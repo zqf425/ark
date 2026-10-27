@@ -1,0 +1,47 @@
+# ark-store 模块设计
+
+## 职责与边界
+
+`ark-store` 以会话目录为系统记录，实现 `SessionStore` 和事件写入边界。每个线程是可迁移目录；
+`events.jsonl` 是权威日志，`items.jsonl`、`usage.jsonl`、`session.json`、child index 和全局
+索引均为可重建投影。
+
+## 一致性与并发
+
+- 每个线程由一个 writer actor 分配序号并追加事件；同一数据目录由 `data/.lock` 独占。
+- `subscribe` 必须在同一 actor 临界区完成“定水位、读取 backlog、注册 live channel”；慢订阅者
+  断开后用 `since_seq` 重连，绝不反压 writer。
+- 同父目录的 child append、删除、索引重建共用父级锁；锁顺序固定为锁表、父级锁、locator。
+- 启动时修复日志末尾半行并从权威日志重建派生数据；非末尾损坏不得静默掩盖。
+
+## 目录与恢复
+
+```text
+data/threads/<thread>/
+├── thread.json                 # 线程元数据
+├── events.jsonl                # 权威事件
+├── items.jsonl / usage.jsonl   # 事件派生数据
+├── session.json                # 最后状态投影
+└── children/
+    ├── runs.jsonl              # child 权威记录
+    ├── index.json              # child 派生缓存
+    └── <child>/                # 内联子会话
+```
+
+启动 reconciliation 以权威日志最大序号和索引水位决定跳过、增量投影或全量重建。索引写失败不能回滚
+已经 fsync 的事件；它必须留下可恢复的 dirty/reconcile 状态。全局 `child_id` locator 从所有父目录的
+`runs.jsonl` 重建，授权以记录中的 `parent_thread_id` 判断，绝不从目录路径猜测。
+
+## 索引现状
+
+当前 v1 使用内存索引加原子 `data/index.json` 快照，并由单一 `IndexProjector` 维护
+`indexed_seq` 和重建计划；它尚不是早期设计中设想的 SQLite/FTS。两者共享“日志权威、索引可重建、
+单写者”的架构约束。是否迁移 SQLite 由实际跨会话检索规模决定，不能把未实现目标写成现状。
+
+## 迁移与删除
+
+子会话内联于 `threads/<parent>/children/<child>/`。删除父会话前必须处理活动 child；迁移按父会话、
+子会话正文、`runs.jsonl`、重建索引、清理孤儿的顺序执行，任一校验失败不留下半个迁移现场。
+
+导出/导入必须区分可搬移的事件、附件、制品与不可搬移的绝对工作区、凭据；导入缺少工作区时，会话
+可以只读但不得继续执行。

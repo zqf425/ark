@@ -1,0 +1,18 @@
+# ark-server 模块设计
+
+## 职责与边界
+
+`ark-server` 是 HTTP/SSE transport adapter：路由、鉴权、中间件、请求解包、SSE 编码和优雅停机。
+业务决策委派给注入的 agent、store、配置、provider、skill 与工作区服务；handler 不得直接写业务分支。
+
+## SSE 与生命周期
+
+- SSE 订阅调用 `SessionStore::subscribe`，取得同一临界区内的 backlog、水位和 live receiver。
+- 连接有界；慢客户端断开后从最后 `seq` 重连，绝不阻塞线程 writer。
+- `/v1/shutdown`、Ctrl-C 和任务 panic 走同一收敛流程：取消活动回合、等待有限时间、落终态并清理 registry。
+- 路径、HTTP 方法、字段名和兼容别名均是对外契约；变更前必须检查 `ark-contract`、`web` 与集成方。
+
+## 路由清单
+
+当前路由以 `src/api/routes.rs` 为准。新增或修改路由必须同步更新 wire DTO、接口测试、渲染层 client
+和对应需求设计；不在本文维护第二份易漂移的完整路由表。
