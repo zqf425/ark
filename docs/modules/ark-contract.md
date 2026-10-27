@@ -8,6 +8,9 @@
 当前公开面包括线程/回合/子代理 DTO、运行时事件、渲染 item、能力目录、配置视图、provider 与
 skill 视图。所有 GUI 字段使用 camelCase；既有查询参数保持既有命名，例如 `since_seq`。
 
+后台子代理终态使用 `child_completed` 事件传递稳定 `notification_id`、状态、摘要/错误和用量；
+消费者按通知 ID 去重，不得把 child 的完整原始转录复制到父线程。
+
 ## 类型生成
 
 - Rust 类型派生 `serde`、`schemars` 与 `ts-rs`；前端只导入 `web/src/generated/` 生成物。

@@ -714,6 +714,92 @@ async fn child_activity_events_are_published_on_the_parent_stream() {
 }
 
 #[tokio::test]
+async fn a_background_child_publishes_a_terminal_completion_notification() {
+    let harness = harness_async(FakeExecutor::new("final report"), (true, 2, 4)).await;
+    let child = harness
+        .runtime
+        .delegate_background(harness.request("research asynchronously"))
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if !harness.latest(child).await.is_active() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the detached child must reach a terminal record");
+
+    let events = SessionStore::replay_events(&*harness.store, harness.parent, 0)
+        .await
+        .unwrap();
+    let completion = events
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap()
+        .into_iter()
+        .find(|event| event["kind"] == "child_completed")
+        .expect("a terminal child must notify the parent thread");
+
+    assert_eq!(completion["child_id"], child.to_string());
+    assert_eq!(completion["summary"], "final report");
+    assert_eq!(completion["status"], ark_ports::child_status::COMPLETED);
+}
+
+#[tokio::test]
+async fn hydrate_replays_a_missing_terminal_completion_notification() {
+    let harness = harness_async(FakeExecutor::new("unused"), (true, 2, 4)).await;
+    let child = ChildId::new();
+    let mut terminal = ark_ports::ChildRunRecord::queued(
+        child,
+        harness.parent,
+        harness.parent_turn,
+        "recovered",
+        chrono::Utc::now(),
+    );
+    terminal.status = ark_ports::child_status::COMPLETED.to_string();
+    terminal.ended_at = Some(chrono::Utc::now());
+    terminal.summary = Some("recovered report".to_string());
+    SessionStore::append_child_run(&*harness.store, terminal)
+        .await
+        .unwrap();
+
+    harness.runtime.hydrate().await.unwrap();
+
+    let events = SessionStore::replay_events(&*harness.store, harness.parent, 0)
+        .await
+        .unwrap();
+    let completions = events
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap()
+        .into_iter()
+        .filter(|event| event["kind"] == "child_completed")
+        .collect::<Vec<_>>();
+    assert_eq!(completions.len(), 1);
+    assert_eq!(completions[0]["child_id"], child.to_string());
+    assert_eq!(completions[0]["summary"], "recovered report");
+
+    harness.runtime.hydrate().await.unwrap();
+    let events = SessionStore::replay_events(&*harness.store, harness.parent, 0)
+        .await
+        .unwrap();
+    let replayed = events
+        .iter()
+        .filter(|event| event.kind().as_str() == "child_completed")
+        .count();
+    assert_eq!(
+        replayed, 1,
+        "hydrate must not duplicate a delivered notification"
+    );
+}
+
+#[tokio::test]
 async fn a_finished_run_frees_its_slot_and_reports_not_active() {
     let harness = harness_async(FakeExecutor::new("ok"), (true, 1, 1)).await;
     for index in 0..3 {

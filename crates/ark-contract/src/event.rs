@@ -62,6 +62,7 @@ pub enum EventKind {
     SseIdleTimeout,
     TransientRetry,
     ChildActivity,
+    ChildCompleted,
 }
 
 impl EventKind {
@@ -111,6 +112,7 @@ impl EventKind {
             EventKind::SseIdleTimeout => "sse_idle_timeout",
             EventKind::TransientRetry => "transient_retry",
             EventKind::ChildActivity => "child_activity",
+            EventKind::ChildCompleted => "child_completed",
         }
     }
 }
@@ -319,6 +321,28 @@ pub enum RuntimeEvent {
         status: String,
     },
 
+    /// A child reached a terminal state. This is a durable parent-thread
+    /// notification, not a second copy of the child transcript.
+    ChildCompleted {
+        #[ts(as = "f64")]
+        seq: u64,
+        thread_id: ThreadId,
+        timestamp: DateTime<Utc>,
+        notification_id: String,
+        child_id: ark_common::ChildId,
+        label: String,
+        status: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        usage: Option<Usage>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(as = "Option<f64>")]
+        tool_invocations: Option<u64>,
+    },
+
     // ---- diagnostics ----
     Error {
         #[ts(as = "f64")]
@@ -396,7 +420,8 @@ impl RuntimeEvent {
             | RuntimeEvent::TransientRetry { seq, .. }
             | RuntimeEvent::CompactionStarted { seq, .. }
             | RuntimeEvent::CompactionCompleted { seq, .. }
-            | RuntimeEvent::ChildActivity { seq, .. } => *seq,
+            | RuntimeEvent::ChildActivity { seq, .. }
+            | RuntimeEvent::ChildCompleted { seq, .. } => *seq,
         }
     }
 
@@ -428,7 +453,8 @@ impl RuntimeEvent {
             | RuntimeEvent::TransientRetry { thread_id, .. }
             | RuntimeEvent::CompactionStarted { thread_id, .. }
             | RuntimeEvent::CompactionCompleted { thread_id, .. }
-            | RuntimeEvent::ChildActivity { thread_id, .. } => *thread_id,
+            | RuntimeEvent::ChildActivity { thread_id, .. }
+            | RuntimeEvent::ChildCompleted { thread_id, .. } => *thread_id,
         }
     }
 
@@ -461,6 +487,7 @@ impl RuntimeEvent {
             RuntimeEvent::CompactionStarted { .. } => EventKind::CompactionStarted,
             RuntimeEvent::CompactionCompleted { .. } => EventKind::CompactionCompleted,
             RuntimeEvent::ChildActivity { .. } => EventKind::ChildActivity,
+            RuntimeEvent::ChildCompleted { .. } => EventKind::ChildCompleted,
         }
     }
 
@@ -826,6 +853,31 @@ impl RuntimeEvent {
                 label,
                 status,
             },
+            RuntimeEvent::ChildCompleted {
+                thread_id,
+                timestamp,
+                notification_id,
+                child_id,
+                label,
+                status,
+                summary,
+                error,
+                usage,
+                tool_invocations,
+                ..
+            } => RuntimeEvent::ChildCompleted {
+                seq,
+                thread_id,
+                timestamp,
+                notification_id,
+                child_id,
+                label,
+                status,
+                summary,
+                error,
+                usage,
+                tool_invocations,
+            },
         }
     }
 
@@ -857,7 +909,8 @@ impl RuntimeEvent {
             | RuntimeEvent::TransientRetry { timestamp, .. }
             | RuntimeEvent::CompactionStarted { timestamp, .. }
             | RuntimeEvent::CompactionCompleted { timestamp, .. }
-            | RuntimeEvent::ChildActivity { timestamp, .. } => *timestamp,
+            | RuntimeEvent::ChildActivity { timestamp, .. }
+            | RuntimeEvent::ChildCompleted { timestamp, .. } => *timestamp,
         }
     }
 }

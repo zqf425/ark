@@ -645,6 +645,7 @@ impl RuntimeCore {
         self.lock_known()
             .insert(finished.child_id, finished.clone());
         self.publish_activity(&finished).await;
+        self.publish_completion(&finished).await;
         Ok(finished)
     }
 
@@ -672,6 +673,56 @@ impl RuntimeCore {
         }
     }
 
+    /// Publish the terminal result separately from lifecycle progress so the
+    /// parent can receive an actionable notification without reading the child
+    /// transcript. The id is stable across a retry of the same run state.
+    async fn publish_completion(&self, record: &ChildRunRecord) {
+        if record.is_active() {
+            return;
+        }
+        let notification_id = completion_notification_id(record);
+        match self
+            .completion_already_published(record, &notification_id)
+            .await
+        {
+            Ok(true) => return,
+            Ok(false) => {}
+            Err(err) => {
+                tracing::warn!(
+                    child = %record.child_id,
+                    error = %err.message,
+                    "could not inspect child completion delivery state"
+                );
+                return;
+            }
+        }
+        let event = completion_event(record, notification_id);
+        if let Err(err) = self.sink.publish(record.parent_thread_id, event).await {
+            tracing::warn!(
+                child = %record.child_id,
+                error = %err.message,
+                "child completion notification was not published"
+            );
+        }
+    }
+
+    async fn completion_already_published(
+        &self,
+        record: &ChildRunRecord,
+        notification_id: &str,
+    ) -> Result<bool> {
+        let events = self.store.replay_events(record.parent_thread_id, 0).await?;
+        Ok(events.into_iter().any(|event| {
+            matches!(
+                event,
+                RuntimeEvent::ChildCompleted {
+                    notification_id: existing,
+                    ..
+                } if existing == notification_id
+            )
+        }))
+    }
+
     async fn hydrate(&self) -> Result<u32> {
         let mut latest: HashMap<ChildId, ChildRunRecord> = HashMap::new();
         for meta in self.store.list_threads().await? {
@@ -696,6 +747,7 @@ impl RuntimeCore {
             loaded += 1;
             self.lock_known().insert(child, record.clone());
             if !record.is_active() {
+                self.publish_completion(&record).await;
                 continue;
             }
             let terminal = finished_record(
@@ -708,12 +760,15 @@ impl RuntimeCore {
             // the durable active row remains available for another retry on the
             // next start.
             self.lock_known().insert(child, terminal.clone());
-            if let Err(err) = self.store.append_child_run(terminal).await {
+            if let Err(err) = self.store.append_child_run(terminal.clone()).await {
                 tracing::warn!(
                     child = %child,
                     error = %err.message,
                     "could not persist convergence of an orphaned child run"
                 );
+            } else {
+                self.publish_activity(&terminal).await;
+                self.publish_completion(&terminal).await;
             }
         }
         Ok(loaded)
@@ -752,6 +807,30 @@ impl RuntimeCore {
         }
         self.lock_known().remove(&child);
         Ok(true)
+    }
+}
+
+fn completion_notification_id(record: &ChildRunRecord) -> String {
+    format!(
+        "child:{}:resume:{}",
+        record.child_id,
+        record.resume_count.unwrap_or_default()
+    )
+}
+
+fn completion_event(record: &ChildRunRecord, notification_id: String) -> RuntimeEvent {
+    RuntimeEvent::ChildCompleted {
+        seq: 0,
+        thread_id: record.parent_thread_id,
+        timestamp: record.ended_at.unwrap_or_else(Utc::now),
+        notification_id,
+        child_id: record.child_id,
+        label: record.label.clone(),
+        status: record.status.clone(),
+        summary: record.summary.clone(),
+        error: record.error.clone(),
+        usage: record.usage.clone(),
+        tool_invocations: record.tool_invocations,
     }
 }
 
