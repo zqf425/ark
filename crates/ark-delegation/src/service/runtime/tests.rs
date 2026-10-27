@@ -17,6 +17,7 @@ use ark_ports::{
     EventSink, SessionStore, SubagentPolicy, SubagentPolicySource, SubagentRegistry,
     SubagentRequest,
 };
+use tokio::sync::Notify;
 
 use super::*;
 
@@ -45,6 +46,8 @@ struct FakeExecutor {
     in_flight: AtomicU32,
     seen: Mutex<Vec<ChildTurnContext>>,
     fail: bool,
+    started: Option<Arc<Notify>>,
+    release: Option<Arc<Notify>>,
 }
 
 impl FakeExecutor {
@@ -56,12 +59,21 @@ impl FakeExecutor {
             in_flight: AtomicU32::new(0),
             seen: Mutex::new(Vec::new()),
             fail: false,
+            started: None,
+            release: None,
         }
     }
 
     fn failing() -> Self {
         let mut executor = Self::new("boom");
         executor.fail = true;
+        executor
+    }
+
+    fn held(summary: &str, started: Arc<Notify>, release: Arc<Notify>) -> Self {
+        let mut executor = Self::new(summary);
+        executor.started = Some(started);
+        executor.release = Some(release);
         executor
     }
 
@@ -76,7 +88,14 @@ impl ChildTurnExecutor for FakeExecutor {
         let current = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
         self.peak_concurrency.fetch_max(current, Ordering::SeqCst);
         self.seen.lock().unwrap().push(ctx.clone());
-        tokio::time::sleep(self.delay).await;
+        if let Some(started) = &self.started {
+            started.notify_one();
+        }
+        if let Some(release) = &self.release {
+            release.notified().await;
+        } else {
+            tokio::time::sleep(self.delay).await;
+        }
         self.in_flight.fetch_sub(1, Ordering::SeqCst);
         if self.fail {
             return Ok(ChildTurnReport::failed("provider 500"));
@@ -343,14 +362,23 @@ async fn the_concurrency_limit_is_enforced_and_all_runs_finish() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_saturated_queue_fails_fast_instead_of_hanging() {
-    let harness = Arc::new(harness_async(FakeExecutor::new("ok"), (true, 1, 0)).await);
+    let started = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let harness = Arc::new(
+        harness_async(
+            FakeExecutor::held("ok", Arc::clone(&started), Arc::clone(&release)),
+            (true, 1, 0),
+        )
+        .await,
+    );
     let running = {
         let runtime = Arc::clone(&harness.runtime);
         let request = harness.request("a");
         tokio::spawn(async move { runtime.delegate(request).await })
     };
-    // Give the first run the slot.
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    tokio::time::timeout(Duration::from_secs(2), started.notified())
+        .await
+        .expect("the first child must acquire its slot before queue saturation is asserted");
 
     let err = harness
         .runtime
@@ -360,6 +388,7 @@ async fn a_saturated_queue_fails_fast_instead_of_hanging() {
     assert_eq!(err.code, ArkErrorCode::Conflict);
     assert!(err.message.contains("queue is full"), "{}", err.message);
 
+    release.notify_one();
     running.await.unwrap().unwrap();
 }
 

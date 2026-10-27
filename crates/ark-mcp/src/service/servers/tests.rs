@@ -424,8 +424,17 @@ async fn adapter_exposes_qualified_name_and_forwards_calls() {
     let server = MockMcp::start();
     let registry = McpServerRegistry::new(temp_dir("adapter"));
     registry.upsert(http_entry("mock", &server.url)).unwrap();
-    let adapters = registry.connect_all().await;
-    assert_eq!(adapters.len(), 2);
+    let adapters = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let adapters = registry.connect_all().await;
+            if adapters.len() == 2 {
+                return adapters;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("mock MCP server must become reachable");
 
     let echo = adapters
         .iter()

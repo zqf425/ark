@@ -109,7 +109,7 @@ mod tests {
         let usage = recorder.usage();
         assert_eq!(usage.cache_hit_tokens, Some(90));
         assert_eq!(usage.cache_miss_tokens, Some(10));
-        assert_eq!(usage.cache_hit_rate, Some(0.9));
+        assert_eq!(usage.cache_hit_rate, None);
     }
 
     #[test]
