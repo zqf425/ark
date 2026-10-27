@@ -4,7 +4,7 @@
  * `test` is separate from connect: it reports the tool list and latency without
  * mutating the stored entry.
  */
-import type { McpServerListResponse, McpServerUpsertRequest, McpTestResult } from '../../../shared/contracts'
+import type { McpServerListResponse, McpServerTestResponse, McpServerUpsertRequest } from '../../../shared/contracts'
 import { del, get, post } from '../../../shared/api/client'
 
 /** `GET /v1/mcp/servers`. */
@@ -23,6 +23,6 @@ export function deleteMcpServer(serverId: string): Promise<McpServerListResponse
 }
 
 /** `POST /v1/mcp/servers/{id}/test`. */
-export function testMcpServer(serverId: string): Promise<McpTestResult> {
-  return post<McpTestResult>(`/v1/mcp/servers/${encodeURIComponent(serverId)}/test`, {})
+export function testMcpServer(serverId: string): Promise<McpServerTestResponse> {
+  return post<McpServerTestResponse>(`/v1/mcp/servers/${encodeURIComponent(serverId)}/test`, {})
 }

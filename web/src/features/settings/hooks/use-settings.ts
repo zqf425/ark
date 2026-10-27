@@ -6,7 +6,7 @@
  * result (not an error) so the sections can show `restart_required` verbatim.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ConfigApplyResult, ConfigPatch, RuntimeConfig, WorkspaceStatus, WorkspaceValidateResult } from '../../../shared/contracts'
+import type { ApplyResult, ConfigPatch, RuntimeConfigView, WorkspaceStatus, WorkspaceValidateResult } from '../../../shared/contracts'
 import { getRuntimeConfig, patchRuntimeConfig } from '../api/settings-api'
 import { getWorkspaceStatus, validateWorkspace } from '../api/workspace-api'
 import { attempt, describeApiError, type Outcome } from '../api/outcome'
@@ -14,17 +14,17 @@ import { attempt, describeApiError, type Outcome } from '../api/outcome'
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 export type SettingsApi = {
-  config: RuntimeConfig | null
+  config: RuntimeConfigView | null
   status: LoadStatus
   error: string | null
   /** Key of the patch currently in flight (`log_level`, `default_workspace`, ...). */
   saving: string | null
   refresh: () => Promise<void>
-  save: (patch: ConfigPatch, key: string) => Promise<Outcome<ConfigApplyResult>>
+  save: (patch: ConfigPatch, key: string) => Promise<Outcome<ApplyResult>>
 }
 
 export function useSettings(): SettingsApi {
-  const [config, setConfig] = useState<RuntimeConfig | null>(null)
+  const [config, setConfig] = useState<RuntimeConfigView | null>(null)
   const [status, setStatus] = useState<LoadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
@@ -53,7 +53,7 @@ export function useSettings(): SettingsApi {
   }, [])
 
   const save = useCallback(
-    async (patch: ConfigPatch, key: string): Promise<Outcome<ConfigApplyResult>> => {
+    async (patch: ConfigPatch, key: string): Promise<Outcome<ApplyResult>> => {
       setSaving(key)
       const outcome = await attempt(() => patchRuntimeConfig(patch))
       if (mounted.current) {

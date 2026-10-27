@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use ark_agent::CancelToken;
 use ark_common::{Result, ThreadId, TurnId, Usage};
 use ark_config::{ConfigStore, TuningConfig};
-use ark_contract::{TurnSummary, UsageResponse};
+use ark_contract::{RuntimeEvent, TurnSummary, UsageResponse};
 use ark_obs::UsageRecorder;
 use ark_ports::{BaseServices, SessionStore, SubagentRegistry, SubagentRunner, ToolRegistryPort};
 use chrono::{DateTime, Utc};
@@ -297,6 +297,98 @@ impl AppState {
     /// Fold one provider-reported sample into the runtime total.
     pub fn record_usage(&self, usage: &Usage) {
         self.usage.record(usage);
+    }
+
+    /// Make sure a turn that died outside the reactor still has a terminal event.
+    ///
+    /// The reactor writes its own terminal events on every path it controls. The
+    /// one it cannot cover is a panic or a dropped task, which would otherwise
+    /// leave the log ending at `turn_started`: a reconnecting client would replay
+    /// a turn that can never finish (design §7.1 / §7.9).
+    ///
+    /// Replay-then-append keeps this idempotent — if the reactor already closed
+    /// the turn, nothing is written.
+    pub async fn record_turn_terminal(&self, thread_id: ThreadId, turn_id: TurnId, end: &TurnEnd) {
+        let already_closed = self
+            .store
+            .replay_events(thread_id, 0)
+            .await
+            .map(|events| {
+                events.iter().any(|event| match event {
+                    RuntimeEvent::TurnCompleted { turn_id: id, .. }
+                    | RuntimeEvent::TurnFailed { turn_id: id, .. }
+                    | RuntimeEvent::TurnAborted { turn_id: id, .. } => *id == turn_id,
+                    _ => false,
+                })
+            })
+            // An unreadable log must not be "fixed" by inventing a second
+            // terminal record; the warning in the supervisor already reports it.
+            .unwrap_or(true);
+        if already_closed {
+            return;
+        }
+        let event = match end {
+            TurnEnd::Completed => RuntimeEvent::TurnCompleted {
+                seq: 0,
+                thread_id,
+                turn_id,
+                timestamp: Utc::now(),
+            },
+            TurnEnd::Failed(message) => RuntimeEvent::TurnFailed {
+                seq: 0,
+                thread_id,
+                turn_id,
+                timestamp: Utc::now(),
+                message: message.clone(),
+            },
+            TurnEnd::Aborted(reason) => RuntimeEvent::TurnAborted {
+                seq: 0,
+                thread_id,
+                turn_id,
+                timestamp: Utc::now(),
+                reason: reason.clone(),
+            },
+        };
+        if let Err(err) = self.store.append_event(thread_id, event).await {
+            tracing::warn!(
+                turn = %turn_id,
+                error = %err.message,
+                "could not persist a synthesized terminal event"
+            );
+        }
+    }
+
+    /// Abort every live child run (shutdown path, design §7.9).
+    ///
+    /// Returns how many were asked to stop. Children converge to their own
+    /// terminal records through the delegation supervisor, which is why shutdown
+    /// only has to trip the handles and wait.
+    pub fn abort_children(&self) -> usize {
+        let Some(registry) = self.subagents.registry.as_ref() else {
+            return 0;
+        };
+        let mut aborted = 0;
+        for record in registry.list(None) {
+            if record.is_active() && registry.abort(record.child_id) {
+                aborted += 1;
+            }
+        }
+        aborted
+    }
+
+    /// Children that still have not reached a terminal state.
+    pub fn active_children(&self) -> usize {
+        self.subagents
+            .registry
+            .as_ref()
+            .map(|registry| {
+                registry
+                    .list(None)
+                    .iter()
+                    .filter(|record| record.is_active())
+                    .count()
+            })
+            .unwrap_or(0)
     }
 }
 

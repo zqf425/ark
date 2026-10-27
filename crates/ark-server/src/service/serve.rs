@@ -62,15 +62,36 @@ pub async fn bind(state: AppState, port: u16) -> Result<AppHandle> {
     Ok(AppHandle { listener, state })
 }
 
-/// Wait for in-flight turns to write their terminal event, bounded by timeout.
+/// Cancel everything still running, then wait for it to reach a terminal state.
+///
+/// Cancelling **before** waiting is the whole point: a `Ctrl-C` that only stopped
+/// accepting requests would leave turns waiting on a model response that nothing
+/// will ever deliver, and the drain would always burn its full timeout before the
+/// runtime dropped them mid-flight (design §7.1 / §7.9).
 async fn drain(state: AppState) {
+    // 1. Trip every cancel handle: parent turns and their child runs.
+    state.turns.cancel_all();
+    let aborted_children = state.abort_children();
+    if aborted_children > 0 {
+        tracing::info!(aborted_children, "shutdown requested child aborts");
+    }
+
+    // 2. Wait for the terminal records the cancellations will produce.
     let deadline = tokio::time::Instant::now() + DRAIN_TIMEOUT;
-    while state.turns.active() > 0 && tokio::time::Instant::now() < deadline {
+    while (state.turns.active() > 0 || state.active_children() > 0)
+        && tokio::time::Instant::now() < deadline
+    {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    let left = state.turns.active();
-    if left > 0 {
-        tracing::warn!(left, "shutdown drain timed out with turns still running");
+
+    let turns_left = state.turns.active();
+    let children_left = state.active_children();
+    if turns_left > 0 || children_left > 0 {
+        tracing::warn!(
+            turns = turns_left,
+            children = children_left,
+            "shutdown drain timed out with work still running"
+        );
     } else {
         tracing::info!("shutdown drain complete");
     }

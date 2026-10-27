@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   ProviderListResponse,
   ProviderTestRequest,
-  ProviderTestResult,
+  ProviderTestResponse,
   ProviderUpsertRequest,
   ProviderView
 } from '../../../shared/contracts'
@@ -29,7 +29,7 @@ export type ProvidersApi = {
   upsert: (request: ProviderUpsertRequest) => Promise<Outcome<ProviderListResponse>>
   remove: (providerId: string) => Promise<Outcome<ProviderListResponse>>
   setDefault: (providerId: string) => Promise<Outcome<ProviderListResponse>>
-  test: (request: ProviderTestRequest) => Promise<Outcome<ProviderTestResult>>
+  test: (request: ProviderTestRequest) => Promise<Outcome<ProviderTestResponse>>
 }
 
 export function useProviders(): ProvidersApi {

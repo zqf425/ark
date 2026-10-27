@@ -259,6 +259,12 @@ impl Reactor {
 
     /// Estimate the prefix and run one model round.
     async fn round_input(&mut self) -> Result<TurnInput> {
+        // Steering is applied at a *round boundary*, never mid tool-call/result
+        // pair: injecting there would hand the provider a history it considers
+        // malformed. `drain_steering` used to have no caller at all, so a
+        // correction produced a `turn_steered` event and then never reached the
+        // model (P1-6).
+        self.apply_steering().await?;
         let estimate = TokenEstimator::new().estimate_request(&self.request());
         self.machine.set_prompt_estimate(estimate);
         match self.pump().await? {
@@ -266,6 +272,17 @@ impl Reactor {
             Round::Aborted => Ok(self.interrupt_input("turn interrupted")),
             Round::Failed(message) => Ok(self.input_of(InputKind::ModelFailed { message })),
         }
+    }
+
+    /// Push queued corrections into the model history, then journal each one.
+    ///
+    /// The event is written **after** the history update so the durable log never
+    /// claims a correction the model did not actually receive.
+    async fn apply_steering(&mut self) -> Result<()> {
+        for text in self.drain_steering() {
+            self.writer.append(self.events.turn_steered(&text)).await?;
+        }
+        Ok(())
     }
 
     /// Stream one model round, folding deltas into one response.
@@ -343,7 +360,12 @@ impl Reactor {
         let usage = response.usage.clone();
         let mut calls = Vec::new();
         for (call_id, tool, arguments) in response.tool_calls.clone() {
-            calls.push(ToolCallRequest::new(call_id, tool, arguments));
+            // The policy is consulted **once**, here, and the decision travels
+            // with the call. The executor consumes it instead of asking again,
+            // which is what makes an approved `bash` actually runnable
+            // (design §7.3, P1-5).
+            let decision = self.sandbox.decide(&tool, &ToolArgs(arguments.clone()));
+            calls.push(ToolCallRequest::new(call_id, tool, arguments).with_sandbox(decision));
         }
         self.record_assistant_turn(&response.text, &calls);
         self.machine.note_usage(&usage);
@@ -384,14 +406,20 @@ impl Reactor {
         )));
     }
 
-    /// Calls that need a human decision, derived from the sandbox policy.
+    /// Calls that need a human decision.
+    ///
+    /// Reads the decision already attached by [`Self::settle_model`]. The policy
+    /// fallback exists only for calls constructed outside that path (synthetic
+    /// or test calls) and keeps the old behaviour for them.
     fn approval_asks(&self, calls: &[ToolCallRequest]) -> Vec<ApprovalAsk> {
         calls
             .iter()
             .filter(|call| {
-                self.sandbox
-                    .decide(&call.tool, &ToolArgs(call.arguments.clone()))
-                    == SandboxDecision::NeedsApproval
+                let decision = call.sandbox.unwrap_or_else(|| {
+                    self.sandbox
+                        .decide(&call.tool, &ToolArgs(call.arguments.clone()))
+                });
+                decision == SandboxDecision::NeedsApproval
             })
             .map(|call| ApprovalAsk::new(call.clone(), summarize(call)))
             .collect()

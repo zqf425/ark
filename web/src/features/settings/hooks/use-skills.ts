@@ -3,7 +3,7 @@
  * runtime config, so the page only reports what was discovered and what failed.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { SkillEntry, SkillValidationError } from '../../../shared/contracts'
+import type { SkillLoadWarning, SkillSummary } from '../../../shared/contracts'
 import { listSkills } from '../api/skills-api'
 import { describeApiError } from '../api/outcome'
 import type { LoadStatus } from './use-settings'
@@ -11,8 +11,8 @@ import type { LoadStatus } from './use-settings'
 export type SkillsApi = {
   enabled: boolean
   roots: string[]
-  skills: SkillEntry[]
-  validationErrors: SkillValidationError[]
+  skills: SkillSummary[]
+  validationErrors: SkillLoadWarning[]
   status: LoadStatus
   error: string | null
   refresh: () => Promise<void>
@@ -21,8 +21,8 @@ export type SkillsApi = {
 export function useSkills(): SkillsApi {
   const [enabled, setEnabled] = useState(false)
   const [roots, setRoots] = useState<string[]>([])
-  const [skills, setSkills] = useState<SkillEntry[]>([])
-  const [validationErrors, setValidationErrors] = useState<SkillValidationError[]>([])
+  const [skills, setSkills] = useState<SkillSummary[]>([])
+  const [validationErrors, setValidationErrors] = useState<SkillLoadWarning[]>([])
   const [status, setStatus] = useState<LoadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const mounted = useRef(true)

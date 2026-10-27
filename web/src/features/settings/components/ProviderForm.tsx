@@ -81,7 +81,8 @@ export function buildEntry(draft: ProviderDraft, editing: boolean): BuiltEntry {
     base_url: baseUrl,
     endpoint_format: draft.endpoint_format,
     model,
-    enabled: draft.enabled
+    enabled: draft.enabled,
+    headers: {}
   }
   const label = draft.label.trim()
   if (label) entry.label = label

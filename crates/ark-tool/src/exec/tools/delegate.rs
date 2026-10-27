@@ -95,9 +95,11 @@ impl DelegateTaskTool {
             parent_turn_id: ctx.turn_id,
             label: parsed.label.unwrap_or_default(),
             prompt: parsed.prompt,
-            workspace: parsed
-                .workspace
-                .or_else(|| Some(ctx.workspace.display().to_string())),
+            // Workspace is **inherited**, never supplied by the model. A child
+            // that could name its own root would effectively widen the parent's
+            // sandbox (design §7.3): every write tool judges containment against
+            // this value.
+            workspace: Some(ctx.workspace.display().to_string()),
             model: parsed.model,
             provider_id: parsed.provider_id,
             resume_child_id,

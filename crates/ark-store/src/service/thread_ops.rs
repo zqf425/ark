@@ -117,6 +117,12 @@ impl FileSessionStore {
     /// parent-scoped transaction. This shares the same lock as delete's
     /// read/modify/write, so deleting one child cannot overwrite another
     /// child's concurrent status append.
+    ///
+    /// The two writes are deliberately **not** treated as equally fatal: the log
+    /// line is the system of record, while `index.json` is a cache. Reporting a
+    /// landed append as failed made the delegation runtime believe a stored
+    /// terminal row had not been written and keep the child `running` in memory
+    /// until the next restart (P1-3).
     pub(crate) fn append_child_run_blocking(&self, record: &ChildRunRecord) -> Result<()> {
         self.with_child_log_lock(record.parent_thread_id, || {
             let parent_paths = self.thread_paths(record.parent_thread_id);
@@ -125,7 +131,16 @@ impl FileSessionStore {
                 record,
                 self.config.limits().fsync_on_append,
             )?;
-            rebuild_child_index_blocking(&parent_paths)?;
+            // Cache only: a failure here is reported, never propagated, because
+            // the next read or reconcile rebuilds it from the log.
+            if let Err(err) = rebuild_child_index_blocking(&parent_paths) {
+                tracing::warn!(
+                    parent = %record.parent_thread_id,
+                    child = %record.child_id,
+                    error = %err.message,
+                    "child-run record stored but its derived index could not be rebuilt"
+                );
+            }
             self.remember_child(record.parent_thread_id, std::slice::from_ref(record))
         })
     }
@@ -429,16 +444,22 @@ mod tests {
     #[tokio::test]
     async fn appends_are_monotonic_and_durable_across_reopen() {
         let dir = TempDir::new("thread-ops-seq");
-        let store = test_store(&dir);
-        let meta = store.create_thread("t").await.unwrap();
-        for _ in 0..4 {
-            store
-                .append_event(meta.thread_id, event_at(meta.thread_id, 999))
-                .await
-                .unwrap();
-        }
-        assert_eq!(store.highest_seq(meta.thread_id).await.unwrap(), 4);
+        let meta = {
+            let store = test_store(&dir);
+            let meta = store.create_thread("t").await.unwrap();
+            for _ in 0..4 {
+                store
+                    .append_event(meta.thread_id, event_at(meta.thread_id, 999))
+                    .await
+                    .unwrap();
+            }
+            assert_eq!(store.highest_seq(meta.thread_id).await.unwrap(), 4);
+            meta
+        };
 
+        // A restart releases the data-directory lock first; only then may a new
+        // process (here: the reopened store) take it over. Holding both at once
+        // is exactly the corruption case the lock refuses.
         let reopened = test_store(&dir);
         assert_eq!(reopened.highest_seq(meta.thread_id).await.unwrap(), 4);
         assert_eq!(

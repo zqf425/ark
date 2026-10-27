@@ -227,6 +227,20 @@ impl TurnEvents {
             usage,
         }
     }
+
+    /// A correction injected into the running turn.
+    ///
+    /// Emitted *after* the text has actually been pushed into the model
+    /// history, so the journal never claims a correction the model never saw.
+    pub fn turn_steered(&self, text: &str) -> RuntimeEvent {
+        RuntimeEvent::TurnSteered {
+            seq: Self::UNASSIGNED,
+            thread_id: self.thread_id,
+            turn_id: self.turn_id,
+            timestamp: Utc::now(),
+            text: text.to_string(),
+        }
+    }
 }
 
 #[cfg(test)]

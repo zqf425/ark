@@ -14,6 +14,7 @@ use crate::domain::thread_file::{self, ThreadFile};
 use crate::service::child_service::ChildStore;
 use crate::service::reconcile::{reconcile_index, ReconcileReport};
 use crate::service::writer_registry::WriterRegistry;
+use crate::store::data_lock::DataLock;
 use crate::store::fs_util::{ensure_dir, remove_dir_all, write_json_atomic};
 use crate::store::index::{load_snapshot, save_snapshot, IndexEntry, ThreadIndex};
 use ark_common::{ArkError, Result, ThreadId};
@@ -32,6 +33,11 @@ pub struct FileSessionStore {
     /// derived index. Atomic rename prevents torn files, but only this lock
     /// prevents a concurrent append from being lost by delete's read/modify/write.
     child_logs: Mutex<HashMap<ThreadId, Arc<Mutex<()>>>>,
+    /// Cross-process exclusivity over `data/.lock` (design §7.4.3).
+    ///
+    /// Declared last so it is the **last** field dropped: every writer actor and
+    /// half-finished append must be gone before another process may take over.
+    _lock: DataLock,
 }
 
 impl FileSessionStore {
@@ -41,12 +47,17 @@ impl FileSessionStore {
     }
 
     /// Open the store and report repairs to `diagnostics`.
+    ///
+    /// Takes the data-directory lock **before** touching any file, so a second
+    /// writer fails fast instead of handing out duplicate event sequence numbers
+    /// against the same authoritative log (design §7.4.3).
     pub fn with_diagnostics(
         config: StoreConfig,
         diagnostics: Arc<dyn DiagnosticSink>,
     ) -> Result<Self> {
         let paths = DataPaths::new(config.data_dir());
         ensure_dir(paths.root())?;
+        let lock = DataLock::acquire(&paths.lock_file())?;
         ensure_dir(&paths.threads_dir())?;
         let index = load_snapshot(&paths.index_file());
         let registry = WriterRegistry::new(config.limits().clone(), diagnostics.clone());
@@ -58,6 +69,7 @@ impl FileSessionStore {
             index: Mutex::new(index),
             children: Mutex::new(ChildLocator::default()),
             child_logs: Mutex::new(HashMap::new()),
+            _lock: lock,
         })
     }
 

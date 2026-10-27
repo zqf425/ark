@@ -156,7 +156,9 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     ));
 
     let runner = Arc::new(AgentTurnRunner {
-        model,
+        providers: Arc::clone(&providers),
+        config: Arc::clone(&config),
+        usage: Arc::clone(&usage),
         tools: tool_runner,
         sink,
         policy,
@@ -220,7 +222,13 @@ fn build_child_tools() -> Result<ToolRegistry> {
 /// One turn, driven by the real reactor (`ark-agent`), with the real store and
 /// the real tool registry behind the ports.
 struct AgentTurnRunner {
-    model: Arc<dyn ModelClient>,
+    /// Kept so a turn can resolve its model from the **current** provider table
+    /// and config snapshot. Holding one client for the process lifetime made
+    /// `Applied` a lie: editing a provider or `tuning` never reached the next
+    /// parent turn (design §7.15, P1-7).
+    providers: Arc<ark_provider::ProviderStore>,
+    config: Arc<ConfigStore>,
+    usage: Arc<UsageRecorder>,
     tools: Arc<RegistryToolRunner>,
     sink: Arc<dyn EventSink>,
     policy: Arc<dyn SandboxPolicy>,
@@ -229,6 +237,47 @@ struct AgentTurnRunner {
     tool_schemas: Vec<serde_json::Value>,
     /// Skill runtime, consulted once per turn for activated instructions.
     skills: Arc<ark_skills::SkillRuntime>,
+}
+
+impl AgentTurnRunner {
+    /// Model client for this turn, from the live provider table.
+    ///
+    /// The provider table wins; `model_providers` in `config.json` remains the
+    /// legacy fallback. Rebuilt per turn so an added/edited provider applies to
+    /// the next turn without a restart.
+    fn model_for_turn(&self, snapshot: &RuntimeConfig) -> Arc<dyn ModelClient> {
+        match self.providers.resolve(None) {
+            Some(endpoint) => model::select_from_config(endpoint, Arc::clone(&self.usage)).0,
+            None => model::select(snapshot, Arc::clone(&self.usage)).0,
+        }
+    }
+
+    /// Per-turn limits from the live `tuning` block.
+    ///
+    /// A running turn keeps the snapshot it started with; the next turn sees the
+    /// edit. That is the bounded-lifetime semantics the design asks for.
+    fn limits_for_turn(snapshot: &RuntimeConfig) -> TurnLimits {
+        let tuning = &snapshot.tuning;
+        TurnLimits {
+            max_rounds: tuning.max_rounds.max(1),
+            max_tokens: tuning.max_tokens.max(1),
+            max_tool_calls: tuning.max_tool_calls.max(1),
+            max_identical_calls: tuning.max_identical_calls.max(1),
+            context_limit_tokens: tuning.context_limit_tokens.max(1),
+            keep_recent_messages: tuning.keep_recent_messages.max(1),
+            max_compactions: TurnLimits::default().max_compactions,
+        }
+    }
+
+    /// Model-delta channel capacity from `tuning`, falling back to the default.
+    fn chunk_buffer_for_turn(snapshot: &RuntimeConfig) -> usize {
+        let tuned = snapshot.tuning.chunk_buffer;
+        if tuned == 0 {
+            CHUNK_BUFFER
+        } else {
+            tuned
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -261,8 +310,12 @@ impl TurnRunner for AgentTurnRunner {
                 "[available skills]\n{catalog}"
             )));
         }
+        // One snapshot per turn: every value below is derived from the same
+        // config state, so a turn cannot mix a new model with old limits.
+        let snapshot = self.config.snapshot();
+        let model = self.model_for_turn(&snapshot);
         let mut reactor = Reactor::new(ReactorConfig {
-            model: Arc::clone(&self.model),
+            model,
             tools,
             writer,
             gates: Arc::new(AllowAllGates),
@@ -275,8 +328,8 @@ impl TurnRunner for AgentTurnRunner {
                 temperature: None,
                 max_tokens: None,
             },
-            machine: TurnMachine::new(TurnLimits::default()),
-            chunk_buffer: CHUNK_BUFFER,
+            machine: TurnMachine::new(Self::limits_for_turn(&snapshot)),
+            chunk_buffer: Self::chunk_buffer_for_turn(&snapshot),
         });
         reactor.push_user(job.text);
         let outcome = reactor.run().await?;
@@ -305,14 +358,34 @@ struct ToolRunnerAdapter {
 #[async_trait::async_trait]
 impl AgentToolRunner for ToolRunnerAdapter {
     async fn execute(&self, call: &ToolCallRequest) -> Result<ToolOutput> {
-        self.inner
-            .run_in(
-                self.roots.current(),
-                self.thread_id,
-                self.turn_id,
-                &call.tool,
-                call.arguments.clone(),
-            )
-            .await
+        // The reactor already decided the sandbox mode for this call and carried
+        // it here; re-deciding would flip an approved `bash` back to
+        // `NeedsApproval` (design §7.3, P1-5). `run_in` remains the fallback for
+        // calls that never went through the model path.
+        match call.sandbox {
+            Some(decision) => {
+                self.inner
+                    .run_decided(
+                        self.roots.current(),
+                        self.thread_id,
+                        self.turn_id,
+                        &call.tool,
+                        call.arguments.clone(),
+                        decision,
+                    )
+                    .await
+            }
+            None => {
+                self.inner
+                    .run_in(
+                        self.roots.current(),
+                        self.thread_id,
+                        self.turn_id,
+                        &call.tool,
+                        call.arguments.clone(),
+                    )
+                    .await
+            }
+        }
     }
 }

@@ -17,7 +17,8 @@ use std::collections::BTreeMap;
 ///
 /// `api_key` is only ever an *input*: read paths go through [`ProviderView`],
 /// which reports `has_api_key` and a masked hint instead of the secret.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct ProviderEntry {
     /// Stable id, e.g. `deepseek` or `qwen-local`.
     pub id: String,
@@ -64,7 +65,8 @@ impl ProviderEntry {
 }
 
 /// Redacted provider as returned by `GET /v1/runtime/model-providers`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct ProviderView {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -81,7 +83,8 @@ pub struct ProviderView {
 }
 
 /// `GET /v1/runtime/model-providers`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct ProviderListResponse {
     pub providers: Vec<ProviderView>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -95,7 +98,8 @@ pub struct ProviderListResponse {
 ///
 /// Either reference a saved provider by id, or test an unsaved draft. Testing a
 /// draft is what lets the settings dialog validate before saving.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct ProviderTestRequest {
     #[serde(default)]
     pub provider_id: Option<String>,
@@ -104,11 +108,13 @@ pub struct ProviderTestRequest {
 }
 
 /// Result of one connectivity probe.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct ProviderTestResponse {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<u16>,
+    #[ts(as = "f64")]
     pub latency_ms: u64,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -120,7 +126,8 @@ pub struct ProviderTestResponse {
 // ---------------------------------------------------------------------------
 
 /// `triggers` block of a `SKILL.md` front matter.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct SkillTriggers {
     #[serde(default)]
     pub commands: Vec<String>,
@@ -131,7 +138,8 @@ pub struct SkillTriggers {
 }
 
 /// Parsed skill manifest (design appendix: skill runtime).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct SkillManifest {
     #[serde(default)]
     pub id: Option<String>,
@@ -158,7 +166,8 @@ fn default_entry() -> String {
 
 /// Where a skill came from. A thread must not be able to discover another
 /// thread's extras, so the origin travels with the summary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(rename_all = "snake_case")]
 pub enum SkillSource {
     /// Runtime-wide root, visible to every thread.
@@ -168,7 +177,8 @@ pub enum SkillSource {
 }
 
 /// One discovered skill, as listed to the GUI.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct SkillSummary {
     pub id: String,
     pub name: String,
@@ -184,14 +194,16 @@ pub struct SkillSummary {
 }
 
 /// A recoverable per-root load failure.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct SkillLoadWarning {
     pub root: String,
     pub message: String,
 }
 
 /// Runtime-wide skill diagnostics (`GET /v1/skills`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct SkillDiagnostics {
     pub enabled: bool,
     pub roots: Vec<String>,
@@ -200,7 +212,8 @@ pub struct SkillDiagnostics {
 }
 
 /// Per-thread skill view (`GET /v1/threads/{id}/skills`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct ThreadSkillsResponse {
     pub enabled: bool,
     pub base_roots: Vec<String>,
@@ -213,7 +226,8 @@ pub struct ThreadSkillsResponse {
 }
 
 /// Why a skill was activated for a turn.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct SkillActivation {
     pub skill_id: String,
     pub reason: String,
@@ -221,7 +235,8 @@ pub struct SkillActivation {
 }
 
 /// What the turn actually gets from the skill runtime.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct SkillTurnResolution {
     pub active_skill_ids: Vec<String>,
     pub activations: Vec<SkillActivation>,
@@ -241,7 +256,8 @@ pub struct SkillTurnResolution {
 ///
 /// Field names match the existing runtime exactly, so the renderer keeps
 /// working unchanged.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct WorkspaceStatus {
     pub path: String,
     pub exists: bool,
@@ -253,6 +269,7 @@ pub struct WorkspaceStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_dirty: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
     pub file_change_count: Option<u64>,
     pub checked_at: DateTime<Utc>,
 }
@@ -262,7 +279,8 @@ pub struct WorkspaceStatus {
 // ---------------------------------------------------------------------------
 
 /// How to reach an external MCP server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(rename_all = "snake_case")]
 pub enum McpTransportKind {
     Stdio,
@@ -292,7 +310,8 @@ impl McpTransportKind {
 }
 
 /// One configured external MCP server.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct McpServerEntry {
     pub id: String,
     pub transport: McpTransportKind,
@@ -316,28 +335,33 @@ pub struct McpServerEntry {
 }
 
 /// Server state as reported to the GUI.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct McpServerView {
     pub id: String,
     pub transport: McpTransportKind,
     pub enabled: bool,
     pub connected: bool,
+    #[ts(as = "f64")]
     pub tool_count: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
 }
 
 /// `GET /v1/mcp/servers`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct McpServerListResponse {
     pub servers: Vec<McpServerView>,
 }
 
 /// Result of connecting to one server and listing its tools.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct McpServerTestResponse {
     pub ok: bool,
     pub tools: Vec<String>,
+    #[ts(as = "f64")]
     pub latency_ms: u64,
     pub message: String,
 }

@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 /// The list is exhaustive on purpose: a renderer or a test can assert that it
 /// only ever sees a known kind, and adding a kind is a deliberate edit here
 /// rather than an arbitrary string at a call site.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
     ThreadCreated,
@@ -118,17 +119,20 @@ impl EventKind {
 ///
 /// `#[serde(tag = "kind")]` keeps the wire shape flat, which is what the
 /// existing renderer expects and what the JSONL log stores verbatim.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RuntimeEvent {
     // ---- thread lifecycle ----
     ThreadCreated {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         timestamp: DateTime<Utc>,
         title: String,
     },
     ThreadUpdated {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         timestamp: DateTime<Utc>,
@@ -137,18 +141,21 @@ pub enum RuntimeEvent {
 
     // ---- turn lifecycle ----
     TurnStarted {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
         timestamp: DateTime<Utc>,
     },
     TurnCompleted {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
         timestamp: DateTime<Utc>,
     },
     TurnFailed {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -156,6 +163,7 @@ pub enum RuntimeEvent {
         message: String,
     },
     TurnAborted {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -163,6 +171,7 @@ pub enum RuntimeEvent {
         reason: String,
     },
     TurnSteered {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -172,6 +181,7 @@ pub enum RuntimeEvent {
 
     // ---- streaming ----
     AssistantTextDelta {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -180,6 +190,7 @@ pub enum RuntimeEvent {
         delta: String,
     },
     AssistantReasoningDelta {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -190,6 +201,7 @@ pub enum RuntimeEvent {
 
     // ---- items ----
     ItemCreated {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -197,6 +209,7 @@ pub enum RuntimeEvent {
         item: crate::item::ThreadItem,
     },
     ItemUpdated {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -204,6 +217,7 @@ pub enum RuntimeEvent {
         item: crate::item::ThreadItem,
     },
     ItemCompleted {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -213,6 +227,7 @@ pub enum RuntimeEvent {
 
     // ---- tools ----
     ToolCallStarted {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -221,6 +236,7 @@ pub enum RuntimeEvent {
         tool: String,
     },
     ToolCallFinished {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -228,19 +244,23 @@ pub enum RuntimeEvent {
         call_id: String,
         tool: String,
         ok: bool,
+        #[ts(as = "f64")]
         duration_ms: u64,
     },
     ToolStormSuppressed {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
         timestamp: DateTime<Utc>,
         tool: String,
+        #[ts(as = "f64")]
         count: u32,
     },
 
     // ---- gates ----
     ApprovalRequested {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -250,6 +270,7 @@ pub enum RuntimeEvent {
         summary: String,
     },
     ApprovalResolved {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -258,6 +279,7 @@ pub enum RuntimeEvent {
         approved: bool,
     },
     UserInputRequested {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -266,6 +288,7 @@ pub enum RuntimeEvent {
         prompt: String,
     },
     UserInputResolved {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -276,6 +299,7 @@ pub enum RuntimeEvent {
 
     // ---- accounting ----
     Usage {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
@@ -286,6 +310,7 @@ pub enum RuntimeEvent {
     /// A child run changed state. Published on the **parent** stream so the
     /// parent UI can show delegation progress without subscribing to the child.
     ChildActivity {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         timestamp: DateTime<Utc>,
@@ -296,6 +321,7 @@ pub enum RuntimeEvent {
 
     // ---- diagnostics ----
     Error {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         timestamp: DateTime<Utc>,
@@ -303,33 +329,40 @@ pub enum RuntimeEvent {
         message: String,
     },
     Heartbeat {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         timestamp: DateTime<Utc>,
     },
     SseIdleTimeout {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         timestamp: DateTime<Utc>,
     },
     TransientRetry {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         timestamp: DateTime<Utc>,
+        #[ts(as = "f64")]
         attempt: u32,
         message: String,
     },
     CompactionStarted {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
         timestamp: DateTime<Utc>,
     },
     CompactionCompleted {
+        #[ts(as = "f64")]
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
         timestamp: DateTime<Utc>,
+        #[ts(as = "f64")]
         removed_items: u32,
     },
 }

@@ -86,8 +86,27 @@ impl RegistryToolRunner {
         tool: &str,
         arguments: serde_json::Value,
     ) -> Result<ToolOutput> {
+        let decision = self.decide(tool, &ToolArgs(arguments.clone()));
+        self.run_decided(workspace, thread_id, turn_id, tool, arguments, decision)
+            .await
+    }
+
+    /// Run one call with a sandbox decision that was **already made**.
+    ///
+    /// The reactor decides once, before any approval gate, and hands the result
+    /// down. Re-deriving it here meant an approved `bash` came back as
+    /// `NeedsApproval` again and was refused after the human had said yes
+    /// (design §7.3, P1-5). This method never consults the policy.
+    pub async fn run_decided(
+        &self,
+        workspace: PathBuf,
+        thread_id: ark_common::ThreadId,
+        turn_id: ark_common::TurnId,
+        tool: &str,
+        arguments: serde_json::Value,
+        sandbox: SandboxDecision,
+    ) -> Result<ToolOutput> {
         let args = ToolArgs(arguments);
-        let sandbox = self.decide(tool, &args);
         if sandbox == SandboxDecision::NeedsApproval {
             return Ok(ToolOutput::err(format!(
                 "tool `{tool}` requires approval and was not dispatched"

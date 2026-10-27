@@ -4,6 +4,8 @@
 //! and answers `202` immediately: the client follows progress over SSE, never by
 //! long-polling this endpoint.
 
+use std::sync::Arc;
+
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -64,19 +66,44 @@ pub async fn start(
 /// Run the turn in the background and fold the outcome back into the registry.
 ///
 /// Detached on purpose: the HTTP response is the `202`, and the turn's progress
-/// reaches the client through the event stream.
+/// reaches the client through the event stream. Detached does **not** mean
+/// unsupervised: the outer task owns the worker's `JoinHandle`, so a panic or an
+/// aborted task still lands on a terminal state (design §3 / §7.1). Without this,
+/// one panicking turn would leave the registry reporting `running` forever and
+/// every later turn on that thread would answer 409.
 fn spawn_turn(state: AppState, job: TurnJob) {
     let turn_id = job.turn_id;
-    let turns = state.turns.clone();
-    let runner = state.runner.clone();
+    let thread_id = job.thread_id;
+    let turns = Arc::clone(&state.turns);
+    let runner = Arc::clone(&state.runner);
+    let supervisor_state = state.clone();
     tokio::spawn(async move {
-        let end = match runner.run_turn(job).await {
-            Ok(end) => end,
-            Err(err) => TurnEnd::Failed(err.message.clone()),
+        // The worker owns the reactor; the supervisor only observes it.
+        let worker = tokio::spawn(async move { runner.run_turn(job).await });
+        let end = match worker.await {
+            Ok(Ok(end)) => end,
+            Ok(Err(err)) => TurnEnd::Failed(err.message.clone()),
+            Err(join) => {
+                let message = if join.is_panic() {
+                    "turn executor panicked"
+                } else {
+                    "turn was cancelled before it finished"
+                };
+                TurnEnd::Failed(message.to_string())
+            }
         };
         turns.finish(turn_id, &end);
+        if let TurnEnd::Failed(message) = &end {
+            // A turn that dies outside the reactor still needs a terminal event,
+            // otherwise the log stops at `turn_started` and a reconnect replays
+            // a turn that will never finish.
+            supervisor_state
+                .record_turn_terminal(thread_id, turn_id, &end)
+                .await;
+            tracing::warn!(turn = %turn_id, %message, "turn ended without a terminal event");
+        }
         if matches!(end, TurnEnd::Completed) {
-            state.note_turn_completed();
+            supervisor_state.note_turn_completed();
         }
     });
 }

@@ -108,11 +108,28 @@ pub async fn update(
 }
 
 /// `DELETE /v1/threads/{id}`.
+///
+/// Refuses while a turn is still running. The store deletes the directory and
+/// forgets the writer, but a live reactor keeps publishing: its next append
+/// would recreate a directory with events but no `thread.json`, i.e. a thread
+/// that cannot be listed, opened or cleaned up (design §7.4.1, P1-4).
+///
+/// Returns `409` so the caller can interrupt first and retry, matching the
+/// existing "reject a second turn on a busy thread" policy.
 pub async fn remove(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let thread_id = parse_thread(&id)?;
+    if let Some(active) = state.turns.active_for(thread_id) {
+        return Err(ApiError::new(
+            ark_common::ArkErrorCode::Conflict,
+            format!(
+                "thread has a running turn ({}) and cannot be deleted; interrupt it first",
+                active.turn_id
+            ),
+        ));
+    }
     state.store.delete_thread(thread_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

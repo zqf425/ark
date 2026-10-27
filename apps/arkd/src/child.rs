@@ -356,15 +356,34 @@ struct ChildToolRunner {
 #[async_trait::async_trait]
 impl ark_agent::ToolRunner for ChildToolRunner {
     async fn execute(&self, call: &ToolCallRequest) -> Result<ToolOutput> {
-        self.inner
-            .run_in(
-                self.workspace.clone(),
-                self.thread_id,
-                self.turn_id,
-                &call.tool,
-                call.arguments.clone(),
-            )
-            .await
+        // Same rule as the parent path: consume the decision the reactor already
+        // made for this call instead of asking the policy a second time
+        // (design §7.3, P1-5).
+        match call.sandbox {
+            Some(decision) => {
+                self.inner
+                    .run_decided(
+                        self.workspace.clone(),
+                        self.thread_id,
+                        self.turn_id,
+                        &call.tool,
+                        call.arguments.clone(),
+                        decision,
+                    )
+                    .await
+            }
+            None => {
+                self.inner
+                    .run_in(
+                        self.workspace.clone(),
+                        self.thread_id,
+                        self.turn_id,
+                        &call.tool,
+                        call.arguments.clone(),
+                    )
+                    .await
+            }
+        }
     }
 }
 

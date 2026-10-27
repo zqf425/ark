@@ -4,7 +4,8 @@
 use serde::{Deserialize, Serialize};
 
 /// A capability a plugin contributes or a page requires.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
     Tool,
@@ -20,7 +21,8 @@ pub enum Capability {
 }
 
 /// Stable page identifier, e.g. `ark.builtin.code`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(transparent)]
 pub struct PageId(pub String);
 
@@ -37,7 +39,8 @@ impl From<&str> for PageId {
 }
 
 /// Where a page shows up in the shell navigation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(rename_all = "snake_case")]
 pub enum Placement {
     PrimaryNav,
@@ -47,7 +50,8 @@ pub enum Placement {
 }
 
 /// Panel slots a plugin may register into.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(rename_all = "snake_case")]
 pub enum PanelSlot {
     Right,
@@ -57,7 +61,8 @@ pub enum PanelSlot {
 
 /// A page contributed to the UI bus. `plugin-code-ui` registers exactly one of
 /// these, so the Code screen has no privileged path in the shell.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct PageSpec {
     pub id: PageId,
     pub route: String,
@@ -72,7 +77,8 @@ pub struct PageSpec {
 }
 
 /// A panel contributed to an existing page slot.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct PanelSpec {
     pub id: PageId,
     pub slot: PanelSlot,

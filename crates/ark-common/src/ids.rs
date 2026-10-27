@@ -9,7 +9,8 @@ use uuid::Uuid;
 /// compile error instead of a runtime 404.
 macro_rules! define_id {
     ($name:ident) => {
-        #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, ts_rs::TS)]
+        #[ts(type = "string")]
         pub struct $name(Uuid);
 
         impl $name {

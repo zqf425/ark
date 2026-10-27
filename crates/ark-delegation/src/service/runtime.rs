@@ -615,6 +615,14 @@ impl RuntimeCore {
     }
 
     /// Append the terminal record and publish the activity event.
+    ///
+    /// Convergence beats propagation. If the append fails, the in-memory
+    /// registry is still moved to the terminal state and the failure is logged:
+    /// leaving `known` at `running` would make the API report a run that nothing
+    /// is executing, while `abort` finds no handle and `resume`/`destroy` refuse
+    /// because the record still looks active — until a restart (P1-3). The
+    /// authoritative log keeps the older row, and `hydrate` converges it on the
+    /// next start.
     async fn finish(
         &self,
         record: ChildRunRecord,
@@ -627,7 +635,13 @@ impl RuntimeCore {
             self.lock_known().remove(&finished.child_id);
             return Ok(finished);
         }
-        self.store.append_child_run(finished.clone()).await?;
+        if let Err(err) = self.store.append_child_run(finished.clone()).await {
+            tracing::warn!(
+                child = %finished.child_id,
+                error = %err.message,
+                "could not persist a terminal child-run record; converging in memory only"
+            );
+        }
         self.lock_known()
             .insert(finished.child_id, finished.clone());
         self.publish_activity(&finished).await;

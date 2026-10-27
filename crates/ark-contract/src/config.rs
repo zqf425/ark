@@ -6,7 +6,8 @@
 use serde::{Deserialize, Serialize};
 
 /// How a config change takes effect.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(rename_all = "snake_case")]
 pub enum ReloadClass {
     /// Applied in place, no restart, no dropped connection.
@@ -19,7 +20,8 @@ pub enum ReloadClass {
 }
 
 /// Dotted path of a config field, e.g. `server.port`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(transparent)]
 pub struct FieldPath(pub String);
 
@@ -37,7 +39,8 @@ impl std::fmt::Display for FieldPath {
 
 /// A config patch. `Restart` fields make the whole patch fail; there is no
 /// partial application and no silent ignore.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct ConfigPatch {
     #[serde(default)]
     pub model_providers: Option<serde_json::Value>,
@@ -61,9 +64,11 @@ pub struct ConfigPatch {
 /// `max_concurrency` is the number of child runs that may be in flight at once.
 /// It is enforced by a real gate, so raising it above the clamp is rejected
 /// instead of silently ignored.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct SubagentSettings {
     pub enabled: bool,
+    #[ts(as = "f64")]
     pub max_concurrency: u32,
 }
 
@@ -97,8 +102,10 @@ impl SubagentSettings {
 /// `tuning` stays an opaque JSON object on purpose: the settings screen shows it
 /// read-only, and duplicating every tuning field here would be a second source
 /// of truth for the same numbers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct RuntimeConfigView {
+    #[ts(as = "f64")]
     pub version: u64,
     pub port: u16,
     pub data_dir: String,
@@ -111,10 +118,12 @@ pub struct RuntimeConfigView {
 }
 
 /// Outcome of `POST /v1/runtime/config`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum ApplyResult {
     Applied {
+        #[ts(as = "f64")]
         version: u64,
         changed: Vec<FieldPath>,
     },

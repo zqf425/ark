@@ -6,19 +6,19 @@
  */
 import { useState } from 'react'
 import { Button, EmptyState, useToast } from '../../../shared/ui'
-import type { McpServerUpsertRequest, McpServerView, McpTestResult, McpTransport } from '../../../shared/contracts'
+import type { McpServerUpsertRequest, McpServerView, McpServerTestResponse, McpTransportKind } from '../../../shared/contracts'
 import { useMcpServers } from '../hooks/use-mcp'
 import { describeOutcome } from '../api/outcome'
 import { CheckField, Field, SelectField, TextField } from './Field'
 import { LoadError, Notice, SettingsSection, Skeleton } from './SectionShell'
 
-const TRANSPORT_LABELS: Record<McpTransport, string> = {
+const TRANSPORT_LABELS: Record<McpTransportKind, string> = {
   stdio: 'stdio（本地进程）',
   sse: 'sse（HTTP 事件流）',
   streamable_http: 'streamable_http'
 }
 
-type TestState = { serverId: string; result?: McpTestResult; error?: string }
+type TestState = { serverId: string; result?: McpServerTestResponse; error?: string }
 
 function ServerRow({
   server,
@@ -82,7 +82,7 @@ function ServerRow({
 
 type Draft = {
   id: string
-  transport: McpTransport
+  transport: McpTransportKind
   enabled: boolean
   command: string
   args: string
@@ -125,7 +125,15 @@ export function McpSection(): JSX.Element {
       return
     }
 
-    const request: McpServerUpsertRequest = { id, transport: draft.transport, enabled: draft.enabled }
+    const request: McpServerUpsertRequest = {
+      id,
+      transport: draft.transport,
+      enabled: draft.enabled,
+      args: [],
+      env: {},
+      headers: {},
+      allow_tools: []
+    }
     if (isStdio) {
       request.command = command
       const args = parseArgs(draft.args)
@@ -216,7 +224,7 @@ export function McpSection(): JSX.Element {
           </div>
           <div className="ark-settings__grid">
             <TextField id="mcp-id" label="id" value={draft.id} mono disabled={api.busy !== null} placeholder="filesystem" onChange={(value) => setDraft({ ...draft, id: value })} />
-            <SelectField<McpTransport>
+            <SelectField<McpTransportKind>
               id="mcp-transport"
               label="transport"
               value={draft.transport}

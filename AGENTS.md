@@ -90,6 +90,25 @@ apps/arkd      → 全部（组合根）
 
 - **数据契约**：Rust 类型是唯一真源（`schemars` → JSON Schema，`ts-rs` → TS 声明）；
   生成物有 diff 即失败，前端不得手抄 DTO 或错误码 union。
+- **生成管线与 CI 闸门**（P1-9）：
+
+  ```bash
+  # 1) 改完 Rust wire 类型后重新生成（这条测试会写盘，是唯一允许写仓的测试）
+  cargo test -p ark-contract --lib ts_export
+  # 2) CI 断言生成物无漂移
+  git diff --exit-code web/src/generated
+  ```
+
+  根类型清单在 `crates/ark-contract/src/ts_export.rs` 的 `export_roots()` 与 `ROOT_NAMES`：
+  **新增 DTO 必须同时登记两处**，否则 barrel 里没有它，前端无法 import。
+  `web/scripts/check-hard-rules.mjs` 双向校验：生成文件必须带 ts-rs 头，
+  `web/src/shared/contracts/` 不得再声明任何生成器已拥有的类型名。
+- **前端只用生成的类型名**，不要造 web 侧别名：`RuntimeConfigView`（不是 `RuntimeConfig`）、
+  `SubagentSettings`（不是 `SubagentConfig`）、`ApplyResult`（不是 `ConfigApplyResult`）、
+  `ProviderTestResponse` / `McpServerTestResponse`（不是 `*TestResult`）、
+  `SkillSummary` / `SkillDiagnostics` / `SkillLoadWarning`、`McpTransportKind`。
+  Rust 未建模的东西（请求体组合、路由裸 JSON、UI 文案、`TurnState` 投影）统一放
+  `web/src/shared/contracts/web-only.ts`，并在文件头写明“非 Rust 契约”。
 - **可执行逻辑**（路径归一化、脱敏、截断、token 估算）必须选定唯一宿主，禁止双实现：
   - 路径归一化：唯一实现 `ark-common::path::normalize`（前端经 WASM 复用同一份源码）；
   - 脱敏、截断：只在 Rust 侧执行，前端经 HTTP / command 调用。

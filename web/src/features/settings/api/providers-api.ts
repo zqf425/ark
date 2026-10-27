@@ -7,7 +7,7 @@
 import type {
   ProviderListResponse,
   ProviderTestRequest,
-  ProviderTestResult,
+  ProviderTestResponse,
   ProviderUpsertRequest
 } from '../../../shared/contracts'
 import { del, get, post } from '../../../shared/api/client'
@@ -33,6 +33,6 @@ export function setDefaultProvider(providerId: string): Promise<ProviderListResp
 }
 
 /** `POST /v1/runtime/providers/test` — probe a stored id or an unsaved entry. */
-export function testProvider(request: ProviderTestRequest): Promise<ProviderTestResult> {
-  return post<ProviderTestResult>('/v1/runtime/providers/test', request)
+export function testProvider(request: ProviderTestRequest): Promise<ProviderTestResponse> {
+  return post<ProviderTestResponse>('/v1/runtime/providers/test', request)
 }

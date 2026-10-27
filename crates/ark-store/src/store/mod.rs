@@ -4,6 +4,7 @@
 //! reconciliation and projection rules stay unit-testable without a disk.
 
 pub mod child_store;
+pub mod data_lock;
 pub mod event_log;
 pub mod fs_util;
 pub mod index;

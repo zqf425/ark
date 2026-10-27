@@ -17,13 +17,76 @@ use ark_common::{ArkError, ChildId, Result, ThreadId};
 use ark_ports::ChildRunRecord;
 
 /// Append one authoritative child-run record.
+///
+/// The tail is repaired first. A process killed mid-write leaves a partial JSON
+/// line with no trailing newline; appending directly would glue the next record
+/// onto those bytes, making the whole line unparseable — so the new record would
+/// be lost and a queued/running child would silently disappear from the log
+/// (P1-2). Only the **last** line is eligible: damage in the middle is real
+/// corruption and must stay visible rather than be truncated away.
 pub fn append_child_run_blocking(
     parent_paths: &ThreadPaths,
     record: &ChildRunRecord,
     fsync: bool,
 ) -> Result<()> {
     ensure_dir(&parent_paths.children_dir())?;
+    repair_child_runs_tail_blocking(parent_paths)?;
     append_text(&parent_paths.children_runs(), &encode_line(record)?, fsync)
+}
+
+/// Cut a torn final line from `children/runs.jsonl`, if there is one.
+///
+/// Returns the number of bytes removed (0 when the log ends cleanly), which the
+/// reconciliation path reports as a repair rather than hiding it.
+pub fn repair_child_runs_tail_blocking(parent_paths: &ThreadPaths) -> Result<u64> {
+    let path = parent_paths.children_runs();
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(err) => {
+            return Err(ArkError::store(format!(
+                "read child run log failed for {}: {err}",
+                path.display()
+            )))
+        }
+    };
+    // `None` when the file ends with a newline, i.e. the last record is whole.
+    let keep = match bytes.iter().rposition(|byte| *byte == b'\n') {
+        Some(pos) => {
+            let complete = pos + 1;
+            let tail = &bytes[complete..];
+            if tail.is_empty() || serde_json::from_slice::<ChildRunRecord>(tail).is_ok() {
+                // Either clean, or a complete final record that merely lacks its
+                // newline; `append_text` adds the separator in that case.
+                if tail.is_empty() {
+                    return Ok(0);
+                }
+                bytes.len() as u64
+            } else {
+                complete as u64
+            }
+        }
+        // No newline at all: the single line is either a complete record or torn.
+        None => {
+            if serde_json::from_slice::<ChildRunRecord>(&bytes).is_ok() {
+                bytes.len() as u64
+            } else {
+                0
+            }
+        }
+    };
+    if keep == bytes.len() as u64 {
+        return Ok(0);
+    }
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .map_err(|err| ArkError::store(format!("open child log for repair failed: {err}")))?;
+    file.set_len(keep)
+        .map_err(|err| ArkError::store(format!("truncate child log failed: {err}")))?;
+    file.sync_all()
+        .map_err(|err| ArkError::store(format!("truncate child log fsync failed: {err}")))?;
+    Ok(bytes.len() as u64 - keep)
 }
 
 /// Read every parsable record from `children/runs.jsonl`.
@@ -396,5 +459,80 @@ mod tests {
         raw.push_str("{\"child_id\": \n");
         std::fs::write(paths.children_runs(), raw).unwrap();
         assert_eq!(read_child_runs_blocking(&paths).len(), 1);
+    }
+
+    #[test]
+    fn a_torn_tail_is_cut_before_the_next_record_is_appended() {
+        // A crash between the payload write and the newline leaves a partial
+        // JSON line *with no terminator*. Appending onto it would glue the new
+        // record to the damaged bytes, so both lines become unparseable and the
+        // queued/running child they describe silently disappears (P1-2).
+        let dir = TempDir::new("child-torn-tail");
+        let paths = parent_paths(&dir);
+        let parent = ThreadId::new();
+        let first = ChildId::new();
+        append_child_run_blocking(&paths, &record(first, parent, "running"), false).unwrap();
+
+        let torn = "{\"child_id\": ";
+        let mut raw = std::fs::read_to_string(paths.children_runs()).unwrap();
+        raw.push_str(torn);
+        std::fs::write(paths.children_runs(), raw).unwrap();
+
+        let second = ChildId::new();
+        append_child_run_blocking(&paths, &record(second, parent, "queued"), false).unwrap();
+
+        let repaired = std::fs::read_to_string(paths.children_runs()).unwrap();
+        assert!(
+            !repaired.contains(torn),
+            "the torn tail must be gone: {repaired}"
+        );
+        let records = read_child_runs_blocking(&paths);
+        assert_eq!(records.len(), 2, "both whole records must survive");
+        assert_eq!(records[0].child_id, first);
+        assert_eq!(records[1].child_id, second);
+        assert_eq!(records[1].status, "queued");
+    }
+
+    #[test]
+    fn terminated_but_invalid_lines_are_kept_as_mid_file_damage() {
+        // A byte-for-byte invalid line that *is* newline-terminated cannot corrupt
+        // the next record, so it must stay on disk: silently truncating it would
+        // hide real corruption (design §7.4.1), and `read` already skips it.
+        let dir = TempDir::new("child-terminated-garbage");
+        let paths = parent_paths(&dir);
+        let parent = ThreadId::new();
+        append_child_run_blocking(&paths, &record(ChildId::new(), parent, "running"), false)
+            .unwrap();
+        let mut raw = std::fs::read_to_string(paths.children_runs()).unwrap();
+        raw.push_str("{\"child_id\": \n");
+        std::fs::write(paths.children_runs(), raw).unwrap();
+        let before = std::fs::read_to_string(paths.children_runs()).unwrap();
+
+        let removed = repair_child_runs_tail_blocking(&paths).unwrap();
+
+        assert_eq!(removed, 0, "terminated damage is not a torn tail");
+        assert_eq!(
+            std::fs::read_to_string(paths.children_runs()).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn a_clean_log_is_never_truncated() {
+        let dir = TempDir::new("child-clean-tail");
+        let paths = parent_paths(&dir);
+        let parent = ThreadId::new();
+        let child = ChildId::new();
+        append_child_run_blocking(&paths, &record(child, parent, "queued"), false).unwrap();
+        let before = std::fs::read_to_string(paths.children_runs()).unwrap();
+
+        let removed = repair_child_runs_tail_blocking(&paths).unwrap();
+
+        assert_eq!(removed, 0, "a clean log has nothing to repair");
+        assert_eq!(
+            std::fs::read_to_string(paths.children_runs()).unwrap(),
+            before,
+            "repair must not rewrite bytes it did not need to touch"
+        );
     }
 }

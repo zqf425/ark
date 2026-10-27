@@ -11,7 +11,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Statuses that mean "the child still owns work". Anything else is terminal.
-pub const ACTIVE_STATUSES: [&str; 4] = ["pending", "running", "streaming", "started"];
+///
+/// These are the **same** strings `ark_ports::child_status` writes and
+/// `ChildRunRecord::is_active` reads. Keeping a hand-typed list here drifted from
+/// that source once already: it named `pending`/`streaming`/`started`, none of
+/// which any writer produces, and omitted `queued`, so a queued child failed to
+/// block deleting its parent thread (P1-1).
+pub const ACTIVE_STATUSES: [&str; 2] = [
+    ark_ports::child_status::QUEUED,
+    ark_ports::child_status::RUNNING,
+];
 
 /// Whether a `ChildRunRecord.status` blocks deleting the parent thread.
 pub fn is_active_status(status: &str) -> bool {
@@ -200,6 +209,36 @@ mod tests {
         assert!(is_active_status(" Running "));
         assert!(!is_active_status("completed"));
         assert!(!is_active_status("failed"));
+    }
+
+    #[test]
+    fn a_queued_child_is_active_so_it_blocks_deleting_its_parent() {
+        // `queued` means "accepted, not started yet". Treating it as terminal
+        // would let the parent directory be deleted while the run still holds a
+        // reservation, and the child would then write into nothing (P1-1).
+        assert!(is_active_status("queued"));
+        let parent = ThreadId::new();
+        let child = ChildId::new();
+        let queued = record(child, parent, "queued");
+        assert!(queued.is_active());
+        let entry = ChildIndexEntry::from_record(&queued);
+        assert!(entry.is_active());
+    }
+
+    #[test]
+    fn the_store_and_the_record_agree_about_every_known_status() {
+        // Two independent liveness rules existed (this one and
+        // `ChildRunRecord::is_active`); they must not be able to drift again.
+        let parent = ThreadId::new();
+        for status in ["queued", "running", "completed", "failed", "aborted"] {
+            let record = record(ChildId::new(), parent, status);
+            let entry = ChildIndexEntry::from_record(&record);
+            assert_eq!(
+                entry.is_active(),
+                record.is_active(),
+                "status `{status}` disagrees between index and record"
+            );
+        }
     }
 
     #[test]

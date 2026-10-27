@@ -1,5 +1,6 @@
 //! One tool call as the agent sees it, and the outcome of running it.
 
+use ark_ports::SandboxDecision;
 use serde::{Deserialize, Serialize};
 
 /// A complete model-issued tool call. `arguments` is already parsed JSON, so no
@@ -9,6 +10,14 @@ pub struct ToolCallRequest {
     pub call_id: String,
     pub tool: String,
     pub arguments: serde_json::Value,
+    /// The sandbox decision **already made** for this call (design §7.3).
+    ///
+    /// The reactor consults the policy once, before the gate; the executor then
+    /// consumes this value instead of asking the policy again. Recomputing it
+    /// meant an approved `bash` still came back as `NeedsApproval` and was
+    /// refused after the human had already said yes (P1-5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxDecision>,
 }
 
 impl ToolCallRequest {
@@ -21,7 +30,14 @@ impl ToolCallRequest {
             call_id: call_id.into(),
             tool: tool.into(),
             arguments,
+            sandbox: None,
         }
+    }
+
+    /// Attach the decision computed for this call.
+    pub fn with_sandbox(mut self, decision: SandboxDecision) -> Self {
+        self.sandbox = Some(decision);
+        self
     }
 
     /// Stable key for storm detection and parallel-safety: tool name plus the

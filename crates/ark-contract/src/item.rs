@@ -9,7 +9,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// What a single item in the conversation stream represents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemKind {
     UserMessage,
@@ -25,7 +26,8 @@ pub enum ItemKind {
 
 /// Lifecycle of an item. Streaming text keeps `Streaming` until the turn or the
 /// item terminates, so the renderer can show a caret without extra inference.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemStatus {
     Pending,
@@ -36,7 +38,8 @@ pub enum ItemStatus {
 }
 
 /// Tool-call facets carried by `ToolCall` / `ToolResult` items.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct ToolPayload {
     pub call_id: String,
     pub tool: String,
@@ -47,6 +50,7 @@ pub struct ToolPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ok: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
     pub duration_ms: Option<u64>,
 }
 
@@ -54,7 +58,8 @@ pub struct ToolPayload {
 ///
 /// `text` holds the accumulated content: a full message for terminal items, and
 /// the partially accumulated text for streaming ones.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct ThreadItem {
     pub item_id: ItemId,
     pub turn_id: TurnId,

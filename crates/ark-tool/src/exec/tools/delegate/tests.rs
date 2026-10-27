@@ -21,6 +21,7 @@ struct FakeRunner {
     reply: Result<SubagentOutcome, ArkErrorCode>,
     seen: Mutex<Vec<SubagentRequest>>,
     active: AtomicU32,
+    foreground_calls: AtomicU32,
     background_calls: AtomicU32,
 }
 
@@ -33,6 +34,7 @@ impl FakeRunner {
             reply: Ok(reply),
             seen: Mutex::new(Vec::new()),
             active: AtomicU32::new(0),
+            foreground_calls: AtomicU32::new(0),
             background_calls: AtomicU32::new(0),
         })
     }
@@ -43,6 +45,7 @@ impl FakeRunner {
             reply: Err(code),
             seen: Mutex::new(Vec::new()),
             active: AtomicU32::new(0),
+            foreground_calls: AtomicU32::new(0),
             background_calls: AtomicU32::new(0),
         })
     }
@@ -53,6 +56,10 @@ impl FakeRunner {
 
     fn background_calls(&self) -> u32 {
         self.background_calls.load(Ordering::Relaxed)
+    }
+
+    fn foreground_calls(&self) -> u32 {
+        self.foreground_calls.load(Ordering::Relaxed)
     }
 }
 
@@ -67,6 +74,7 @@ impl SubagentRunner for FakeRunner {
     }
 
     async fn delegate(&self, request: SubagentRequest) -> ark_common::Result<SubagentOutcome> {
+        self.foreground_calls.fetch_add(1, Ordering::Relaxed);
         self.seen.lock().unwrap().push(request);
         match &self.reply {
             Ok(outcome) => Ok(outcome.clone()),
@@ -157,6 +165,7 @@ async fn a_prompt_alone_is_enough_to_spawn_a_child() {
         Some(context.workspace.display().to_string().as_str())
     );
     assert!(requests[0].resume_child_id.is_none());
+    assert_eq!(runner.foreground_calls(), 1);
     assert_eq!(runner.background_calls(), 0);
 }
 
@@ -180,6 +189,7 @@ async fn background_returns_the_queued_child_without_using_foreground_delegate()
     let expected_detail = format!("child={child} status=queued");
     assert_eq!(out.detail.as_deref(), Some(expected_detail.as_str()));
     assert_eq!(runner.background_calls(), 1);
+    assert_eq!(runner.foreground_calls(), 0);
     let requests = runner.requests();
     assert_eq!(requests.len(), 1);
     assert!(requests[0].resume_child_id.is_none());
@@ -205,10 +215,37 @@ async fn resume_child_id_takes_precedence_over_background() {
 
     assert!(out.ok);
     assert_eq!(out.content, "resumed answer");
+    assert_eq!(runner.foreground_calls(), 1);
     assert_eq!(runner.background_calls(), 0);
     let requests = runner.requests();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].resume_child_id, Some(resumed));
+}
+
+#[tokio::test]
+async fn a_child_cannot_choose_its_own_workspace() {
+    // The child's workspace is inherited from the parent context. A model that
+    // tries to name a directory must not be able to widen the sandbox, so the
+    // unknown argument is ignored and the context value always wins.
+    let runner = FakeRunner::new(true, completed("ok"));
+    let tool = DelegateTaskTool::new(runner.clone());
+    let context = ctx();
+
+    tool.execute(
+        &context,
+        ToolArgs(serde_json::json!({
+            "prompt": "inspect",
+            "workspace": "C:/Windows",
+        })),
+    )
+    .await
+    .unwrap();
+
+    let expected = context.workspace.display().to_string();
+    assert_eq!(
+        runner.requests()[0].workspace.as_deref(),
+        Some(expected.as_str())
+    );
 }
 
 #[tokio::test]
@@ -233,7 +270,9 @@ async fn the_model_can_override_the_label_model_and_workspace() {
     assert_eq!(request.label, "reviewer");
     assert_eq!(request.model.as_deref(), Some("other-model"));
     assert_eq!(request.provider_id.as_deref(), Some("other-provider"));
-    assert_eq!(request.workspace.as_deref(), Some("/tmp/elsewhere"));
+    // Workspace is always the parent's, even when the model supplies one.
+    let expected = ctx().workspace.display().to_string();
+    assert_eq!(request.workspace.as_deref(), Some(expected.as_str()));
 }
 
 #[tokio::test]
@@ -339,12 +378,7 @@ async fn the_detail_line_carries_identity_and_real_usage() {
     outcome.tool_invocations = 4;
     outcome.model = Some("m1".to_string());
     outcome.provider_id = Some("p1".to_string());
-    outcome.usage = Usage {
-        prompt_tokens: 10,
-        completion_tokens: 5,
-        total_tokens: 15,
-        ..Usage::default()
-    };
+    outcome.usage = Usage::new(10, 5);
     let child = outcome.child_id;
     let runner = FakeRunner::new(true, outcome);
     let tool = DelegateTaskTool::new(runner);
@@ -386,8 +420,18 @@ fn the_schema_requires_a_prompt_and_no_policy_fields() {
     assert!(properties.contains_key("prompt"));
     assert_eq!(properties["background"]["type"], "boolean");
     assert_eq!(properties["resumeChildId"]["type"], "string");
-    // Budget and depth are runtime policy, not per-call arguments.
-    for forbidden in ["max_depth", "max_concurrency", "max_queued", "timeout_ms"] {
+    assert!(!schema["required"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("resumeChildId")));
+    // `workspace` must not be a delegation argument: the child inherits it.
+    for forbidden in [
+        "workspace",
+        "max_depth",
+        "max_concurrency",
+        "max_queued",
+        "timeout_ms",
+    ] {
         assert!(
             !properties.contains_key(forbidden),
             "`{forbidden}` must not be a delegation argument"

@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// The renderer must never hand-maintain a second union of these values, so the
 /// enum is the single source of truth for both the wire payload and the UI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 #[serde(rename_all = "snake_case")]
 pub enum ArkErrorCode {
     ValidationError,
@@ -40,7 +41,8 @@ impl ArkErrorCode {
 
 /// Wire shape of an error. This is what SSE `error` events carry and what the
 /// HTTP error body contains.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
 pub struct ArkErrorPayload {
     pub code: ArkErrorCode,
     pub message: String,

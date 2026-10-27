@@ -78,22 +78,34 @@ async fn pump(
     }
     tracing::debug!(thread = %thread_label, watermark, "sse switched to live");
     loop {
+        // The receiver disappears the moment the client disconnects, but
+        // `live.recv()` would keep waiting for the next event — forever when
+        // `sse_idle_timeout_secs == 0` (idle timeout disabled). Watching
+        // `sender.closed()` is what makes a quiet thread release its pump and
+        // its store subscriber immediately instead of on the next fanout
+        // (design §7.9, P1-10).
         let next = match idle {
-            Some(limit) => match tokio::time::timeout(limit, live.recv()).await {
-                Ok(value) => value,
-                Err(_) => {
-                    // Tell the client why the stream ends; it reconnects with
-                    // its last `seq`, so nothing is lost.
-                    let event = RuntimeEvent::SseIdleTimeout {
-                        seq: watermark,
-                        thread_id: parse_thread_lossy(&thread_label),
-                        timestamp: chrono::Utc::now(),
-                    };
-                    let _ = sender.send(Ok(to_sse(&event))).await;
-                    return;
-                }
+            Some(limit) => tokio::select! {
+                _ = sender.closed() => return,
+                value = tokio::time::timeout(limit, live.recv()) => match value {
+                    Ok(value) => value,
+                    Err(_) => {
+                        // Tell the client why the stream ends; it reconnects with
+                        // its last `seq`, so nothing is lost.
+                        let event = RuntimeEvent::SseIdleTimeout {
+                            seq: watermark,
+                            thread_id: parse_thread_lossy(&thread_label),
+                            timestamp: chrono::Utc::now(),
+                        };
+                        let _ = sender.send(Ok(to_sse(&event))).await;
+                        return;
+                    }
+                },
             },
-            None => live.recv().await,
+            None => tokio::select! {
+                _ = sender.closed() => return,
+                value = live.recv() => value,
+            },
         };
         match next {
             Some(event) => {

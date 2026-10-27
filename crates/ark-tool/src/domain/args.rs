@@ -98,13 +98,16 @@ pub struct BashArgs {
 ///
 /// No `max_depth` or budget field exists on purpose: those are runtime policy,
 /// not something the model gets to negotiate per call.
+///
+/// There is deliberately **no `workspace` field**. A child always inherits the
+/// parent turn's workspace (design §7.3): letting the model name a directory
+/// would hand it a box that the sandbox then treats as "inside the workspace",
+/// which would break the parent's file-access boundary.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct DelegateArgs {
     pub prompt: String,
     #[serde(default)]
     pub label: Option<String>,
-    #[serde(default)]
-    pub workspace: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
@@ -152,9 +155,20 @@ mod tests {
         assert_eq!(parsed.prompt, "scan the repo");
         assert!(parsed.label.is_none());
         assert!(parsed.model.is_none());
-        assert!(parsed.workspace.is_none());
         assert!(!parsed.background);
         assert!(parsed.resume_child_id.is_none());
+    }
+
+    #[test]
+    fn delegate_args_reject_a_model_supplied_workspace() {
+        // The field is gone on purpose: a child must inherit the parent's
+        // workspace, so an unknown key is simply ignored rather than honoured.
+        let args = ToolArgs(serde_json::json!({
+            "prompt": "scan",
+            "workspace": "/etc"
+        }));
+        let parsed: DelegateArgs = parse("delegate_task", &args).unwrap();
+        assert_eq!(parsed.prompt, "scan");
     }
 
     #[test]

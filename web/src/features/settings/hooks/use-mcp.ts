@@ -5,7 +5,7 @@
  * only list-changing calls are folded back into state.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { McpServerListResponse, McpServerUpsertRequest, McpServerView, McpTestResult } from '../../../shared/contracts'
+import type { McpServerListResponse, McpServerUpsertRequest, McpServerView, McpServerTestResponse } from '../../../shared/contracts'
 import { deleteMcpServer, listMcpServers, testMcpServer, upsertMcpServer } from '../api/mcp-api'
 import { attempt, describeApiError, type Outcome } from '../api/outcome'
 import type { LoadStatus } from './use-settings'
@@ -18,7 +18,7 @@ export type McpApi = {
   refresh: () => Promise<void>
   add: (request: McpServerUpsertRequest) => Promise<Outcome<McpServerListResponse>>
   remove: (serverId: string) => Promise<Outcome<McpServerListResponse>>
-  test: (serverId: string) => Promise<Outcome<McpTestResult>>
+  test: (serverId: string) => Promise<Outcome<McpServerTestResponse>>
 }
 
 export function useMcpServers(): McpApi {

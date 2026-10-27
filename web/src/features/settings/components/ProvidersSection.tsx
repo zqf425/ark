@@ -7,14 +7,14 @@
  */
 import { useState } from 'react'
 import { Button, EmptyState, useToast } from '../../../shared/ui'
-import type { ProviderEntry, ProviderTestResult, ProviderView } from '../../../shared/contracts'
+import type { ProviderEntry, ProviderTestResponse, ProviderView } from '../../../shared/contracts'
 import type { ProvidersApi } from '../hooks/use-providers'
 import { describeOutcome } from '../api/outcome'
 import { draftFromView, emptyDraft, ProviderForm, type ProviderDraft } from './ProviderForm'
 import { LoadError, Notice, SettingsSection, Skeleton } from './SectionShell'
 
 /** Pending test outcome, keyed by provider id (`*` = unsaved draft). */
-type TestState = { key: string; result?: ProviderTestResult; error?: string }
+type TestState = { key: string; result?: ProviderTestResponse; error?: string }
 
 function ProviderRow({
   provider,

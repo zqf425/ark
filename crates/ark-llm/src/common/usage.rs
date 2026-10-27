@@ -68,16 +68,9 @@ impl UsageParser {
     ) -> Usage {
         let prompt_tokens = prompt.unwrap_or(0);
         let completion_tokens = completion.unwrap_or(0);
-        Usage {
-            prompt_tokens,
-            completion_tokens,
-            total_tokens: prompt_tokens.saturating_add(completion_tokens),
-            cache_hit_tokens: hit,
-            cache_miss_tokens: miss,
-            // The only place a rate is computed, and it needs both sides.
-            cache_hit_rate: Usage::rate(hit, miss),
-            cost_usd: None,
-        }
+        // `with_cache` owns both the native counters and the "may a rate be
+        // derived" decision, so this path cannot drift from `Usage::merge`.
+        Usage::new(prompt_tokens, completion_tokens).with_cache(hit, miss)
     }
 }
 

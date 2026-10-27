@@ -140,7 +140,6 @@ fn delegate_task_schema() -> serde_json::Value {
         serde_json::json!({
             "prompt": { "type": "string", "description": "The complete task for the child run; it sees only this, so state the goal and the boundaries" },
             "label": { "type": "string", "description": "Short human label shown in the parent thread" },
-            "workspace": { "type": "string", "description": "Workspace root for the child; defaults to the parent's" },
             "model": { "type": "string", "description": "Model override; defaults to the parent turn's model" },
             "provider_id": { "type": "string", "description": "Provider override; defaults to the parent turn's provider" },
             "background": { "type": "boolean", "description": "Return after the child is queued and keep it running under the runtime supervisor" },

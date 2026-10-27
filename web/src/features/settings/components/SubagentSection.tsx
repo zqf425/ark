@@ -7,7 +7,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Button, useToast } from '../../../shared/ui'
-import { SUBAGENT_MAX_CONCURRENCY, SUBAGENT_MIN_CONCURRENCY, type ConfigApplyResult, type SubagentConfig } from '../../../shared/contracts'
+import { SUBAGENT_MAX_CONCURRENCY, SUBAGENT_MIN_CONCURRENCY, type ApplyResult, type SubagentSettings } from '../../../shared/contracts'
 import type { SettingsApi } from '../hooks/use-settings'
 import { describeOutcome, type Outcome } from '../api/outcome'
 import { CheckField, Field } from './Field'
@@ -47,9 +47,9 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
   const dirty =
     enabled !== config.subagents.enabled || parsed !== config.subagents.max_concurrency || invalid
 
-  const persist = async (payload: SubagentConfig, label: string): Promise<void> => {
+  const persist = async (payload: SubagentSettings, label: string): Promise<void> => {
     setRejection(null)
-    const outcome: Outcome<ConfigApplyResult> = await save({ subagents: payload }, 'subagents')
+    const outcome: Outcome<ApplyResult> = await save({ subagents: payload }, 'subagents')
     if (!outcome.ok) {
       toast.push('error', `${label}失败`, describeOutcome(outcome))
       return

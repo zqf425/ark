@@ -12,6 +12,12 @@ pub mod config;
 pub mod dto;
 pub mod event;
 pub mod item;
+/// TypeScript binding generation (design §6.1).
+///
+/// Test-only: it writes into `web/src/generated/`, and the checked-in output is
+/// what keeps the renderer and this crate from drifting apart.
+#[cfg(test)]
+pub mod ts_export;
 
 pub use base::{
     McpServerEntry, McpServerListResponse, McpServerTestResponse, McpServerView, McpTransportKind,
