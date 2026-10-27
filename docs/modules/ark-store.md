@@ -32,6 +32,10 @@ data/threads/<thread>/
 已经 fsync 的事件；它必须留下可恢复的 dirty/reconcile 状态。全局 `child_id` locator 从所有父目录的
 `runs.jsonl` 重建，授权以记录中的 `parent_thread_id` 判断，绝不从目录路径猜测。
 
+子代理完成收件箱不另建可变真源：它从父线程 `events.jsonl` 的 `child_completed` 与
+`child_completion_acknowledged` 事件投影。后者只有父回合成功结束后追加，因此确认写入失败会自然保留
+下一回合的重投递机会。
+
 ## 索引现状
 
 当前 v1 使用内存索引加原子 `data/index.json` 快照，并由单一 `IndexProjector` 维护

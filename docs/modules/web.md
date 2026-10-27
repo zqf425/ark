@@ -11,6 +11,8 @@
   `src/shared/contracts/web-only.ts`。
 - 运行时请求集中在 feature API/client 层；组件不直接裸 `fetch('/v1/...')`。
 - SSE 消费保存最后 `seq`，断线后使用 `since_seq` 恢复；页面必须能处理压缩产生的显式空洞。
+- `child_completed` 按稳定 `notification_id` 去重后显示持久摘要卡片；实时到达时显示一次性提示。摘要仅作
+  父线程状态展示，不能在 web 侧重建或改写模型上下文。
 - 组件状态按 feature 拆分，避免重建旧 `Workbench.tsx` 巨型组件；UI 变更应进行实际浏览器验证。
 
 ## 计划边界

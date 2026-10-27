@@ -20,6 +20,7 @@ export type { ItemKind } from "./ItemKind";
 export type { ItemStatus } from "./ItemStatus";
 export type { ToolPayload } from "./ToolPayload";
 export type { ThreadItem } from "./ThreadItem";
+export type { ChildCompletionNotice } from "./ChildCompletionNotice";
 export type { EventKind } from "./EventKind";
 export type { RuntimeEvent } from "./RuntimeEvent";
 export type { ChildRunSummary } from "./ChildRunSummary";

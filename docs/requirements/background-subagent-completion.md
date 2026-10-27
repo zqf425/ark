@@ -25,10 +25,16 @@
 两个日志之间不能有跨文件事务，因此采用至少一次投递：启动 hydrate 扫描所有终态 child，发现父线程
 缺少相同 `notificationId` 的完成事件时补发。重复事件可出现，但 UI、inbox 和 continuation 必须幂等。
 
+阶段 2 在父事件日志中以 `child_completion_acknowledged` 记录某个通知已被一个**正常完成**的父回合
+消费。确认写入失败或父回合失败/中断时不丢弃通知，下一个回合会再次投递；因此语义为至少一次而非跨
+模型调用的伪“精确一次”。
+
 ## 主线程收件箱与 continuation
 
 完成事件投影为父线程 completion inbox。新的用户回合开始前读取未确认条目，并以“子代理结果”
-系统上下文提供给模型，不能伪造为用户消息。
+系统上下文提供给模型，不能伪造为用户消息。每次最多投递 8 条，超过部分保持未确认并留待后续回合，
+以免完成风暴突破上下文预算；每条摘要或错误最多 1,200 UTF-8 字节。只传递 child 的摘要或错误，
+不复制原始转录。
 
 `autoContinue` 仅在显式启用、父线程无活动 turn、未删除/归档且没有已调度 continuation 时触发。
 同一父线程短时间内多个完成通知必须合并为一个 continuation；用户中断、删除或归档父线程时取消待执行
@@ -38,17 +44,17 @@ continuation。自动 continuation 仍受模型预算、工具沙箱和审批约
 
 - **阶段 1（本次）**：`child_completed` 作为父线程持久化 SSE 事件发布，带终态摘要和稳定通知 ID；
   hydrate 在事件缺失时补投递，并避免重复投递。
-- **阶段 2（后续）**：将事件投影为主线程 completion inbox，在下一次用户回合前以系统来源上下文提供
-  给模型。
+- **阶段 2（本次）**：将事件投影为主线程 completion inbox，在下一次用户回合前以系统来源上下文提供
+  给模型；正常完成后写入确认事件。`ThreadDetail` 恢复持久摘要卡片，web 对实时完成事件显示一次性提示。
 - **阶段 3（后续）**：在显式 `autoContinue` 配置下，由 per-thread supervisor 合并通知并启动 continuation。
 
 ## 影响模块
 
 | 模块 | 变更 |
 |---|---|
-| `ark-contract` | 完成通知 DTO/事件和 TypeScript 生成 |
-| `ark-ports` | completion inbox/调度所需端口 |
-| `ark-store` | 父事件查询、通知投影与 hydrate 补投递 |
+| `ark-contract` | 完成通知、消费确认事件和 TypeScript 生成 |
+| `ark-ports` | 复用 `SessionStore::replay_events`，阶段 2 不新增端口 |
+| `ark-store` | 权威父事件查询与确认事件持久化 |
 | `ark-delegation` | 终态后发布完成通知，恢复时幂等补发 |
 | `ark-agent` | 将 inbox 结果作为系统来源输入；后续 continuation trigger |
 | `ark-server` | SSE/查询接口与错误映射 |
@@ -60,6 +66,7 @@ continuation。自动 continuation 仍受模型预算、工具沙箱和审批约
 1. `background: true` 在 child 排队后立即返回，父 turn 不等待。
 2. child 终态后父 SSE 收到一次可去重的完成通知，含摘要或错误。
 3. 重启发生在终态记录与父通知之间时，hydrate 补投递；重复 hydrate 不重复事件。
-4. 阶段 2 必须把未确认通知作为系统来源输入，而非伪造用户消息。
+4. 阶段 2 必须把未确认通知作为系统来源输入，而非伪造用户消息；只有父回合正常完成后才确认，确认失败
+   必须允许下一回合重投递。
 5. 阶段 3 的多 child 完成只调度一个合并 continuation；已中断、删除或归档的父线程不得自动 continuation。
 6. 默认配置不产生自动模型调用；自动 continuation 仍走原审批和沙箱。

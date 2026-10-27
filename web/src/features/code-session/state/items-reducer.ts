@@ -6,7 +6,7 @@
  * deltas, tracking `seq`, and recording gate requests that must be answered.
  */
 import type { ItemKind, RuntimeEvent, ThreadItem, TurnState } from '../../../shared/contracts'
-import type { ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
+import type { ChildCompletionNotice, ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
 
 export function emptyItemsState(): ItemsSnapshot {
   return {
@@ -17,7 +17,8 @@ export function emptyItemsState(): ItemsSnapshot {
     lastSeq: 0,
     errors: [],
     approvals: {},
-    userInputs: {}
+    userInputs: {},
+    childCompletions: {}
   }
 }
 
@@ -38,7 +39,8 @@ function clone(state: ItemsSnapshot): ItemsSnapshot {
     lastSeq: state.lastSeq,
     errors: [...state.errors],
     approvals: { ...state.approvals },
-    userInputs: { ...state.userInputs }
+    userInputs: { ...state.userInputs },
+    childCompletions: { ...state.childCompletions }
   }
 }
 
@@ -101,10 +103,15 @@ function pushError(next: ItemsSnapshot, line: ErrorLine): void {
 }
 
 /** Seed history from `GET /v1/threads/{id}`. */
-export function seedFromItems(items: ThreadItem[], lastSeq: number): ItemsSnapshot {
+export function seedFromItems(
+  items: ThreadItem[],
+  lastSeq: number,
+  childCompletions: ChildCompletionNotice[]
+): ItemsSnapshot {
   const next = emptyItemsState()
   next.lastSeq = lastSeq
   for (const item of items) upsertItem(next, item)
+  for (const notice of childCompletions) next.childCompletions[notice.notification_id] = notice
   return next
 }
 
@@ -210,6 +217,23 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       if (existing) {
         next.userInputs[event.request_id] = { ...existing, status: 'answered', answer: event.answer }
       }
+      return next
+    }
+
+    case 'child_completed': {
+      if (next.childCompletions[event.notification_id]) return next
+      const notice: ChildCompletionNotice = {
+        notification_id: event.notification_id,
+        child_id: event.child_id,
+        thread_id: event.thread_id,
+        label: event.label,
+        status: event.status,
+        summary: event.summary,
+        error: event.error,
+        completed_at: event.timestamp,
+        seq: event.seq
+      }
+      next.childCompletions[event.notification_id] = notice
       return next
     }
 

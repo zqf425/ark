@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef } from 'react'
 import { EmptyState, ErrorBoundary } from '../../../shared/ui'
 import type { ThreadItem } from '../../../shared/contracts'
 import { useCodeSessionStore } from '../state/store'
-import { groupByTurn, openApprovals, openUserInputs, recentErrors } from '../state/selectors'
+import { childCompletionNotices, groupByTurn, openApprovals, openUserInputs, recentErrors } from '../state/selectors'
 import { UserBubble, AssistantBubble, ReasoningBlock } from './MessageBubble'
 import { ToolCard } from './ToolCard'
-import { ErrorRow, NoticeRow, ToolResultRow } from './ErrorRow'
+import { ChildCompletionCard, ErrorRow, NoticeRow, ToolResultRow } from './ErrorRow'
 import { ApprovalCard } from './ApprovalCard'
 import { UserInputCard } from './UserInputCard'
 import { Composer } from './Composer'
@@ -76,7 +76,8 @@ export function ThreadStream({ threadId }: { threadId: string | null }): JSX.Ele
   const approvals = useMemo(() => openApprovals(snapshot), [snapshot])
   const userInputs = useMemo(() => openUserInputs(snapshot), [snapshot])
   const errors = useMemo(() => recentErrors(snapshot), [snapshot])
-  const { ref, atBottom, scrollToBottom } = useStickToBottom(`${items.length}:${items.map((id) => itemsById[id]?.text?.length ?? 0).join(',')}`)
+  const completions = useMemo(() => childCompletionNotices(snapshot), [snapshot])
+  const { ref, atBottom, scrollToBottom } = useStickToBottom(`${items.length}:${completions.length}:${items.map((id) => itemsById[id]?.text?.length ?? 0).join(',')}`)
 
   const resolveApprovalLocally = useCodeSessionStore((s) => s.noteApprovalResolved)
   const answerInputLocally = useCodeSessionStore((s) => s.noteUserInputAnswered)
@@ -109,6 +110,10 @@ export function ThreadStream({ threadId }: { threadId: string | null }): JSX.Ele
               </ErrorBoundary>
             ))}
           </div>
+        ))}
+
+        {completions.map((notice) => (
+          <ChildCompletionCard key={notice.notification_id} notice={notice} />
         ))}
 
         {approvals.map((approval) => (

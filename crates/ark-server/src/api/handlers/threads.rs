@@ -61,6 +61,13 @@ pub async fn get(
     let thread_id = parse_thread(&id)?;
     let meta = state.store.get_thread(thread_id).await?;
     let items = state.store.read_items(thread_id).await?;
+    let child_completions = state
+        .store
+        .replay_events(thread_id, 0)
+        .await?
+        .iter()
+        .filter_map(RuntimeEvent::child_completion_notice)
+        .collect();
     let child_ids = state
         .store
         .list_child_runs(thread_id)
@@ -73,6 +80,7 @@ pub async fn get(
         summary,
         items,
         child_ids,
+        child_completions,
     }))
 }
 

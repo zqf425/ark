@@ -1,5 +1,6 @@
 import type {
   ArkErrorCode,
+  ChildCompletionNotice,
   ItemId,
   ThreadId,
   ThreadItem,
@@ -8,6 +9,8 @@ import type {
   TurnState
 } from '../../../shared/contracts'
 import type { StreamStatus } from '../api/events-api'
+
+export type { ChildCompletionNotice } from '../../../shared/contracts'
 
 /** One runtime `error` event surfaced inline in the stream. */
 export type ErrorLine = {
@@ -51,6 +54,7 @@ export type ItemsSnapshot = {
   errors: ErrorLine[]
   approvals: Record<string, PendingApproval>
   userInputs: Record<string, PendingUserInput>
+  childCompletions: Record<string, ChildCompletionNotice>
 }
 
 export type ThreadListSnapshot = {

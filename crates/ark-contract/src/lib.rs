@@ -36,5 +36,5 @@ pub use dto::{
     SteerChildRequest, ThreadDetail, ThreadSummary, TurnRequest, TurnSummary, UpdateThreadRequest,
     UsageResponse,
 };
-pub use event::{EventKind, RuntimeEvent};
+pub use event::{ChildCompletionNotice, EventKind, RuntimeEvent};
 pub use item::{ItemStatus, ThreadItem};

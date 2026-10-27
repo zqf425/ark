@@ -10,8 +10,8 @@ use std::sync::Arc;
 use ark_agent::exec::journal::EventSinkWriter;
 use ark_agent::exec::tool_runner::ToolRunner as AgentToolRunner;
 use ark_agent::{
-    AllowAllGates, ModelSeed, Reactor, ReactorConfig, ToolCallRequest, TurnEvents, TurnLimits,
-    TurnMachine, TurnOutcome,
+    AllowAllGates, CompletionInbox, ModelSeed, Reactor, ReactorConfig, ToolCallRequest, TurnEvents,
+    TurnLimits, TurnMachine, TurnOutcome,
 };
 use ark_common::{Result, ThreadId, TurnId};
 use ark_config::{ConfigStore, RuntimeConfig};
@@ -160,6 +160,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         config: Arc::clone(&config),
         usage: Arc::clone(&usage),
         tools: tool_runner,
+        store: Arc::clone(&store_port),
         sink,
         policy,
         roots: Arc::clone(&roots),
@@ -230,6 +231,7 @@ struct AgentTurnRunner {
     config: Arc<ConfigStore>,
     usage: Arc<UsageRecorder>,
     tools: Arc<RegistryToolRunner>,
+    store: Arc<dyn SessionStore>,
     sink: Arc<dyn EventSink>,
     policy: Arc<dyn SandboxPolicy>,
     /// Resolved per turn so a workspace chosen in Settings applies immediately.
@@ -280,9 +282,55 @@ impl AgentTurnRunner {
     }
 }
 
+/// Read the durable completion inbox before constructing a parent turn.
+///
+/// Child completion is at-least-once delivery: if acknowledgement fails after
+/// the model turn, the next parent turn safely receives the same source again.
+async fn completion_inbox(
+    store: &dyn SessionStore,
+    thread_id: ThreadId,
+) -> Result<CompletionInbox> {
+    let events = store.replay_events(thread_id, 0).await?;
+    Ok(CompletionInbox::from_events(&events))
+}
+
+/// Persists the completion IDs delivered to a parent turn without changing its
+/// completed outcome when the acknowledgement write itself fails.
+async fn acknowledge_completion_inbox(
+    sink: &dyn EventSink,
+    thread_id: ThreadId,
+    turn_id: TurnId,
+    notification_ids: &[String],
+) {
+    for notification_id in notification_ids {
+        if let Err(error) = sink
+            .publish(
+                thread_id,
+                ark_contract::RuntimeEvent::ChildCompletionAcknowledged {
+                    seq: 0,
+                    thread_id,
+                    turn_id,
+                    timestamp: chrono::Utc::now(),
+                    notification_id: notification_id.clone(),
+                },
+            )
+            .await
+        {
+            tracing::warn!(
+                thread = %thread_id,
+                turn = %turn_id,
+                %notification_id,
+                %error,
+                "failed to acknowledge child completion; it will be delivered again"
+            );
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl TurnRunner for AgentTurnRunner {
     async fn run_turn(&self, job: TurnJob) -> Result<TurnEnd> {
+        let inbox = completion_inbox(self.store.as_ref(), job.thread_id).await?;
         let events = TurnEvents::new(job.thread_id, job.turn_id);
         let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events));
         let tools: Arc<dyn AgentToolRunner> = Arc::new(ToolRunnerAdapter {
@@ -310,6 +358,9 @@ impl TurnRunner for AgentTurnRunner {
                 "[available skills]\n{catalog}"
             )));
         }
+        if let Some(message) = inbox.system_message() {
+            seed_messages.push(message);
+        }
         // One snapshot per turn: every value below is derived from the same
         // config state, so a turn cannot mix a new model with old limits.
         let snapshot = self.config.snapshot();
@@ -334,7 +385,16 @@ impl TurnRunner for AgentTurnRunner {
         reactor.push_user(job.text);
         let outcome = reactor.run().await?;
         Ok(match outcome {
-            TurnOutcome::Completed => TurnEnd::Completed,
+            TurnOutcome::Completed => {
+                acknowledge_completion_inbox(
+                    self.sink.as_ref(),
+                    job.thread_id,
+                    job.turn_id,
+                    inbox.notification_ids(),
+                )
+                .await;
+                TurnEnd::Completed
+            }
             TurnOutcome::Failed { message } => TurnEnd::Failed(message),
             TurnOutcome::Aborted { reason } => TurnEnd::Aborted(reason),
         })
@@ -387,5 +447,89 @@ impl AgentToolRunner for ToolRunnerAdapter {
                     .await
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ark_common::ChildId;
+    use ark_contract::RuntimeEvent;
+    use chrono::Utc;
+
+    struct TestDataDir(std::path::PathBuf);
+
+    impl TestDataDir {
+        fn new() -> Self {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time is after the Unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!("ark-completion-inbox-{nonce}"));
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDataDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn child_completion_events_are_loaded_as_the_next_turn_system_source() {
+        let data_dir = TestDataDir::new();
+        let store = FileSessionStore::open(StoreConfig::new(&data_dir.0)).unwrap();
+        let thread = store.create_thread("parent").await.unwrap().thread_id;
+        store
+            .append_event(
+                thread,
+                RuntimeEvent::ChildCompleted {
+                    seq: 0,
+                    thread_id: thread,
+                    timestamp: Utc::now(),
+                    notification_id: "child:one".to_string(),
+                    child_id: ChildId::new(),
+                    label: "inspect runtime".to_string(),
+                    status: "completed".to_string(),
+                    summary: Some("The runtime is healthy.".to_string()),
+                    error: None,
+                    usage: None,
+                    tool_invocations: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let inbox = completion_inbox(&store, thread).await.unwrap();
+        assert_eq!(inbox.notification_ids(), &["child:one".to_string()]);
+        assert_eq!(
+            inbox.system_message().unwrap().role,
+            ark_ports::ModelRole::System
+        );
+    }
+
+    #[tokio::test]
+    async fn completed_parent_turn_acknowledges_the_delivered_completion_ids() {
+        let data_dir = TestDataDir::new();
+        let store = FileSessionStore::open(StoreConfig::new(&data_dir.0)).unwrap();
+        let thread = store.create_thread("parent").await.unwrap().thread_id;
+        let turn = TurnId::new();
+
+        acknowledge_completion_inbox(&store, thread, turn, &["child:one".to_string()]).await;
+
+        let events = store.replay_events(thread, 0).await.unwrap();
+        assert!(events.iter().any(|event| {
+            matches!(
+                event,
+                RuntimeEvent::ChildCompletionAcknowledged {
+                    notification_id,
+                    turn_id,
+                    ..
+                } if notification_id == "child:one" && *turn_id == turn
+            )
+        }));
     }
 }

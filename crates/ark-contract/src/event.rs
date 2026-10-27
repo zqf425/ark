@@ -63,6 +63,7 @@ pub enum EventKind {
     TransientRetry,
     ChildActivity,
     ChildCompleted,
+    ChildCompletionAcknowledged,
 }
 
 impl EventKind {
@@ -113,8 +114,31 @@ impl EventKind {
             EventKind::TransientRetry => "transient_retry",
             EventKind::ChildActivity => "child_activity",
             EventKind::ChildCompleted => "child_completed",
+            EventKind::ChildCompletionAcknowledged => "child_completion_acknowledged",
         }
     }
+}
+
+/// Render-ready projection of one durable `child_completed` event.
+///
+/// It intentionally contains only the child terminal summary, never the child
+/// transcript, so thread detail can restore completion cards without replaying
+/// the whole event stream in the renderer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ChildCompletionNotice {
+    #[ts(as = "f64")]
+    pub seq: u64,
+    pub thread_id: ThreadId,
+    pub completed_at: DateTime<Utc>,
+    pub notification_id: String,
+    pub child_id: ark_common::ChildId,
+    pub label: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// A persisted runtime event.
@@ -343,6 +367,17 @@ pub enum RuntimeEvent {
         tool_invocations: Option<u64>,
     },
 
+    /// A parent turn completed after receiving the identified child result as a
+    /// system source. This makes completion-inbox consumption durable.
+    ChildCompletionAcknowledged {
+        #[ts(as = "f64")]
+        seq: u64,
+        thread_id: ThreadId,
+        turn_id: ark_common::TurnId,
+        timestamp: DateTime<Utc>,
+        notification_id: String,
+    },
+
     // ---- diagnostics ----
     Error {
         #[ts(as = "f64")]
@@ -392,6 +427,37 @@ pub enum RuntimeEvent {
 }
 
 impl RuntimeEvent {
+    /// Projects a terminal child event for parent-thread detail rendering.
+    ///
+    /// * Returns: a completion notice for `child_completed`, otherwise `None`.
+    pub fn child_completion_notice(&self) -> Option<ChildCompletionNotice> {
+        match self {
+            RuntimeEvent::ChildCompleted {
+                seq,
+                thread_id,
+                timestamp,
+                notification_id,
+                child_id,
+                label,
+                status,
+                summary,
+                error,
+                ..
+            } => Some(ChildCompletionNotice {
+                seq: *seq,
+                thread_id: *thread_id,
+                completed_at: *timestamp,
+                notification_id: notification_id.clone(),
+                child_id: *child_id,
+                label: label.clone(),
+                status: status.clone(),
+                summary: summary.clone(),
+                error: error.clone(),
+            }),
+            _ => None,
+        }
+    }
+
     pub fn seq(&self) -> u64 {
         match self {
             RuntimeEvent::ThreadCreated { seq, .. }
@@ -421,7 +487,8 @@ impl RuntimeEvent {
             | RuntimeEvent::CompactionStarted { seq, .. }
             | RuntimeEvent::CompactionCompleted { seq, .. }
             | RuntimeEvent::ChildActivity { seq, .. }
-            | RuntimeEvent::ChildCompleted { seq, .. } => *seq,
+            | RuntimeEvent::ChildCompleted { seq, .. }
+            | RuntimeEvent::ChildCompletionAcknowledged { seq, .. } => *seq,
         }
     }
 
@@ -454,7 +521,8 @@ impl RuntimeEvent {
             | RuntimeEvent::CompactionStarted { thread_id, .. }
             | RuntimeEvent::CompactionCompleted { thread_id, .. }
             | RuntimeEvent::ChildActivity { thread_id, .. }
-            | RuntimeEvent::ChildCompleted { thread_id, .. } => *thread_id,
+            | RuntimeEvent::ChildCompleted { thread_id, .. }
+            | RuntimeEvent::ChildCompletionAcknowledged { thread_id, .. } => *thread_id,
         }
     }
 
@@ -488,6 +556,9 @@ impl RuntimeEvent {
             RuntimeEvent::CompactionCompleted { .. } => EventKind::CompactionCompleted,
             RuntimeEvent::ChildActivity { .. } => EventKind::ChildActivity,
             RuntimeEvent::ChildCompleted { .. } => EventKind::ChildCompleted,
+            RuntimeEvent::ChildCompletionAcknowledged { .. } => {
+                EventKind::ChildCompletionAcknowledged
+            }
         }
     }
 
@@ -878,6 +949,19 @@ impl RuntimeEvent {
                 usage,
                 tool_invocations,
             },
+            RuntimeEvent::ChildCompletionAcknowledged {
+                thread_id,
+                turn_id,
+                timestamp,
+                notification_id,
+                ..
+            } => RuntimeEvent::ChildCompletionAcknowledged {
+                seq,
+                thread_id,
+                turn_id,
+                timestamp,
+                notification_id,
+            },
         }
     }
 
@@ -910,7 +994,8 @@ impl RuntimeEvent {
             | RuntimeEvent::CompactionStarted { timestamp, .. }
             | RuntimeEvent::CompactionCompleted { timestamp, .. }
             | RuntimeEvent::ChildActivity { timestamp, .. }
-            | RuntimeEvent::ChildCompleted { timestamp, .. } => *timestamp,
+            | RuntimeEvent::ChildCompleted { timestamp, .. }
+            | RuntimeEvent::ChildCompletionAcknowledged { timestamp, .. } => *timestamp,
         }
     }
 }
@@ -953,5 +1038,29 @@ mod tests {
             timestamp: Utc::now(),
         };
         assert_eq!(event.with_seq(42).seq(), 42);
+    }
+
+    #[test]
+    fn child_completion_event_projects_a_renderable_notice() {
+        let thread_id = ThreadId::new();
+        let event = RuntimeEvent::ChildCompleted {
+            seq: 7,
+            thread_id,
+            timestamp: Utc::now(),
+            notification_id: "child:result".to_string(),
+            child_id: ark_common::ChildId::new(),
+            label: "inspect runtime".to_string(),
+            status: "completed".to_string(),
+            summary: Some("The runtime is healthy.".to_string()),
+            error: None,
+            usage: None,
+            tool_invocations: None,
+        };
+
+        let notice = event.child_completion_notice().expect("completion notice");
+        assert_eq!(notice.notification_id, "child:result");
+        assert_eq!(notice.thread_id, thread_id);
+        assert_eq!(notice.seq, 7);
+        assert_eq!(notice.summary.as_deref(), Some("The runtime is healthy."));
     }
 }

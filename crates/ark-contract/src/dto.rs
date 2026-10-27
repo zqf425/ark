@@ -8,7 +8,7 @@ use ark_common::{ThreadId, TurnId, Usage};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::item::ThreadItem;
+use crate::{item::ThreadItem, ChildCompletionNotice};
 
 /// `GET /health` — unauthenticated liveness probe.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -65,7 +65,7 @@ pub struct UpdateThreadRequest {
     pub archived: Option<bool>,
 }
 
-/// `GET /v1/threads/{id}` — metadata plus the render-ready item stream.
+/// `GET /v1/threads/{id}` — metadata, items and durable child terminal summaries.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct ThreadDetail {
@@ -74,6 +74,8 @@ pub struct ThreadDetail {
     pub items: Vec<ThreadItem>,
     #[serde(default)]
     pub child_ids: Vec<ark_common::ChildId>,
+    #[serde(default)]
+    pub child_completions: Vec<ChildCompletionNotice>,
 }
 
 /// `POST /v1/threads/{id}/turns`.

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ThreadItem } from '../../../shared/contracts'
 import { formatClock } from '../../../shared/format'
+import type { ChildCompletionNotice } from '../state/types'
 
 /**
  * Inline error row. `code` comes straight from the runtime error taxonomy
@@ -23,6 +24,23 @@ export function NoticeRow({ item }: { item: ThreadItem }): JSX.Element {
   return (
     <div className="ark-notice">
       <span className="ark-notice__text">{item.text ?? item.detail ?? ''}</span>
+    </div>
+  )
+}
+
+/** Durable parent-thread summary for one finished background child. */
+export function ChildCompletionCard({ notice }: { notice: ChildCompletionNotice }): JSX.Element {
+  const failed = notice.status !== 'completed'
+  const detail = notice.summary ?? notice.error ?? '子代理未提供摘要。'
+
+  return (
+    <div className={`ark-childcompletion ${failed ? 'is-failed' : ''}`} role="status">
+      <div className="ark-childcompletion__head">
+        <span className={`ark-chip ${failed ? 'ark-chip--error' : 'ark-chip--ok'}`}>{notice.status}</span>
+        <strong>{notice.label}</strong>
+        <span className="ark-childcompletion__time">{formatClock(notice.completed_at)}</span>
+      </div>
+      <p className="ark-childcompletion__summary">{detail}</p>
     </div>
   )
 }

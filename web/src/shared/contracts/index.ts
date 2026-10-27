@@ -3,6 +3,7 @@ export type {
   ArkErrorCode,
   ArkErrorPayload,
   ChildId,
+  ChildCompletionNotice,
   ConfigPatch,
   CreateThreadRequest,
   EventKind,

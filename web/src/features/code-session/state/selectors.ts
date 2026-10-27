@@ -5,7 +5,7 @@
  * inference, no re-sorting by kind, no text post-processing (design §7.10.3).
  */
 import type { ItemId, ThreadItem, TurnId } from '../../../shared/contracts'
-import type { ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
+import type { ChildCompletionNotice, ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
 
 export type TurnGroup = {
   turnId: TurnId
@@ -68,6 +68,11 @@ export function openUserInputs(snapshot: ItemsSnapshot): PendingUserInput[] {
 /** Latest error lines, oldest first; the stream renders them as a footer block. */
 export function recentErrors(snapshot: ItemsSnapshot, limit = 5): ErrorLine[] {
   return snapshot.errors.slice(-limit)
+}
+
+/** Completed background children in their durable event order. */
+export function childCompletionNotices(snapshot: ItemsSnapshot): ChildCompletionNotice[] {
+  return Object.values(snapshot.childCompletions).sort((left, right) => left.seq - right.seq)
 }
 
 /** True while any item still streams — used to disable send and show a caret. */

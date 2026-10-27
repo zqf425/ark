@@ -9,6 +9,7 @@
 import { useEffect } from 'react'
 import { ApiError } from '../../../shared/api/client'
 import type { ThreadId } from '../../../shared/contracts'
+import { useToast } from '../../../shared/ui'
 import { subscribeThreadEvents } from '../api/events-api'
 import { getThread } from '../api/threads-api'
 import { useCodeSessionStore } from '../state/store'
@@ -25,6 +26,7 @@ export function useThreadStream(threadId: ThreadId | null): void {
   const ingestEvent = useCodeSessionStore((s) => s.ingestEvent)
   const setDetailStatus = useCodeSessionStore((s) => s.setDetailStatus)
   const setStreamStatus = useCodeSessionStore((s) => s.setStreamStatus)
+  const { push: pushToast } = useToast()
 
   useEffect(() => {
     if (!threadId) {
@@ -35,6 +37,7 @@ export function useThreadStream(threadId: ThreadId | null): void {
 
     const controller = new AbortController()
     let cancelled = false
+    const displayedCompletions = new Set<string>()
     setDetailStatus('loading')
 
     const run = async (): Promise<void> => {
@@ -42,14 +45,21 @@ export function useThreadStream(threadId: ThreadId | null): void {
         const detail = await getThread(threadId, controller.signal)
         if (cancelled) return
         const watermark = detail.summary.last_seq ?? 0
-        seedItems(detail.items, watermark)
+        seedItems(detail.items, watermark, detail.child_completions)
 
         await subscribeThreadEvents({
           threadId,
           sinceSeq: watermark,
           signal: controller.signal,
           onEvent: (event) => {
-            if (!cancelled) ingestEvent(event)
+            if (cancelled) return
+            ingestEvent(event)
+            if (event.kind === 'child_completed' && !displayedCompletions.has(event.notification_id)) {
+              displayedCompletions.add(event.notification_id)
+              const detail = event.summary ?? event.error ?? '子代理未提供摘要。'
+              const tone = event.status === 'completed' ? 'success' : 'error'
+              pushToast(tone, `子代理「${event.label}」${event.status}`, detail)
+            }
           },
           onStatus: (status) => {
             if (!cancelled) setStreamStatus(status)
@@ -71,5 +81,5 @@ export function useThreadStream(threadId: ThreadId | null): void {
       controller.abort()
       setStreamStatus('closed')
     }
-  }, [threadId, ingestEvent, resetItems, seedItems, setDetailStatus, setStreamStatus])
+  }, [threadId, ingestEvent, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
 }

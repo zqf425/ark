@@ -13,6 +13,10 @@
 child executor 在此复用同一个 `ark-agent::Reactor`，并桥接 cancel/steer、工具集和会话 writer。
 它不能创建第二套 agent framework，也不能让模型指定任意 workspace。
 
+父回合开始前由组合根读取 `SessionStore` 的父事件，调用 `ark-agent` 的纯 inbox 投影并作为动态 system
+source 注入 reactor。父回合成功后再追加 completion acknowledgement；写入失败记录告警并保留下一回合
+的至少一次投递，不能把已经完成的模型回合改写为失败。
+
 ## 验证
 
 装配变更至少执行 `cargo check -p arkd`；涉及运行时、存储或并发时执行 workspace 测试，并验证启动/停机

@@ -2,7 +2,7 @@ import type { StateCreator } from 'zustand'
 import type { RuntimeEvent, ThreadItem } from '../../../shared/contracts'
 import type { StreamStatus } from '../api/events-api'
 import { applyEvent, emptyItemsState, markApprovalLocally, markUserInputLocally, seedFromItems } from './items-reducer'
-import type { ItemsSnapshot, LoadStatus } from './types'
+import type { ChildCompletionNotice, ItemsSnapshot, LoadStatus } from './types'
 
 export type ItemsSlice = ItemsSnapshot & {
   detailStatus: LoadStatus
@@ -10,7 +10,7 @@ export type ItemsSlice = ItemsSnapshot & {
   streamStatus: StreamStatus
   streamError: string | null
   /** Replace the stream with the authoritative server snapshot. */
-  seedItems: (items: ThreadItem[], lastSeq: number) => void
+  seedItems: (items: ThreadItem[], lastSeq: number, childCompletions: ChildCompletionNotice[]) => void
   /** Fold one SSE event through the pure reducer. */
   ingestEvent: (event: RuntimeEvent) => void
   resetItems: () => void
@@ -27,7 +27,11 @@ export const createItemsSlice: StateCreator<ItemsSlice, [], [], ItemsSlice> = (s
   streamStatus: 'closed',
   streamError: null,
 
-  seedItems: (items, lastSeq) => set({ ...seedFromItems(items, lastSeq), detailStatus: 'ready', detailError: null }),
+  seedItems: (items, lastSeq, childCompletions) => set({
+    ...seedFromItems(items, lastSeq, childCompletions),
+    detailStatus: 'ready',
+    detailError: null
+  }),
 
   ingestEvent: (event) => set(applyEvent(get(), event)),
 

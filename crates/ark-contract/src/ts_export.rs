@@ -22,14 +22,15 @@ use ts_rs::TS;
 
 use crate::item::{ItemKind, ToolPayload};
 use crate::{
-    ApplyResult, ChildRunActionResult, ChildRunAggregates, ChildRunEventsResponse,
-    ChildRunListResponse, ChildRunSummary, ConfigPatch, CreateThreadRequest, EventKind, FieldPath,
-    HealthResponse, ItemStatus, McpServerEntry, McpServerListResponse, McpServerTestResponse,
-    McpServerView, McpTransportKind, ProviderEntry, ProviderListResponse, ProviderTestRequest,
-    ProviderTestResponse, ProviderView, ResumeChildRequest, RuntimeConfigView, RuntimeEvent,
-    RuntimeInfo, SkillDiagnostics, SkillLoadWarning, SkillSource, SkillSummary, SteerChildRequest,
-    SubagentSettings, ThreadDetail, ThreadItem, ThreadSkillsResponse, ThreadSummary, TurnRequest,
-    TurnSummary, UpdateThreadRequest, UsageResponse, WorkspaceStatus,
+    ApplyResult, ChildCompletionNotice, ChildRunActionResult, ChildRunAggregates,
+    ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
+    CreateThreadRequest, EventKind, FieldPath, HealthResponse, ItemStatus, McpServerEntry,
+    McpServerListResponse, McpServerTestResponse, McpServerView, McpTransportKind, ProviderEntry,
+    ProviderListResponse, ProviderTestRequest, ProviderTestResponse, ProviderView,
+    ResumeChildRequest, RuntimeConfigView, RuntimeEvent, RuntimeInfo, SkillDiagnostics,
+    SkillLoadWarning, SkillSource, SkillSummary, SteerChildRequest, SubagentSettings, ThreadDetail,
+    ThreadItem, ThreadSkillsResponse, ThreadSummary, TurnRequest, TurnSummary, UpdateThreadRequest,
+    UsageResponse, WorkspaceStatus,
 };
 use ark_common::{ArkErrorCode, ArkErrorPayload, ChildId, ItemId, ThreadId, TurnId, Usage};
 
@@ -67,6 +68,7 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     ItemStatus::export_all_to(dir)?;
     ToolPayload::export_all_to(dir)?;
     ThreadItem::export_all_to(dir)?;
+    ChildCompletionNotice::export_all_to(dir)?;
     EventKind::export_all_to(dir)?;
     RuntimeEvent::export_all_to(dir)?;
 
@@ -155,6 +157,7 @@ const ROOT_NAMES: &[&str] = &[
     "ItemStatus",
     "ToolPayload",
     "ThreadItem",
+    "ChildCompletionNotice",
     "EventKind",
     "RuntimeEvent",
     "ChildRunSummary",

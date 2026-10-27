@@ -373,6 +373,7 @@ pub async fn thread(
         summary,
         items,
         child_ids: Vec::new(),
+        child_completions: Vec::new(),
     }))
 }
 

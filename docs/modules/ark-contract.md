@@ -9,7 +9,10 @@
 skill 视图。所有 GUI 字段使用 camelCase；既有查询参数保持既有命名，例如 `since_seq`。
 
 后台子代理终态使用 `child_completed` 事件传递稳定 `notification_id`、状态、摘要/错误和用量；
-消费者按通知 ID 去重，不得把 child 的完整原始转录复制到父线程。
+消费者按通知 ID 去重，不得把 child 的完整原始转录复制到父线程。父回合正常完成后以
+`child_completion_acknowledged` 确认已消费的通知；确认失败保留至少一次重投递语义。
+`ThreadDetail.child_completions` 是 `child_completed` 的渲染投影，用于页面重新打开时恢复摘要卡片；它
+不取代事件日志，也不包含完整 child 转录。
 
 ## 类型生成
 
