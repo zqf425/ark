@@ -23,6 +23,7 @@
 
 ## 0. 一页结论
 
+0. **原始项目地址**：D:\code\github\smart-ark
 1. **拆分边界已经天然存在**：当前 GUI 与 agent loop 之间已经是 `HTTP + SSE`，
    UI 自动化执行器也已经是**独立进程 + JSONL 协议**（`packages/runner`）。
    重写的核心工作是**在既有进程边界内换实现**，不需要先重构架构。
@@ -100,7 +101,7 @@
 
 ### 1.2 明确不在范围内
 
-- Write 模式、工作流引擎、定时任务、GitLab/观测等业务面板
+- Write 模式、工作流引擎、GitLab/观测等业务面板
   （Connect 手机的 **IM 部分已收编为插件**纳入范围，见 §7.13；其余 claw 专属逻辑不迁移）
 - 云端"银河"平台的用例管理与发布（继续按 HTTP 客户端对接，不重写服务端）
 - Playwright 内核本身（作为 sidecar 复用）
@@ -196,6 +197,7 @@
 - 同一线程事件同时落在 `events.jsonl` 与内存 `InMemoryEventBus`，
   高负载下两者一致性靠调用顺序保证，没有显式不变量。
 - `highestSeq()` 与 `loadEventsSince()` 分别读盘，重放边界存在竞态窗口。
+- 有大会话时界面卡顿，输入、发送、停止等动作点击无反应
 
 ### 2.6 配置与热更新
 
@@ -305,7 +307,7 @@ S-8 的结论：**后端集成抽象成端口 + 插件**，`ark` 核心只依赖
 2. **Node 不会完全消失**，但被压缩到"只有一个 Playwright sidecar"，
    且该 sidecar **不含任何决策逻辑**（现状的 Playwright Test Agent 循环被移除）。
 3. **ark 是能力总线**：出站 HTTP（`ark-http`）、MCP 开放与互调（`ark-mcp`）、
-   界面承载（`ark-ui`）三组基础能力由 ark 统一提供。
+   界面承载（`ark-ui`）、日志等基础能力由 ark 统一提供。
    插件只写领域逻辑与页面，通信、治理、界面容器一律复用总线（§7.5）。
 4. **后端与界面都可插拔**：`ark-studio` 只依赖 `ark-ports` 的 `BackendProvider`；
    Code 模式界面本身也注册在 `ark-ui` 上。换后端、加页面都不需要改核心。
@@ -344,10 +346,9 @@ ark-rs/
 ```
 
 **命名说明**：原 `kun` 全部更名为 `ark`（crate 前缀、二进制 `arkd`、包名、日志、
-配置节名）。旧名只保留在**迁移兼容层**（读旧配置/旧目录时识别 `kun`/`KUN_` 前缀），
-由 `ark-config::legacy` 单点处理，其余代码不得再出现 `kun`。
+配置节名）。**不需要兼容**（这是一个全新的项目，轻装上阵，不需要考虑兼容）。
 
-### 5.1 模块内部统一分层（直接对齐 `QualityDataCenter`）
+### 5.1 模块内部统一分层（DDD思想，直接对齐 `QualityDataCenter`）
 
 `QualityDataCenter` 的做法是：**按业务域切模块，模块内分层固定**
 （`controller` / `service` / `dao` / `dto` / `entity` / `request` / `config` /
