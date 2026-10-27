@@ -1,0 +1,14 @@
+[package]
+name = "ark-tool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ark-common = { workspace = true }
+ark-contract = { workspace = true }
+ark-ports = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }

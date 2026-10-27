@@ -1,0 +1,12 @@
+/**
+ * Code screen stylesheet entry (design §7.10.2).
+ *
+ * Split into three files so no single file exceeds the 400-line CI limit:
+ *   - code-session-stream.css  status bar, thread rail, stream, messages
+ *   - code-session-tools.css   tool cards, tool results, error / notice rows
+ *   - code-session-gates.css   gates, composer, stream footer
+ * Order matters: later files refine earlier ones.
+ */
+@import './code-session-stream.css';
+@import './code-session-tools.css';
+@import './code-session-gates.css';

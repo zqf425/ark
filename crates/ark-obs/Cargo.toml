@@ -1,0 +1,13 @@
+[package]
+name = "ark-obs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ark-common = { workspace = true }
+ark-contract = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

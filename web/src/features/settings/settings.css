@@ -1,0 +1,352 @@
+/**
+ * Settings screen stylesheet (design §7.10.2).
+ *
+ * Tokens come from styles/global.css only: this file must not introduce a
+ * palette of its own. Shared primitives (.ark-btn / .ark-chip / .ark-tabs)
+ * are still owned by shared/ui.
+ */
+
+/* ---------- page shell ---------- */
+
+.ark-settings {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--ark-bg);
+}
+
+.ark-settings__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px 40px;
+}
+
+.ark-settings__body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 1040px;
+}
+
+/* ---------- section card ---------- */
+
+.ark-settings__section {
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius);
+  background: var(--ark-bg-raised);
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ark-settings__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ark-settings__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ark-text);
+}
+
+.ark-settings__desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ark-text-faint);
+}
+
+.ark-settings__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ark-settings__row--end {
+  justify-content: flex-end;
+}
+
+.ark-settings__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px 14px;
+}
+
+.ark-settings__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ark-settings__hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ark-text-faint);
+}
+
+.ark-settings__hint--error {
+  color: var(--ark-error);
+}
+
+.ark-settings__hint--ok {
+  color: var(--ark-ok);
+}
+
+.ark-settings__hint--warn {
+  color: var(--ark-warn);
+}
+
+.ark-settings__code {
+  font-family: var(--ark-mono);
+  font-size: 11.5px;
+  color: var(--ark-text-dim);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- fields ---------- */
+
+.ark-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ark-field__label {
+  font-size: 11.5px;
+  color: var(--ark-text-dim);
+}
+
+.ark-field__input,
+.ark-field__select {
+  width: 100%;
+  min-width: 0;
+  background: var(--ark-bg-inset);
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius);
+  padding: 5px 8px;
+  color: var(--ark-text);
+}
+
+.ark-field__input:focus-visible,
+.ark-field__select:focus-visible,
+.ark-field__area:focus-visible {
+  outline: none;
+  border-color: var(--ark-accent-dim);
+}
+
+.ark-field__input:disabled,
+.ark-field__select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ark-field__area {
+  width: 100%;
+  resize: vertical;
+  min-height: 56px;
+  background: var(--ark-bg-inset);
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius);
+  padding: 6px 8px;
+  color: var(--ark-text);
+  font-family: var(--ark-mono);
+  font-size: 11.5px;
+}
+
+.ark-field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.ark-field__inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ark-field__inline > .ark-field__input {
+  flex: 1;
+}
+
+.ark-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ark-text-dim);
+  cursor: pointer;
+}
+
+.ark-check input {
+  accent-color: var(--ark-accent);
+}
+
+/* ---------- provider / server cards ---------- */
+
+.ark-settings__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ark-card {
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius);
+  background: var(--ark-bg-inset);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ark-card--editing {
+  border-color: var(--ark-accent-dim);
+}
+
+.ark-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ark-card__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ark-card__meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--ark-text-dim);
+}
+
+.ark-card__meta > span {
+  overflow-wrap: anywhere;
+}
+
+.ark-card__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.ark-card__foot {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ---------- notices ---------- */
+
+.ark-settings__notice {
+  border: 1px solid #4a3a1e;
+  background: #1c1812;
+  border-radius: var(--ark-radius);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ark-warn);
+}
+
+.ark-settings__notice--error {
+  border-color: #4a2429;
+  background: #1a1114;
+  color: #f0b8bc;
+}
+
+.ark-settings__notice-title {
+  font-weight: 600;
+}
+
+.ark-settings__notice-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ---------- key/value blocks ---------- */
+
+.ark-kv {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.ark-kv__k {
+  color: var(--ark-text-faint);
+}
+
+.ark-kv__v {
+  margin: 0;
+  color: var(--ark-text);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- tool chips ---------- */
+
+.ark-settings__tools {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* ---------- skeleton ---------- */
+
+.ark-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ark-skeleton__bar {
+  height: 14px;
+  border-radius: var(--ark-radius);
+  background: linear-gradient(90deg, var(--ark-bg-inset), var(--ark-bg-hover), var(--ark-bg-inset));
+  background-size: 200% 100%;
+  animation: ark-skeleton-sweep 1.4s linear infinite;
+}
+
+.ark-skeleton__bar--wide {
+  width: 72%;
+}
+
+.ark-skeleton__bar--narrow {
+  width: 42%;
+}
+
+@keyframes ark-skeleton-sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ark-skeleton__bar {
+    animation: none;
+  }
+}

@@ -1,0 +1,171 @@
+//! Adapters from the four platform stores to the `ark-ports` capability traits.
+//!
+//! `ark-server` must not depend on `ark-provider` / `ark-skills` /
+//! `ark-workspace` / `ark-mcp` (design §5.2: the boundary talks to ports). This
+//! module is the single place that knows both sides, so the wiring stays a
+//! straight composition instead of a chain of `if service == ...` branches.
+//!
+//! Each adapter is deliberately mechanical: it forwards, converts a concrete
+//! result into the contract shape, and nothing else. Any real rule lives in the
+//! store behind it.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use ark_common::Result;
+use ark_contract::{
+    McpServerEntry, McpServerListResponse, McpServerTestResponse, ProviderEntry,
+    ProviderListResponse, ProviderTestRequest, ProviderTestResponse, SkillDiagnostics,
+    SkillTurnResolution, ThreadSkillsResponse, WorkspaceStatus,
+};
+use ark_ports::{
+    McpServerService, ModelEndpoint, ProviderService, SkillService, Tool, WorkspaceService,
+};
+
+// ---------------------------------------------------------------------------
+// Providers
+// ---------------------------------------------------------------------------
+
+/// Forwards to `ark-provider::ProviderStore`.
+pub struct ProviderAdapter {
+    inner: Arc<ark_provider::ProviderStore>,
+}
+
+impl ProviderAdapter {
+    pub fn new(inner: Arc<ark_provider::ProviderStore>) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait::async_trait]
+impl ProviderService for ProviderAdapter {
+    fn list(&self) -> ProviderListResponse {
+        self.inner.list()
+    }
+
+    fn upsert(&self, entry: ProviderEntry, make_default: bool) -> Result<ProviderListResponse> {
+        self.inner.upsert(entry, make_default)
+    }
+
+    fn delete(&self, id: &str) -> Result<ProviderListResponse> {
+        self.inner.delete(id)
+    }
+
+    fn set_default(&self, id: &str) -> Result<ProviderListResponse> {
+        self.inner.set_default(id)
+    }
+
+    async fn test(&self, request: ProviderTestRequest) -> ProviderTestResponse {
+        self.inner.test(request).await
+    }
+
+    fn resolve_endpoint(&self, id: Option<&str>) -> Option<ModelEndpoint> {
+        let config = self.inner.resolve(id)?;
+        Some(ModelEndpoint {
+            provider_id: config.provider_id,
+            model: config.model,
+            base_url: config.base_url,
+            api_key: config.api_key,
+            endpoint_format: config.endpoint_format.as_str().to_string(),
+            custom_endpoint: config.custom_endpoint,
+            max_tokens: config.max_tokens,
+            temperature: config.temperature,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Skills
+// ---------------------------------------------------------------------------
+
+/// Forwards to `ark-skills::SkillRuntime`.
+pub struct SkillAdapter {
+    inner: Arc<ark_skills::SkillRuntime>,
+}
+
+impl SkillAdapter {
+    pub fn new(inner: Arc<ark_skills::SkillRuntime>) -> Self {
+        Self { inner }
+    }
+}
+
+impl SkillService for SkillAdapter {
+    fn list(&self) -> SkillDiagnostics {
+        self.inner.list()
+    }
+
+    fn reload(&self) -> SkillDiagnostics {
+        self.inner.reload()
+    }
+
+    fn thread_view(&self, extra_roots: &[PathBuf]) -> ThreadSkillsResponse {
+        self.inner.thread_view(extra_roots)
+    }
+
+    fn resolve_for_turn(&self, prompt: &str) -> SkillTurnResolution {
+        self.inner.resolve_for_turn(prompt)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Workspace
+// ---------------------------------------------------------------------------
+
+/// Forwards to `ark-workspace::WorkspaceInspector`.
+pub struct WorkspaceAdapter {
+    inner: Arc<ark_workspace::WorkspaceInspector>,
+}
+
+impl WorkspaceAdapter {
+    pub fn new(inner: Arc<ark_workspace::WorkspaceInspector>) -> Self {
+        Self { inner }
+    }
+}
+
+impl WorkspaceService for WorkspaceAdapter {
+    fn validate(&self, raw: &str) -> Result<PathBuf> {
+        self.inner.validate(raw)
+    }
+
+    fn status(&self, path: &str) -> WorkspaceStatus {
+        self.inner.status(path)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MCP servers
+// ---------------------------------------------------------------------------
+
+/// Forwards to `ark-mcp::McpServerRegistry`.
+pub struct McpServerAdapter {
+    inner: Arc<ark_mcp::McpServerRegistry>,
+}
+
+impl McpServerAdapter {
+    pub fn new(inner: Arc<ark_mcp::McpServerRegistry>) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait::async_trait]
+impl McpServerService for McpServerAdapter {
+    fn list(&self) -> McpServerListResponse {
+        self.inner.list()
+    }
+
+    fn upsert(&self, entry: McpServerEntry) -> Result<McpServerListResponse> {
+        self.inner.upsert(entry)
+    }
+
+    fn delete(&self, id: &str) -> Result<McpServerListResponse> {
+        self.inner.delete(id)
+    }
+
+    async fn test(&self, id: &str) -> McpServerTestResponse {
+        self.inner.test(id).await
+    }
+
+    async fn connect_all(&self) -> Vec<Arc<dyn Tool>> {
+        self.inner.connect_all().await
+    }
+}

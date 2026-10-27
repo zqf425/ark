@@ -1,0 +1,35 @@
+[package]
+name = "arkd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "arkd"
+path = "src/main.rs"
+
+[dependencies]
+ark-common = { workspace = true }
+ark-contract = { workspace = true }
+ark-ports = { workspace = true }
+ark-config = { workspace = true }
+ark-store = { workspace = true }
+ark-agent = { workspace = true }
+ark-delegation = { workspace = true }
+ark-llm = { workspace = true }
+ark-tool = { workspace = true }
+ark-http = { workspace = true }
+ark-ui = { workspace = true }
+ark-mcp = { workspace = true }
+ark-plugin = { workspace = true }
+ark-server = { workspace = true }
+ark-obs = { workspace = true }
+ark-provider = { workspace = true }
+ark-skills = { workspace = true }
+ark-workspace = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }

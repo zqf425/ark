@@ -1,0 +1,19 @@
+[package]
+name = "ark-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ark-common = { workspace = true }
+ark-contract = { workspace = true }
+ark-ports = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+url = "2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

@@ -1,0 +1,72 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/ark-common",
+  "crates/ark-contract",
+  "crates/ark-ports",
+  "crates/ark-config",
+  "crates/ark-store",
+  "crates/ark-agent",
+  "crates/ark-llm",
+  "crates/ark-tool",
+  "crates/ark-http",
+  "crates/ark-ui",
+  "crates/ark-mcp",
+  "crates/ark-plugin",
+  "crates/ark-skills",
+  "crates/ark-provider",
+  "crates/ark-workspace",
+  "crates/ark-delegation",
+  "crates/ark-studio",
+  "crates/ark-obs",
+  "crates/ark-server",
+  "apps/arkd",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.75"
+
+[workspace.dependencies]
+ark-common = { path = "crates/ark-common" }
+ark-contract = { path = "crates/ark-contract" }
+ark-ports = { path = "crates/ark-ports" }
+ark-config = { path = "crates/ark-config" }
+ark-store = { path = "crates/ark-store" }
+ark-agent = { path = "crates/ark-agent" }
+ark-llm = { path = "crates/ark-llm" }
+ark-tool = { path = "crates/ark-tool" }
+ark-http = { path = "crates/ark-http" }
+ark-ui = { path = "crates/ark-ui" }
+ark-mcp = { path = "crates/ark-mcp" }
+ark-plugin = { path = "crates/ark-plugin" }
+ark-skills = { path = "crates/ark-skills" }
+ark-provider = { path = "crates/ark-provider" }
+ark-workspace = { path = "crates/ark-workspace" }
+ark-delegation = { path = "crates/ark-delegation" }
+ark-studio = { path = "crates/ark-studio" }
+ark-obs = { path = "crates/ark-obs" }
+ark-server = { path = "crates/ark-server" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "process", "fs", "io-util"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures = "0.3"
+axum = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+encoding_rs = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

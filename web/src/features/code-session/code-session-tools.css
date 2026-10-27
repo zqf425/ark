@@ -1,0 +1,181 @@
+/**
+ * Tool cards, tool results, error and notice rows.
+ *
+ * Part of the Code screen stylesheet; split to stay under the 400-line
+ * per-file limit (design §7.10.2). Code-session.css is the entry.
+ */
+/* ---------- tool cards ---------- */
+
+.ark-tool,
+.ark-toolresult {
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius);
+  background: var(--ark-bg-inset);
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.ark-tool.is-open {
+  border-color: var(--ark-border-strong);
+}
+
+.ark-tool--bare {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ark-tool__head,
+.ark-toolresult__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 6px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ark-tool__head:hover,
+.ark-toolresult__head:hover {
+  background: var(--ark-bg-hover);
+}
+
+.ark-tool__chevron {
+  color: var(--ark-text-faint);
+  width: 12px;
+  flex: none;
+}
+
+.ark-tool__name,
+.ark-toolresult__name {
+  font-family: var(--ark-mono);
+  font-size: 12px;
+  color: var(--ark-text);
+  flex: none;
+}
+
+.ark-tool__meta,
+.ark-toolresult__meta {
+  font-size: 11px;
+  color: var(--ark-text-faint);
+  font-family: var(--ark-mono);
+}
+
+.ark-tool__callid {
+  margin-left: auto;
+  font-family: var(--ark-mono);
+  font-size: 10.5px;
+  color: var(--ark-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 26ch;
+}
+
+.ark-tool__body {
+  border-top: 1px solid var(--ark-border);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ark-tool__section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ark-tool__label {
+  margin: 0;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ark-text-faint);
+  font-weight: 600;
+}
+
+.ark-tool__output {
+  margin: 0;
+  padding: 6px 8px;
+  background: #07090c;
+  border: 1px solid var(--ark-border);
+  border-radius: 4px;
+  max-height: 340px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #b9c4d0;
+}
+
+.ark-tool__note {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ark-text-dim);
+}
+
+/* ---------- error / notice rows ---------- */
+
+.ark-errorrow {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  border: 1px solid #4a2429;
+  background: #1a1114;
+  border-radius: var(--ark-radius);
+  padding: 6px 8px;
+}
+
+.ark-errorrow__mark {
+  color: var(--ark-error);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.ark-errorrow__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ark-errorrow__message {
+  margin: 0;
+  color: #f0b8bc;
+  font-family: var(--ark-mono);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.ark-errorrow__meta {
+  color: var(--ark-text-faint);
+  font-size: 11px;
+  font-family: var(--ark-mono);
+}
+
+.ark-notice {
+  color: var(--ark-text-faint);
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.ark-errorline {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 11.5px;
+}
+
+.ark-errorline__code {
+  color: var(--ark-error);
+  flex: none;
+}
+
+.ark-errorline__message {
+  color: var(--ark-text-dim);
+  word-break: break-word;
+}

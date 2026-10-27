@@ -1,0 +1,39 @@
+/**
+ * Thread surface only. No business rules: it maps HTTP shapes, nothing more.
+ */
+import type {
+  CreateThreadRequest,
+  ThreadDetail,
+  ThreadId,
+  ThreadSummary,
+  TurnState,
+  UpdateThreadRequest
+} from '../../../shared/contracts'
+import { del, get, patch, post } from '../../../shared/api/client'
+
+/** `GET /v1/threads` — archived threads are filtered by the caller, not here. */
+export function listThreads(signal?: AbortSignal): Promise<ThreadSummary[]> {
+  return get<ThreadSummary[]>('/v1/threads', signal ? { signal } : {})
+}
+
+/** `GET /v1/threads/{id}` — metadata plus the render-ready item stream. */
+export function getThread(threadId: ThreadId, signal?: AbortSignal): Promise<ThreadDetail> {
+  return get<ThreadDetail>(`/v1/threads/${threadId}`, signal ? { signal } : {})
+}
+
+/** `POST /v1/threads`. The runtime assigns the id. */
+export function createThread(request: CreateThreadRequest = {}): Promise<ThreadSummary> {
+  return post<ThreadSummary>('/v1/threads', request)
+}
+
+/** `PATCH /v1/threads/{id}` — rename / archive. */
+export function updateThread(threadId: ThreadId, request: UpdateThreadRequest): Promise<ThreadSummary> {
+  return patch<ThreadSummary>(`/v1/threads/${threadId}`, request)
+}
+
+/** `DELETE /v1/threads/{id}`. */
+export function deleteThread(threadId: ThreadId): Promise<void> {
+  return del<void>(`/v1/threads/${threadId}`)
+}
+
+export type { TurnState }

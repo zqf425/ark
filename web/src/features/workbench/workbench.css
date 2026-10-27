@@ -1,0 +1,129 @@
+/* Workbench layout: three columns, two resizer gutters, right panel slot. */
+
+.ark-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--ark-bg);
+}
+
+.ark-cols {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.ark-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.ark-col--left {
+  width: var(--ark-left);
+  flex: none;
+  border-right: 1px solid var(--ark-border);
+}
+
+.ark-col--center {
+  flex: 1;
+  min-width: 320px;
+  position: relative;
+}
+
+.ark-col--right {
+  width: var(--ark-right);
+  flex: none;
+  border-left: 1px solid var(--ark-border);
+  background: var(--ark-bg-raised);
+}
+
+.ark-col__tools {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 4px 6px;
+  z-index: 2;
+}
+
+.ark-resizer {
+  width: 5px;
+  flex: none;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 3;
+}
+
+.ark-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 0 2px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.ark-resizer:hover::after,
+.ark-resizer:focus-visible::after {
+  background: var(--ark-accent-dim);
+}
+
+.ark-resizer:focus-visible {
+  outline: none;
+}
+
+/* ---------- right panel slot ---------- */
+
+.ark-panelslot {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.ark-panelslot__body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ark-resizer::after {
+    transition: none;
+  }
+}
+
+/* ---------- top-bar view switch ---------- */
+
+.ark-viewswitch {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.ark-viewswitch__btn {
+  border: 1px solid transparent;
+  background: none;
+  color: var(--ark-text-dim);
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.ark-viewswitch__btn:hover {
+  color: var(--ark-text);
+  background: var(--ark-bg-hover);
+}
+
+.ark-viewswitch__btn.is-active {
+  color: var(--ark-text);
+  border-color: var(--ark-border-strong);
+  background: var(--ark-bg-inset);
+}
+
