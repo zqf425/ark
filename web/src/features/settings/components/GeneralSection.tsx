@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Button, useToast } from '../../../shared/ui'
+import { useI18n, type UiFontSize, type UiLocale } from '../../../shared/i18n'
 import { LOG_LEVELS, type LogLevel } from '../../../shared/contracts'
 import { useSettings, useWorkspaceProbe } from '../hooks/use-settings'
 import type { ProvidersApi } from '../hooks/use-providers'
@@ -25,6 +26,31 @@ const LOG_LEVEL_LABELS: Record<LogLevel, string> = {
 
 function isLogLevel(value: string): value is LogLevel {
   return (LOG_LEVELS as readonly string[]).includes(value)
+}
+
+/** Renderer-only appearance preferences; never sent to the runtime configuration API. */
+function AppearancePreferences(): JSX.Element {
+  const { locale, fontSize, setLocale, setFontSize, t } = useI18n()
+  return (
+    <SettingsSection title={t('settings.appearance.title')} desc={t('settings.appearance.desc')}>
+      <SelectField<UiLocale>
+        id="settings-language"
+        label={t('settings.language')}
+        value={locale}
+        options={['zh-CN', 'en-US']}
+        labels={{ 'zh-CN': t('settings.language.zh-CN'), 'en-US': t('settings.language.en-US') }}
+        onChange={setLocale}
+      />
+      <SelectField<UiFontSize>
+        id="settings-font-size"
+        label={t('settings.fontSize')}
+        value={fontSize}
+        options={['small', 'medium', 'large']}
+        labels={{ small: t('settings.fontSize.small'), medium: t('settings.fontSize.medium'), large: t('settings.fontSize.large') }}
+        onChange={setFontSize}
+      />
+    </SettingsSection>
+  )
 }
 
 /** `active` is what the loop uses now; `default` is only the configured target. */
@@ -202,32 +228,40 @@ export function GeneralSection({ settings, providers }: GeneralSectionProps): JS
 
   if ((status === 'loading' || status === 'idle') && !config) {
     return (
-      <SettingsSection title="通用" desc="默认模型、工作空间与日志级别。">
-        <Skeleton rows={5} />
-      </SettingsSection>
+      <>
+        <AppearancePreferences />
+        <SettingsSection title="通用" desc="默认模型、工作空间与日志级别。">
+          <Skeleton rows={5} />
+        </SettingsSection>
+      </>
     )
   }
 
   if (status === 'error' && !config) {
     return (
-      <SettingsSection title="通用" desc="默认模型、工作空间与日志级别。">
-        <Notice tone="error" title="运行时配置读取失败">
-          {error ?? '未知错误'}
-        </Notice>
-        <div className="ark-settings__actions">
-          <Button size="sm" onClick={() => void refresh()}>
-            重试
-          </Button>
-        </div>
-      </SettingsSection>
+      <>
+        <AppearancePreferences />
+        <SettingsSection title="通用" desc="默认模型、工作空间与日志级别。">
+          <Notice tone="error" title="运行时配置读取失败">
+            {error ?? '未知错误'}
+          </Notice>
+          <div className="ark-settings__actions">
+            <Button size="sm" onClick={() => void refresh()}>
+              重试
+            </Button>
+          </div>
+        </SettingsSection>
+      </>
     )
   }
 
   const logLevel = config && isLogLevel(config.log_level) ? config.log_level : 'info'
 
   return (
-    <SettingsSection title="通用" desc="默认模型、工作空间与日志级别。">
-      <DefaultModelPicker providers={providers} />
+    <>
+      <AppearancePreferences />
+      <SettingsSection title="通用" desc="默认模型、工作空间与日志级别。">
+        <DefaultModelPicker providers={providers} />
 
       {config ? (
         <WorkspaceEditor
@@ -248,15 +282,16 @@ export function GeneralSection({ settings, providers }: GeneralSectionProps): JS
         onChange={(next) => void savePatch({ log_level: next }, 'log_level', `日志级别已设为 ${next}`)}
       />
 
-      {config ? (
-        <KeyValue
-          rows={[
-            { key: 'version', value: <code className="ark-settings__code">v{config.version}</code> },
-            { key: 'port', value: <code className="ark-settings__code">{config.port}</code> },
-            { key: 'data_dir', value: <code className="ark-settings__code">{config.data_dir}</code> },
-          ]}
-        />
-      ) : null}
-    </SettingsSection>
+        {config ? (
+          <KeyValue
+            rows={[
+              { key: 'version', value: <code className="ark-settings__code">v{config.version}</code> },
+              { key: 'port', value: <code className="ark-settings__code">{config.port}</code> },
+              { key: 'data_dir', value: <code className="ark-settings__code">{config.data_dir}</code> },
+            ]}
+          />
+        ) : null}
+      </SettingsSection>
+    </>
   )
 }

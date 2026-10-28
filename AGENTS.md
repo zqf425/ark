@@ -60,6 +60,7 @@ docs/
 - 前端只使用生成类型；未由 Rust 建模的请求组合和纯 UI 状态放
   `web/src/shared/contracts/web-only.ts` 并注明“非 Rust 契约”。
 - 可执行逻辑必须有唯一宿主，禁止 Rust/TypeScript 双实现；ID 使用 newtype，使用量统一为 `Usage`。
+- 新增或修改用户可见 UI 时必须接入 `web/src/shared/i18n/` 的消息键与中英文资源；不得新增硬编码的用户文案。纯 UI 偏好（语言、字号等）保留在 `web` 本地状态，只有确需跨设备同步时才设计 wire 契约。
 
 ## 5. 验证
 

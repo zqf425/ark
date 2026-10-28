@@ -42,6 +42,14 @@
   --ark-right: 360px;
 }
 
+:root[data-ark-font-size='small'] {
+  --ark-size: 12px;
+}
+
+:root[data-ark-font-size='large'] {
+  --ark-size: 15px;
+}
+
 * {
   box-sizing: border-box;
 }

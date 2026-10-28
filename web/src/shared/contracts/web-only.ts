@@ -41,3 +41,8 @@ export type EndpointFormat = (typeof ENDPOINT_FORMATS)[number]
 export const MCP_TRANSPORTS = ['stdio', 'sse', 'streamable_http'] as const
 export const SUBAGENT_MIN_CONCURRENCY = 1
 export const SUBAGENT_MAX_CONCURRENCY = 8
+
+/** Renderer-only appearance preferences; intentionally not a Rust wire contract. */
+export type UiLocale = 'zh-CN' | 'en-US'
+export type UiFontSize = 'small' | 'medium' | 'large'
+export type UiPreferences = { locale: UiLocale; fontSize: UiFontSize }
