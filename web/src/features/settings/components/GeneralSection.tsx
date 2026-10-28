@@ -7,7 +7,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Button, useToast } from '../../../shared/ui'
-import { useI18n, type UiFontSize, type UiLocale } from '../../../shared/i18n'
+import { useI18n, type UiFontSize, type UiLocale, type UiTheme } from '../../../shared/i18n'
 import { LOG_LEVELS, type LogLevel } from '../../../shared/contracts'
 import { useSettings, useWorkspaceProbe } from '../hooks/use-settings'
 import type { ProvidersApi } from '../hooks/use-providers'
@@ -30,7 +30,7 @@ function isLogLevel(value: string): value is LogLevel {
 
 /** Renderer-only appearance preferences; never sent to the runtime configuration API. */
 function AppearancePreferences(): JSX.Element {
-  const { locale, fontSize, setLocale, setFontSize, t } = useI18n()
+  const { locale, fontSize, theme, setLocale, setFontSize, setTheme, t } = useI18n()
   return (
     <SettingsSection title={t('settings.appearance.title')} desc={t('settings.appearance.desc')}>
       <SelectField<UiLocale>
@@ -48,6 +48,14 @@ function AppearancePreferences(): JSX.Element {
         options={['small', 'medium', 'large']}
         labels={{ small: t('settings.fontSize.small'), medium: t('settings.fontSize.medium'), large: t('settings.fontSize.large') }}
         onChange={setFontSize}
+      />
+      <SelectField<UiTheme>
+        id="settings-theme"
+        label={t('settings.theme')}
+        value={theme}
+        options={['light', 'dark']}
+        labels={{ light: t('settings.theme.light'), dark: t('settings.theme.dark') }}
+        onChange={setTheme}
       />
     </SettingsSection>
   )

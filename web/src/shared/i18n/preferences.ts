@@ -1,12 +1,13 @@
-import type { UiFontSize, UiLocale, UiPreferences } from '../contracts/web-only'
+import type { UiFontSize, UiLocale, UiPreferences, UiTheme } from '../contracts/web-only'
 
-export type { UiFontSize, UiLocale, UiPreferences }
+export type { UiFontSize, UiLocale, UiPreferences, UiTheme }
 
 export const UI_PREFERENCES_STORAGE_KEY = 'ark.ui.preferences'
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   locale: 'zh-CN',
-  fontSize: 'medium'
+  fontSize: 'medium',
+  theme: 'light'
 }
 
 function isLocale(value: unknown): value is UiLocale {
@@ -17,11 +18,15 @@ function isFontSize(value: unknown): value is UiFontSize {
   return value === 'small' || value === 'medium' || value === 'large'
 }
 
+function isTheme(value: unknown): value is UiTheme {
+  return value === 'light' || value === 'dark'
+}
+
 export function normalizeUiPreferences(value: unknown): UiPreferences {
   if (!value || typeof value !== 'object') return DEFAULT_UI_PREFERENCES
   const candidate = value as Partial<UiPreferences>
   if (!isLocale(candidate.locale) || !isFontSize(candidate.fontSize)) return DEFAULT_UI_PREFERENCES
-  return { locale: candidate.locale, fontSize: candidate.fontSize }
+  return { locale: candidate.locale, fontSize: candidate.fontSize, theme: isTheme(candidate.theme) ? candidate.theme : DEFAULT_UI_PREFERENCES.theme }
 }
 
 export function readUiPreferences(storage: Pick<Storage, 'getItem'>): UiPreferences {

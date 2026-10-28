@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { translate, type MessageKey } from './messages'
-import { DEFAULT_UI_PREFERENCES, readUiPreferences, type UiFontSize, type UiLocale, type UiPreferences, UI_PREFERENCES_STORAGE_KEY } from './preferences'
+import { DEFAULT_UI_PREFERENCES, readUiPreferences, type UiFontSize, type UiLocale, type UiPreferences, type UiTheme, UI_PREFERENCES_STORAGE_KEY } from './preferences'
 
 type I18nContextValue = UiPreferences & {
   setLocale: (locale: UiLocale) => void
   setFontSize: (fontSize: UiFontSize) => void
+  setTheme: (theme: UiTheme) => void
   t: (key: MessageKey) => string
 }
 
@@ -21,6 +22,7 @@ export function I18nProvider({ children }: { children: ReactNode }): JSX.Element
   useEffect(() => {
     document.documentElement.lang = preferences.locale
     document.documentElement.dataset.arkFontSize = preferences.fontSize
+    document.documentElement.dataset.arkTheme = preferences.theme
     window.localStorage.setItem(UI_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences))
   }, [preferences])
 
@@ -28,6 +30,7 @@ export function I18nProvider({ children }: { children: ReactNode }): JSX.Element
     ...preferences,
     setLocale: (locale) => setPreferences((current) => ({ ...current, locale })),
     setFontSize: (fontSize) => setPreferences((current) => ({ ...current, fontSize })),
+    setTheme: (theme) => setPreferences((current) => ({ ...current, theme })),
     t: (key) => translate(preferences.locale, key)
   }), [preferences])
 
