@@ -237,6 +237,12 @@ impl Reactor {
             HistoryHygiene::new().is_legal(&self.history),
             "history must be provider-legal after repair, report: {report:?}"
         );
+        // `Start` is budget-checked before the first model round. Include the
+        // just-persisted user message here, otherwise an oversized initial
+        // prompt bypasses compaction until after it has already reached the
+        // provider.
+        let estimate = TokenEstimator::new().estimate_request(&self.request());
+        self.machine.set_prompt_estimate(estimate);
         Ok(())
     }
 
