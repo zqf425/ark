@@ -11,6 +11,8 @@
 - 连接有界；慢客户端断开后从最后 `seq` 重连，绝不阻塞线程 writer。
 - `/v1/shutdown`、Ctrl-C 和任务 panic 走同一收敛流程：取消活动回合、等待有限时间、落终态并清理 registry。
 - 路径、HTTP 方法、字段名和兼容别名均是对外契约；变更前必须检查 `ark-contract`、`web` 与集成方。
+- `GET /v1/threads/{id}` 的 `child_completions` 是最新 50 个不同通知 ID 的有界视图；它从 store 的窄
+  completion 查询投影，不能全量回放普通会话事件。
 
 ## 路由清单
 

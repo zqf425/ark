@@ -33,6 +33,9 @@ pub enum WriterCmd {
         since_seq: u64,
         reply: oneshot::Sender<Vec<RuntimeEvent>>,
     },
+    ChildCompletionEvents {
+        reply: oneshot::Sender<Vec<RuntimeEvent>>,
+    },
     Events {
         reply: oneshot::Sender<Vec<RuntimeEvent>>,
     },
@@ -94,6 +97,15 @@ impl WriterHandle {
         rx.await.map_err(|_| self.closed())
     }
 
+    /// Reads the child-completion lifecycle records owned by this writer.
+    ///
+    /// Returns: child completion and acknowledgement events in sequence order.
+    pub async fn child_completion_events(&self) -> Result<Vec<RuntimeEvent>> {
+        let (reply, rx) = oneshot::channel();
+        self.send(WriterCmd::ChildCompletionEvents { reply })?;
+        rx.await.map_err(|_| self.closed())
+    }
+
     pub async fn events(&self) -> Result<Vec<RuntimeEvent>> {
         let (reply, rx) = oneshot::channel();
         self.send(WriterCmd::Events { reply })?;
@@ -148,6 +160,9 @@ async fn run(mut state: WriterState, mut rx: mpsc::Receiver<WriterCmd>) {
             }
             WriterCmd::Replay { since_seq, reply } => {
                 let _ = reply.send(state.replay(since_seq));
+            }
+            WriterCmd::ChildCompletionEvents { reply } => {
+                let _ = reply.send(state.child_completion_events());
             }
             WriterCmd::Events { reply } => {
                 let _ = reply.send(state.events().to_vec());

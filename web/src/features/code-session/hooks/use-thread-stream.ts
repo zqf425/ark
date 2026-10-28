@@ -12,6 +12,7 @@ import type { ThreadId } from '../../../shared/contracts'
 import { useToast } from '../../../shared/ui'
 import { subscribeThreadEvents } from '../api/events-api'
 import { getThread } from '../api/threads-api'
+import { childCompletionStatus } from '../child-completion-status'
 import { useCodeSessionStore } from '../state/store'
 
 function describe(error: unknown): string {
@@ -58,7 +59,7 @@ export function useThreadStream(threadId: ThreadId | null): void {
               displayedCompletions.add(event.notification_id)
               const detail = event.summary ?? event.error ?? '子代理未提供摘要。'
               const tone = event.status === 'completed' ? 'success' : 'error'
-              pushToast(tone, `子代理「${event.label}」${event.status}`, detail)
+              pushToast(tone, `子代理「${event.label}」${childCompletionStatus(event.status)}`, detail)
             }
           },
           onStatus: (status) => {

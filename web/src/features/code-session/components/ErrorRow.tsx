@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ThreadItem } from '../../../shared/contracts'
 import { formatClock } from '../../../shared/format'
+import { childCompletionStatus } from '../child-completion-status'
 import type { ChildCompletionNotice } from '../state/types'
 
 /**
@@ -36,7 +37,9 @@ export function ChildCompletionCard({ notice }: { notice: ChildCompletionNotice 
   return (
     <div className={`ark-childcompletion ${failed ? 'is-failed' : ''}`} role="status">
       <div className="ark-childcompletion__head">
-        <span className={`ark-chip ${failed ? 'ark-chip--error' : 'ark-chip--ok'}`}>{notice.status}</span>
+        <span className={`ark-chip ${failed ? 'ark-chip--error' : 'ark-chip--ok'}`}>
+          {childCompletionStatus(notice.status)}
+        </span>
         <strong>{notice.label}</strong>
         <span className="ark-childcompletion__time">{formatClock(notice.completed_at)}</span>
       </div>

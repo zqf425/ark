@@ -29,6 +29,7 @@ const DELTA_ITEM_KIND: Partial<Record<RuntimeEvent['kind'], ItemKind>> = {
 }
 
 const MAX_ERROR_LINES = 50
+const MAX_CHILD_COMPLETIONS = 50
 
 function clone(state: ItemsSnapshot): ItemsSnapshot {
   return {
@@ -102,6 +103,21 @@ function pushError(next: ItemsSnapshot, line: ErrorLine): void {
   next.errors = [...next.errors, line].slice(-MAX_ERROR_LINES)
 }
 
+/** Keep UI-only completion cards bounded even if a stream is unusually long. */
+function recordChildCompletion(next: ItemsSnapshot, notice: ChildCompletionNotice): void {
+  if (next.childCompletions[notice.notification_id]) return
+  next.childCompletions[notice.notification_id] = notice
+  const notificationIds = Object.keys(next.childCompletions)
+  if (notificationIds.length <= MAX_CHILD_COMPLETIONS) return
+
+  const oldestId = notificationIds.reduce((oldest, id) => {
+    const candidate = next.childCompletions[id]
+    const current = next.childCompletions[oldest]
+    return candidate && current && candidate.seq < current.seq ? id : oldest
+  })
+  delete next.childCompletions[oldestId]
+}
+
 /** Seed history from `GET /v1/threads/{id}`. */
 export function seedFromItems(
   items: ThreadItem[],
@@ -111,7 +127,7 @@ export function seedFromItems(
   const next = emptyItemsState()
   next.lastSeq = lastSeq
   for (const item of items) upsertItem(next, item)
-  for (const notice of childCompletions) next.childCompletions[notice.notification_id] = notice
+  for (const notice of childCompletions) recordChildCompletion(next, notice)
   return next
 }
 
@@ -221,7 +237,6 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
     }
 
     case 'child_completed': {
-      if (next.childCompletions[event.notification_id]) return next
       const notice: ChildCompletionNotice = {
         notification_id: event.notification_id,
         child_id: event.child_id,
@@ -233,7 +248,7 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
         completed_at: event.timestamp,
         seq: event.seq
       }
-      next.childCompletions[event.notification_id] = notice
+      recordChildCompletion(next, notice)
       return next
     }
 

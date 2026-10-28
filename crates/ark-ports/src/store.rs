@@ -124,6 +124,13 @@ pub trait SessionStore: Send + Sync {
     /// Replay every durable event with `seq > since_seq`, in order.
     async fn replay_events(&self, thread: ThreadId, since_seq: u64) -> Result<Vec<RuntimeEvent>>;
 
+    /// Replay only durable child-completion lifecycle events for a parent.
+    ///
+    /// Completion-inbox projection and thread detail use this narrow query so
+    /// an ordinary turn does not clone an unbounded transcript just to inspect
+    /// `child_completed` and its acknowledgement records.
+    async fn replay_child_completion_events(&self, thread: ThreadId) -> Result<Vec<RuntimeEvent>>;
+
     /// Highest durable `seq` for the thread (0 when the log is empty).
     async fn highest_seq(&self, thread: ThreadId) -> Result<u64>;
 

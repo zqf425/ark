@@ -17,6 +17,9 @@ child executor 在此复用同一个 `ark-agent::Reactor`，并桥接 cancel/ste
 source 注入 reactor。父回合成功后再追加 completion acknowledgement；写入失败记录告警并保留下一回合
 的至少一次投递，不能把已经完成的模型回合改写为失败。
 
+读取使用 completion 生命周期窄查询而非完整历史回放。组合根的完成处理必须保持“注入 → 正常完成才确认 →
+下一回合不再注入；失败或中断不确认”的顺序。
+
 ## 验证
 
 装配变更至少执行 `cargo check -p arkd`；涉及运行时、存储或并发时执行 workspace 测试，并验证启动/停机

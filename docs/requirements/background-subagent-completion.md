@@ -29,12 +29,19 @@
 消费。确认写入失败或父回合失败/中断时不丢弃通知，下一个回合会再次投递；因此语义为至少一次而非跨
 模型调用的伪“精确一次”。
 
+事件压缩不得越过最早的未确认 `child_completed`：该记录及其后的事件保留，直到对应确认落盘。若保留的
+重复完成事件依赖更早的确认记录，也必须一并保留该确认。这样压缩不破坏至少一次投递；已经确认且不再
+被保留事件引用的旧通知仍可随普通历史一起折叠。
+
 ## 主线程收件箱与 continuation
 
 完成事件投影为父线程 completion inbox。新的用户回合开始前读取未确认条目，并以“子代理结果”
 系统上下文提供给模型，不能伪造为用户消息。每次最多投递 8 条，超过部分保持未确认并留待后续回合，
 以免完成风暴突破上下文预算；每条摘要或错误最多 1,200 UTF-8 字节。只传递 child 的摘要或错误，
 不复制原始转录。
+
+父线程详情只返回最新 50 条不同 `notificationId` 的完成摘要；web 同样只保留 50 个摘要卡片，避免长寿命
+线程的响应或渲染状态无界增长。
 
 `autoContinue` 仅在显式启用、父线程无活动 turn、未删除/归档且没有已调度 continuation 时触发。
 同一父线程短时间内多个完成通知必须合并为一个 continuation；用户中断、删除或归档父线程时取消待执行
@@ -53,12 +60,12 @@ continuation。自动 continuation 仍受模型预算、工具沙箱和审批约
 | 模块 | 变更 |
 |---|---|
 | `ark-contract` | 完成通知、消费确认事件和 TypeScript 生成 |
-| `ark-ports` | 复用 `SessionStore::replay_events`，阶段 2 不新增端口 |
-| `ark-store` | 权威父事件查询与确认事件持久化 |
+| `ark-ports` | `SessionStore::replay_child_completion_events` 提供窄查询，避免回放完整事件历史 |
+| `ark-store` | 权威父事件查询与确认事件持久化；压缩保护未确认通知 |
 | `ark-delegation` | 终态后发布完成通知，恢复时幂等补发 |
 | `ark-agent` | 将 inbox 结果作为系统来源输入；后续 continuation trigger |
-| `ark-server` | SSE/查询接口与错误映射 |
-| `web` | child 完成提示、摘要和跳转动作 |
+| `ark-server` | SSE/查询接口与错误映射；详情摘要上限 50 条 |
+| `web` | child 完成提示、摘要和跳转动作；摘要卡片上限 50 条 |
 | `arkd` | 配置、supervisor、continuation 装配 |
 
 ## 验收

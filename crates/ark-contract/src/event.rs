@@ -427,6 +427,16 @@ pub enum RuntimeEvent {
 }
 
 impl RuntimeEvent {
+    /// Whether this record participates in the durable child-completion inbox.
+    ///
+    /// Returns: `true` for completion and acknowledgement records.
+    pub fn is_child_completion_lifecycle(&self) -> bool {
+        matches!(
+            self,
+            RuntimeEvent::ChildCompleted { .. } | RuntimeEvent::ChildCompletionAcknowledged { .. }
+        )
+    }
+
     /// Projects a terminal child event for parent-thread detail rendering.
     ///
     /// * Returns: a completion notice for `child_completed`, otherwise `None`.

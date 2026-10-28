@@ -290,7 +290,7 @@ async fn completion_inbox(
     store: &dyn SessionStore,
     thread_id: ThreadId,
 ) -> Result<CompletionInbox> {
-    let events = store.replay_events(thread_id, 0).await?;
+    let events = store.replay_child_completion_events(thread_id).await?;
     Ok(CompletionInbox::from_events(&events))
 }
 
@@ -324,6 +324,30 @@ async fn acknowledge_completion_inbox(
                 "failed to acknowledge child completion; it will be delivered again"
             );
         }
+    }
+}
+
+/// Converts a reactor outcome into the server-facing turn result.
+///
+/// * `outcome`: terminal result emitted by the parent reactor.
+/// * `sink`: durable event destination for successful inbox acknowledgements.
+/// * `thread_id` / `turn_id`: identity of the completed parent turn.
+/// * `inbox`: completion IDs supplied to that turn as a system source.
+/// * Returns: the terminal result without changing a failed or aborted turn.
+async fn finish_parent_turn(
+    outcome: TurnOutcome,
+    sink: &dyn EventSink,
+    thread_id: ThreadId,
+    turn_id: TurnId,
+    inbox: &CompletionInbox,
+) -> TurnEnd {
+    match outcome {
+        TurnOutcome::Completed => {
+            acknowledge_completion_inbox(sink, thread_id, turn_id, inbox.notification_ids()).await;
+            TurnEnd::Completed
+        }
+        TurnOutcome::Failed { message } => TurnEnd::Failed(message),
+        TurnOutcome::Aborted { reason } => TurnEnd::Aborted(reason),
     }
 }
 
@@ -384,20 +408,14 @@ impl TurnRunner for AgentTurnRunner {
         });
         reactor.push_user(job.text);
         let outcome = reactor.run().await?;
-        Ok(match outcome {
-            TurnOutcome::Completed => {
-                acknowledge_completion_inbox(
-                    self.sink.as_ref(),
-                    job.thread_id,
-                    job.turn_id,
-                    inbox.notification_ids(),
-                )
-                .await;
-                TurnEnd::Completed
-            }
-            TurnOutcome::Failed { message } => TurnEnd::Failed(message),
-            TurnOutcome::Aborted { reason } => TurnEnd::Aborted(reason),
-        })
+        Ok(finish_parent_turn(
+            outcome,
+            self.sink.as_ref(),
+            job.thread_id,
+            job.turn_id,
+            &inbox,
+        )
+        .await)
     }
 }
 
@@ -512,24 +530,91 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn completed_parent_turn_acknowledges_the_delivered_completion_ids() {
+    async fn completed_parent_turn_acknowledges_the_injected_completion_and_skips_it_next_time() {
         let data_dir = TestDataDir::new();
         let store = FileSessionStore::open(StoreConfig::new(&data_dir.0)).unwrap();
         let thread = store.create_thread("parent").await.unwrap().thread_id;
         let turn = TurnId::new();
 
-        acknowledge_completion_inbox(&store, thread, turn, &["child:one".to_string()]).await;
-
-        let events = store.replay_events(thread, 0).await.unwrap();
-        assert!(events.iter().any(|event| {
-            matches!(
-                event,
-                RuntimeEvent::ChildCompletionAcknowledged {
-                    notification_id,
-                    turn_id,
-                    ..
-                } if notification_id == "child:one" && *turn_id == turn
+        store
+            .append_event(
+                thread,
+                RuntimeEvent::ChildCompleted {
+                    seq: 0,
+                    thread_id: thread,
+                    timestamp: Utc::now(),
+                    notification_id: "child:one".to_string(),
+                    child_id: ChildId::new(),
+                    label: "inspect runtime".to_string(),
+                    status: "completed".to_string(),
+                    summary: Some("The runtime is healthy.".to_string()),
+                    error: None,
+                    usage: None,
+                    tool_invocations: None,
+                },
             )
-        }));
+            .await
+            .unwrap();
+        let inbox = completion_inbox(&store, thread).await.unwrap();
+        assert!(
+            inbox.system_message().is_some(),
+            "the turn receives a system source"
+        );
+
+        let end = finish_parent_turn(TurnOutcome::Completed, &store, thread, turn, &inbox).await;
+
+        assert!(matches!(end, TurnEnd::Completed));
+        assert!(completion_inbox(&store, thread)
+            .await
+            .unwrap()
+            .notification_ids()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_parent_turn_leaves_the_completion_for_redelivery() {
+        let data_dir = TestDataDir::new();
+        let store = FileSessionStore::open(StoreConfig::new(&data_dir.0)).unwrap();
+        let thread = store.create_thread("parent").await.unwrap().thread_id;
+        store
+            .append_event(
+                thread,
+                RuntimeEvent::ChildCompleted {
+                    seq: 0,
+                    thread_id: thread,
+                    timestamp: Utc::now(),
+                    notification_id: "child:one".to_string(),
+                    child_id: ChildId::new(),
+                    label: "inspect runtime".to_string(),
+                    status: "failed".to_string(),
+                    summary: None,
+                    error: Some("child failed".to_string()),
+                    usage: None,
+                    tool_invocations: None,
+                },
+            )
+            .await
+            .unwrap();
+        let inbox = completion_inbox(&store, thread).await.unwrap();
+
+        let end = finish_parent_turn(
+            TurnOutcome::Failed {
+                message: "model failed".to_string(),
+            },
+            &store,
+            thread,
+            TurnId::new(),
+            &inbox,
+        )
+        .await;
+
+        assert!(matches!(end, TurnEnd::Failed(message) if message == "model failed"));
+        assert_eq!(
+            completion_inbox(&store, thread)
+                .await
+                .unwrap()
+                .notification_ids(),
+            &["child:one".to_string()]
+        );
     }
 }

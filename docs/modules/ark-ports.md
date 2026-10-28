@@ -13,6 +13,8 @@
 - `ark-agent` 只能依赖到本 crate，不得引用 `ark-store`、`ark-llm`、`ark-tool` 等实现。
 - `BackendProvider` 只表达用例、版本、执行、制品和结果等领域概念；不得引入具体平台字段。
 - `SessionStore::subscribe` 返回的 `SubscribeTicket` 必须保证 backlog、水位和 live 通道来自同一序列化临界区。
+- `SessionStore::replay_child_completion_events` 只返回 `child_completed` 与
+  `child_completion_acknowledged`，供收件箱和线程详情投影使用；不得为此克隆完整转录事件历史。
 - 插件只能经 `HttpCapability`、`McpCapability` 和 `UiCapability` 与基础设施或其它插件交互。
 
 ## 变更规则

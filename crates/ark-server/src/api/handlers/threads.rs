@@ -11,15 +11,18 @@ use chrono::Utc;
 
 use ark_common::ThreadId;
 use ark_contract::{
-    CreateThreadRequest, RuntimeEvent, ThreadDetail, ThreadSummary, UpdateThreadRequest,
+    ChildCompletionNotice, CreateThreadRequest, RuntimeEvent, ThreadDetail, ThreadSummary,
+    UpdateThreadRequest,
 };
 use ark_ports::ThreadMeta;
+use std::collections::HashSet;
 
 use crate::api::error::ApiError;
 use crate::state::AppState;
 
 /// Placeholder title when the client sends none.
 pub const DEFAULT_TITLE: &str = "New thread";
+const MAX_CHILD_COMPLETION_NOTICES: usize = 50;
 
 /// `GET /v1/threads`.
 pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<ThreadSummary>>, ApiError> {
@@ -61,13 +64,12 @@ pub async fn get(
     let thread_id = parse_thread(&id)?;
     let meta = state.store.get_thread(thread_id).await?;
     let items = state.store.read_items(thread_id).await?;
-    let child_completions = state
-        .store
-        .replay_events(thread_id, 0)
-        .await?
-        .iter()
-        .filter_map(RuntimeEvent::child_completion_notice)
-        .collect();
+    let child_completions = recent_child_completions(
+        state
+            .store
+            .replay_child_completion_events(thread_id)
+            .await?,
+    );
     let child_ids = state
         .store
         .list_child_runs(thread_id)
@@ -164,9 +166,24 @@ pub fn summary_of(meta: &ThreadMeta) -> ThreadSummary {
     }
 }
 
+/// Keeps the newest distinct child completion cards within the bounded detail response.
+fn recent_child_completions(events: Vec<RuntimeEvent>) -> Vec<ChildCompletionNotice> {
+    let mut notification_ids = HashSet::new();
+    let mut notices: Vec<_> = events
+        .into_iter()
+        .filter_map(|event| event.child_completion_notice())
+        .rev()
+        .filter(|notice| notification_ids.insert(notice.notification_id.clone()))
+        .take(MAX_CHILD_COMPLETION_NOTICES)
+        .collect();
+    notices.reverse();
+    notices
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark_common::ChildId;
 
     #[test]
     fn invalid_thread_ids_are_validation_errors() {
@@ -193,5 +210,31 @@ mod tests {
         assert_eq!(summary.title, "hello");
         assert!(summary.archived);
         assert_eq!(summary.last_seq, None);
+    }
+
+    #[test]
+    fn thread_detail_keeps_only_the_latest_distinct_completion_cards() {
+        let thread = ThreadId::new();
+        let events = (1..=55)
+            .map(|seq| RuntimeEvent::ChildCompleted {
+                seq,
+                thread_id: thread,
+                timestamp: Utc::now(),
+                notification_id: format!("child:{seq}"),
+                child_id: ChildId::new(),
+                label: "inspect runtime".to_string(),
+                status: "completed".to_string(),
+                summary: None,
+                error: None,
+                usage: None,
+                tool_invocations: None,
+            })
+            .collect();
+
+        let notices = recent_child_completions(events);
+
+        assert_eq!(notices.len(), MAX_CHILD_COMPLETION_NOTICES);
+        assert_eq!(notices.first().unwrap().seq, 6);
+        assert_eq!(notices.last().unwrap().seq, 55);
     }
 }

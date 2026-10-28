@@ -17,6 +17,7 @@ use crate::store::fs_util::{remove_dir_all, write_atomic, write_json_atomic};
 use crate::store::items_log::{append_item_blocking, append_usage_blocking, UsageRecord};
 use ark_common::{ArkError, Result, ThreadId};
 use ark_contract::RuntimeEvent;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -155,10 +156,27 @@ impl WriterState {
             .collect()
     }
 
+    /// Completion lifecycle entries only, in durable log order.
+    ///
+    /// This intentionally scans the actor-owned log instead of cloning every
+    /// event. The callers need only these two event kinds to build the inbox
+    /// and the bounded child-completion view.
+    ///
+    /// Returns: cloned `child_completed` and `child_completion_acknowledged`
+    /// records, ordered by their durable sequence.
+    pub fn child_completion_events(&self) -> Vec<RuntimeEvent> {
+        self.events
+            .iter()
+            .filter(|event| event.is_child_completion_lifecycle())
+            .cloned()
+            .collect()
+    }
+
     /// Fold the oldest events into a declared hole, keeping `keep_last` recent.
     ///
     /// Returns the last folded `seq`, i.e. where the hole ends.
     pub fn compact(&mut self, keep_last: usize) -> Result<Option<u64>> {
+        let keep_last = self.completion_safe_keep_last(keep_last);
         let planned = plan_compaction(&self.events, keep_last, "capacity")?;
         let Some((body, marker)) = planned else {
             return Ok(None);
@@ -172,6 +190,53 @@ impl WriterState {
         let cutoff = marker.to_seq;
         self.events.retain(|event| event.seq() > cutoff);
         Ok(Some(cutoff))
+    }
+
+    /// Increases the requested retained suffix when completion semantics need
+    /// an earlier boundary. An acknowledgement preceding a duplicate
+    /// completion must stay with that duplicate; otherwise a later replay
+    /// would turn an already-consumed notification back into an unacknowledged
+    /// one.
+    fn completion_safe_keep_last(&self, keep_last: usize) -> usize {
+        let acknowledgements: HashMap<&str, usize> = self
+            .events
+            .iter()
+            .enumerate()
+            .filter_map(|(index, event)| match event {
+                RuntimeEvent::ChildCompletionAcknowledged {
+                    notification_id, ..
+                } => Some((notification_id.as_str(), index)),
+                _ => None,
+            })
+            .fold(HashMap::new(), |mut indexes, (notification_id, index)| {
+                indexes.entry(notification_id).or_insert(index);
+                indexes
+            });
+        let mut cut = self.events.len().saturating_sub(keep_last.max(1));
+        for (index, event) in self.events.iter().enumerate() {
+            if let RuntimeEvent::ChildCompleted {
+                notification_id, ..
+            } = event
+            {
+                if !acknowledgements.contains_key(notification_id.as_str()) {
+                    cut = cut.min(index);
+                }
+            }
+        }
+
+        let mut index = self.events.len();
+        while index > cut {
+            index -= 1;
+            if let RuntimeEvent::ChildCompleted {
+                notification_id, ..
+            } = &self.events[index]
+            {
+                if let Some(ack_index) = acknowledgements.get(notification_id.as_str()) {
+                    cut = cut.min(*ack_index);
+                }
+            }
+        }
+        self.events.len() - cut
     }
 
     /// Compaction markers currently declared for this thread.
@@ -264,5 +329,146 @@ impl WriterState {
                 .for_thread(self.thread_id),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::diagnostics::MemoryDiagnostics;
+    use crate::store::tests::{event_at, TempDir};
+    use ark_common::ChildId;
+    use chrono::Utc;
+
+    fn state(dir: &TempDir, thread: ThreadId) -> WriterState {
+        WriterState::open(
+            thread,
+            ThreadPaths::new(dir.path().join("thread")),
+            StoreLimits::for_tests(),
+            Arc::new(MemoryDiagnostics::new()),
+        )
+        .unwrap()
+    }
+
+    fn child_completed(thread: ThreadId, notification_id: &str) -> RuntimeEvent {
+        RuntimeEvent::ChildCompleted {
+            seq: 0,
+            thread_id: thread,
+            timestamp: Utc::now(),
+            notification_id: notification_id.to_string(),
+            child_id: ChildId::new(),
+            label: "inspect runtime".to_string(),
+            status: "completed".to_string(),
+            summary: Some("healthy".to_string()),
+            error: None,
+            usage: None,
+            tool_invocations: None,
+        }
+    }
+
+    #[test]
+    fn compaction_keeps_an_unacknowledged_child_completion() {
+        let dir = TempDir::new("completion-compaction");
+        let thread = ThreadId::new();
+        let mut state = state(&dir, thread);
+        state.append(event_at(thread, 1)).unwrap();
+        state
+            .append(child_completed(thread, "child:pending"))
+            .unwrap();
+        for _ in 0..3 {
+            state.append(event_at(thread, 1)).unwrap();
+        }
+
+        let compacted_to = state.compact(2).unwrap();
+
+        assert_eq!(compacted_to, Some(1));
+        assert!(state.events().iter().any(|event| {
+            matches!(
+                event,
+                RuntimeEvent::ChildCompleted { notification_id, .. }
+                    if notification_id == "child:pending"
+            )
+        }));
+    }
+
+    #[test]
+    fn completion_query_excludes_unrelated_event_payloads() {
+        let dir = TempDir::new("completion-query");
+        let thread = ThreadId::new();
+        let mut state = state(&dir, thread);
+        state.append(event_at(thread, 1)).unwrap();
+        state.append(child_completed(thread, "child:one")).unwrap();
+
+        let events = state.child_completion_events();
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], RuntimeEvent::ChildCompleted { .. }));
+    }
+
+    #[test]
+    fn acknowledged_child_completion_no_longer_blocks_compaction() {
+        let dir = TempDir::new("acknowledged-completion-compaction");
+        let thread = ThreadId::new();
+        let mut state = state(&dir, thread);
+        state.append(event_at(thread, 1)).unwrap();
+        state
+            .append(child_completed(thread, "child:acknowledged"))
+            .unwrap();
+        state
+            .append(RuntimeEvent::ChildCompletionAcknowledged {
+                seq: 0,
+                thread_id: thread,
+                turn_id: ark_common::TurnId::new(),
+                timestamp: Utc::now(),
+                notification_id: "child:acknowledged".to_string(),
+            })
+            .unwrap();
+        for _ in 0..3 {
+            state.append(event_at(thread, 1)).unwrap();
+        }
+
+        let compacted_to = state.compact(2).unwrap();
+
+        assert_eq!(compacted_to, Some(4));
+        assert!(state
+            .events()
+            .iter()
+            .all(|event| !event.is_child_completion_lifecycle()));
+    }
+
+    #[test]
+    fn compaction_keeps_an_acknowledgement_for_a_retained_duplicate_completion() {
+        let dir = TempDir::new("duplicate-completion-compaction");
+        let thread = ThreadId::new();
+        let mut state = state(&dir, thread);
+        state.append(event_at(thread, 1)).unwrap();
+        state
+            .append(child_completed(thread, "child:duplicate"))
+            .unwrap();
+        state
+            .append(RuntimeEvent::ChildCompletionAcknowledged {
+                seq: 0,
+                thread_id: thread,
+                turn_id: ark_common::TurnId::new(),
+                timestamp: Utc::now(),
+                notification_id: "child:duplicate".to_string(),
+            })
+            .unwrap();
+        state
+            .append(child_completed(thread, "child:duplicate"))
+            .unwrap();
+        state.append(event_at(thread, 1)).unwrap();
+        state.append(event_at(thread, 1)).unwrap();
+
+        let compacted_to = state.compact(3).unwrap();
+
+        assert_eq!(compacted_to, Some(2));
+        assert!(state.events().iter().any(|event| {
+            matches!(
+                event,
+                RuntimeEvent::ChildCompletionAcknowledged { notification_id, .. }
+                    if notification_id == "child:duplicate"
+            )
+        }));
     }
 }
