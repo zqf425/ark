@@ -14,10 +14,8 @@
 //! flag anywhere.
 
 use std::sync::Arc;
-use std::time::Instant;
 
 use ark_common::{ArkError, ItemId, Result, Usage};
-use ark_contract::{item::ItemKind, ThreadItem};
 use ark_ports::{
     ModelChunk, ModelClient, ModelMessage, ModelRequest, ModelResponse, ModelRole, SandboxDecision,
     SandboxPolicy, ToolArgs, ToolOutput,
@@ -96,7 +94,8 @@ pub struct Reactor {
     chunk_buffer: usize,
     machine: TurnMachine,
     history: Vec<ModelMessage>,
-    message_item: Option<ItemId>,
+    assistant_message_item: Option<ItemId>,
+    reasoning_item: Option<ItemId>,
     /// Calls of the current round, in model order.
     pending_calls: Vec<ToolCallRequest>,
     /// Gates not yet resolved, in model order.
@@ -139,7 +138,8 @@ impl Reactor {
             chunk_buffer,
             machine,
             history: seed.messages,
-            message_item: None,
+            assistant_message_item: None,
+            reasoning_item: None,
             pending_calls: Vec::new(),
             pending_approvals: Vec::new(),
             approved: Vec::new(),
@@ -320,14 +320,14 @@ impl Reactor {
     async fn observe(&mut self, chunk: ModelChunk, acc: &mut Accumulator) -> Result<()> {
         match chunk {
             ModelChunk::TextDelta { delta } => {
-                let item = self.ensure_message_item();
+                let item = Self::ensure_item(&mut self.assistant_message_item);
                 self.writer
                     .append(self.events.text_delta(item, delta.clone()))
                     .await?;
                 acc.text.push_str(&delta);
             }
             ModelChunk::ReasoningDelta { delta } => {
-                let item = self.ensure_message_item();
+                let item = Self::ensure_item(&mut self.reasoning_item);
                 self.writer
                     .append(self.events.reasoning_delta(item, delta))
                     .await?;
@@ -345,13 +345,12 @@ impl Reactor {
         Ok(())
     }
 
-    fn ensure_message_item(&mut self) -> ItemId {
-        if let Some(item) = self.message_item {
+    fn ensure_item(slot: &mut Option<ItemId>) -> ItemId {
+        if let Some(item) = *slot {
             return item;
         }
-        let item = ThreadItem::new(self.events.turn_id, ItemKind::AssistantMessage);
-        let item_id = item.item_id;
-        self.message_item = Some(item_id);
+        let item_id = ItemId::new();
+        *slot = Some(item_id);
         item_id
     }
 
@@ -751,5 +750,97 @@ impl Accumulator {
             }
         }
         response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::exec::{AllowAllGates, MapToolRunner, MemoryWriter};
+    use ark_common::{ThreadId, TurnId};
+    use ark_contract::RuntimeEvent;
+
+    #[derive(Debug)]
+    struct NoopModel;
+
+    #[async_trait::async_trait]
+    impl ModelClient for NoopModel {
+        fn provider_id(&self) -> &str {
+            "test"
+        }
+
+        fn model(&self) -> &str {
+            "test"
+        }
+
+        async fn stream(
+            &self,
+            _request: ModelRequest,
+            _sink: mpsc::Sender<ModelChunk>,
+        ) -> Result<ModelResponse> {
+            Ok(ModelResponse::default())
+        }
+    }
+
+    #[derive(Debug)]
+    struct ReadOnlySandbox;
+
+    impl SandboxPolicy for ReadOnlySandbox {
+        fn decide(&self, _tool: &str, _args: &ToolArgs) -> SandboxDecision {
+            SandboxDecision::ReadOnly
+        }
+    }
+
+    fn reactor(writer: Arc<MemoryWriter>) -> Reactor {
+        let events = TurnEvents::new(ThreadId::new(), TurnId::new());
+        Reactor::new(ReactorConfig {
+            model: Arc::new(NoopModel),
+            tools: Arc::new(MapToolRunner::new()),
+            writer,
+            gates: Arc::new(AllowAllGates),
+            sandbox: Arc::new(ReadOnlySandbox),
+            events,
+            cancel: CancelToken::new(),
+            seed: ModelSeed::default(),
+            machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+            chunk_buffer: 1,
+        })
+    }
+
+    #[tokio::test]
+    async fn reasoning_and_text_deltas_use_distinct_items() {
+        let writer = Arc::new(MemoryWriter::new());
+        let mut reactor = reactor(Arc::clone(&writer));
+        let mut acc = Accumulator::default();
+
+        reactor
+            .observe(
+                ModelChunk::ReasoningDelta {
+                    delta: "plan".to_string(),
+                },
+                &mut acc,
+            )
+            .await
+            .unwrap();
+        reactor
+            .observe(
+                ModelChunk::TextDelta {
+                    delta: "answer".to_string(),
+                },
+                &mut acc,
+            )
+            .await
+            .unwrap();
+
+        let events = writer.recorded();
+        let reasoning_id = match &events[0] {
+            RuntimeEvent::AssistantReasoningDelta { item_id, .. } => item_id,
+            event => panic!("expected reasoning delta, got {event:?}"),
+        };
+        let text_id = match &events[1] {
+            RuntimeEvent::AssistantTextDelta { item_id, .. } => item_id,
+            event => panic!("expected text delta, got {event:?}"),
+        };
+        assert_ne!(reasoning_id, text_id);
     }
 }
