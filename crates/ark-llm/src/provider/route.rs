@@ -57,13 +57,15 @@ impl Family {
     /// Auth headers for this family.
     pub fn headers(&self, config: &ProviderConfig) -> Vec<(String, String)> {
         // Header names are ASCII case-insensitive on the wire. Normalize first
-        // and overwrite core keys afterwards so a custom header cannot replace
-        // the selected endpoint family's authentication or content type.
+        // and overwrite core authentication afterwards. `reqwest::RequestBuilder::json`
+        // owns Content-Type for POST requests; adding it here would send a
+        // duplicate header and can make strict gateways ignore the JSON body.
         let mut headers: BTreeMap<String, String> = config
             .headers
             .iter()
             .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
             .collect();
+        headers.remove("content-type");
         match self {
             Family::Chat(_) | Family::Responses(_) => {
                 headers.insert(
@@ -79,7 +81,6 @@ impl Family {
                 );
             }
         }
-        headers.insert("content-type".to_string(), "application/json".to_string());
         headers.into_iter().collect()
     }
 }
@@ -204,6 +205,17 @@ mod tests {
         assert!(headers
             .iter()
             .any(|(name, value)| name == "authorization" && value == "Bearer key"));
+    }
+
+    #[test]
+    fn provider_headers_cannot_add_a_second_content_type() {
+        let mut config = config(EndpointFormat::OpenAiChat);
+        config
+            .headers
+            .insert("Content-Type".into(), "text/plain".into());
+
+        let headers = Family::of(&config).headers(&config);
+        assert!(!headers.iter().any(|(name, _)| name == "content-type"));
     }
 
     #[test]

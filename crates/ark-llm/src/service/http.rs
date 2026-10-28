@@ -371,6 +371,41 @@ mod tests {
         assert_eq!(body["stream"], true);
     }
 
+    #[tokio::test]
+    async fn chat_request_sends_content_type_once() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4_096];
+            let count = socket.read(&mut request).unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 14\r\nConnection: close\r\n\r\ndata: [DONE]\n\n",
+                )
+                .unwrap();
+            String::from_utf8_lossy(&request[..count]).into_owned()
+        });
+        let client = HttpModelClient::with_config(
+            ProviderConfig::new("test", "test-model")
+                .with_base_url(format!("http://{address}"))
+                .with_api_key("test-key"),
+        );
+        let (sink, _drain) = mpsc::channel(1);
+
+        client.stream(request(), sink).await.unwrap();
+
+        let received = server.join().unwrap().to_ascii_lowercase();
+        assert_eq!(
+            received.matches("content-type: application/json").count(),
+            1,
+            "request contained duplicate content-type headers:\n{received}"
+        );
+    }
+
     #[test]
     fn partial_lines_are_held_back() {
         let (complete, rest) = split_at_last_complete_line("data: a\ndata: par");
