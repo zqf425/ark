@@ -5,8 +5,10 @@
 //! landed are registered explicitly and answer a structured `NotFound` from
 //! [`crate::api::handlers::pending`] instead of 404-ing at the router level.
 
+use axum::http::{header, HeaderValue, Method};
 use axum::routing::{delete, get, patch, post};
 use axum::Router;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use crate::api::middleware::require_token;
 use crate::state::AppState;
@@ -28,10 +30,27 @@ pub fn router(state: AppState) -> Router {
     ));
 
     open.merge(protected)
+        .layer(desktop_cors())
         .layer(axum::middleware::from_fn(
             crate::api::middleware::declare_utf8_charset,
         ))
         .with_state(state)
+}
+
+/// Allow only the native shell origins to call the loopback runtime directly.
+///
+/// Vite development stays same-origin through its proxy. Tauri uses
+/// `http://tauri.localhost` on Windows and `tauri://localhost` on macOS/Linux;
+/// allowing neither would make the packaged shell unable to reach its own
+/// loopback sidecar, while `*` would expose the local API to arbitrary pages.
+fn desktop_cors() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list([
+            HeaderValue::from_static("http://tauri.localhost"),
+            HeaderValue::from_static("tauri://localhost"),
+        ]))
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+        .allow_headers([header::ACCEPT, header::AUTHORIZATION, header::CONTENT_TYPE])
 }
 
 /// Every route that requires authentication.
@@ -293,10 +312,51 @@ fn protected_routes() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Body;
+    use axum::http::{HeaderValue, Request, StatusCode};
+    use tower::ServiceExt;
 
     #[test]
     fn protected_routes_compile_into_a_router() {
         // Construction alone proves every path string is well formed for axum.
         let _ = protected_routes();
+    }
+
+    #[tokio::test]
+    async fn desktop_cors_allows_only_the_documented_tauri_origin() {
+        let app = Router::new()
+            .route("/probe", get(|| async { StatusCode::NO_CONTENT }))
+            .layer(desktop_cors());
+
+        let desktop = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/probe")
+                    .header(header::ORIGIN, "http://tauri.localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            desktop.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&HeaderValue::from_static("http://tauri.localhost"))
+        );
+
+        let foreign = app
+            .oneshot(
+                Request::builder()
+                    .uri("/probe")
+                    .header(header::ORIGIN, "https://untrusted.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(foreign
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none());
     }
 }

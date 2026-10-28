@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ark",
+  "version": "0.1.0",
+  "identifier": "com.ark.desktop",
+  "build": {
+    "beforeDevCommand": {
+      "script": "npm run dev:web",
+      "cwd": "..",
+      "wait": false
+    },
+    "beforeBuildCommand": "npm run prepare:sidecar && npm run build:web",
+    "devUrl": "http://127.0.0.1:5273",
+    "frontendDist": "../../../web/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "ark",
+        "width": 1440,
+        "height": 920,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:18791; img-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": ["icons/icon.ico"],
+    "targets": "nsis"
+  }
+}

@@ -21,7 +21,8 @@ ark 用 Rust 重建原 smart-ark 的 Code 运行时与渲染层，重点解决�
 - **已批准计划**：已确认的架构目标，但尚未实现；必须在对应模块或需求文档标注“计划”。
 - **待决**：影响产品边界、兼容性或安全模型的事项；未决前不得假定实现存在。
 
-当前 workspace 的唯一组合根是 `apps/arkd`。`plugins/`、`xtask/`、`apps/ark-desktop/` 和独立
+当前 workspace 的唯一运行时组合根是 `apps/arkd`。`apps/ark-desktop/src-tauri` 是已实现的桌面宿主，
+但不链接任何 ark crate，也不成为组合根；它只启动/回收 `arkd` 进程。`plugins/`、`xtask/` 和独立
 `plugin-code-ui` 等目录尚不是当前 workspace 模块；引用它们时必须标记为计划。
 
 ## 3. 架构原则
@@ -51,6 +52,8 @@ React web ── HTTP/SSE ── ark-server ── ports ── ark-agent
                      ark-http / ark-mcp / ark-ui / ark-plugin │
                                                               │
                          provider、skills、workspace、obs、Studio（按需）
+
+Tauri desktop ── 管理本地 arkd 进程 ── React web（同一 HTTP/SSE 边界）
 ```
 
 - `ark-server` 仅是 HTTP/SSE 边界，不包含领域分支。
@@ -84,6 +87,7 @@ ark-obs        → ark-common, ark-contract
 ark-server     → ark-common, ark-contract, ark-ports, ark-agent, ark-store, ark-config, ark-obs
 ark-studio     → ark-common, ark-contract, ark-ports
 arkd           → 所有实现（组合根）
+ark-desktop    → 无 ark crate 依赖；以受控进程启动 arkd
 ```
 
 特别约束：`ark-agent` 不得依赖具体实现；`ark-contract` 不得承载端口 trait 或内部业务对象；

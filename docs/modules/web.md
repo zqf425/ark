@@ -30,7 +30,11 @@
 - 设置页的分类导航是 `web` 内本地状态，只决定既有 section 的可见性；每个 section 仍独立持有既有 hook，
   不把 provider、MCP 或 runtime 配置逻辑回流到 Code 会话状态或 `ark-agent`。
 
-## 计划边界
+## 桌面宿主边界
 
-Tauri 外壳和独立 `plugin-code-ui` 尚未成为当前 workspace 模块。实现相关需求时先更新本文件和需求设计，
-再决定其与 `ark-ui` 内置注册的迁移方案。
+`apps/ark-desktop` 是已实现的 Tauri 窗口和本地 `arkd` 生命周期宿主。它不会成为 web 的业务 API：生产构建
+仅通过 `VITE_ARK_BASE_URL` 将既有 typed HTTP/SSE client 指向受限 loopback 运行时；开发仍使用 Vite proxy。
+不得在 React 组件中引入 Tauri command、shell/plugin API 或 provider/Agent 分支。
+
+独立 `plugin-code-ui` 尚未成为当前 workspace 模块。其未来迁移必须先建立需求设计，不能借桌面外壳绕过
+`ark-ui` 注册总线。

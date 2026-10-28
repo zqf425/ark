@@ -3,12 +3,14 @@ import react from '@vitejs/plugin-react'
 
 // The renderer never knows the runtime origin: in dev, Vite proxies the two
 // surfaces the UI is allowed to touch onto the local `arkd` listener.
-const RUNTIME_ORIGIN = 'http://127.0.0.1:18790'
+const RUNTIME_PORT = process.env.ARK_RUNTIME_PORT ?? '18790'
+const RUNTIME_ORIGIN = `http://127.0.0.1:${RUNTIME_PORT}`
 const DEV_PORT = 5273
 
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: '127.0.0.1',
     port: DEV_PORT,
     strictPort: true,
     proxy: {

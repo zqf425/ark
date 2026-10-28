@@ -1,0 +1,17 @@
+[package]
+name = "ark-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+# Tauri 2.12 and its shell plugin require Rust 1.90. The core workspace keeps
+# its existing 1.75 baseline; this host opts into the newer toolchain alone.
+rust-version = "1.90"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"

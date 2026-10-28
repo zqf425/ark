@@ -19,6 +19,9 @@
   调用该纯函数；File 不直接访问磁盘，而是返回已持久化的 `read` 工具输出。
 - provider model catalog 路由只转发 `ProviderService::models`，不读取、记录或回显 api key/header；具体
   限时、限体积和元数据规范化留在 `ark-llm` / `ark-provider`。
+- loopback API 默认不对浏览器开放跨域访问。为 Tauri 桌面壳，仅精确允许 Windows 的
+  `http://tauri.localhost` 与 macOS/Linux 的 `tauri://localhost` origin，且只允许 GET/POST/PATCH/DELETE
+  和 `accept`、`authorization`、`content-type` headers；禁止将其放宽为 `*`。
 
 ## 路由清单
 

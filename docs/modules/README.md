@@ -28,4 +28,5 @@
 | `ark-server` | [ark-server.md](ark-server.md) | HTTP/SSE 边界与优雅停机 |
 | `ark-studio` | [ark-studio.md](ark-studio.md) | UI 自动化领域模型（计划中） |
 | `arkd` | [arkd.md](arkd.md) | 唯一组合根 |
+| `ark-desktop` | [ark-desktop.md](ark-desktop.md) | Tauri 窗口与本地运行时生命周期 |
 | `web` | [web.md](web.md) | React Code 模式渲染层 |

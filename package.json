@@ -1,0 +1,9 @@
+{
+  "name": "ark",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "npm --prefix apps/ark-desktop run dev",
+    "build": "npm --prefix apps/ark-desktop run build"
+  }
+}

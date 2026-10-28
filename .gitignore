@@ -4,3 +4,9 @@
 /web/node_modules
 /web/dist
 /web/*.tsbuildinfo
+/apps/ark-desktop/src-tauri/binaries/
+/apps/ark-desktop/node_modules/
+/apps/ark-desktop/src-tauri/gen/
+/apps/ark-desktop/src-tauri/icons/*
+!/apps/ark-desktop/src-tauri/icons/ark.svg
+!/apps/ark-desktop/src-tauri/icons/icon.ico
