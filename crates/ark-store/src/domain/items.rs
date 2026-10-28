@@ -99,18 +99,30 @@ impl ItemProjector {
                 turn_id,
                 call_id,
                 tool,
+                arguments,
                 timestamp,
                 ..
-            } => self.apply_tool_started(*turn_id, call_id, tool, *timestamp),
+            } => self.apply_tool_started(*turn_id, call_id, tool, arguments, *timestamp),
             RuntimeEvent::ToolCallFinished {
                 turn_id,
                 call_id,
                 tool,
                 ok,
                 duration_ms,
+                output,
+                detail,
                 timestamp,
                 ..
-            } => self.apply_tool_finished(*turn_id, call_id, tool, *ok, *duration_ms, *timestamp),
+            } => self.apply_tool_finished(
+                *turn_id,
+                call_id,
+                tool,
+                *ok,
+                *duration_ms,
+                output,
+                detail.as_deref(),
+                *timestamp,
+            ),
             RuntimeEvent::ApprovalRequested {
                 turn_id,
                 approval_id,
@@ -199,12 +211,14 @@ impl ItemProjector {
         turn: TurnId,
         call_id: &str,
         tool: &str,
+        arguments: &serde_json::Value,
         at: DateTime<Utc>,
     ) -> ThreadItem {
         let id = keyed_item_id(&format!("tool_call:{call_id}"));
         let mut item = self.ensure(id, turn, ItemKind::ToolCall, at);
         let payload = tool_payload(&mut item, call_id, tool);
         payload.tool = tool.to_string();
+        payload.arguments = (!arguments.is_null()).then(|| arguments.clone());
         item.status = ItemStatus::Streaming;
         self.upsert(item)
     }
@@ -216,6 +230,8 @@ impl ItemProjector {
         tool: &str,
         ok: bool,
         duration_ms: u64,
+        output: &str,
+        detail: Option<&str>,
         at: DateTime<Utc>,
     ) -> ThreadItem {
         let id = keyed_item_id(&format!("tool_call:{call_id}"));
@@ -223,6 +239,8 @@ impl ItemProjector {
         let payload = tool_payload(&mut item, call_id, tool);
         payload.ok = Some(ok);
         payload.duration_ms = Some(duration_ms);
+        payload.output = (!output.is_empty()).then(|| output.to_string());
+        item.detail = detail.map(ToString::to_string);
         item.status = if ok {
             ItemStatus::Completed
         } else {
@@ -460,6 +478,7 @@ mod tests {
                 timestamp: now,
                 call_id: "call_1".into(),
                 tool: "read".into(),
+                arguments: serde_json::json!({ "path": "src/main.rs" }),
             },
             RuntimeEvent::ToolCallFinished {
                 seq: 2,
@@ -470,12 +489,19 @@ mod tests {
                 tool: "read".into(),
                 ok: true,
                 duration_ms: 12,
+                output: "fn main() {}".into(),
+                detail: None,
             },
         ];
         let items = project_items(&events);
         assert_eq!(items.len(), 1);
         let tool = items[0].tool.as_ref().expect("tool payload");
         assert_eq!(tool.tool, "read");
+        assert_eq!(
+            tool.arguments,
+            Some(serde_json::json!({ "path": "src/main.rs" }))
+        );
+        assert_eq!(tool.output.as_deref(), Some("fn main() {}"));
         assert_eq!(tool.ok, Some(true));
         assert_eq!(tool.duration_ms, Some(12));
         assert_eq!(items[0].status, ItemStatus::Completed);

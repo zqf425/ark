@@ -6,7 +6,8 @@
 //! value, so a rejected patch cannot leave the live snapshot half updated.
 
 use ark_contract::{
-    ConfigPatch, FieldPath, SubagentSettings, SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
+    ConfigPatch, FieldPath, SubagentSettings, TuningSettings, SUBAGENT_CONCURRENCY_MAX,
+    SUBAGENT_CONCURRENCY_MIN,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -67,6 +68,38 @@ impl TuningConfig {
         self.sse_heartbeat_secs = self.sse_heartbeat_secs.clamp(0, 3_600);
         self.sse_idle_timeout_secs = self.sse_idle_timeout_secs.clamp(0, 86_400);
         self
+    }
+}
+
+impl From<&TuningConfig> for TuningSettings {
+    fn from(value: &TuningConfig) -> Self {
+        Self {
+            max_rounds: value.max_rounds,
+            max_tokens: value.max_tokens,
+            max_tool_calls: value.max_tool_calls,
+            max_identical_calls: value.max_identical_calls,
+            context_limit_tokens: value.context_limit_tokens,
+            keep_recent_messages: value.keep_recent_messages,
+            chunk_buffer: value.chunk_buffer,
+            sse_heartbeat_secs: value.sse_heartbeat_secs,
+            sse_idle_timeout_secs: value.sse_idle_timeout_secs,
+        }
+    }
+}
+
+impl From<TuningSettings> for TuningConfig {
+    fn from(value: TuningSettings) -> Self {
+        Self {
+            max_rounds: value.max_rounds,
+            max_tokens: value.max_tokens,
+            max_tool_calls: value.max_tool_calls,
+            max_identical_calls: value.max_identical_calls,
+            context_limit_tokens: value.context_limit_tokens,
+            keep_recent_messages: value.keep_recent_messages,
+            chunk_buffer: value.chunk_buffer,
+            sse_heartbeat_secs: value.sse_heartbeat_secs,
+            sse_idle_timeout_secs: value.sse_idle_timeout_secs,
+        }
     }
 }
 
@@ -158,8 +191,7 @@ impl RuntimeConfig {
             }
         }
         if let Some(value) = &patch.tuning {
-            let tuning: TuningConfig = serde_json::from_value(value.clone())
-                .map_err(|err| format!("tuning is not a valid object: {err}"))?;
+            let tuning = TuningConfig::from(value.clone());
             if next.tuning != tuning {
                 next.tuning = tuning;
                 changed.push(FieldPath::new("tuning"));

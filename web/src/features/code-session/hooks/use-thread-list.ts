@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError } from '../../../shared/api/client'
 import type { ThreadSummary } from '../../../shared/contracts'
-import { createThread, listThreads } from '../api/threads-api'
+import { createThread, deleteThread, forkThread, listThreads, updateThread } from '../api/threads-api'
 import { useCodeSessionStore } from '../state/store'
 
 function describe(error: unknown): string {
@@ -19,6 +19,11 @@ function describe(error: unknown): string {
 export type ThreadListApi = {
   refresh: () => Promise<void>
   create: () => Promise<ThreadSummary | null>
+  rename: (threadId: string, title: string) => Promise<boolean>
+  archive: (threadId: string) => Promise<boolean>
+  restore: (threadId: string) => Promise<boolean>
+  remove: (threadId: string) => Promise<boolean>
+  fork: (threadId: string) => Promise<ThreadSummary | null>
   select: (threadId: string | null) => void
   busy: boolean
 }
@@ -46,7 +51,7 @@ export function useThreadList(): ThreadListApi {
     try {
       const rows = await listThreads()
       if (!mounted.current) return
-      setThreads(rows.filter((row) => !row.archived))
+      setThreads(rows)
     } catch (error) {
       if (mounted.current) setListStatus('error', describe(error))
     }
@@ -68,6 +73,63 @@ export function useThreadList(): ThreadListApi {
     }
   }, [setActiveThread, setListStatus, upsertThread])
 
+  const mutate = useCallback(async (action: () => Promise<ThreadSummary>, removeId?: string): Promise<boolean> => {
+    setBusy(true)
+    try {
+      const next = await action()
+      if (!mounted.current) return false
+      if (removeId) useCodeSessionStore.getState().removeThread(removeId)
+      else upsertThread(next)
+      return true
+    } catch (error) {
+      if (mounted.current) setListStatus('error', describe(error))
+      return false
+    } finally {
+      if (mounted.current) setBusy(false)
+    }
+  }, [setListStatus, upsertThread])
+
+  const rename = useCallback((threadId: string, title: string) => {
+    const trimmed = title.trim()
+    if (!trimmed) return Promise.resolve(false)
+    return mutate(() => updateThread(threadId, { title: trimmed }))
+  }, [mutate])
+
+  const archive = useCallback((threadId: string) => mutate(() => updateThread(threadId, { archived: true })), [mutate])
+
+  const restore = useCallback((threadId: string) => mutate(() => updateThread(threadId, { archived: false }), undefined), [mutate])
+
+  const remove = useCallback(async (threadId: string): Promise<boolean> => {
+    setBusy(true)
+    try {
+      await deleteThread(threadId)
+      if (!mounted.current) return false
+      useCodeSessionStore.getState().removeThread(threadId)
+      return true
+    } catch (error) {
+      if (mounted.current) setListStatus('error', describe(error))
+      return false
+    } finally {
+      if (mounted.current) setBusy(false)
+    }
+  }, [setListStatus])
+
+  const fork = useCallback(async (threadId: string): Promise<ThreadSummary | null> => {
+    setBusy(true)
+    try {
+      const forked = await forkThread(threadId)
+      if (!mounted.current) return null
+      upsertThread(forked)
+      setActiveThread(forked.thread_id)
+      return forked
+    } catch (error) {
+      if (mounted.current) setListStatus('error', describe(error))
+      return null
+    } finally {
+      if (mounted.current) setBusy(false)
+    }
+  }, [setActiveThread, setListStatus, upsertThread])
+
   // Select the newest thread once the first load lands, so the screen is never
   // an empty shell when history exists.
   useEffect(() => {
@@ -77,5 +139,5 @@ export function useThreadList(): ThreadListApi {
     if (first) setActiveThread(first.thread_id)
   }, [activeThreadId, listStatus, setActiveThread, threads])
 
-  return { refresh, create, select: setActiveThread, busy }
+  return { refresh, create, rename, archive, restore, remove, fork, select: setActiveThread, busy }
 }

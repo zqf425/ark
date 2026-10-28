@@ -23,6 +23,10 @@
 stdio server 必须独立子进程，避免与主服务争用标准输入输出；远程 HTTP 默认仅 loopback，并要求
 运行时 token 和显式远程配置。
 
+MCP 设置的安全 read view 可返回 transport、command/url、args、allow-tools 和 env/header 是否已配置，
+但绝不返回 env/header 值。全量 upsert 编辑中空 env/header 表示保留既有 secret；显式删除必须以后续
+字段级 patch 表达，不能借空表单猜测。
+
 ## 错误与验证
 
 区分深度超限、调用环、等待图死锁、未声明消费、重复工具名和 grant 拒绝，便于调用方恢复。测试至少

@@ -5,9 +5,11 @@
 //! [`state::AppState`] and the boundary never learns which provider is behind it.
 
 pub mod api;
+pub mod gates;
 pub mod service;
 pub mod state;
 
 pub use api::{error::ApiError, routes::router};
+pub use gates::InteractiveGates;
 pub use service::serve::{bind, AppHandle};
 pub use state::{AppState, SharedUsage, TurnEnd, TurnJob, TurnRunner};

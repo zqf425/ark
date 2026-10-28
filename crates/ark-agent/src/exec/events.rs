@@ -113,7 +113,12 @@ impl TurnEvents {
         }
     }
 
-    pub fn tool_call_started(&self, call_id: &str, tool: &str) -> RuntimeEvent {
+    pub fn tool_call_started(
+        &self,
+        call_id: &str,
+        tool: &str,
+        arguments: serde_json::Value,
+    ) -> RuntimeEvent {
         RuntimeEvent::ToolCallStarted {
             seq: Self::UNASSIGNED,
             thread_id: self.thread_id,
@@ -121,6 +126,7 @@ impl TurnEvents {
             timestamp: Utc::now(),
             call_id: call_id.to_string(),
             tool: tool.to_string(),
+            arguments,
         }
     }
 
@@ -130,6 +136,8 @@ impl TurnEvents {
         tool: &str,
         ok: bool,
         duration_ms: u64,
+        output: String,
+        detail: Option<String>,
     ) -> RuntimeEvent {
         RuntimeEvent::ToolCallFinished {
             seq: Self::UNASSIGNED,
@@ -140,6 +148,8 @@ impl TurnEvents {
             tool: tool.to_string(),
             ok,
             duration_ms,
+            output,
+            detail,
         }
     }
 
@@ -262,8 +272,8 @@ mod tests {
             events.turn_aborted("y"),
             events.text_delta(ItemId::new(), "d"),
             events.reasoning_delta(ItemId::new(), "r"),
-            events.tool_call_started("c", "read"),
-            events.tool_call_finished("c", "read", true, 5),
+            events.tool_call_started("c", "read", serde_json::json!({ "path": "a.rs" })),
+            events.tool_call_finished("c", "read", true, 5, "contents".to_string(), None),
             events.usage(Usage::new(1, 1)),
         ];
         for event in all {

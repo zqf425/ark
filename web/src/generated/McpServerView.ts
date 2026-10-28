@@ -4,4 +4,9 @@ import type { McpTransportKind } from "./McpTransportKind";
 /**
  * Server state as reported to the GUI.
  */
-export type McpServerView = { id: string, transport: McpTransportKind, enabled: boolean, connected: boolean, tool_count: number, last_error?: string, };
+export type McpServerView = { id: string, transport: McpTransportKind, enabled: boolean, command?: string, args: Array<string>, url?: string, allow_tools: Array<string>, 
+/**
+ * Secret values are never returned; these flags only tell an editor that
+ * leaving its blank secret inputs untouched will preserve existing values.
+ */
+has_env: boolean, has_headers: boolean, connected: boolean, tool_count: number, last_error?: string, };

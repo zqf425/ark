@@ -144,6 +144,25 @@ pub async fn remove(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `POST /v1/threads/{id}/fork`.
+///
+/// A fork always uses the current durable watermark. Forking from a selected
+/// historical sequence needs an explicit history UI; accepting an arbitrary
+/// number here would expose a partial feature with no way for the renderer to
+/// explain which prefix it selected.
+pub async fn fork(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<(StatusCode, Json<ThreadSummary>), ApiError> {
+    let thread_id = parse_thread(&id)?;
+    state.store.get_thread(thread_id).await?;
+    let watermark = state.store.highest_seq(thread_id).await?;
+    let forked = state.store.fork_thread(thread_id, watermark).await?;
+    let mut summary = summary_of(&forked);
+    summary.last_seq = Some(watermark);
+    Ok((StatusCode::CREATED, Json(summary)))
+}
+
 /// Parse a thread id, reporting a validation error instead of a 500.
 pub fn parse_thread(raw: &str) -> Result<ThreadId, ApiError> {
     raw.parse::<ThreadId>().map_err(|err| {

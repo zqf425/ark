@@ -2,7 +2,10 @@ import type { ReactNode } from 'react'
 import { Tabs } from '../../../shared/ui'
 import { useCodeSessionStore } from '../../code-session/state/store'
 import type { PanelId } from '../../code-session/state/workbench-slice'
-import { ChangesPanel, FilePanel, PlanPanel, TerminalPanel } from './panels'
+import { ChangesPanel } from './ChangesPanel'
+import { FilePanel } from './FilePanel'
+import { PlanPanel } from './PlanPanel'
+import { TerminalPanel } from './TerminalPanel'
 
 const PANEL_TABS: { id: PanelId; label: string }[] = [
   { id: 'changes', label: 'Changes' },

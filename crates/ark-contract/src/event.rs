@@ -260,6 +260,9 @@ pub enum RuntimeEvent {
         timestamp: DateTime<Utc>,
         call_id: String,
         tool: String,
+        /// The validated tool arguments, retained for Code projections.
+        #[serde(default)]
+        arguments: serde_json::Value,
     },
     ToolCallFinished {
         #[ts(as = "f64")]
@@ -272,6 +275,12 @@ pub enum RuntimeEvent {
         ok: bool,
         #[ts(as = "f64")]
         duration_ms: u64,
+        /// Capped tool output. It is already part of the model's durable turn
+        /// history, so retaining it here avoids a second file/terminal parser.
+        #[serde(default)]
+        output: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
     },
     ToolStormSuppressed {
         #[ts(as = "f64")]
@@ -321,6 +330,34 @@ pub enum RuntimeEvent {
         timestamp: DateTime<Utc>,
         request_id: String,
         answer: String,
+    },
+
+    // ---- thread plan ----
+    GoalUpdated {
+        #[ts(as = "f64")]
+        seq: u64,
+        thread_id: ThreadId,
+        timestamp: DateTime<Utc>,
+        goal: String,
+    },
+    GoalCleared {
+        #[ts(as = "f64")]
+        seq: u64,
+        thread_id: ThreadId,
+        timestamp: DateTime<Utc>,
+    },
+    TodosUpdated {
+        #[ts(as = "f64")]
+        seq: u64,
+        thread_id: ThreadId,
+        timestamp: DateTime<Utc>,
+        todos: Vec<crate::dto::TodoEntry>,
+    },
+    TodosCleared {
+        #[ts(as = "f64")]
+        seq: u64,
+        thread_id: ThreadId,
+        timestamp: DateTime<Utc>,
     },
 
     // ---- accounting ----
@@ -489,6 +526,10 @@ impl RuntimeEvent {
             | RuntimeEvent::ApprovalResolved { seq, .. }
             | RuntimeEvent::UserInputRequested { seq, .. }
             | RuntimeEvent::UserInputResolved { seq, .. }
+            | RuntimeEvent::GoalUpdated { seq, .. }
+            | RuntimeEvent::GoalCleared { seq, .. }
+            | RuntimeEvent::TodosUpdated { seq, .. }
+            | RuntimeEvent::TodosCleared { seq, .. }
             | RuntimeEvent::Usage { seq, .. }
             | RuntimeEvent::Error { seq, .. }
             | RuntimeEvent::Heartbeat { seq, .. }
@@ -523,6 +564,10 @@ impl RuntimeEvent {
             | RuntimeEvent::ApprovalResolved { thread_id, .. }
             | RuntimeEvent::UserInputRequested { thread_id, .. }
             | RuntimeEvent::UserInputResolved { thread_id, .. }
+            | RuntimeEvent::GoalUpdated { thread_id, .. }
+            | RuntimeEvent::GoalCleared { thread_id, .. }
+            | RuntimeEvent::TodosUpdated { thread_id, .. }
+            | RuntimeEvent::TodosCleared { thread_id, .. }
             | RuntimeEvent::Usage { thread_id, .. }
             | RuntimeEvent::Error { thread_id, .. }
             | RuntimeEvent::Heartbeat { thread_id, .. }
@@ -557,6 +602,10 @@ impl RuntimeEvent {
             RuntimeEvent::ApprovalResolved { .. } => EventKind::ApprovalResolved,
             RuntimeEvent::UserInputRequested { .. } => EventKind::UserInputRequested,
             RuntimeEvent::UserInputResolved { .. } => EventKind::UserInputResolved,
+            RuntimeEvent::GoalUpdated { .. } => EventKind::GoalUpdated,
+            RuntimeEvent::GoalCleared { .. } => EventKind::GoalCleared,
+            RuntimeEvent::TodosUpdated { .. } => EventKind::TodosUpdated,
+            RuntimeEvent::TodosCleared { .. } => EventKind::TodosCleared,
             RuntimeEvent::Usage { .. } => EventKind::Usage,
             RuntimeEvent::Error { .. } => EventKind::Error,
             RuntimeEvent::Heartbeat { .. } => EventKind::Heartbeat,
@@ -733,6 +782,7 @@ impl RuntimeEvent {
                 timestamp,
                 call_id,
                 tool,
+                arguments,
                 ..
             } => RuntimeEvent::ToolCallStarted {
                 seq,
@@ -741,6 +791,7 @@ impl RuntimeEvent {
                 timestamp,
                 call_id,
                 tool,
+                arguments,
             },
             RuntimeEvent::ToolCallFinished {
                 thread_id,
@@ -750,6 +801,8 @@ impl RuntimeEvent {
                 tool,
                 ok,
                 duration_ms,
+                output,
+                detail,
                 ..
             } => RuntimeEvent::ToolCallFinished {
                 seq,
@@ -760,6 +813,8 @@ impl RuntimeEvent {
                 tool,
                 ok,
                 duration_ms,
+                output,
+                detail,
             },
             RuntimeEvent::ToolStormSuppressed {
                 thread_id,
@@ -837,6 +892,46 @@ impl RuntimeEvent {
                 timestamp,
                 request_id,
                 answer,
+            },
+            RuntimeEvent::GoalUpdated {
+                thread_id,
+                timestamp,
+                goal,
+                ..
+            } => RuntimeEvent::GoalUpdated {
+                seq,
+                thread_id,
+                timestamp,
+                goal,
+            },
+            RuntimeEvent::GoalCleared {
+                thread_id,
+                timestamp,
+                ..
+            } => RuntimeEvent::GoalCleared {
+                seq,
+                thread_id,
+                timestamp,
+            },
+            RuntimeEvent::TodosUpdated {
+                thread_id,
+                timestamp,
+                todos,
+                ..
+            } => RuntimeEvent::TodosUpdated {
+                seq,
+                thread_id,
+                timestamp,
+                todos,
+            },
+            RuntimeEvent::TodosCleared {
+                thread_id,
+                timestamp,
+                ..
+            } => RuntimeEvent::TodosCleared {
+                seq,
+                thread_id,
+                timestamp,
             },
             RuntimeEvent::Usage {
                 thread_id,
@@ -996,6 +1091,10 @@ impl RuntimeEvent {
             | RuntimeEvent::ApprovalResolved { timestamp, .. }
             | RuntimeEvent::UserInputRequested { timestamp, .. }
             | RuntimeEvent::UserInputResolved { timestamp, .. }
+            | RuntimeEvent::GoalUpdated { timestamp, .. }
+            | RuntimeEvent::GoalCleared { timestamp, .. }
+            | RuntimeEvent::TodosUpdated { timestamp, .. }
+            | RuntimeEvent::TodosCleared { timestamp, .. }
             | RuntimeEvent::Usage { timestamp, .. }
             | RuntimeEvent::Error { timestamp, .. }
             | RuntimeEvent::Heartbeat { timestamp, .. }

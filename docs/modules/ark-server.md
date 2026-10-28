@@ -13,6 +13,10 @@
 - 路径、HTTP 方法、字段名和兼容别名均是对外契约；变更前必须检查 `ark-contract`、`web` 与集成方。
 - `GET /v1/threads/{id}` 的 `child_completions` 是最新 50 个不同通知 ID 的有界视图；它从 store 的窄
   completion 查询投影，不能全量回放普通会话事件。
+- `InteractiveGates` 只做 HTTP 决议与 reactor waiter 的一次性 rendezvous；resolved 事件仍由 reactor 在
+  实际消费回复后写入，取消时 Drop 守卫必须移除 waiter。
+- workbench 的 Plan、Changes、File、Terminal 投影均在 `service/workbench.rs`，handler 只读取权威事件并
+  调用该纯函数；File 不直接访问磁盘，而是返回已持久化的 `read` 工具输出。
 
 ## 路由清单
 

@@ -427,7 +427,9 @@ impl Reactor {
 
     /// Resolve one approval gate and return the next input.
     async fn ask_approval(&mut self, call: ToolCallRequest, summary: String) -> Result<TurnInput> {
-        let approval_id = format!("approval_{}", call.call_id);
+        // `call_id` is provider-local and may repeat across concurrent turns;
+        // HTTP resolution is process-wide, so scope the public gate id by turn.
+        let approval_id = format!("approval_{}_{}", self.events.turn_id, call.call_id);
         self.writer
             .append(
                 self.events
@@ -486,7 +488,7 @@ impl Reactor {
     /// Resolve a user-input gate. The answer becomes a tool result so the model
     /// sees it in the same turn.
     async fn ask_user(&mut self, call: ToolCallRequest, prompt: String) -> Result<TurnInput> {
-        let request_id = format!("ask_{}", call.call_id);
+        let request_id = format!("ask_{}_{}", self.events.turn_id, call.call_id);
         self.writer
             .append(self.events.user_input_requested(&request_id, &prompt))
             .await?;
@@ -505,15 +507,19 @@ impl Reactor {
         self.writer
             .append(self.events.user_input_resolved(&request_id, &answer))
             .await?;
-        let execution = ToolExecution::ok(&call, answer, 0);
+        let execution = ToolExecution::ok(&call, answer.clone(), 0);
         self.append_tool_history(&call, &execution);
         self.machine.note_tool_calls(1);
         self.machine.record_calls(std::slice::from_ref(&call));
         self.writer
-            .append(
-                self.events
-                    .tool_call_finished(&call.call_id, &call.tool, true, 0),
-            )
+            .append(self.events.tool_call_finished(
+                &call.call_id,
+                &call.tool,
+                true,
+                0,
+                answer,
+                None,
+            ))
             .await?;
         Ok(self.input_of(InputKind::ToolsSettled {
             executions: vec![execution],
@@ -582,10 +588,11 @@ impl Reactor {
         out: &mut Vec<ToolExecution>,
     ) -> Result<()> {
         self.writer
-            .append(
-                self.events
-                    .tool_call_started(&synthetic.call_id, &synthetic.tool),
-            )
+            .append(self.events.tool_call_started(
+                &synthetic.call_id,
+                &synthetic.tool,
+                serde_json::Value::Null,
+            ))
             .await?;
         if let Some(count) = synthetic.storm_count {
             self.writer
@@ -598,6 +605,8 @@ impl Reactor {
                 &synthetic.tool,
                 synthetic.ok,
                 0,
+                synthetic.content.clone(),
+                Some("not executed".to_string()),
             ))
             .await?;
         let execution = ToolExecution {
@@ -631,20 +640,6 @@ impl Reactor {
         };
         let mut executions = Vec::new();
         for execution in results {
-            self.writer
-                .append(
-                    self.events
-                        .tool_call_started(&execution.call_id, &execution.tool),
-                )
-                .await?;
-            self.writer
-                .append(self.events.tool_call_finished(
-                    &execution.call_id,
-                    &execution.tool,
-                    execution.ok,
-                    execution.duration_ms,
-                ))
-                .await?;
             let call = batch
                 .iter()
                 .find(|call| call.call_id == execution.call_id)
@@ -656,6 +651,23 @@ impl Reactor {
                         serde_json::Value::Null,
                     )
                 });
+            self.writer
+                .append(self.events.tool_call_started(
+                    &call.call_id,
+                    &call.tool,
+                    call.arguments.clone(),
+                ))
+                .await?;
+            self.writer
+                .append(self.events.tool_call_finished(
+                    &execution.call_id,
+                    &execution.tool,
+                    execution.ok,
+                    execution.duration_ms,
+                    execution.content.clone(),
+                    execution.detail.clone(),
+                ))
+                .await?;
             self.append_tool_history(&call, &execution);
             executions.push(execution);
         }

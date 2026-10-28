@@ -71,7 +71,11 @@ async fn pump(
         watermark,
         mut live,
     } = ticket;
+    // Synthetic control frames must never make a reconnecting client's
+    // Last-Event-ID go backwards after replay or a live event.
+    let mut last_sent_seq = watermark;
     for event in backlog {
+        last_sent_seq = last_sent_seq.max(event.seq());
         if sender.send(Ok(to_sse(&event))).await.is_err() {
             return;
         }
@@ -93,7 +97,7 @@ async fn pump(
                         // Tell the client why the stream ends; it reconnects with
                         // its last `seq`, so nothing is lost.
                         let event = RuntimeEvent::SseIdleTimeout {
-                            seq: watermark,
+                            seq: last_sent_seq,
                             thread_id: parse_thread_lossy(&thread_label),
                             timestamp: chrono::Utc::now(),
                         };
@@ -109,6 +113,7 @@ async fn pump(
         };
         match next {
             Some(event) => {
+                last_sent_seq = last_sent_seq.max(event.seq());
                 if sender.send(Ok(to_sse(&event))).await.is_err() {
                     // Slow client: the store already disconnected it, so drop
                     // this connection and let it resume from `since_seq`.
@@ -161,5 +166,45 @@ mod tests {
     #[test]
     fn lossy_parse_falls_back_to_a_fresh_id() {
         assert!(parse_thread_lossy("not-a-uuid").to_string().len() > 0);
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_uses_the_highest_sent_sequence() {
+        let thread_id = ThreadId::new();
+        let (live_sender, live) = mpsc::channel(1);
+        let (sender, mut receiver) = mpsc::channel(4);
+        live_sender
+            .send(RuntimeEvent::Heartbeat {
+                seq: 11,
+                thread_id,
+                timestamp: chrono::Utc::now(),
+            })
+            .await
+            .unwrap();
+        let task = tokio::spawn(pump(
+            ark_ports::SubscribeTicket {
+                backlog: Vec::new(),
+                watermark: 10,
+                live,
+            },
+            sender,
+            Some(Duration::from_millis(10)),
+            thread_id.to_string(),
+        ));
+
+        let live_frame = tokio::time::timeout(Duration::from_secs(1), receiver.recv())
+            .await
+            .expect("live event must arrive before the idle timeout")
+            .expect("pump must keep the stream open");
+        assert!(format!("{live_frame:?}").contains("id: 11\\n"));
+        let idle_frame = tokio::time::timeout(Duration::from_secs(1), receiver.recv())
+            .await
+            .expect("idle timeout frame must arrive")
+            .expect("pump must emit a timeout frame");
+        assert!(
+            format!("{idle_frame:?}").contains("id: 11\\n"),
+            "the synthetic timeout must not move the SSE id backwards"
+        );
+        task.await.unwrap();
     }
 }

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use ark_agent::exec::journal::EventSinkWriter;
 use ark_agent::exec::tool_runner::ToolRunner as AgentToolRunner;
 use ark_agent::{
-    AllowAllGates, CompletionInbox, ModelSeed, Reactor, ReactorConfig, ToolCallRequest, TurnEvents,
+    CompletionInbox, GateBroker, ModelSeed, Reactor, ReactorConfig, ToolCallRequest, TurnEvents,
     TurnLimits, TurnMachine, TurnOutcome,
 };
 use ark_common::{Result, ThreadId, TurnId};
@@ -155,6 +155,12 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         roots.current(),
     ));
 
+    // The HTTP gate handlers and every parent reactor receive this exact same
+    // rendezvous. A request waits until the Code UI resolves it; `AllowAllGates`
+    // would make approval cards cosmetic.
+    let gates = Arc::new(ark_server::InteractiveGates::new());
+    let gate_broker: Arc<dyn GateBroker> = gates.clone();
+
     let runner = Arc::new(AgentTurnRunner {
         providers: Arc::clone(&providers),
         config: Arc::clone(&config),
@@ -166,6 +172,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         roots: Arc::clone(&roots),
         tool_schemas: tools.schemas(),
         skills: Arc::clone(&skills),
+        gates: gate_broker,
     });
 
     let base = BaseServices::new()
@@ -188,6 +195,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         Arc::clone(&delegation) as Arc<dyn ark_ports::SubagentRunner>,
         Arc::clone(&delegation) as Arc<dyn ark_ports::SubagentRegistry>,
     )
+    .with_gates(gates)
     .with_auth_token(args.auth_token.clone());
 
     Ok(Wiring {
@@ -239,6 +247,8 @@ struct AgentTurnRunner {
     tool_schemas: Vec<serde_json::Value>,
     /// Skill runtime, consulted once per turn for activated instructions.
     skills: Arc<ark_skills::SkillRuntime>,
+    /// Human gate broker shared with the HTTP command surface.
+    gates: Arc<dyn GateBroker>,
 }
 
 impl AgentTurnRunner {
@@ -393,7 +403,7 @@ impl TurnRunner for AgentTurnRunner {
             model,
             tools,
             writer,
-            gates: Arc::new(AllowAllGates),
+            gates: Arc::clone(&self.gates),
             sandbox: Arc::clone(&self.policy),
             events,
             cancel: job.cancel,
@@ -405,7 +415,8 @@ impl TurnRunner for AgentTurnRunner {
             },
             machine: TurnMachine::new(Self::limits_for_turn(&snapshot)),
             chunk_buffer: Self::chunk_buffer_for_turn(&snapshot),
-        });
+        })
+        .with_steering(job.steering);
         reactor.push_user(job.text);
         let outcome = reactor.run().await?;
         Ok(finish_parent_turn(

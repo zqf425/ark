@@ -168,6 +168,52 @@
   white-space: nowrap;
 }
 
+.ark-childruns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 9px;
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius);
+  background: var(--ark-bg-raised);
+}
+
+.ark-childruns > header,
+.ark-childruns__row,
+.ark-childruns__actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ark-childruns > header {
+  justify-content: space-between;
+  color: var(--ark-text-dim);
+  font-size: 11px;
+}
+
+.ark-childruns__row {
+  justify-content: space-between;
+  padding-top: 6px;
+  border-top: 1px solid var(--ark-border);
+  font-size: 12px;
+}
+
+.ark-childruns__row > div:first-child {
+  min-width: 0;
+}
+
+.ark-childruns__row strong {
+  margin-left: 6px;
+}
+
+.ark-childruns__row p {
+  margin: 4px 0 0;
+  color: var(--ark-text-faint);
+  overflow-wrap: anywhere;
+}
+
 /* Accessibility: no blinking caret when the OS asks for reduced motion. */
 @media (prefers-reduced-motion: reduce) {
   .ark-caret {

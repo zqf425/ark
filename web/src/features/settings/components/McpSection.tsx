@@ -25,12 +25,14 @@ function ServerRow({
   busy,
   testState,
   onTest,
+  onEdit,
   onDelete
 }: {
   server: McpServerView
   busy: boolean
   testState: TestState | null
   onTest: () => void
+  onEdit: () => void
   onDelete: () => void
 }): JSX.Element {
   const shown = testState && testState.serverId === server.id ? testState : null
@@ -45,6 +47,9 @@ function ServerRow({
           <Button size="sm" disabled={busy} onClick={onTest}>
             测试连接
           </Button>
+          <Button size="sm" disabled={busy} onClick={onEdit}>
+            编辑
+          </Button>
           <Button variant="danger" size="sm" disabled={busy} onClick={onDelete}>
             删除
           </Button>
@@ -53,6 +58,8 @@ function ServerRow({
 
       <div className="ark-card__meta">
         <span>tool_count: {server.tool_count}</span>
+        {server.has_env ? <span>env: 已配置（编辑留空会保留）</span> : null}
+        {server.has_headers ? <span>headers: 已配置（编辑留空会保留）</span> : null}
         {server.last_error ? <span className="ark-settings__hint--error">last_error: {server.last_error}</span> : null}
       </div>
 
@@ -87,9 +94,26 @@ type Draft = {
   command: string
   args: string
   url: string
+  allowTools: string
+  envText: string
+  headersText: string
 }
 
-const EMPTY_DRAFT: Draft = { id: '', transport: 'stdio', enabled: true, command: '', args: '', url: '' }
+const EMPTY_DRAFT: Draft = { id: '', transport: 'stdio', enabled: true, command: '', args: '', url: '', allowTools: '', envText: '', headersText: '' }
+
+function draftFromServer(server: McpServerView): Draft {
+  return {
+    id: server.id,
+    transport: server.transport,
+    enabled: server.enabled,
+    command: server.command ?? '',
+    args: server.args.join('\n'),
+    url: server.url ?? '',
+    allowTools: server.allow_tools.join('\n'),
+    envText: '',
+    headersText: ''
+  }
+}
 
 /** Parse the args textarea: one argument per line, blank lines dropped. */
 function parseArgs(text: string): string[] {
@@ -99,10 +123,22 @@ function parseArgs(text: string): string[] {
     .filter((line) => line.length > 0)
 }
 
+function parseMap(text: string, label: string): { value?: Record<string, string>; error?: string } {
+  if (!text.trim()) return { value: {} }
+  try {
+    const value: unknown = JSON.parse(text)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return { error: `${label} 必须是 JSON 对象` }
+    return { value: Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, String(item)])) }
+  } catch {
+    return { error: `${label} 不是合法 JSON` }
+  }
+}
+
 export function McpSection(): JSX.Element {
   const toast = useToast()
   const api = useMcpServers()
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [editing, setEditing] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [testState, setTestState] = useState<TestState | null>(null)
 
@@ -124,15 +160,21 @@ export function McpSection(): JSX.Element {
       setFormError('http / sse 需要填写 url')
       return
     }
+    const env = parseMap(draft.envText, 'env')
+    const headers = parseMap(draft.headersText, 'headers')
+    if (env.error || headers.error) {
+      setFormError(env.error ?? headers.error ?? '高级配置无效')
+      return
+    }
 
     const request: McpServerUpsertRequest = {
       id,
       transport: draft.transport,
       enabled: draft.enabled,
       args: [],
-      env: {},
-      headers: {},
-      allow_tools: []
+      env: env.value ?? {},
+      headers: headers.value ?? {},
+      allow_tools: parseArgs(draft.allowTools)
     }
     if (isStdio) {
       request.command = command
@@ -147,6 +189,7 @@ export function McpSection(): JSX.Element {
     if (outcome.ok) {
       toast.push('success', `MCP server ${id} 已保存`)
       setDraft(null)
+      setEditing(false)
       return
     }
     const message = describeOutcome(outcome)
@@ -188,6 +231,11 @@ export function McpSection(): JSX.Element {
             busy={api.busy !== null}
             testState={testState}
             onTest={() => void test(server.id)}
+            onEdit={() => {
+              setFormError(null)
+              setEditing(true)
+              setDraft(draftFromServer(server))
+            }}
             onDelete={() => void remove(server.id)}
           />
         ))}
@@ -207,6 +255,7 @@ export function McpSection(): JSX.Element {
             disabled={api.busy !== null}
             onClick={() => {
               setFormError(null)
+              setEditing(false)
               setDraft(EMPTY_DRAFT)
             }}
           >
@@ -220,10 +269,10 @@ export function McpSection(): JSX.Element {
       {draft ? (
         <div className="ark-card ark-card--editing">
           <div className="ark-card__meta">
-            <strong>新增 MCP server</strong>
+            <strong>{editing ? `编辑 MCP server ${draft.id}` : '新增 MCP server'}</strong>
           </div>
           <div className="ark-settings__grid">
-            <TextField id="mcp-id" label="id" value={draft.id} mono disabled={api.busy !== null} placeholder="filesystem" onChange={(value) => setDraft({ ...draft, id: value })} />
+            <TextField id="mcp-id" label="id" value={draft.id} mono disabled={editing || api.busy !== null} placeholder="filesystem" onChange={(value) => setDraft({ ...draft, id: value })} />
             <SelectField<McpTransportKind>
               id="mcp-transport"
               label="transport"
@@ -273,13 +322,25 @@ export function McpSection(): JSX.Element {
             <CheckField label="启用（enabled）" checked={draft.enabled} disabled={api.busy !== null} onChange={(value) => setDraft({ ...draft, enabled: value })} />
           </div>
 
+          <div className="ark-settings__grid">
+            <Field label="allow_tools（每行一个；留空 = 全部）" htmlFor="mcp-allow-tools">
+              <textarea id="mcp-allow-tools" className="ark-field__area" value={draft.allowTools} disabled={api.busy !== null} spellCheck={false} onChange={(event) => setDraft({ ...draft, allowTools: event.target.value })} />
+            </Field>
+            <Field label="env（JSON 对象，可选）" htmlFor="mcp-env" hint={editing ? '留空会保留已配置的环境变量值。' : '只写入运行时，不会在列表回显。'}>
+              <textarea id="mcp-env" className="ark-field__area" value={draft.envText} disabled={api.busy !== null} spellCheck={false} placeholder={'{\n  "TOKEN": "…"\n}'} onChange={(event) => setDraft({ ...draft, envText: event.target.value })} />
+            </Field>
+            <Field label="headers（JSON 对象，可选）" htmlFor="mcp-headers" hint={editing ? '留空会保留已配置的 header 值。' : '只写入运行时，不会在列表回显。'}>
+              <textarea id="mcp-headers" className="ark-field__area" value={draft.headersText} disabled={api.busy !== null} spellCheck={false} placeholder={'{\n  "Authorization": "Bearer …"\n}'} onChange={(event) => setDraft({ ...draft, headersText: event.target.value })} />
+            </Field>
+          </div>
+
           {formError ? <Notice tone="error" title="无法保存">{formError}</Notice> : null}
 
           <div className="ark-settings__actions">
             <Button variant="primary" size="sm" disabled={api.busy !== null} onClick={() => void submit()}>
               {api.busy ? '保存中…' : '保存'}
             </Button>
-            <Button variant="ghost" size="sm" disabled={api.busy !== null} onClick={() => setDraft(null)}>
+            <Button variant="ghost" size="sm" disabled={api.busy !== null} onClick={() => { setDraft(null); setEditing(false) }}>
               取消
             </Button>
           </div>

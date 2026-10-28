@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use ark_agent::CancelToken;
+use ark_agent::{CancelToken, SteerQueue};
 use ark_common::{Result, ThreadId, TurnId, Usage};
 use ark_config::{ConfigStore, TuningConfig};
 use ark_contract::{RuntimeEvent, TurnSummary, UsageResponse};
@@ -18,6 +18,8 @@ use ark_obs::UsageRecorder;
 use ark_ports::{BaseServices, SessionStore, SubagentRegistry, SubagentRunner, ToolRegistryPort};
 use chrono::{DateTime, Utc};
 use tokio::sync::broadcast;
+
+use crate::gates::InteractiveGates;
 
 /// Terminal outcome a turn run reported (design §7.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +35,23 @@ pub struct TurnJob {
     pub turn_id: TurnId,
     pub text: String,
     pub cancel: CancelToken,
+    /// The active turn's bounded correction queue. The registry creates it
+    /// before the worker starts, so `/steer` and the reactor share one handle.
+    pub steering: Arc<SteerQueue>,
+}
+
+/// The handles created atomically with a newly accepted turn.
+pub struct TurnRegistration {
+    pub summary: TurnSummary,
+    pub steering: Arc<SteerQueue>,
+}
+
+/// Why an active turn could not accept a correction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SteerError {
+    NotFound,
+    Finished,
+    QueueFull,
 }
 
 /// The single orchestration seam: `arkd` runs one turn through the reactor.
@@ -50,6 +69,7 @@ pub struct TurnRegistry {
 struct TurnSlot {
     summary: TurnSummary,
     cancel: CancelToken,
+    steering: Arc<SteerQueue>,
 }
 
 impl Default for TurnRegistry {
@@ -69,7 +89,7 @@ impl TurnRegistry {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Register a turn as running and hand back its summary.
+    /// Register a turn as running and hand back the handles its worker needs.
     ///
     /// Returns `None` when the thread already has an in-flight turn. The existing
     /// runtime rejects with `conflictPolicy: 'reject'` and answers 409, so the
@@ -81,7 +101,7 @@ impl TurnRegistry {
         thread_id: ThreadId,
         turn_id: TurnId,
         cancel: CancelToken,
-    ) -> Option<TurnSummary> {
+    ) -> Option<TurnRegistration> {
         let mut guard = self.lock();
         let busy = guard
             .values()
@@ -97,14 +117,16 @@ impl TurnRegistry {
             ended_at: None,
             error: None,
         };
+        let steering = Arc::new(SteerQueue::new());
         guard.insert(
             turn_id,
             TurnSlot {
                 summary: summary.clone(),
                 cancel,
+                steering: Arc::clone(&steering),
             },
         );
-        Some(summary)
+        Some(TurnRegistration { summary, steering })
     }
 
     /// The in-flight turn of a thread, if any.
@@ -117,6 +139,36 @@ impl TurnRegistry {
 
     pub fn get(&self, turn_id: TurnId) -> Option<TurnSummary> {
         self.lock().get(&turn_id).map(|slot| slot.summary.clone())
+    }
+
+    /// The queue the reactor must drain for this still-running turn.
+    pub fn steering_for(&self, turn_id: TurnId) -> Option<Arc<SteerQueue>> {
+        self.lock()
+            .get(&turn_id)
+            .filter(|slot| slot.summary.ended_at.is_none())
+            .map(|slot| Arc::clone(&slot.steering))
+    }
+
+    /// Queue a correction for the exact active turn and report saturation
+    /// instead of dropping it silently.
+    pub fn enqueue_steering(
+        &self,
+        thread_id: ThreadId,
+        turn_id: TurnId,
+        text: &str,
+    ) -> std::result::Result<TurnSummary, SteerError> {
+        let guard = self.lock();
+        let slot = guard.get(&turn_id).ok_or(SteerError::NotFound)?;
+        if slot.summary.thread_id != thread_id {
+            return Err(SteerError::NotFound);
+        }
+        if slot.summary.ended_at.is_some() {
+            return Err(SteerError::Finished);
+        }
+        if !slot.steering.push(text) {
+            return Err(SteerError::QueueFull);
+        }
+        Ok(slot.summary.clone())
     }
 
     /// Trip the turn's cancel token, if the turn is still known.
@@ -170,6 +222,8 @@ pub struct AppState {
     pub config: Arc<ConfigStore>,
     pub usage: Arc<UsageRecorder>,
     pub turns: Arc<TurnRegistry>,
+    /// The one-shot gate rendezvous shared with the reactor injected by arkd.
+    pub gates: Arc<InteractiveGates>,
     pub runner: Arc<dyn TurnRunner>,
     pub started_at: DateTime<Utc>,
     pub version: String,
@@ -219,6 +273,7 @@ impl AppState {
             config,
             usage,
             turns: Arc::new(TurnRegistry::new()),
+            gates: Arc::new(InteractiveGates::new()),
             runner,
             started_at: Utc::now(),
             version: version.into(),
@@ -254,6 +309,12 @@ impl AppState {
             runner: Some(runner),
             registry: Some(registry),
         };
+        self
+    }
+
+    /// Attach the same interactive gate broker the injected turn runner uses.
+    pub fn with_gates(mut self, gates: Arc<InteractiveGates>) -> Self {
+        self.gates = gates;
         self
     }
 
@@ -414,7 +475,7 @@ mod tests {
         let summary = registry
             .try_register(thread, turn, CancelToken::new())
             .expect("first turn on an idle thread must be accepted");
-        assert_eq!(summary.state, "running");
+        assert_eq!(summary.summary.state, "running");
         registry.finish(turn, &TurnEnd::Completed);
         let done = registry.get(turn).unwrap();
         assert_eq!(done.state, "completed");
@@ -495,6 +556,23 @@ mod tests {
         registry.try_register(ThreadId::new(), TurnId::new(), second.clone());
         registry.cancel_all();
         assert!(first.is_cancelled() && second.is_cancelled());
+    }
+
+    #[test]
+    fn active_turn_steering_reaches_its_reactor_queue() {
+        let registry = TurnRegistry::new();
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        registry.try_register(thread, turn, CancelToken::new());
+        let queue = registry
+            .steering_for(turn)
+            .expect("a running turn owns a steering queue");
+
+        registry
+            .enqueue_steering(thread, turn, "focus on the failing test")
+            .expect("an active turn accepts steering");
+
+        assert_eq!(queue.drain(), vec!["focus on the failing test"]);
     }
 
     #[test]

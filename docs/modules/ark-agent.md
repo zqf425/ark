@@ -21,6 +21,10 @@
 - 工具沙箱决策只在派发前计算一次，执行器仅消费不可变结果。
 - 预算、工具风暴、并发安全和历史裁剪属于独立 policy/context 模块，不得回流为巨型 reactor。
 - 每轮模型可见历史必须已经落盘；每个工具调用必须与终态结果配对。
+- `ToolCallStarted` 持久化已校验参数，`ToolCallFinished` 持久化受工具上限限制的输出和 detail；这既是
+  会话重放资料，也是服务端 Changes/File/Terminal 投影的唯一来源，不能由 web 解析自由文本补造。
+- parent steer 的有界 `SteerQueue` 由 server registry 创建并由 `arkd` 注入同一个 reactor；reactor 只在
+  轮次边界 drain、写 `turn_steered` 后把文本加入用户历史。
 - 子代理完成 inbox 从父线程权威事件投影为带标记的 system source，而非用户消息；按稳定通知 ID 去重，
   跳过已确认项，并且每个父回合最多交付 8 条、每条最多 1,200 UTF-8 字节，避免完成风暴突破上下文
   预算。

@@ -85,6 +85,116 @@ pub struct TurnRequest {
     pub text: String,
 }
 
+/// `POST /v1/approvals/{id}`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ResolveApprovalRequest {
+    pub approved: bool,
+}
+
+/// `POST /v1/user-inputs/{id}`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ResolveUserInputRequest {
+    pub answer: String,
+}
+
+/// One task in the durable thread plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+/// User-maintained task shown in the Code plan panel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct TodoEntry {
+    pub id: String,
+    pub title: String,
+    pub status: TodoStatus,
+}
+
+/// The current durable goal plus todo list of one thread.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct PlanView {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<String>,
+    #[serde(default)]
+    pub todos: Vec<TodoEntry>,
+}
+
+/// `POST /v1/threads/{id}/goal`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct GoalRequest {
+    pub goal: String,
+}
+
+/// `POST /v1/threads/{id}/todos` replaces the complete ordered list.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct TodosRequest {
+    #[serde(default)]
+    pub todos: Vec<TodoEntry>,
+}
+
+/// One file mutation projected from a durable tool call.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct WorkspaceChange {
+    pub path: String,
+    pub operation: String,
+    pub turn_id: TurnId,
+    #[ts(as = "f64")]
+    pub seq: u64,
+}
+
+/// `GET /v1/threads/{id}/changes`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct WorkspaceChangesResponse {
+    #[serde(default)]
+    pub changes: Vec<WorkspaceChange>,
+}
+
+/// `GET /v1/threads/{id}/files?path=...`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct FilePreview {
+    pub path: String,
+    pub content: String,
+    #[ts(as = "f64")]
+    pub source_seq: u64,
+}
+
+/// One completed shell command projected from a durable tool call.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct TerminalEntry {
+    pub call_id: String,
+    pub turn_id: TurnId,
+    pub command: String,
+    pub output: String,
+    pub ok: bool,
+    #[ts(as = "f64")]
+    pub duration_ms: u64,
+    #[ts(as = "f64")]
+    pub seq: u64,
+}
+
+/// `GET /v1/threads/{id}/terminal`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct TerminalEntriesResponse {
+    #[serde(default)]
+    pub entries: Vec<TerminalEntry>,
+}
+
 /// `GET /v1/threads/{id}/turns/{turnId}`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
@@ -152,6 +262,7 @@ pub struct ChildRunSummary {
 /// Per-status counts plus the children's folded usage.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ChildRunAggregates {
     #[ts(as = "f64")]
     pub queued: u32,
@@ -224,4 +335,21 @@ pub struct ChildRunEventsResponse {
     pub events: Vec<crate::event::RuntimeEvent>,
     #[ts(as = "f64")]
     pub highest_seq: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn child_run_aggregates_use_camel_case_on_the_wire() {
+        let payload = serde_json::to_value(ChildRunAggregates {
+            tool_invocations: 3,
+            ..ChildRunAggregates::default()
+        })
+        .unwrap();
+
+        assert_eq!(payload.get("toolInvocations"), Some(&serde_json::json!(3)));
+        assert!(payload.get("tool_invocations").is_none());
+    }
 }

@@ -208,11 +208,11 @@ mod tests {
     #[test]
     fn tuning_component_is_reported_as_nested_paths() {
         let store = store();
-        let mut tuning = TuningConfig::default();
+        let mut tuning = ark_contract::TuningSettings::default();
         tuning.max_rounds = 5;
         tuning.chunk_buffer = 8;
         let result = store.apply(ConfigPatch {
-            tuning: Some(serde_json::to_value(&tuning).unwrap()),
+            tuning: Some(tuning),
             ..ConfigPatch::default()
         });
         match result {
@@ -229,10 +229,10 @@ mod tests {
     #[test]
     fn out_of_range_tuning_is_rejected_without_a_swap() {
         let store = store();
-        let mut tuning = TuningConfig::default();
+        let mut tuning = ark_contract::TuningSettings::default();
         tuning.max_rounds = 0;
         let result = store.apply(ConfigPatch {
-            tuning: Some(serde_json::to_value(&tuning).unwrap()),
+            tuning: Some(tuning),
             ..ConfigPatch::default()
         });
         assert!(matches!(result, ApplyResult::Rejected { .. }));

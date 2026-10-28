@@ -137,19 +137,35 @@ fn protected_routes() -> Router<AppState> {
         // ---- not implemented in this milestone: structured NotFound ----
         .route(
             "/v1/threads/{id}/fork",
-            post(crate::api::handlers::pending::fork),
+            post(crate::api::handlers::threads::fork),
+        )
+        .route(
+            "/v1/threads/{id}/plan",
+            get(crate::api::handlers::workbench::plan),
+        )
+        .route(
+            "/v1/threads/{id}/changes",
+            get(crate::api::handlers::workbench::changes),
+        )
+        .route(
+            "/v1/threads/{id}/files",
+            get(crate::api::handlers::workbench::file),
+        )
+        .route(
+            "/v1/threads/{id}/terminal",
+            get(crate::api::handlers::workbench::terminal),
         )
         .route(
             "/v1/threads/{id}/goal",
-            get(crate::api::handlers::pending::goal)
-                .post(crate::api::handlers::pending::goal)
-                .delete(crate::api::handlers::pending::goal),
+            get(crate::api::handlers::workbench::plan)
+                .post(crate::api::handlers::workbench::update_goal)
+                .delete(crate::api::handlers::workbench::clear_goal),
         )
         .route(
             "/v1/threads/{id}/todos",
-            get(crate::api::handlers::pending::todos)
-                .post(crate::api::handlers::pending::todos)
-                .delete(crate::api::handlers::pending::todos),
+            get(crate::api::handlers::workbench::plan)
+                .post(crate::api::handlers::workbench::update_todos)
+                .delete(crate::api::handlers::workbench::clear_todos),
         )
         .route(
             "/v1/threads/{id}/skills",
@@ -161,15 +177,15 @@ fn protected_routes() -> Router<AppState> {
         )
         .route(
             "/v1/approvals/{id}",
-            post(crate::api::handlers::pending::approvals),
+            post(crate::api::handlers::gates::resolve_approval),
         )
         .route(
             "/v1/user-inputs/{id}",
-            post(crate::api::handlers::pending::user_inputs),
+            post(crate::api::handlers::gates::resolve_user_input),
         )
         .route(
             "/v1/user-input/{id}",
-            post(crate::api::handlers::pending::user_inputs),
+            post(crate::api::handlers::gates::resolve_user_input),
         )
         .route(
             "/v1/memory",

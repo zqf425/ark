@@ -7,7 +7,7 @@
  */
 import { useCallback } from 'react'
 import { ApiError } from '../../../shared/api/client'
-import { interruptTurn, startTurn } from '../api/turns-api'
+import { interruptTurn, startTurn, steerTurn } from '../api/turns-api'
 import { useCodeSessionStore } from '../state/store'
 
 function describe(error: unknown): string {
@@ -18,6 +18,7 @@ function describe(error: unknown): string {
 
 export type TurnApi = {
   send: (text: string) => Promise<boolean>
+  steer: (text: string) => Promise<boolean>
   interrupt: () => Promise<void>
   canSend: boolean
   canInterrupt: boolean
@@ -65,8 +66,25 @@ export function useTurn(threadId: string | null): TurnApi {
     }
   }, [activeTurnId, interrupting, setCommandError, setInterrupting, threadId])
 
+  const steer = useCallback(async (text: string): Promise<boolean> => {
+    const trimmed = text.trim()
+    if (!threadId || !activeTurnId || !trimmed || sending) return false
+    setSending(true)
+    setCommandError(null)
+    try {
+      await steerTurn(threadId, activeTurnId, trimmed)
+      return true
+    } catch (error) {
+      setCommandError(describe(error))
+      return false
+    } finally {
+      setSending(false)
+    }
+  }, [activeTurnId, sending, setCommandError, setSending, threadId])
+
   return {
     send,
+    steer,
     interrupt,
     canSend: Boolean(threadId) && streamStatus === 'open' && !sending,
     canInterrupt: Boolean(threadId) && Boolean(activeTurnId) && !interrupting

@@ -1,0 +1,3 @@
+# ts-rs emits wrapped type aliases with a space before its generated newline.
+# They are reproducible generator output, not hand-authored whitespace errors.
+web/src/generated/*.ts whitespace=-trailing-space

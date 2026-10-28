@@ -10,6 +10,7 @@ import { ApprovalCard } from './ApprovalCard'
 import { UserInputCard } from './UserInputCard'
 import { Composer } from './Composer'
 import { StreamFooter } from './StreamFooter'
+import { ChildRunsPanel } from './ChildRunsPanel'
 
 /**
  * One row dispatcher. This is the entire "event → UI" decision surface left on
@@ -115,6 +116,7 @@ export function ThreadStream({ threadId }: { threadId: string | null }): JSX.Ele
         {completions.map((notice) => (
           <ChildCompletionCard key={notice.notification_id} notice={notice} />
         ))}
+        <ChildRunsPanel threadId={threadId} />
 
         {approvals.map((approval) => (
           <ApprovalCard key={approval.approval_id} approval={approval} onResolved={resolveApprovalLocally} />

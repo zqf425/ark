@@ -16,7 +16,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const streamStatus = useCodeSessionStore((s) => s.streamStatus)
   const commandError = useCodeSessionStore((s) => s.commandError)
   const setCommandError = useCodeSessionStore((s) => s.setCommandError)
-  const { send, interrupt, canInterrupt } = useTurn(threadId)
+  const { send, steer, interrupt, canInterrupt } = useTurn(threadId)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
 
   const disabled = !threadId || draft
@@ -27,7 +27,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     if (!node) return
     const text = node.value
     if (!text.trim()) return
-    const ok = await send(text)
+    const ok = canInterrupt ? await steer(text) : await send(text)
     if (ok) {
       node.value = ''
       node.style.height = 'auto'
@@ -52,7 +52,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
           ref={inputRef}
           className="ark-composer__input"
           rows={3}
-          placeholder={threadId ? '发送消息（Enter 发送，Shift+Enter 换行）' : '先新建或选择一个线程'}
+          placeholder={threadId ? (canInterrupt ? '向运行中的回合补充指令（Enter steer）' : '发送消息（Enter 发送，Shift+Enter 换行）') : '先新建或选择一个线程'}
           disabled={disabled}
           onChange={(event) => {
             const node = event.currentTarget
@@ -76,7 +76,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
             </Button>
           ) : null}
           <Button variant="primary" size="sm" disabled={disabled} onClick={() => void submit()}>
-            {draft ? '发送中…' : '发送'}
+            {draft ? '提交中…' : canInterrupt ? 'Steer' : '发送'}
           </Button>
         </div>
       </div>

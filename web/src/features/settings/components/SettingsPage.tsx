@@ -9,6 +9,7 @@ import { ErrorBoundary } from '../../../shared/ui'
 import { useSettings } from '../hooks/use-settings'
 import { useProviders } from '../hooks/use-providers'
 import { GeneralSection } from './GeneralSection'
+import { TuningSection } from './TuningSection'
 import { SubagentSection } from './SubagentSection'
 import { ProvidersSection } from './ProvidersSection'
 import { McpSection } from './McpSection'
@@ -25,6 +26,10 @@ export function SettingsPage(): JSX.Element {
         <div className="ark-settings__body">
           <ErrorBoundary label="通用设置崩溃">
             <GeneralSection settings={settings} providers={providers} />
+          </ErrorBoundary>
+
+          <ErrorBoundary label="运行调优设置崩溃">
+            <TuningSection settings={settings} />
           </ErrorBoundary>
 
           <ErrorBoundary label="子 agent 设置崩溃">

@@ -114,8 +114,8 @@ impl ProviderStore {
         let candidate = normalize_entry(entry)?;
         let document = self.lock();
         let mut next = document.clone();
-        let previous_key = next.get(&candidate.id).and_then(|old| old.api_key.clone());
-        let entry = keep_existing_key(candidate, previous_key);
+        let previous = next.get(&candidate.id).cloned();
+        let entry = keep_omitted_edit_fields(candidate, previous.as_ref());
         next.put(entry.clone());
         if make_default {
             // Enabling and promoting in one call is the settings dialog's
@@ -280,10 +280,28 @@ impl ProviderStore {
     }
 }
 
-/// A GUI edit sends no key, which means "keep the stored one".
-fn keep_existing_key(mut candidate: ProviderEntry, previous: Option<String>) -> ProviderEntry {
+/// The current settings form does not receive secret or advanced values back
+/// from the redacted list response. Empty/absent values therefore mean "not
+/// edited", not "erase the persisted value". A later explicit patch shape
+/// will carry a separate clear operation instead of making absence ambiguous.
+fn keep_omitted_edit_fields(
+    mut candidate: ProviderEntry,
+    previous: Option<&ProviderEntry>,
+) -> ProviderEntry {
+    let Some(previous) = previous else {
+        return candidate;
+    };
     if candidate.api_key.is_none() {
-        candidate.api_key = previous;
+        candidate.api_key = previous.api_key.clone();
+    }
+    if candidate.headers.is_empty() {
+        candidate.headers = previous.headers.clone();
+    }
+    if candidate.max_tokens.is_none() {
+        candidate.max_tokens = previous.max_tokens;
+    }
+    if candidate.temperature.is_none() {
+        candidate.temperature = previous.temperature;
     }
     candidate
 }
@@ -399,6 +417,31 @@ mod tests {
             "sk-1234567890abcdef"
         );
         assert_eq!(store.resolve(Some("p")).unwrap().model, "deepseek-reasoner");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gui_edit_without_advanced_fields_keeps_the_stored_advanced_values() {
+        let dir = temp_dir("keep-advanced");
+        let store = store(&dir);
+        let mut saved = entry("p", Some("sk-1234567890abcdef"));
+        saved.headers.insert("X-Trace".into(), "enabled".into());
+        saved.max_tokens = Some(4_096);
+        saved.temperature = Some(0.3);
+        store.upsert(saved, false).unwrap();
+
+        let mut edit = entry("p", None);
+        edit.model = "deepseek-reasoner".into();
+        store.upsert(edit, false).unwrap();
+
+        let retained = store.lock().get("p").cloned().unwrap();
+        assert_eq!(
+            retained.headers.get("X-Trace"),
+            Some(&"enabled".to_string())
+        );
+        assert_eq!(retained.max_tokens, Some(4_096));
+        assert_eq!(retained.temperature, Some(0.3));
+        assert_eq!(retained.model, "deepseek-reasoner");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

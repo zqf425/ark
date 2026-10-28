@@ -1,0 +1,34 @@
+/* Thread controls and child-run cards, kept separate from stream layout. */
+.ark-threadrow__select {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 6px 8px;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+
+.ark-threadrow__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 6px;
+  flex-wrap: wrap;
+}
+
+.ark-threadrow__rename {
+  min-width: 0;
+  flex: 1 1 120px;
+  border: 1px solid var(--ark-border-strong);
+  border-radius: var(--ark-radius);
+  padding: 3px 5px;
+  background: var(--ark-bg-inset);
+  color: var(--ark-text);
+  font: inherit;
+}

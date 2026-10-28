@@ -4,4 +4,4 @@ import type { Usage } from "./Usage";
 /**
  * Per-status counts plus the children's folded usage.
  */
-export type ChildRunAggregates = { queued: number, running: number, completed: number, failed: number, aborted: number, tool_invocations: number, usage: Usage, };
+export type ChildRunAggregates = { queued: number, running: number, completed: number, failed: number, aborted: number, toolInvocations: number, usage: Usage, };

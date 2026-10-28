@@ -36,4 +36,9 @@ export function deleteThread(threadId: ThreadId): Promise<void> {
   return del<void>(`/v1/threads/${threadId}`)
 }
 
+/** `POST /v1/threads/{id}/fork` — copies the latest durable event prefix. */
+export function forkThread(threadId: ThreadId): Promise<ThreadSummary> {
+  return post<ThreadSummary>(`/v1/threads/${threadId}/fork`)
+}
+
 export type { TurnState }

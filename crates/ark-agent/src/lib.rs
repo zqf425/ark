@@ -43,7 +43,7 @@ pub use domain::{
 };
 pub use exec::{
     AllowAllGates, ApprovalReply, ApprovalRequest, CancelToken, DenyAllGates, EventSinkWriter,
-    GateBroker, MemoryWriter, SessionWriter, ToolRunner, TurnEvents, UserInputRequest,
+    GateBroker, MemoryWriter, SessionWriter, SteerQueue, ToolRunner, TurnEvents, UserInputRequest,
 };
 pub use policy::{
     AccessKind, BudgetVerdict, ParallelPolicy, StormBreaker, StormReport, SuppressedCall,

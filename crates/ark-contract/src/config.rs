@@ -45,7 +45,7 @@ pub struct ConfigPatch {
     #[serde(default)]
     pub model_providers: Option<serde_json::Value>,
     #[serde(default)]
-    pub tuning: Option<serde_json::Value>,
+    pub tuning: Option<TuningSettings>,
     #[serde(default)]
     pub log_level: Option<String>,
     #[serde(default)]
@@ -57,6 +57,50 @@ pub struct ConfigPatch {
     /// Sub-agent switch plus the concurrency cap.
     #[serde(default)]
     pub subagents: Option<SubagentSettings>,
+}
+
+/// Hot runtime limits exposed by the settings screen.
+///
+/// This is a wire DTO, not the runtime's policy implementation. Keeping it
+/// typed makes the Rust contract generate the only renderer shape instead of
+/// leaving the UI to recreate a loosely typed JSON object.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct TuningSettings {
+    #[ts(as = "f64")]
+    pub max_rounds: u32,
+    #[ts(as = "f64")]
+    pub max_tokens: u64,
+    #[ts(as = "f64")]
+    pub max_tool_calls: u32,
+    #[ts(as = "f64")]
+    pub max_identical_calls: u32,
+    #[ts(as = "f64")]
+    pub context_limit_tokens: u64,
+    #[ts(as = "f64")]
+    pub keep_recent_messages: usize,
+    #[ts(as = "f64")]
+    pub chunk_buffer: usize,
+    #[ts(as = "f64")]
+    pub sse_heartbeat_secs: u64,
+    #[ts(as = "f64")]
+    pub sse_idle_timeout_secs: u64,
+}
+
+impl Default for TuningSettings {
+    fn default() -> Self {
+        Self {
+            max_rounds: 24,
+            max_tokens: 1_000_000,
+            max_tool_calls: 200,
+            max_identical_calls: 3,
+            context_limit_tokens: 96_000,
+            keep_recent_messages: 12,
+            chunk_buffer: 64,
+            sse_heartbeat_secs: 15,
+            sse_idle_timeout_secs: 300,
+        }
+    }
 }
 
 /// Sub-agent policy (design §7.8 / §7.14).
@@ -99,9 +143,6 @@ impl SubagentSettings {
 
 /// `GET /v1/runtime/config` — what the settings screen renders.
 ///
-/// `tuning` stays an opaque JSON object on purpose: the settings screen shows it
-/// read-only, and duplicating every tuning field here would be a second source
-/// of truth for the same numbers.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct RuntimeConfigView {
@@ -114,7 +155,7 @@ pub struct RuntimeConfigView {
     /// `string | null`, and omitting the key would make it `undefined` instead.
     pub default_workspace: Option<String>,
     pub subagents: SubagentSettings,
-    pub tuning: serde_json::Value,
+    pub tuning: TuningSettings,
 }
 
 /// Outcome of `POST /v1/runtime/config`.

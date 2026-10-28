@@ -6,18 +6,17 @@
 
 use std::sync::Arc;
 
+use ark_agent::CancelToken;
+use ark_common::{ThreadId, TurnId};
+use ark_contract::{RuntimeEvent, TurnRequest, TurnSummary};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 use chrono::Utc;
 
-use ark_agent::CancelToken;
-use ark_common::{ThreadId, TurnId};
-use ark_contract::{RuntimeEvent, TurnRequest, TurnSummary};
-
 use crate::api::error::ApiError;
 use crate::api::handlers::threads::parse_thread;
-use crate::state::{AppState, TurnEnd, TurnJob};
+use crate::state::{AppState, SteerError, TurnEnd, TurnJob};
 
 /// `POST /v1/threads/{id}/turns`.
 pub async fn start(
@@ -42,7 +41,7 @@ pub async fn start(
     // (`conflictPolicy: 'reject'` -> 409) instead of interleaving two model loops
     // over one event log. The renderer keeps the message queued and retries after
     // the running turn settles.
-    let Some(summary) = state.turns.try_register(thread_id, turn_id, cancel.clone()) else {
+    let Some(registration) = state.turns.try_register(thread_id, turn_id, cancel.clone()) else {
         let running = state
             .turns
             .active_for(thread_id)
@@ -58,9 +57,10 @@ pub async fn start(
         turn_id,
         text,
         cancel,
+        steering: registration.steering,
     };
     spawn_turn(state.clone(), job);
-    Ok((StatusCode::ACCEPTED, Json(summary)))
+    Ok((StatusCode::ACCEPTED, Json(registration.summary)))
 }
 
 /// Run the turn in the background and fold the outcome back into the registry.
@@ -124,8 +124,9 @@ pub async fn get(
 
 /// `POST /v1/threads/{id}/turns/{turn_id}/steer`.
 ///
-/// Steering appends a `turn_steered` event so the model sees the instruction on
-/// its next round; the reactor owns when that round happens.
+/// Steering enters the active reactor's bounded queue. The reactor journals the
+/// `turn_steered` event only after it has safely added the instruction to model
+/// history at the next round boundary.
 pub async fn steer(
     State(state): State<AppState>,
     Path((id, turn)): Path<(String, String)>,
@@ -142,27 +143,20 @@ pub async fn steer(
     }
     let summary = state
         .turns
-        .get(turn_id)
-        .ok_or_else(|| ApiError::new(ark_common::ArkErrorCode::NotFound, "turn is not known"))?;
-    if summary.ended_at.is_some() {
-        return Err(ApiError::new(
-            ark_common::ArkErrorCode::Conflict,
-            "turn has already finished and cannot be steered",
-        ));
-    }
-    state
-        .store
-        .append_event(
-            thread_id,
-            RuntimeEvent::TurnSteered {
-                seq: 0,
-                thread_id,
-                turn_id,
-                timestamp: Utc::now(),
-                text,
-            },
-        )
-        .await?;
+        .enqueue_steering(thread_id, turn_id, &text)
+        .map_err(|error| match error {
+            SteerError::NotFound => {
+                ApiError::new(ark_common::ArkErrorCode::NotFound, "turn is not known")
+            }
+            SteerError::Finished => ApiError::new(
+                ark_common::ArkErrorCode::Conflict,
+                "turn has already finished and cannot be steered",
+            ),
+            SteerError::QueueFull => ApiError::new(
+                ark_common::ArkErrorCode::Conflict,
+                "turn steering queue is full; wait for the next model round",
+            ),
+        })?;
     Ok((StatusCode::ACCEPTED, Json(summary)))
 }
 

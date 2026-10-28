@@ -24,9 +24,7 @@ fn view_of(state: &AppState) -> RuntimeConfigView {
             .as_ref()
             .map(|path| path.to_string_lossy().to_string()),
         subagents: snapshot.subagents,
-        // Tuning stays an opaque object: the screen renders it read-only and a
-        // second typed copy here would be a competing source of truth.
-        tuning: serde_json::to_value(&snapshot.tuning).unwrap_or(serde_json::Value::Null),
+        tuning: (&snapshot.tuning).into(),
     }
 }
 

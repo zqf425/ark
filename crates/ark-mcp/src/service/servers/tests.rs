@@ -367,6 +367,28 @@ fn upserting_the_same_id_updates_in_place() {
 }
 
 #[test]
+fn an_edit_without_secret_fields_keeps_existing_env_and_headers() {
+    let registry = McpServerRegistry::new(temp_dir("preserve-secrets"));
+    let mut stored = stdio_entry("safe-edit", "npx");
+    stored.env.insert("TOKEN".into(), "secret-env".into());
+    stored
+        .headers
+        .insert("Authorization".into(), "Bearer secret-header".into());
+    registry.upsert(stored).unwrap();
+
+    // Mirrors the redacted settings form: it can update command but cannot
+    // prefill secret values, so empty maps mean unchanged rather than erase.
+    registry.upsert(stdio_entry("safe-edit", "node")).unwrap();
+
+    let document: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(registry.data_path()).unwrap()).unwrap();
+    let entry = &document["servers"][0];
+    assert_eq!(entry["command"], "node");
+    assert_eq!(entry["env"]["TOKEN"], "secret-env");
+    assert_eq!(entry["headers"]["Authorization"], "Bearer secret-header");
+}
+
+#[test]
 fn delete_unknown_id_is_a_not_found_error() {
     let registry = McpServerRegistry::new(temp_dir("delete"));
     registry.upsert(stdio_entry("keep", "npx")).unwrap();

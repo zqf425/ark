@@ -341,6 +341,18 @@ pub struct McpServerView {
     pub id: String,
     pub transport: McpTransportKind,
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub allow_tools: Vec<String>,
+    /// Secret values are never returned; these flags only tell an editor that
+    /// leaving its blank secret inputs untouched will preserve existing values.
+    pub has_env: bool,
+    pub has_headers: bool,
     pub connected: bool,
     #[ts(as = "f64")]
     pub tool_count: u64,

@@ -24,13 +24,15 @@ use crate::item::{ItemKind, ToolPayload};
 use crate::{
     ApplyResult, ChildCompletionNotice, ChildRunActionResult, ChildRunAggregates,
     ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
-    CreateThreadRequest, EventKind, FieldPath, HealthResponse, ItemStatus, McpServerEntry,
-    McpServerListResponse, McpServerTestResponse, McpServerView, McpTransportKind, ProviderEntry,
-    ProviderListResponse, ProviderTestRequest, ProviderTestResponse, ProviderView,
+    CreateThreadRequest, EventKind, FieldPath, FilePreview, GoalRequest, HealthResponse,
+    ItemStatus, McpServerEntry, McpServerListResponse, McpServerTestResponse, McpServerView,
+    McpTransportKind, PlanView, ProviderEntry, ProviderListResponse, ProviderTestRequest,
+    ProviderTestResponse, ProviderView, ResolveApprovalRequest, ResolveUserInputRequest,
     ResumeChildRequest, RuntimeConfigView, RuntimeEvent, RuntimeInfo, SkillDiagnostics,
-    SkillLoadWarning, SkillSource, SkillSummary, SteerChildRequest, SubagentSettings, ThreadDetail,
-    ThreadItem, ThreadSkillsResponse, ThreadSummary, TurnRequest, TurnSummary, UpdateThreadRequest,
-    UsageResponse, WorkspaceStatus,
+    SkillLoadWarning, SkillSource, SkillSummary, SteerChildRequest, SubagentSettings,
+    TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadItem, ThreadSkillsResponse,
+    ThreadSummary, TodoEntry, TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary,
+    UpdateThreadRequest, UsageResponse, WorkspaceChange, WorkspaceChangesResponse, WorkspaceStatus,
 };
 use ark_common::{ArkErrorCode, ArkErrorPayload, ChildId, ItemId, ThreadId, TurnId, Usage};
 
@@ -59,6 +61,18 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     ThreadDetail::export_all_to(dir)?;
     TurnRequest::export_all_to(dir)?;
     TurnSummary::export_all_to(dir)?;
+    ResolveApprovalRequest::export_all_to(dir)?;
+    ResolveUserInputRequest::export_all_to(dir)?;
+    PlanView::export_all_to(dir)?;
+    GoalRequest::export_all_to(dir)?;
+    TodosRequest::export_all_to(dir)?;
+    TodoEntry::export_all_to(dir)?;
+    TodoStatus::export_all_to(dir)?;
+    WorkspaceChangesResponse::export_all_to(dir)?;
+    WorkspaceChange::export_all_to(dir)?;
+    FilePreview::export_all_to(dir)?;
+    TerminalEntriesResponse::export_all_to(dir)?;
+    TerminalEntry::export_all_to(dir)?;
     UsageResponse::export_all_to(dir)?;
     HealthResponse::export_all_to(dir)?;
     RuntimeInfo::export_all_to(dir)?;
@@ -86,6 +100,7 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     ConfigPatch::export_all_to(dir)?;
     ApplyResult::export_all_to(dir)?;
     SubagentSettings::export_all_to(dir)?;
+    TuningSettings::export_all_to(dir)?;
     ProviderEntry::export_all_to(dir)?;
     ProviderView::export_all_to(dir)?;
     ProviderListResponse::export_all_to(dir)?;
@@ -150,6 +165,18 @@ const ROOT_NAMES: &[&str] = &[
     "ThreadDetail",
     "TurnRequest",
     "TurnSummary",
+    "ResolveApprovalRequest",
+    "ResolveUserInputRequest",
+    "PlanView",
+    "GoalRequest",
+    "TodosRequest",
+    "TodoEntry",
+    "TodoStatus",
+    "WorkspaceChangesResponse",
+    "WorkspaceChange",
+    "FilePreview",
+    "TerminalEntriesResponse",
+    "TerminalEntry",
     "UsageResponse",
     "HealthResponse",
     "RuntimeInfo",
@@ -171,6 +198,7 @@ const ROOT_NAMES: &[&str] = &[
     "ConfigPatch",
     "ApplyResult",
     "SubagentSettings",
+    "TuningSettings",
     "ProviderEntry",
     "ProviderView",
     "ProviderListResponse",

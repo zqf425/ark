@@ -133,11 +133,22 @@ impl McpServerRegistry {
     /// in-memory list ahead of the file. A replaced entry loses its session,
     /// because the old transport was built from the old configuration.
     pub fn upsert(&self, entry: McpServerEntry) -> Result<McpServerListResponse> {
-        let entry = server_entry::normalize(entry)?;
+        let mut entry = server_entry::normalize(entry)?;
         let mut state = self.lock()?;
         let mut next = state.entries.clone();
         match next.iter_mut().find(|existing| existing.id == entry.id) {
-            Some(slot) => *slot = entry.clone(),
+            Some(slot) => {
+                // The read model never exposes env/header values. An edit that
+                // omits them must keep the stored secrets rather than erase
+                // credentials the form intentionally could not prefill.
+                if entry.env.is_empty() {
+                    entry.env = slot.env.clone();
+                }
+                if entry.headers.is_empty() {
+                    entry.headers = slot.headers.clone();
+                }
+                *slot = entry.clone();
+            }
             None => next.push(entry.clone()),
         }
         next.sort_by(|a, b| a.id.cmp(&b.id));
@@ -363,6 +374,12 @@ fn view_of(entry: &McpServerEntry, runtime: Option<&Runtime>) -> McpServerView {
         id: entry.id.clone(),
         transport: entry.transport,
         enabled: entry.enabled,
+        command: entry.command.clone(),
+        args: entry.args.clone(),
+        url: entry.url.clone(),
+        allow_tools: entry.allow_tools.clone(),
+        has_env: !entry.env.is_empty(),
+        has_headers: !entry.headers.is_empty(),
         connected: runtime.map(|state| state.connected).unwrap_or(false),
         tool_count: runtime.map(|state| state.tool_count).unwrap_or(0),
         last_error: runtime.and_then(|state| state.last_error.clone()),
