@@ -187,6 +187,23 @@ pub async fn compact(
     let thread_id = parse_thread(&id)?;
     state.store.get_thread(thread_id).await?;
     let turn_id = TurnId::new();
+    let facts: Vec<String> = state
+        .store
+        .read_items(thread_id)
+        .await?
+        .into_iter()
+        .filter_map(|item| item.text)
+        .filter(|text| {
+            text.starts_with("Goal:")
+                || text.starts_with("Constraint:")
+                || text.starts_with("Decision:")
+        })
+        .collect();
+    let checkpoint = if facts.is_empty() {
+        "[context checkpoint: no structured facts extracted]".to_string()
+    } else {
+        format!("[context checkpoint]\n{}", facts.join("\n"))
+    };
     state
         .store
         .append_event(
@@ -196,6 +213,22 @@ pub async fn compact(
                 thread_id,
                 turn_id,
                 timestamp: Utc::now(),
+            },
+        )
+        .await?;
+    let item = ark_contract::ThreadItem::new(turn_id, ark_contract::item::ItemKind::Notice)
+        .with_text(checkpoint.clone())
+        .completed();
+    state
+        .store
+        .append_event(
+            thread_id,
+            RuntimeEvent::ItemCreated {
+                seq: 0,
+                thread_id,
+                turn_id,
+                timestamp: Utc::now(),
+                item,
             },
         )
         .await?;
@@ -217,7 +250,7 @@ pub async fn compact(
         "thread_id": thread_id,
         "turn_id": turn_id,
         "removed_items": removed,
-        "note": "manual compaction marker written",
+        "checkpoint": checkpoint,
     })))
 }
 

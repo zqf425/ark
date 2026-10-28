@@ -557,6 +557,11 @@ fn conversation_history(items: &[ark_contract::ThreadItem]) -> Vec<ModelMessage>
                 .as_deref()
                 .filter(|text| !text.trim().is_empty())
                 .map(ModelMessage::assistant),
+            ark_contract::item::ItemKind::Notice => item
+                .text
+                .as_deref()
+                .filter(|text| text.starts_with("[context checkpoint]"))
+                .map(ModelMessage::system),
             _ => None,
         })
         .collect()
@@ -608,6 +613,21 @@ impl AgentToolRunner for ToolRunnerAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conversation_history_replays_context_checkpoints_as_system_messages() {
+        let checkpoint = ark_contract::ThreadItem::new(
+            TurnId::new(),
+            ark_contract::item::ItemKind::Notice,
+        )
+        .with_text("[context checkpoint]\nGoal: preserve state")
+        .completed();
+
+        assert_eq!(
+            conversation_history(&[checkpoint]),
+            vec![ModelMessage::system("[context checkpoint]\nGoal: preserve state")]
+        );
+    }
 
     use ark_common::ChildId;
     use ark_contract::RuntimeEvent;

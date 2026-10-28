@@ -35,6 +35,8 @@ export const MESSAGES = {
   'session.runtime.strict': ['严格：命令与写入需批准', 'Strict: approve commands and writes'],
   'session.runtime.workspaceWrite': ['工作区写入：仅命令需批准', 'Workspace write: approve commands only'],
   'session.runtime.unattended': ['无人值守：不请求批准', 'Unattended: no approval prompts']
+  ,'session.context.compact': ['创建上下文检查点', 'Create context checkpoint']
+  ,'session.context.compacted': ['上下文检查点已创建', 'Context checkpoint created']
 } as const
 
 export type MessageKey = keyof typeof MESSAGES

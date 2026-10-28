@@ -41,4 +41,9 @@ export function forkThread(threadId: ThreadId): Promise<ThreadSummary> {
   return post<ThreadSummary>(`/v1/threads/${threadId}/fork`)
 }
 
+/** `POST /v1/threads/{id}/compact` — persist a context checkpoint. */
+export function compactThread(threadId: ThreadId): Promise<{ checkpoint: string }> {
+  return post<{ checkpoint: string }>(`/v1/threads/${threadId}/compact`)
+}
+
 export type { TurnState }

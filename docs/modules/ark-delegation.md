@@ -9,6 +9,13 @@
 `delegate_task` 明确给出的 Provider、模型或 `autonomy` 权限覆盖优先。工作空间不接受模型指定，
 始终由父工具上下文传入。显式权限覆盖会写入 child run 记录，以便恢复同一子代理时仍然生效。
 
+## 分层上下文压缩
+
+当前实现将运行配置和 system 指令保留为永久层；最近消息保留为高保真层；被压缩区间会生成
+确定性 checkpoint，提取 `Goal:`、`Constraint:` 和 `Decision:` 事实。checkpoint 同时注入当前
+模型窗口、以 Notice 写入事件流，并在后续回合回放为 system context。原始事件和 items 日志不删除，
+作为冷历史保留；手动 `POST /v1/threads/{id}/compact` 也会创建同一类型的 checkpoint。
+
 ## 生命周期与存储
 
 子任务状态为 `queued`、`running` 或终态。权威记录追加到父会话的

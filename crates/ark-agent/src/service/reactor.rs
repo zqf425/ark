@@ -557,7 +557,11 @@ impl Reactor {
     /// Compact the prefix. Runs entirely in memory: the journal only records it.
     async fn compact(&mut self, keep_recent: usize) -> Result<TurnInput> {
         self.writer.append(self.events.compaction_started()).await?;
-        let removed = self.compact_history(keep_recent);
+        let (removed, checkpoint) = self.compact_history(keep_recent);
+        let item = ThreadItem::new(self.events.turn_id, ItemKind::Notice)
+            .with_text(checkpoint)
+            .completed();
+        self.writer.append(self.events.item_created(item)).await?;
         self.machine.note_compaction(removed);
         self.writer
             .append(self.events.compaction_completed(removed))
@@ -568,7 +572,7 @@ impl Reactor {
     }
 
     /// Keep the system prefix and the newest messages; fold the middle away.
-    fn compact_history(&mut self, keep_recent: usize) -> u32 {
+    fn compact_history(&mut self, keep_recent: usize) -> (u32, String) {
         let system_count = self
             .history
             .iter()
@@ -576,17 +580,24 @@ impl Reactor {
             .count();
         let keep = keep_recent.max(1);
         if self.history.len() <= system_count + keep {
-            return 0;
+            return (
+                0,
+                "[context checkpoint: no messages eligible for compaction]".to_string(),
+            );
         }
         let split = self.history.len() - keep;
         let removed = (split - system_count) as u32;
         let mut next: Vec<ModelMessage> = self.history[..system_count].to_vec();
-        next.push(ModelMessage::system(format!(
-            "[{removed} earlier messages were compacted to fit the context window]"
-        )));
+        let checkpoint =
+            crate::context::ContextCheckpoint::from_messages(&self.history[system_count..split]);
+        let rendered = format!(
+            "{}\n[{removed} earlier messages compacted]",
+            checkpoint.render()
+        );
+        next.push(ModelMessage::system(rendered.clone()));
         next.extend_from_slice(&self.history[split..]);
         self.history = next;
-        removed
+        (removed, rendered)
     }
 
     /// Execute a dispatch plan: synthetic results first, then batches in order.
