@@ -1,0 +1,341 @@
+/**
+ * Agent-console visual layer. It only styles feature-owned markup and does
+ * not define runtime state, API calls, or plugin-specific presentation.
+ */
+
+/* ---------- runtime bar ---------- */
+
+.ark-statusbar {
+  height: 52px;
+  gap: 20px;
+  padding: 0 18px;
+  background: color-mix(in srgb, var(--ark-bg-raised) 92%, #182235);
+}
+
+.ark-statusbar__brand {
+  gap: 9px;
+}
+
+.ark-statusbar__logo {
+  color: var(--ark-text);
+  font-size: 14px;
+  letter-spacing: 0.13em;
+}
+
+.ark-statusbar__mode {
+  border: 0;
+  border-left: 1px solid var(--ark-border-strong);
+  border-radius: 0;
+  padding: 0 0 0 9px;
+  color: var(--ark-text-faint);
+  font: 10px/1 var(--ark-mono);
+  letter-spacing: 0.08em;
+}
+
+.ark-statusbar__group {
+  gap: 7px;
+}
+
+.ark-statusbar__group--end {
+  gap: 10px;
+}
+
+.ark-statusbar__label,
+.ark-statusbar__path {
+  font-size: 11px;
+}
+
+/* ---------- task rail ---------- */
+
+.ark-threadlist {
+  background: linear-gradient(180deg, #111722 0%, var(--ark-bg-raised) 38%);
+}
+
+.ark-threadlist__head {
+  padding: 17px 14px 13px;
+  border-bottom: 0;
+}
+
+.ark-threadlist__eyebrow,
+.ark-threadfocus__eyebrow {
+  display: block;
+  color: var(--ark-accent);
+  font: 10px/1 var(--ark-mono);
+  letter-spacing: 0.12em;
+}
+
+.ark-threadlist__title {
+  margin: 5px 0 0;
+  color: var(--ark-text);
+  font-size: 15px;
+  font-weight: 630;
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
+
+.ark-threadlist__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 0 10px 11px;
+  border-bottom: 1px solid var(--ark-border);
+}
+
+.ark-threadlist__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--ark-bg-inset);
+  color: var(--ark-text-faint);
+  padding: 0 8px;
+}
+
+.ark-threadlist__search:focus-within {
+  border-color: var(--ark-accent-dim);
+}
+
+.ark-threadlist__search-icon {
+  font: 17px/1 var(--ark-mono);
+}
+
+.ark-threadlist__search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ark-text);
+  padding: 7px 0;
+  font-size: 12px;
+}
+
+.ark-threadlist__search input::placeholder {
+  color: var(--ark-text-faint);
+}
+
+.ark-threadlist__scope {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  border-bottom: 1px solid var(--ark-border);
+}
+
+.ark-threadlist__scope button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ark-text-faint);
+  cursor: pointer;
+  padding: 4px 2px 7px;
+  text-align: left;
+  font-size: 11px;
+}
+
+.ark-threadlist__scope button:hover,
+.ark-threadlist__scope button.is-active {
+  color: var(--ark-text);
+}
+
+.ark-threadlist__scope button.is-active {
+  border-bottom-color: var(--ark-accent);
+}
+
+.ark-threadlist__scope span {
+  margin-left: 4px;
+  color: var(--ark-text-faint);
+  font-family: var(--ark-mono);
+}
+
+.ark-threadlist__nav {
+  gap: 4px;
+  padding: 8px;
+}
+
+.ark-threadrow {
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+
+.ark-threadrow:hover {
+  background: #172130;
+}
+
+.ark-threadrow.is-active {
+  border-color: #30445e;
+  background: linear-gradient(105deg, #1b3350, #152131);
+  box-shadow: inset 2px 0 0 var(--ark-accent);
+}
+
+.ark-threadrow__select {
+  padding: 9px 8px;
+}
+
+.ark-threadrow__title {
+  color: var(--ark-text);
+  font-size: 12px;
+  font-weight: 540;
+}
+
+.ark-threadrow__meta {
+  margin-top: 3px;
+  font: 10px/1.2 var(--ark-mono);
+}
+
+.ark-threadlist__foot {
+  padding: 9px 12px;
+  background: color-mix(in srgb, var(--ark-bg) 38%, transparent);
+}
+
+/* ---------- active task focus ---------- */
+
+.ark-threadfocus {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 78px;
+  padding: 16px 76px 15px 24px;
+  border-bottom: 1px solid var(--ark-border);
+  background:
+    radial-gradient(circle at 10% -190%, rgba(99, 167, 255, 0.28), transparent 58%),
+    linear-gradient(90deg, #111b2a 0%, var(--ark-bg-raised) 65%);
+}
+
+.ark-threadfocus::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--ark-accent), var(--ark-progress), transparent 62%);
+  content: '';
+}
+
+.ark-threadfocus h1 {
+  max-width: min(58vw, 760px);
+  margin: 6px 0 0;
+  overflow: hidden;
+  color: var(--ark-text);
+  font-size: clamp(16px, 1.6vw, 22px);
+  font-weight: 620;
+  letter-spacing: -0.025em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-threadfocus__metrics {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 3px;
+  color: var(--ark-text-faint);
+  font: 10px/1 var(--ark-mono);
+  white-space: nowrap;
+}
+
+.ark-threadfocus__metrics .is-live {
+  color: var(--ark-ok);
+}
+
+.ark-threadfocus__metrics .is-live::before {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: currentcolor;
+  content: '';
+}
+
+.ark-stream__scroll {
+  padding: 22px max(24px, calc((100% - 920px) / 2)) 14px;
+  gap: 18px;
+  background: linear-gradient(90deg, rgba(17, 23, 34, 0.45), transparent 16%, transparent 84%, rgba(17, 23, 34, 0.45));
+}
+
+.ark-turn {
+  gap: 12px;
+}
+
+.ark-msg {
+  border-radius: 10px;
+  padding: 11px 13px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.ark-msg--assistant {
+  border-color: #263449;
+  background: linear-gradient(135deg, #131c29, var(--ark-bg-raised));
+}
+
+.ark-msg--user {
+  border-color: #2b4f72;
+  background: linear-gradient(135deg, #163252, #13283e);
+}
+
+.ark-msg__head {
+  font-family: var(--ark-mono);
+}
+
+.ark-msg__author {
+  color: #b8d7ff;
+}
+
+/* ---------- command dock ---------- */
+
+.ark-composer {
+  padding: 10px max(24px, calc((100% - 920px) / 2)) 18px;
+  border-top: 1px solid var(--ark-border);
+  background: rgba(13, 18, 27, 0.92);
+}
+
+.ark-composer__box {
+  border-color: #354761;
+  border-radius: 10px;
+  background: #111a27;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+}
+
+.ark-composer__lead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 11px 2px;
+  color: var(--ark-text-dim);
+  font-size: 11px;
+}
+
+.ark-composer__lead kbd {
+  border: 1px solid var(--ark-border-strong);
+  border-radius: 4px;
+  color: var(--ark-text-faint);
+  padding: 1px 4px;
+  font: 10px/1.3 var(--ark-mono);
+}
+
+.ark-composer__input {
+  padding: 8px 11px;
+  background: transparent;
+}
+
+.ark-composer__actions {
+  padding: 7px 10px 10px;
+}
+
+@media (max-width: 900px) {
+  .ark-statusbar__path,
+  .ark-statusbar__group--end .ark-statusbar__label,
+  .ark-statusbar__sep {
+    display: none;
+  }
+
+  .ark-threadfocus {
+    padding-right: 16px;
+  }
+}

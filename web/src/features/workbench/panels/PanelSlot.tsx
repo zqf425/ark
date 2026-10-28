@@ -8,10 +8,10 @@ import { PlanPanel } from './PlanPanel'
 import { TerminalPanel } from './TerminalPanel'
 
 const PANEL_TABS: { id: PanelId; label: string }[] = [
-  { id: 'changes', label: 'Changes' },
-  { id: 'plan', label: 'Plan' },
-  { id: 'file', label: 'File' },
-  { id: 'terminal', label: 'Terminal' }
+  { id: 'changes', label: '变更' },
+  { id: 'plan', label: '计划' },
+  { id: 'file', label: '文件' },
+  { id: 'terminal', label: '终端' }
 ]
 
 function PanelBody({ panel }: { panel: PanelId }): ReactNode {

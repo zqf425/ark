@@ -135,3 +135,16 @@ abort/steer/resume。终态摘要卡片继续按 `notification_id` 去重，且�
 选择只是修改待保存草稿，避免远端目录变化隐式修改运行配置。保存后的 context window 会约束下一父/子
 回合的压缩阈值，并为用户设置的 max_tokens 预留输出空间。此前已保存但未实际使用的 headers、temperature
 和 max_tokens 同步进入模型请求；核心协议头仍由 endpoint family 覆盖，防止自定义 header 破坏认证。
+
+## 阶段 F：Code 与设置的信息架构
+
+视觉重构只发生在 `web/`：不增加 wire 字段、不改变 reactor 状态，也不让插件或 provider 实现承担界面职责。
+Code 将已加载会话分为最近/归档两个本地范围，并提供大小写无关的本地标题搜索；搜索不承诺全局全文检索。
+中栏以当前会话和真实回合数/执行态作为操作焦点，输入区保持现有 send/steer/interrupt 语义。右侧的
+Changes、Plan、File、Terminal 继续使用服务端投影，可由纯布局状态折叠，收起不能卸载或改写其数据。
+
+设置页将既有表单按工作区、运行时、供应商、集成、Skills 分类导航。导航只控制可见内容，各 section 的 hook
+和保存语义不变：Provider/MCP 的 secret 仍只写不回显，模型目录仍需用户显式选择后才进入草稿。
+
+阶段 F 已将 Code 和设置改为面向任务执行的信息结构，并补上已加载线程的本地搜索/归档切换与设置分类导航。
+这是一层渲染和本地布局状态的变更，未修改 `ark-agent`、HTTP/SSE 契约、插件总线或运行时语义。

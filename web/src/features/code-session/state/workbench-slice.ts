@@ -11,11 +11,13 @@ export type WorkbenchSlice = {
   rightWidth: number
   leftWidth: number
   leftCollapsed: boolean
+  rightCollapsed: boolean
   selectedFilePath: string | null
   setActivePanel: (panel: PanelId) => void
   setRightWidth: (width: number) => void
   setLeftWidth: (width: number) => void
   toggleLeft: () => void
+  toggleRight: () => void
   selectFile: (path: string | null) => void
 }
 
@@ -34,11 +36,13 @@ export const createWorkbenchSlice: StateCreator<WorkbenchSlice, [], [], Workbenc
   rightWidth: DEFAULT_RIGHT,
   leftWidth: DEFAULT_LEFT,
   leftCollapsed: false,
+  rightCollapsed: false,
   selectedFilePath: null,
 
   setActivePanel: (panel) => set({ activePanel: panel }),
   setRightWidth: (width) => set({ rightWidth: clampSideWidth(width) }),
   setLeftWidth: (width) => set({ leftWidth: clampSideWidth(width) }),
   toggleLeft: () => set((state) => ({ leftCollapsed: !state.leftCollapsed })),
+  toggleRight: () => set((state) => ({ rightCollapsed: !state.rightCollapsed })),
   selectFile: (path) => set({ selectedFilePath: path, ...(path ? { activePanel: 'file' } : {}) })
 })

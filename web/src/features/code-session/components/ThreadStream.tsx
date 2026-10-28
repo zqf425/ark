@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { EmptyState, ErrorBoundary } from '../../../shared/ui'
 import type { ThreadItem } from '../../../shared/contracts'
 import { useCodeSessionStore } from '../state/store'
-import { childCompletionNotices, groupByTurn, openApprovals, openUserInputs, recentErrors } from '../state/selectors'
+import { childCompletionNotices, groupByTurn, hasLiveItems, openApprovals, openUserInputs, recentErrors } from '../state/selectors'
 import { UserBubble, AssistantBubble, ReasoningBlock } from './MessageBubble'
 import { ToolCard } from './ToolCard'
 import { ChildCompletionCard, ErrorRow, NoticeRow, ToolResultRow } from './ErrorRow'
@@ -72,12 +72,14 @@ export function ThreadStream({ threadId }: { threadId: string | null }): JSX.Ele
   const detailStatus = useCodeSessionStore((s) => s.detailStatus)
   const detailError = useCodeSessionStore((s) => s.detailError)
   const snapshot = useCodeSessionStore((s) => s)
+  const activeThread = useCodeSessionStore((s) => s.threads.find((thread) => thread.thread_id === threadId) ?? null)
 
   const groups = useMemo(() => groupByTurn(snapshot), [snapshot])
   const approvals = useMemo(() => openApprovals(snapshot), [snapshot])
   const userInputs = useMemo(() => openUserInputs(snapshot), [snapshot])
   const errors = useMemo(() => recentErrors(snapshot), [snapshot])
   const completions = useMemo(() => childCompletionNotices(snapshot), [snapshot])
+  const live = useMemo(() => hasLiveItems(snapshot), [snapshot])
   const { ref, atBottom, scrollToBottom } = useStickToBottom(`${items.length}:${completions.length}:${items.map((id) => itemsById[id]?.text?.length ?? 0).join(',')}`)
 
   const resolveApprovalLocally = useCodeSessionStore((s) => s.noteApprovalResolved)
@@ -93,6 +95,16 @@ export function ThreadStream({ threadId }: { threadId: string | null }): JSX.Ele
 
   return (
     <section className="ark-stream">
+      <header className="ark-threadfocus">
+        <div className="ark-threadfocus__identity">
+          <span className="ark-threadfocus__eyebrow">ACTIVE THREAD</span>
+          <h1 title={activeThread?.title ?? ''}>{activeThread?.title || '未命名会话'}</h1>
+        </div>
+        <div className="ark-threadfocus__metrics">
+          <span>{groups.length} 个回合</span>
+          <span className={live ? 'is-live' : ''}>{live ? '执行中' : '等待输入'}</span>
+        </div>
+      </header>
       <div className="ark-stream__scroll" ref={ref}>
         {detailStatus === 'loading' ? <p className="ark-stream__hint">正在载入会话…</p> : null}
         {detailStatus === 'error' ? (

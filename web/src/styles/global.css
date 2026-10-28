@@ -8,30 +8,31 @@
   color-scheme: dark;
 
   /* surfaces */
-  --ark-bg: #0e1116;
-  --ark-bg-raised: #151a21;
-  --ark-bg-inset: #0a0d12;
-  --ark-bg-hover: #1b2229;
-  --ark-border: #232b34;
-  --ark-border-strong: #303a46;
+  --ark-bg: #0b0e14;
+  --ark-bg-raised: #111722;
+  --ark-bg-inset: #0d121b;
+  --ark-bg-hover: #1a2331;
+  --ark-border: #263142;
+  --ark-border-strong: #39495e;
 
   /* text */
-  --ark-text: #d7dee7;
-  --ark-text-dim: #8d99a6;
-  --ark-text-faint: #667080;
+  --ark-text: #edf2f8;
+  --ark-text-dim: #a6b4c4;
+  --ark-text-faint: #748397;
 
   /* intent */
-  --ark-accent: #4b8ef7;
-  --ark-accent-dim: #2a5fa8;
-  --ark-ok: #3fb27f;
-  --ark-warn: #d0a44a;
-  --ark-error: #e0626b;
+  --ark-accent: #63a7ff;
+  --ark-accent-dim: #285f9f;
+  --ark-progress: #8c7cff;
+  --ark-ok: #5ac8a3;
+  --ark-warn: #e1ad57;
+  --ark-error: #ec7d88;
 
   /* type */
   --ark-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --ark-mono: 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
   --ark-size: 13px;
-  --ark-radius: 6px;
+  --ark-radius: 8px;
 
   /* layout */
   --ark-topbar: 40px;

@@ -50,9 +50,11 @@ export function WorkbenchLayout({ left, center, right, top }: WorkbenchLayoutPro
   const leftWidth = useCodeSessionStore((s) => s.leftWidth)
   const rightWidth = useCodeSessionStore((s) => s.rightWidth)
   const leftCollapsed = useCodeSessionStore((s) => s.leftCollapsed)
+  const rightCollapsed = useCodeSessionStore((s) => s.rightCollapsed)
   const setLeftWidth = useCodeSessionStore((s) => s.setLeftWidth)
   const setRightWidth = useCodeSessionStore((s) => s.setRightWidth)
   const toggleLeft = useCodeSessionStore((s) => s.toggleLeft)
+  const toggleRight = useCodeSessionStore((s) => s.toggleRight)
 
   return (
     <div className="ark-shell">
@@ -66,16 +68,21 @@ export function WorkbenchLayout({ left, center, right, top }: WorkbenchLayoutPro
         )}
 
         <div className="ark-col ark-col--center">
-          <div className="ark-col__tools">
-            <Button variant="ghost" size="sm" onClick={toggleLeft}>
-              {leftCollapsed ? '显示会话列表' : '隐藏会话列表'}
+          <div className="ark-workbench-tools" aria-label="布局控制">
+            <Button variant="ghost" size="sm" aria-pressed={!leftCollapsed} onClick={toggleLeft}>
+              {leftCollapsed ? '会话' : '收起会话'}
+            </Button>
+            <Button variant="ghost" size="sm" aria-pressed={!rightCollapsed} onClick={toggleRight}>
+              {rightCollapsed ? '上下文' : '收起上下文'}
             </Button>
           </div>
           {center}
         </div>
 
-        <Resizer side="right" width={rightWidth} setWidth={setRightWidth} />
-        <div className="ark-col ark-col--right">{right}</div>
+        {rightCollapsed ? null : <Resizer side="right" width={rightWidth} setWidth={setRightWidth} />}
+        <div className="ark-col ark-col--right" hidden={rightCollapsed}>
+          {right}
+        </div>
       </div>
     </div>
   )

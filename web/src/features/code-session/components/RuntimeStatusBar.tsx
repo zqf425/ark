@@ -27,15 +27,15 @@ export function RuntimeStatusBar(): JSX.Element {
   return (
     <header className="ark-statusbar">
       <div className="ark-statusbar__brand">
-        <span className="ark-statusbar__logo">ark</span>
-        <span className="ark-statusbar__mode">Code</span>
+        <span className="ark-statusbar__logo">ARK</span>
+        <span className="ark-statusbar__mode">AGENT CONSOLE</span>
       </div>
 
       <ViewSwitch />
 
       <div className="ark-statusbar__group">
         <span className={`ark-dot ark-dot--${online === 'online' ? 'ok' : online === 'offline' ? 'bad' : 'idle'}`} />
-        <span className="ark-statusbar__label">{ONLINE_LABEL[online]}</span>
+        <span className="ark-statusbar__label">运行时 {ONLINE_LABEL[online]}</span>
         <span className="ark-statusbar__sep">·</span>
         <span className="ark-statusbar__label">v{version}</span>
         <span className="ark-statusbar__sep">·</span>
