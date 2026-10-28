@@ -17,7 +17,7 @@ import { McpSection } from './McpSection'
 import { SkillsSection } from './SkillsSection'
 import { SETTINGS_SECTIONS, type SettingsSectionId } from './settings-navigation'
 import '../settings.css'
-import '../settings-console.css'
+import '../settings-agent.css'
 
 export function SettingsPage(): JSX.Element {
   const settings = useSettings()
@@ -69,7 +69,6 @@ export function SettingsPage(): JSX.Element {
     <div className="ark-settings" aria-label="设置">
       <aside className="ark-settings__rail" aria-label="设置分类">
         <div className="ark-settings__rail-head">
-          <span className="ark-settings__eyebrow">CONTROL PLANE</span>
           <strong>设置</strong>
           <p>配置本地运行时与外部能力。</p>
         </div>
@@ -92,7 +91,6 @@ export function SettingsPage(): JSX.Element {
       <main className="ark-settings__scroll">
         <div className="ark-settings__body">
           <header className="ark-settings__hero">
-            <span className="ark-settings__eyebrow">SETTINGS / {current?.id.toUpperCase()}</span>
             <h1>{current?.label}</h1>
             <p>{current?.detail}</p>
           </header>

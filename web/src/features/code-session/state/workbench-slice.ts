@@ -36,13 +36,18 @@ export const createWorkbenchSlice: StateCreator<WorkbenchSlice, [], [], Workbenc
   rightWidth: DEFAULT_RIGHT,
   leftWidth: DEFAULT_LEFT,
   leftCollapsed: false,
-  rightCollapsed: false,
+  // Conversation is the primary work surface. Context projections open only
+  // when the user asks for one, rather than consuming empty-state space.
+  rightCollapsed: true,
   selectedFilePath: null,
 
-  setActivePanel: (panel) => set({ activePanel: panel }),
+  setActivePanel: (panel) => set({ activePanel: panel, rightCollapsed: false }),
   setRightWidth: (width) => set({ rightWidth: clampSideWidth(width) }),
   setLeftWidth: (width) => set({ leftWidth: clampSideWidth(width) }),
   toggleLeft: () => set((state) => ({ leftCollapsed: !state.leftCollapsed })),
   toggleRight: () => set((state) => ({ rightCollapsed: !state.rightCollapsed })),
-  selectFile: (path) => set({ selectedFilePath: path, ...(path ? { activePanel: 'file' } : {}) })
+  selectFile: (path) => set({
+    selectedFilePath: path,
+    ...(path ? { activePanel: 'file', rightCollapsed: false } : {})
+  })
 })

@@ -49,14 +49,14 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
 
       <div className="ark-composer__box">
         <div className="ark-composer__lead">
-          <span>{canInterrupt ? '运行中 · 补充下一步指令' : '下一步'}</span>
-          <kbd>Enter</kbd>
+          <span>{canInterrupt ? '补充给正在执行的会话' : '描述本次会话要完成的工作'}</span>
+          <span className="ark-composer__keys"><kbd>Enter</kbd> 发送 <kbd>Shift + Enter</kbd> 换行</span>
         </div>
         <textarea
           ref={inputRef}
           className="ark-composer__input"
           rows={3}
-          placeholder={threadId ? (canInterrupt ? '向运行中的回合补充指令（Enter steer）' : '发送消息（Enter 发送，Shift+Enter 换行）') : '先新建或选择一个线程'}
+          placeholder={threadId ? (canInterrupt ? '向运行中的回合补充指令（Enter steer）' : '发送消息（Enter 发送，Shift+Enter 换行）') : '先新建或选择一个会话'}
           aria-label={canInterrupt ? '向运行中的回合补充指令' : '发送消息'}
           disabled={disabled}
           onChange={(event) => {

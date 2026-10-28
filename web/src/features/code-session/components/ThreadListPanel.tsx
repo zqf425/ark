@@ -117,11 +117,10 @@ export function ThreadListPanel(): JSX.Element {
     <aside className="ark-threadlist">
       <header className="ark-threadlist__head">
         <div>
-          <span className="ark-threadlist__eyebrow">会话</span>
-          <h1 className="ark-threadlist__title">任务历史</h1>
+          <h1 className="ark-threadlist__title">会话</h1>
         </div>
         <Button variant="primary" size="sm" disabled={busy} onClick={() => void create()}>
-          {busy ? '创建中…' : '新建会话'}
+          {busy ? '创建中…' : '新会话'}
         </Button>
       </header>
 

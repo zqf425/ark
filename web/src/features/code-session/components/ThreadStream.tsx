@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { EmptyState, ErrorBoundary } from '../../../shared/ui'
+import { Button, EmptyState, ErrorBoundary } from '../../../shared/ui'
 import type { ThreadItem } from '../../../shared/contracts'
 import { useCodeSessionStore } from '../state/store'
 import { childCompletionNotices, groupByTurn, hasLiveItems, openApprovals, openUserInputs, recentErrors } from '../state/selectors'
@@ -66,7 +66,13 @@ function useStickToBottom(dependency: unknown): {
   return { ref, atBottom: atBottomRef.current, scrollToBottom }
 }
 
-export function ThreadStream({ threadId }: { threadId: string | null }): JSX.Element {
+export function ThreadStream({
+  threadId,
+  onCreateThread
+}: {
+  threadId: string | null
+  onCreateThread?: () => Promise<unknown>
+}): JSX.Element {
   const items = useCodeSessionStore((s) => s.itemOrder)
   const itemsById = useCodeSessionStore((s) => s.itemsById)
   const detailStatus = useCodeSessionStore((s) => s.detailStatus)
@@ -88,7 +94,14 @@ export function ThreadStream({ threadId }: { threadId: string | null }): JSX.Ele
   if (!threadId) {
     return (
       <section className="ark-stream ark-stream--empty">
-        <EmptyState title="未选择线程" hint="在左侧新建线程后即可开始对话。" />
+        <div className="ark-stream__emptycall">
+          <EmptyState title="开始一个会话" hint="新建或选择一个会话，再描述希望 ark 完成的工作。" />
+          {onCreateThread ? (
+            <Button variant="primary" size="sm" onClick={() => void onCreateThread()}>
+              新建会话
+            </Button>
+          ) : null}
+        </div>
       </section>
     )
   }
@@ -97,12 +110,8 @@ export function ThreadStream({ threadId }: { threadId: string | null }): JSX.Ele
     <section className="ark-stream">
       <header className="ark-threadfocus">
         <div className="ark-threadfocus__identity">
-          <span className="ark-threadfocus__eyebrow">ACTIVE THREAD</span>
           <h1 title={activeThread?.title ?? ''}>{activeThread?.title || '未命名会话'}</h1>
-        </div>
-        <div className="ark-threadfocus__metrics">
-          <span>{groups.length} 个回合</span>
-          <span className={live ? 'is-live' : ''}>{live ? '执行中' : '等待输入'}</span>
+          <p aria-live="polite">{live ? '正在执行' : groups.length > 0 ? `${groups.length} 个回合` : '准备开始'}</p>
         </div>
       </header>
       <div className="ark-stream__scroll" ref={ref}>

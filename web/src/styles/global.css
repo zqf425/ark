@@ -8,36 +8,38 @@
   color-scheme: dark;
 
   /* surfaces */
-  --ark-bg: #0b0e14;
-  --ark-bg-raised: #111722;
-  --ark-bg-inset: #0d121b;
-  --ark-bg-hover: #1a2331;
-  --ark-border: #263142;
-  --ark-border-strong: #39495e;
+  --ark-bg: #17191d;
+  --ark-bg-raised: #202328;
+  --ark-bg-inset: #131519;
+  --ark-bg-hover: #2a2e34;
+  --ark-border: #32363d;
+  --ark-border-strong: #454a52;
 
   /* text */
-  --ark-text: #edf2f8;
-  --ark-text-dim: #a6b4c4;
-  --ark-text-faint: #748397;
+  --ark-text: #f1f1ec;
+  --ark-text-dim: #bac0c8;
+  --ark-text-faint: #8c939d;
 
   /* intent */
-  --ark-accent: #63a7ff;
-  --ark-accent-dim: #285f9f;
-  --ark-progress: #8c7cff;
-  --ark-ok: #5ac8a3;
-  --ark-warn: #e1ad57;
-  --ark-error: #ec7d88;
+  --ark-accent: #7cb4dd;
+  --ark-accent-dim: #416f91;
+  --ark-ok: #79b99a;
+  --ark-warn: #d7ab6b;
+  --ark-error: #d9868f;
+  --ark-selection: #31404f;
+  --ark-user-message: #26333e;
+  --ark-user-border: #3b5365;
 
   /* type */
   --ark-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --ark-mono: 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
   --ark-size: 13px;
-  --ark-radius: 8px;
+  --ark-radius: 6px;
 
   /* layout */
-  --ark-topbar: 40px;
-  --ark-left: 272px;
-  --ark-right: 400px;
+  --ark-topbar: 48px;
+  --ark-left: 252px;
+  --ark-right: 360px;
 }
 
 * {

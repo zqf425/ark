@@ -21,7 +21,7 @@ import { SettingsPage } from './features/settings/components/SettingsPage'
 export function App(): JSX.Element {
   const view = useViewStore((state) => state.view)
   const activeThreadId = useCodeSessionStore((s) => s.activeThreadId)
-  const { refresh } = useThreadList()
+  const { refresh, create } = useThreadList()
 
   // One bootstrap fetch. The stream hook below owns everything after that.
   useEffect(() => {
@@ -51,7 +51,7 @@ export function App(): JSX.Element {
       }
       center={
         <ErrorBoundary label="会话流崩溃">
-          <ThreadStream threadId={activeThreadId} />
+          <ThreadStream threadId={activeThreadId} onCreateThread={create} />
         </ErrorBoundary>
       }
       right={

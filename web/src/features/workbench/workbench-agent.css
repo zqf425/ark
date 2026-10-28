@@ -1,0 +1,142 @@
+/** Layout rules for the conversation-first workbench. */
+
+.ark-shell,
+.ark-shell .ark-cols,
+.ark-shell .ark-col--center {
+  background: var(--ark-bg);
+}
+
+.ark-shell .ark-cols {
+  position: relative;
+}
+
+.ark-shell .ark-col--left {
+  border-right-color: var(--ark-border);
+}
+
+.ark-shell .ark-col--right {
+  border-left-color: var(--ark-border);
+  background: var(--ark-bg-raised);
+}
+
+.ark-shell .ark-workbench-tools {
+  top: 13px;
+  right: 14px;
+  gap: 1px;
+  padding: 2px;
+  border-color: var(--ark-border);
+  border-radius: 5px;
+  background: var(--ark-bg-raised);
+}
+
+.ark-shell .ark-workbench-tools .ark-btn {
+  padding: 3px 6px;
+  color: var(--ark-text-faint);
+  font-size: 10px;
+}
+
+.ark-shell .ark-workbench-tools .ark-btn:hover {
+  background: var(--ark-bg-hover);
+  color: var(--ark-text);
+}
+
+.ark-shell .ark-viewswitch {
+  gap: 1px;
+  padding: 2px;
+  border: 1px solid var(--ark-border);
+  border-radius: 6px;
+  background: var(--ark-bg-inset);
+}
+
+.ark-shell .ark-viewswitch__btn {
+  border: 0;
+  border-radius: 4px;
+  color: var(--ark-text-faint);
+  padding: 3px 8px;
+}
+
+.ark-shell .ark-viewswitch__btn:hover,
+.ark-shell .ark-viewswitch__btn.is-active {
+  border-color: transparent;
+  background: var(--ark-bg-hover);
+  color: var(--ark-text);
+}
+
+.ark-shell .ark-resizer {
+  width: 4px;
+}
+
+.ark-shell .ark-panelslot {
+  background: var(--ark-bg-raised);
+}
+
+.ark-shell .ark-panelslot__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 0 11px 0 14px;
+  border-bottom: 1px solid var(--ark-border);
+}
+
+.ark-shell .ark-panelslot__head h2 {
+  margin: 0;
+  color: var(--ark-text);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.ark-shell .ark-panelslot__close {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ark-text-faint);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.ark-shell .ark-panelslot__close:hover {
+  background: var(--ark-bg-hover);
+  color: var(--ark-text);
+}
+
+.ark-shell .ark-panelslot .ark-tabs {
+  gap: 8px;
+  padding: 0 14px;
+  background: var(--ark-bg-raised);
+}
+
+.ark-shell .ark-panelslot .ark-tabs__tab {
+  padding: 8px 0;
+  font-size: 11px;
+}
+
+@media (max-width: 1024px) {
+  .ark-shell .ark-col--left,
+  .ark-shell .ark-col--left + .ark-resizer {
+    display: none;
+  }
+
+  .ark-shell .ark-col--center {
+    min-width: 0;
+  }
+
+  .ark-shell .ark-col--center + .ark-resizer {
+    display: none;
+  }
+
+  .ark-shell .ark-col--right:not([hidden]) {
+    position: absolute;
+    z-index: 6;
+    inset: 0 0 0 auto;
+    width: min(360px, 100%);
+    box-shadow: -12px 0 28px rgba(0, 0, 0, 0.28);
+  }
+
+  .ark-shell .ark-workbench-tools .ark-btn:first-child {
+    display: none;
+  }
+}

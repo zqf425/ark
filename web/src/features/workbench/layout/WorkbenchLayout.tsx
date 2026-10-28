@@ -43,8 +43,9 @@ export type WorkbenchLayoutProps = {
 }
 
 /**
- * Three-column workbench (design §7.10.2): thread rail, stream, panel slot.
- * Widths live in the workbench slice so layout survives thread switches.
+ * Conversation-first workbench: task rail and wide stream are the default;
+ * the context projection is a user-opened drawer. Widths stay local to the
+ * layout slice and never alter thread or runtime state.
  */
 export function WorkbenchLayout({ left, center, right, top }: WorkbenchLayoutProps): JSX.Element {
   const leftWidth = useCodeSessionStore((s) => s.leftWidth)
@@ -69,11 +70,11 @@ export function WorkbenchLayout({ left, center, right, top }: WorkbenchLayoutPro
 
         <div className="ark-col ark-col--center">
           <div className="ark-workbench-tools" aria-label="布局控制">
-            <Button variant="ghost" size="sm" aria-pressed={!leftCollapsed} onClick={toggleLeft}>
-              {leftCollapsed ? '会话' : '收起会话'}
+            <Button variant="ghost" size="sm" aria-pressed={!leftCollapsed} title={leftCollapsed ? '显示会话' : '隐藏会话'} onClick={toggleLeft}>
+              {leftCollapsed ? '会话' : '收起'}
             </Button>
-            <Button variant="ghost" size="sm" aria-pressed={!rightCollapsed} onClick={toggleRight}>
-              {rightCollapsed ? '上下文' : '收起上下文'}
+            <Button variant="ghost" size="sm" aria-pressed={!rightCollapsed} title={rightCollapsed ? '打开上下文' : '关闭上下文'} onClick={toggleRight}>
+              {rightCollapsed ? '上下文' : '关闭'}
             </Button>
           </div>
           {center}

@@ -1,0 +1,386 @@
+/**
+ * Conversation-first workspace styling. The runtime, plugin bus and wire
+ * contracts remain outside this layer; it owns only the Code feature's visual
+ * hierarchy.
+ */
+
+/* ---------- app chrome ---------- */
+
+.ark-statusbar {
+  height: var(--ark-topbar);
+  gap: 14px;
+  padding: 0 14px;
+  border-bottom-color: var(--ark-border);
+  background: var(--ark-bg-raised);
+}
+
+.ark-statusbar__brand {
+  gap: 0;
+}
+
+.ark-statusbar__logo {
+  color: var(--ark-text);
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+}
+
+.ark-statusbar__mode,
+.ark-statusbar__sep,
+.ark-statusbar__path,
+.ark-statusbar__error {
+  display: none;
+}
+
+.ark-statusbar__group {
+  gap: 5px;
+}
+
+.ark-statusbar__group:not(.ark-statusbar__group--end) {
+  margin-left: auto;
+}
+
+.ark-statusbar__label {
+  color: var(--ark-text-faint);
+  font-size: 11px;
+}
+
+.ark-statusbar__label.is-warning {
+  color: var(--ark-warn);
+}
+
+.ark-statusbar__error {
+  display: block;
+  max-width: 26ch;
+  overflow: hidden;
+  color: var(--ark-error);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-statusbar__group--end {
+  margin-left: 0;
+}
+
+.ark-statusbar__refresh {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ark-text-faint);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.ark-statusbar__refresh:hover {
+  background: var(--ark-bg-hover);
+  color: var(--ark-text);
+}
+
+.ark-viewswitch {
+  gap: 1px;
+  padding: 2px;
+  border: 1px solid var(--ark-border);
+  border-radius: 6px;
+  background: var(--ark-bg-inset);
+}
+
+.ark-viewswitch__btn {
+  border: 0;
+  border-radius: 4px;
+  color: var(--ark-text-faint);
+  padding: 3px 8px;
+}
+
+.ark-viewswitch__btn:hover,
+.ark-viewswitch__btn.is-active {
+  border-color: transparent;
+  background: var(--ark-bg-hover);
+  color: var(--ark-text);
+}
+
+/* ---------- task list ---------- */
+
+.ark-threadlist {
+  background: var(--ark-bg-raised);
+}
+
+.ark-threadlist__head {
+  padding: 16px 12px 11px;
+  border-bottom: 0;
+}
+
+.ark-threadlist__title {
+  margin: 0;
+  color: var(--ark-text);
+  font-size: 14px;
+  font-weight: 620;
+  text-transform: none;
+  letter-spacing: -0.01em;
+}
+
+.ark-threadlist__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 11px;
+  border-bottom-color: var(--ark-border);
+}
+
+.ark-threadlist__search {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 6px;
+  padding: 0 8px;
+  border-color: var(--ark-border);
+  border-radius: 5px;
+  background: var(--ark-bg-inset);
+}
+
+.ark-threadlist__search:focus-within {
+  border-color: var(--ark-accent-dim);
+}
+
+.ark-threadlist__search-icon {
+  font-size: 14px;
+}
+
+.ark-threadlist__search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ark-text);
+  padding: 7px 0;
+  font-size: 12px;
+}
+
+.ark-threadlist__search input::placeholder {
+  color: var(--ark-text-faint);
+}
+
+.ark-threadlist__scope {
+  display: flex;
+  gap: 12px;
+  border-bottom: 0;
+}
+
+.ark-threadlist__scope button {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--ark-text-faint);
+  cursor: pointer;
+  padding: 1px 0;
+  border-bottom: 0;
+  text-align: left;
+  font-size: 11px;
+}
+
+.ark-threadlist__scope button.is-active {
+  color: var(--ark-text);
+}
+
+.ark-threadlist__scope span {
+  color: var(--ark-text-faint);
+}
+
+.ark-threadlist__nav {
+  gap: 2px;
+  padding: 7px;
+}
+
+.ark-threadrow {
+  border: 0;
+  border-radius: 5px;
+}
+
+.ark-threadrow:hover,
+.ark-threadrow.is-active {
+  background: var(--ark-bg-hover);
+  box-shadow: none;
+}
+
+.ark-threadrow.is-active {
+  box-shadow: inset 2px 0 0 var(--ark-accent);
+  background: var(--ark-selection);
+}
+
+.ark-threadrow__select {
+  padding: 8px;
+}
+
+.ark-threadrow__title {
+  font-size: 12px;
+  font-weight: 520;
+}
+
+.ark-threadrow__meta {
+  font-family: var(--ark-font);
+  font-size: 10px;
+}
+
+.ark-threadlist__foot {
+  padding: 8px 12px;
+  border-top-color: var(--ark-border);
+  background: var(--ark-bg-raised);
+}
+
+/* ---------- session canvas ---------- */
+
+.ark-stream {
+  --ark-canvas-width: 880px;
+}
+
+.ark-threadfocus {
+  min-height: 58px;
+  padding: 13px max(22px, calc((100% - var(--ark-canvas-width)) / 2));
+  border-bottom-color: var(--ark-border);
+  background: var(--ark-bg);
+}
+
+.ark-threadfocus::after,
+.ark-threadfocus__eyebrow {
+  display: none;
+}
+
+.ark-threadfocus h1 {
+  max-width: min(62vw, 720px);
+  margin: 0;
+  color: var(--ark-text);
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -0.015em;
+}
+
+.ark-threadfocus p {
+  margin: 2px 0 0;
+  color: var(--ark-text-faint);
+  font-size: 11px;
+}
+
+.ark-stream__scroll {
+  gap: 15px;
+  padding: 24px max(22px, calc((100% - var(--ark-canvas-width)) / 2)) 16px;
+  background: var(--ark-bg);
+}
+
+.ark-turn {
+  gap: 10px;
+}
+
+.ark-msg {
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.ark-msg--assistant {
+  border-color: transparent;
+  background: transparent;
+  padding: 3px 0;
+}
+
+.ark-msg--user {
+  align-self: flex-end;
+  border-color: var(--ark-user-border);
+  background: var(--ark-user-message);
+  padding: 9px 11px;
+}
+
+.ark-msg__head {
+  color: var(--ark-text-faint);
+}
+
+.ark-msg__author {
+  color: var(--ark-text-dim);
+}
+
+.ark-msg__body--prose {
+  line-height: 1.68;
+}
+
+.ark-stream--empty .ark-empty {
+  gap: 9px;
+  padding: 52px 24px;
+}
+
+.ark-stream--empty .ark-empty__title {
+  font-size: 17px;
+}
+
+.ark-stream__emptycall {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ---------- composer ---------- */
+
+.ark-composer {
+  padding: 10px max(22px, calc((100% - var(--ark-canvas-width)) / 2)) 20px;
+  border-top-color: var(--ark-border);
+  background: var(--ark-bg);
+}
+
+.ark-composer__box {
+  border-color: var(--ark-border-strong);
+  border-radius: 8px;
+  background: var(--ark-bg-raised);
+  box-shadow: none;
+}
+
+.ark-composer__box:focus-within {
+  border-color: var(--ark-accent-dim);
+}
+
+.ark-composer__lead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px 1px;
+  color: var(--ark-text-faint);
+  font-size: 11px;
+}
+
+.ark-composer__keys {
+  color: var(--ark-text-faint);
+}
+
+.ark-composer__lead kbd {
+  border-color: var(--ark-border);
+  background: var(--ark-bg-inset);
+  color: var(--ark-text-faint);
+}
+
+.ark-composer__input {
+  min-height: 70px;
+  padding: 8px 11px;
+  background: transparent;
+  line-height: 1.6;
+}
+
+.ark-composer__actions {
+  padding: 7px 9px 9px;
+}
+
+.ark-composer__status {
+  color: var(--ark-text-faint);
+}
+
+@media (max-width: 800px) {
+  .ark-statusbar__group:not(.ark-statusbar__group--end) .ark-statusbar__label,
+  .ark-statusbar__group:not(.ark-statusbar__group--end) .ark-statusbar__error {
+    display: none;
+  }
+
+  .ark-threadfocus {
+    padding-right: 14px;
+  }
+
+}

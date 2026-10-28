@@ -1,0 +1,169 @@
+/** Product settings, deliberately quieter than the task workspace. */
+
+.ark-settings {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: row;
+  overflow: hidden;
+  background: var(--ark-bg);
+}
+
+.ark-settings__rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 224px;
+  padding: 24px 10px;
+  border-right-color: var(--ark-border);
+  background: var(--ark-bg-raised);
+}
+
+.ark-settings__rail-head {
+  padding: 0 10px 20px;
+}
+
+.ark-settings__rail-head strong {
+  color: var(--ark-text);
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+.ark-settings__rail-head p {
+  margin-top: 5px;
+  font-size: 11px;
+}
+
+.ark-settings__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ark-settings__nav button {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ark-text-dim);
+  cursor: pointer;
+  text-align: left;
+  border-radius: 5px;
+  padding: 8px 10px;
+}
+
+.ark-settings__nav button.is-active {
+  border-color: transparent;
+  box-shadow: inset 2px 0 0 var(--ark-accent);
+  background: var(--ark-selection);
+}
+
+.ark-settings__nav button:hover {
+  background: var(--ark-bg-hover);
+}
+
+.ark-settings__nav span {
+  font-size: 12px;
+  font-weight: 560;
+}
+
+.ark-settings__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 34px clamp(24px, 5vw, 72px) 54px;
+}
+
+.ark-settings__body {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 920px);
+  gap: 14px;
+}
+
+.ark-settings__hero {
+  padding: 2px 0 18px;
+  border-bottom-color: var(--ark-border);
+}
+
+.ark-settings__hero h1 {
+  font-size: 25px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+}
+
+.ark-settings__hero p {
+  margin-top: 4px;
+}
+
+.ark-settings__section {
+  border-color: var(--ark-border);
+  border-radius: 7px;
+  background: var(--ark-bg-raised);
+  box-shadow: none;
+  padding: 16px;
+}
+
+.ark-settings__head {
+  padding-bottom: 9px;
+  border-bottom-color: var(--ark-border);
+}
+
+.ark-settings__title {
+  font-size: 13px;
+}
+
+.ark-field__input,
+.ark-field__select,
+.ark-field__area {
+  border-color: var(--ark-border);
+  border-radius: 5px;
+  background: var(--ark-bg-inset);
+}
+
+.ark-card {
+  border-color: var(--ark-border);
+  border-radius: 6px;
+  background: var(--ark-bg-inset);
+}
+
+.ark-card--editing {
+  border-color: var(--ark-accent-dim);
+  box-shadow: none;
+}
+
+@media (max-width: 760px) {
+  .ark-settings {
+    flex-direction: column;
+  }
+
+  .ark-settings__rail {
+    width: 100%;
+    padding: 12px;
+    border-right: 0;
+    border-bottom-color: var(--ark-border);
+  }
+
+  .ark-settings__rail-head {
+    display: none;
+  }
+
+  .ark-settings__nav {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .ark-settings__nav button {
+    min-width: max-content;
+  }
+
+  .ark-settings__nav small {
+    display: none;
+  }
+
+  .ark-settings__scroll {
+    padding: 20px 16px 38px;
+  }
+}
