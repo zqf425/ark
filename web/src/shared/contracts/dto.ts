@@ -1,1 +1,1 @@
-export type { Usage, HealthResponse, RuntimeInfo, ThreadSummary, CreateThreadRequest, UpdateThreadRequest, ThreadDetail, TurnRequest, TurnSummary, UsageResponse } from '../../generated'
+export type { Usage, HealthResponse, RuntimeInfo, ThreadSummary, CreateThreadRequest, UpdateThreadRequest, ThreadDetail, ThreadRuntimeSnapshot, TurnRequest, TurnSummary, UsageResponse, WorkspaceDescriptor, WorkspaceView, SwitchWorkspaceRequest, WorkspaceDiffFile, WorkspaceDiff } from '../../generated'

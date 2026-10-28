@@ -5,6 +5,7 @@
 //! collaborator is a field of [`Wiring`], injected into the pieces that need it,
 //! and nothing downstream can reach for a different implementation.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use ark_agent::exec::journal::EventSinkWriter;
@@ -69,6 +70,13 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     // Real store: the session directory is the system of record.
     let store = Arc::new(FileSessionStore::open(StoreConfig::new(&args.data_dir))?);
     store.reconcile()?;
+    let interrupted = abort_interrupted_turns(store.as_ref()).await?;
+    if interrupted != 0 {
+        tracing::warn!(
+            turns = interrupted,
+            "aborted parent turns left open by a previous runtime"
+        );
+    }
     let store_port: Arc<dyn SessionStore> = store.clone();
     let sink: Arc<dyn EventSink> = store.clone();
 
@@ -76,13 +84,9 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     // must never get a laxer sandbox than the turn that spawned it.
     let policy: Arc<dyn SandboxPolicy> =
         Arc::new(BuiltinSandboxPolicy::new(Autonomy::WorkspaceWrite));
-    // Workspace roots are resolved per call from the live config snapshot, so a
-    // change made in Settings takes effect on the next tool call instead of
-    // requiring a restart (design §7.15: `default_workspace` is `Hot`).
-    let roots = Arc::new(WorkspaceRoots::new(
-        Arc::clone(&config),
-        args.workspace.clone(),
-    ));
+    // A workspace root is leased once per turn. Switching is handled through
+    // the workspace HTTP surface and never re-reads the Hot config mid-turn.
+    let roots = Arc::new(WorkspaceRoots::new(args.workspace.clone())?);
     let usage = Arc::new(UsageRecorder::new());
 
     // ---- platform services (design §7.5.4) ----
@@ -178,7 +182,10 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     let base = BaseServices::new()
         .with_providers(Arc::new(ProviderAdapter::new(Arc::clone(&providers))))
         .with_skills(Arc::new(SkillAdapter::new(Arc::clone(&skills))))
-        .with_workspace(Arc::new(WorkspaceAdapter::new(Arc::clone(&workspace))))
+        .with_workspace(Arc::new(WorkspaceAdapter::new(
+            Arc::clone(&workspace),
+            Arc::clone(&roots),
+        )))
         .with_mcp(Arc::new(McpServerAdapter::new(Arc::clone(&mcp))));
 
     let state = AppState::new(
@@ -313,6 +320,47 @@ async fn completion_inbox(
     Ok(CompletionInbox::from_events(&events))
 }
 
+/// Terminates parent turns whose process-owned reactor vanished on restart.
+///
+/// The event log is the sole durable source. A reactor, its cancellation token,
+/// steering queue and gate waiters do not survive a process boundary, so this
+/// intentionally does not recreate any of them or replay a tool/model call.
+async fn abort_interrupted_turns(store: &dyn SessionStore) -> Result<usize> {
+    let mut aborted = 0;
+    for thread in store.list_threads().await? {
+        let mut open = HashSet::new();
+        for event in store.replay_interaction_events(thread.thread_id).await? {
+            match event {
+                ark_contract::RuntimeEvent::TurnStarted { turn_id, .. } => {
+                    open.insert(turn_id);
+                }
+                ark_contract::RuntimeEvent::TurnCompleted { turn_id, .. }
+                | ark_contract::RuntimeEvent::TurnFailed { turn_id, .. }
+                | ark_contract::RuntimeEvent::TurnAborted { turn_id, .. } => {
+                    open.remove(&turn_id);
+                }
+                _ => {}
+            }
+        }
+        for turn_id in open {
+            store
+                .append_event(
+                    thread.thread_id,
+                    ark_contract::RuntimeEvent::TurnAborted {
+                        seq: 0,
+                        thread_id: thread.thread_id,
+                        turn_id,
+                        timestamp: chrono::Utc::now(),
+                        reason: "runtime restarted before turn could finish".to_string(),
+                    },
+                )
+                .await?;
+            aborted += 1;
+        }
+    }
+    Ok(aborted)
+}
+
 /// Persists the completion IDs delivered to a parent turn without changing its
 /// completed outcome when the acknowledgement write itself fails.
 async fn acknowledge_completion_inbox(
@@ -373,12 +421,16 @@ async fn finish_parent_turn(
 #[async_trait::async_trait]
 impl TurnRunner for AgentTurnRunner {
     async fn run_turn(&self, job: TurnJob) -> Result<TurnEnd> {
+        // Capture once before building either the prompt or tool adapter. This
+        // is the parent-turn lease: later workspace switches affect only a new
+        // turn.
+        let workspace = self.roots.lease();
         let inbox = completion_inbox(self.store.as_ref(), job.thread_id).await?;
         let events = TurnEvents::new(job.thread_id, job.turn_id);
         let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events));
         let tools: Arc<dyn AgentToolRunner> = Arc::new(ToolRunnerAdapter {
             inner: Arc::clone(&self.tools),
-            roots: Arc::clone(&self.roots),
+            workspace: workspace.canonical_root.clone(),
             thread_id: job.thread_id,
             turn_id: job.turn_id,
         });
@@ -389,7 +441,7 @@ impl TurnRunner for AgentTurnRunner {
         let resolution = self.skills.resolve_for_turn(&job.text);
         let mut seed_messages = vec![
             ModelMessage::system(SYSTEM_PROMPT),
-            ModelMessage::system(workspace_line(&self.roots.current())),
+            ModelMessage::system(workspace_line(&workspace.canonical_root)),
         ];
         for instruction in &resolution.instructions {
             seed_messages.push(ModelMessage::system(format!(
@@ -449,7 +501,7 @@ fn workspace_line(workspace: &std::path::Path) -> String {
 /// Adapter from `ark-tool`'s runner to `ark-agent`'s `ToolRunner` trait.
 struct ToolRunnerAdapter {
     inner: Arc<RegistryToolRunner>,
-    roots: Arc<WorkspaceRoots>,
+    workspace: std::path::PathBuf,
     thread_id: ThreadId,
     turn_id: TurnId,
 }
@@ -465,7 +517,7 @@ impl AgentToolRunner for ToolRunnerAdapter {
             Some(decision) => {
                 self.inner
                     .run_decided(
-                        self.roots.current(),
+                        self.workspace.clone(),
                         self.thread_id,
                         self.turn_id,
                         &call.tool,
@@ -477,7 +529,7 @@ impl AgentToolRunner for ToolRunnerAdapter {
             None => {
                 self.inner
                     .run_in(
-                        self.roots.current(),
+                        self.workspace.clone(),
                         self.thread_id,
                         self.turn_id,
                         &call.tool,
@@ -651,5 +703,35 @@ mod tests {
         let limits = AgentTurnRunner::limits_for_turn(&config, Some(&provider));
 
         assert_eq!(limits.context_limit_tokens, 27_904);
+    }
+
+    #[tokio::test]
+    async fn startup_aborts_a_parent_turn_left_open_by_a_previous_process() {
+        let data_dir = TestDataDir::new();
+        let store = FileSessionStore::open(StoreConfig::new(&data_dir.0)).unwrap();
+        let thread = store.create_thread("parent").await.unwrap().thread_id;
+        let turn = TurnId::new();
+        store
+            .append_event(
+                thread,
+                RuntimeEvent::TurnStarted {
+                    seq: 0,
+                    thread_id: thread,
+                    turn_id: turn,
+                    timestamp: Utc::now(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(abort_interrupted_turns(&store).await.unwrap(), 1);
+        assert_eq!(abort_interrupted_turns(&store).await.unwrap(), 0);
+
+        let events = store.replay_interaction_events(thread).await.unwrap();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            RuntimeEvent::TurnAborted { turn_id, reason, .. }
+                if *turn_id == turn && reason == "runtime restarted before turn could finish"
+        )));
     }
 }

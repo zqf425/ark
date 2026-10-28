@@ -15,6 +15,8 @@
   completion 查询投影，不能全量回放普通会话事件。
 - `InteractiveGates` 只做 HTTP 决议与 reactor waiter 的一次性 rendezvous；resolved 事件仍由 reactor 在
   实际消费回复后写入，取消时 Drop 守卫必须移除 waiter。
+- `GET /v1/threads/{id}` 把 active `TurnRegistry` entry、interaction 窄事件投影和 live waiter id 三者取交集
+  写入 `ThreadDetail.runtime`；历史 gate 或已移除 waiter 不得出现在可操作快照中。
 - workbench 的 Plan、Changes、File、Terminal 投影均在 `service/workbench.rs`，handler 只读取权威事件并
   调用该纯函数；File 不直接访问磁盘，而是返回已持久化的 `read` 工具输出。
 - provider model catalog 路由只转发 `ProviderService::models`，不读取、记录或回显 api key/header；具体
@@ -27,3 +29,7 @@
 
 当前路由以 `src/api/routes.rs` 为准。新增或修改路由必须同步更新 wire DTO、接口测试、渲染层 client
 和对应需求设计；不在本文维护第二份易漂移的完整路由表。
+
+工作区路由只经 `WorkspaceService` 读取 active view、执行 switch 和取得 diff。切换时将 parent
+`TurnRegistry` 与 active child 数相加；非零即返回 `Conflict`/409，不能隐式取消。diff 响应带
+generation，客户端必须丢弃 generation 已变的旧响应。

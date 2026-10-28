@@ -17,7 +17,7 @@ use ark_contract::{
     McpServerEntry, McpServerListResponse, McpServerTestResponse, ProviderEntry,
     ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SkillTurnResolution,
-    ThreadSkillsResponse, WorkspaceStatus,
+    ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
 };
 use ark_ports::{
     McpServerService, ModelEndpoint, ProviderService, SkillService, Tool, WorkspaceService,
@@ -122,11 +122,15 @@ impl SkillService for SkillAdapter {
 /// Forwards to `ark-workspace::WorkspaceInspector`.
 pub struct WorkspaceAdapter {
     inner: Arc<ark_workspace::WorkspaceInspector>,
+    roots: Arc<crate::workspace::WorkspaceRoots>,
 }
 
 impl WorkspaceAdapter {
-    pub fn new(inner: Arc<ark_workspace::WorkspaceInspector>) -> Self {
-        Self { inner }
+    pub fn new(
+        inner: Arc<ark_workspace::WorkspaceInspector>,
+        roots: Arc<crate::workspace::WorkspaceRoots>,
+    ) -> Self {
+        Self { inner, roots }
     }
 }
 
@@ -137,6 +141,20 @@ impl WorkspaceService for WorkspaceAdapter {
 
     fn status(&self, path: &str) -> WorkspaceStatus {
         self.inner.status(path)
+    }
+
+    fn view(&self) -> WorkspaceView {
+        self.roots.view()
+    }
+
+    fn switch(&self, path: &str, active_runs: usize) -> Result<WorkspaceView> {
+        let validated = self.inner.validate(path)?;
+        self.roots
+            .switch(&validated.display().to_string(), active_runs)
+    }
+
+    fn diff(&self) -> Result<WorkspaceDiff> {
+        self.inner.diff(&self.roots.lease().canonical_root)
     }
 }
 

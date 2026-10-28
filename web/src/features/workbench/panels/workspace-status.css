@@ -33,3 +33,49 @@
 .ark-workspace-status--ok .ark-workspace-status__detail { color: var(--ark-ok); }
 .ark-workspace-status--warn .ark-workspace-status__detail { color: var(--ark-warn); }
 .ark-workspace-status--error .ark-workspace-status__detail { color: var(--ark-error); }
+
+.ark-workspace-switch,
+.ark-workspace-diff {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ark-border);
+}
+
+.ark-workspace-switch > label,
+.ark-workspace-diff__summary,
+.ark-workspace-diff__group h3 {
+  margin: 0 0 6px;
+  color: var(--ark-text-dim);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ark-workspace-switch__controls {
+  display: flex;
+  gap: 6px;
+}
+
+.ark-workspace-switch__controls input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--ark-border);
+  border-radius: 4px;
+  background: var(--ark-bg-inset);
+  color: var(--ark-text);
+  font: 11px var(--ark-mono);
+  padding: 5px 6px;
+}
+
+.ark-workspace-diff__group {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.ark-workspace-diff__group code {
+  overflow: hidden;
+  color: var(--ark-text-faint);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

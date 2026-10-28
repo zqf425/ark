@@ -13,6 +13,8 @@ skill 视图。所有 GUI 字段使用 camelCase；既有查询参数保持既�
 `child_completion_acknowledged` 确认已消费的通知；确认失败保留至少一次重投递语义。
 `ThreadDetail.child_completions` 是 `child_completed` 的渲染投影，用于页面重新打开时恢复摘要卡片；它
 不取代事件日志，也不包含完整 child 转录。
+`ThreadDetail.runtime` 是同一存活 `arkd` 进程内的短暂控制快照：包含 active turn 及待处理 gate 的
+最小展示字段。它以 serde default 保持旧 detail JSON 可读，绝不用于重建重启后的 waiter。
 
 ## 类型生成
 
@@ -25,3 +27,7 @@ skill 视图。所有 GUI 字段使用 camelCase；既有查询参数保持既�
 
 错误码的通用定义当前位于 `ark-common::ArkErrorCode`，而非本 crate；这是当前实现的明确例外。
 若未来迁移错误码，必须一次性更新 HTTP、SSE、MCP 和生成的 TypeScript，不能保留双源。
+
+工作区 wire 包含 `WorkspaceView`、`SwitchWorkspaceRequest` 和 `WorkspaceDiff`。后者独立于线程
+Changes 投影，明确提供 staged/unstaged/untracked、rename、二进制、patch 上限和 truncation；所有
+generation 均以 JSON number 输出。

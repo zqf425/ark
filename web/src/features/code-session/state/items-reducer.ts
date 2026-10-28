@@ -5,7 +5,7 @@
  * here is bookkeeping the server cannot do for us: replacing snapshots, appending
  * deltas, tracking `seq`, and recording gate requests that must be answered.
  */
-import type { ItemKind, RuntimeEvent, ThreadItem, TurnState } from '../../../shared/contracts'
+import type { ItemKind, RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot, TurnState } from '../../../shared/contracts'
 import type { ChildCompletionNotice, ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
 
 export function emptyItemsState(): ItemsSnapshot {
@@ -18,7 +18,8 @@ export function emptyItemsState(): ItemsSnapshot {
     errors: [],
     approvals: {},
     userInputs: {},
-    childCompletions: {}
+    childCompletions: {},
+    childRunRevision: 0
   }
 }
 
@@ -41,7 +42,8 @@ function clone(state: ItemsSnapshot): ItemsSnapshot {
     errors: [...state.errors],
     approvals: { ...state.approvals },
     userInputs: { ...state.userInputs },
-    childCompletions: { ...state.childCompletions }
+    childCompletions: { ...state.childCompletions },
+    childRunRevision: state.childRunRevision
   }
 }
 
@@ -122,12 +124,26 @@ function recordChildCompletion(next: ItemsSnapshot, notice: ChildCompletionNotic
 export function seedFromItems(
   items: ThreadItem[],
   lastSeq: number,
-  childCompletions: ChildCompletionNotice[]
+  childCompletions: ChildCompletionNotice[],
+  runtime: ThreadRuntimeSnapshot
 ): ItemsSnapshot {
   const next = emptyItemsState()
   next.lastSeq = lastSeq
   for (const item of items) upsertItem(next, item)
   for (const notice of childCompletions) recordChildCompletion(next, notice)
+  if (runtime.active_turn) {
+    next.activeTurnId = runtime.active_turn.turn_id
+    // An active registry entry can only be running or aborting. Keep an
+    // unknown future wire string actionable as running rather than inventing a
+    // terminal state in the browser.
+    next.turnState[runtime.active_turn.turn_id] = runtime.active_turn.state === 'aborting' ? 'aborting' : 'running'
+  }
+  for (const approval of runtime.pending_approvals) {
+    next.approvals[approval.approval_id] = { ...approval, status: 'pending' }
+  }
+  for (const request of runtime.pending_user_inputs) {
+    next.userInputs[request.request_id] = { ...request, status: 'pending' }
+  }
   return next
 }
 
@@ -249,8 +265,13 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
         seq: event.seq
       }
       recordChildCompletion(next, notice)
+      next.childRunRevision += 1
       return next
     }
+
+    case 'child_activity':
+      next.childRunRevision += 1
+      return next
 
     default:
       return next

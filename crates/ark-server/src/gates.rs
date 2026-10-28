@@ -59,6 +59,20 @@ impl InteractiveGates {
     fn pending_approvals(&self) -> usize {
         lock(&self.approvals).len()
     }
+
+    /// IDs whose one-shot approval receivers are still owned by this process.
+    pub fn pending_approval_ids(&self) -> Vec<String> {
+        let mut ids: Vec<_> = lock(&self.approvals).keys().cloned().collect();
+        ids.sort();
+        ids
+    }
+
+    /// IDs whose one-shot input receivers are still owned by this process.
+    pub fn pending_user_input_ids(&self) -> Vec<String> {
+        let mut ids: Vec<_> = lock(&self.inputs).keys().cloned().collect();
+        ids.sort();
+        ids
+    }
 }
 
 fn lock<T>(value: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -169,5 +183,23 @@ mod tests {
         assert!(waiter.await.unwrap_err().is_cancelled());
         assert_eq!(gates.pending_approvals(), 0);
         assert!(!gates.resolve_approval("approval-cancel", true));
+    }
+
+    #[tokio::test]
+    async fn live_snapshot_exposes_a_waiting_approval() {
+        let gates = std::sync::Arc::new(InteractiveGates::new());
+        let waiting = std::sync::Arc::clone(&gates);
+        let waiter = tokio::spawn(async move {
+            waiting
+                .request_approval(ark_agent::ApprovalRequest::new(
+                    "approval-live",
+                    ark_agent::ToolCallRequest::new("call-1", "bash", serde_json::json!({})),
+                    "run command",
+                ))
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(gates.pending_approval_ids(), vec!["approval-live"]);
+        waiter.abort();
     }
 }

@@ -61,7 +61,10 @@ pub fn run_git(cwd: &Path, args: &[&str]) -> Option<GitOutput> {
         .stderr(Stdio::piped())
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("GIT_PAGER", "cat");
+        .env("GIT_PAGER", "cat")
+        .env("GIT_EXTERNAL_DIFF", "")
+        .env("GIT_DIFF_OPTS", "--no-ext-diff --no-textconv --no-color")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

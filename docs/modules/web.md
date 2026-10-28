@@ -15,8 +15,15 @@
   父线程状态展示，不能在 web 侧重建或改写模型上下文。
 - `child_completions` 详情与 reducer 内存均限制为最新 50 条；完成、失败和中止状态必须本地化为用户文案，
   不直接显示内部枚举值。
+- 子代理监督只由 `child_activity` 与 `child_completed` 驱动刷新，不能因文本 token delta 重复请求
+  child-runs；排队与运行同样必须显示为用户文案。已决审批和用户输入在当前页面会话中保留为历史
+  卡片。刷新后的待处理 gate 只可来自服务端的 runtime 快照，web 不得从历史 item 猜测仍可提交的 gate id。
+- detail 返回 `runtime` 时，web 在以 detail watermark 建立 SSE 前将 active turn 和其中的待处理 gate seed
+  到本地状态；SSE terminal/resolved 事件仍是后续状态的权威更新。
 - Code 右侧的 Plan、Changes、File、Terminal 均调用服务端投影；File 仅预览本线程已成功 `read` 的工具
   输出，浏览器不得直接读取工作区。子代理控制请求始终带父线程 query，不能只凭 child id 操作。
+- Changes 同时展示活动工作区的服务端受限 Git 投影（暂存、未暂存、未跟踪）；切换请求仅提交路径给
+  `arkd`，运行中存在父回合或子代理时服务端拒绝切换。浏览器不读取目录、Git 或未跟踪文件内容。
 - 设置页的 tuning、provider 与 MCP 都使用生成契约；API key、MCP env/header 值只写不回读，编辑时的空
   secret 字段表示保留，不表示删除。
 - 新增/编辑 provider 可显式查询模型目录，在用户选择后才把远端明确声明的 context window 与识图能力写入

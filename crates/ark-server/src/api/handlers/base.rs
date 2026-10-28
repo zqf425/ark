@@ -12,8 +12,8 @@ use serde::Deserialize;
 use ark_contract::{
     McpServerEntry, McpServerListResponse, McpServerTestResponse, ProviderEntry,
     ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
-    ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, ThreadSkillsResponse,
-    WorkspaceStatus,
+    ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SwitchWorkspaceRequest,
+    ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
 };
 
 use crate::api::error::ApiError;
@@ -205,6 +205,50 @@ pub async fn workspace_validate(
         "ok": true,
         "path": resolved.to_string_lossy(),
     })))
+}
+
+/// `GET /v1/workspace`.
+pub async fn workspace_view(
+    State(state): State<AppState>,
+) -> Result<Json<WorkspaceView>, ApiError> {
+    let service = state
+        .base
+        .workspace
+        .as_ref()
+        .ok_or_else(|| missing("workspace"))?;
+    Ok(Json(service.view()))
+}
+
+/// `POST /v1/workspace/switch`.
+///
+/// The active count includes both parent turns and delegated child runs. A busy
+/// runtime gets a structured 409; no task is cancelled as a side effect.
+pub async fn workspace_switch(
+    State(state): State<AppState>,
+    Json(body): Json<SwitchWorkspaceRequest>,
+) -> Result<Json<WorkspaceView>, ApiError> {
+    let service = state
+        .base
+        .workspace
+        .as_ref()
+        .ok_or_else(|| missing("workspace"))?;
+    let _workspace_guard = state.workspace_gate.lock().await;
+    let active = state.turns.active() + state.active_children();
+    Ok(Json(service.switch(&body.path, active)?))
+}
+
+/// `GET /v1/workspace/diff` for the active canonical root only.
+pub async fn workspace_diff(
+    State(state): State<AppState>,
+) -> Result<Json<WorkspaceDiff>, ApiError> {
+    let service = state
+        .base
+        .workspace
+        .as_ref()
+        .ok_or_else(|| missing("workspace"))?;
+    let mut diff = service.diff()?;
+    diff.generation = service.view().generation;
+    Ok(Json(diff))
 }
 
 // ---------------------------------------------------------------------------

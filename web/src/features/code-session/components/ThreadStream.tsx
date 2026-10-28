@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { Button, EmptyState, ErrorBoundary } from '../../../shared/ui'
 import type { ThreadItem } from '../../../shared/contracts'
 import { useCodeSessionStore } from '../state/store'
-import { childCompletionNotices, groupByTurn, hasLiveItems, openApprovals, openUserInputs, recentErrors } from '../state/selectors'
+import { approvalCards, childCompletionNotices, groupByTurn, hasLiveItems, recentErrors, userInputCards } from '../state/selectors'
 import { UserBubble, AssistantBubble, ReasoningBlock } from './MessageBubble'
 import { ToolCard } from './ToolCard'
 import { ChildCompletionCard, ErrorRow, NoticeRow, ToolResultRow } from './ErrorRow'
@@ -81,8 +81,8 @@ export function ThreadStream({
   const activeThread = useCodeSessionStore((s) => s.threads.find((thread) => thread.thread_id === threadId) ?? null)
 
   const groups = useMemo(() => groupByTurn(snapshot), [snapshot])
-  const approvals = useMemo(() => openApprovals(snapshot), [snapshot])
-  const userInputs = useMemo(() => openUserInputs(snapshot), [snapshot])
+  const approvals = useMemo(() => approvalCards(snapshot), [snapshot])
+  const userInputs = useMemo(() => userInputCards(snapshot), [snapshot])
   const errors = useMemo(() => recentErrors(snapshot), [snapshot])
   const completions = useMemo(() => childCompletionNotices(snapshot), [snapshot])
   const live = useMemo(() => hasLiveItems(snapshot), [snapshot])

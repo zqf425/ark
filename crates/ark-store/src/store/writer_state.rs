@@ -172,6 +172,27 @@ impl WriterState {
             .collect()
     }
 
+    /// Turn and interactive-gate lifecycle entries, in durable log order.
+    pub fn interaction_events(&self) -> Vec<RuntimeEvent> {
+        self.events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    RuntimeEvent::TurnStarted { .. }
+                        | RuntimeEvent::TurnCompleted { .. }
+                        | RuntimeEvent::TurnFailed { .. }
+                        | RuntimeEvent::TurnAborted { .. }
+                        | RuntimeEvent::ApprovalRequested { .. }
+                        | RuntimeEvent::ApprovalResolved { .. }
+                        | RuntimeEvent::UserInputRequested { .. }
+                        | RuntimeEvent::UserInputResolved { .. }
+                )
+            })
+            .cloned()
+            .collect()
+    }
+
     /// Fold the oldest events into a declared hole, keeping `keep_last` recent.
     ///
     /// Returns the last folded `seq`, i.e. where the hole ends.
@@ -403,6 +424,47 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], RuntimeEvent::ChildCompleted { .. }));
+    }
+
+    #[test]
+    fn interaction_query_excludes_transcript_payloads() {
+        let dir = TempDir::new("interaction-query");
+        let thread = ThreadId::new();
+        let turn = ark_common::TurnId::new();
+        let mut state = state(&dir, thread);
+        state.append(event_at(thread, 1)).unwrap();
+        state
+            .append(RuntimeEvent::TurnStarted {
+                seq: 0,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: Utc::now(),
+            })
+            .unwrap();
+        state
+            .append(RuntimeEvent::ApprovalRequested {
+                seq: 0,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: Utc::now(),
+                approval_id: "approval-1".into(),
+                tool: "bash".into(),
+                summary: "run command".into(),
+            })
+            .unwrap();
+
+        let events = state.interaction_events();
+
+        assert_eq!(events.len(), 2);
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::TurnStarted { .. })));
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::ApprovalRequested { .. })));
+        assert!(events
+            .iter()
+            .all(|event| !matches!(event, RuntimeEvent::Error { .. })));
     }
 
     #[test]

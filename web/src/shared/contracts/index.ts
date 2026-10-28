@@ -6,6 +6,7 @@ export type {
   ChildCompletionNotice,
   ChildRunActionResult,
   ChildRunListResponse,
+  ChildRunSummary,
   ConfigPatch,
   CreateThreadRequest,
   EventKind,
@@ -31,6 +32,8 @@ export type {
   ProviderTestResponse,
   ProviderView,
   PlanView,
+  PendingApprovalView,
+  PendingUserInputView,
   ResolveApprovalRequest,
   ResolveUserInputRequest,
   RuntimeConfigView,
@@ -42,6 +45,7 @@ export type {
   SubagentSettings,
   TuningSettings,
   ThreadDetail,
+  ThreadRuntimeSnapshot,
   ThreadId,
   ThreadItem,
   ThreadSummary,
@@ -59,6 +63,11 @@ export type {
   UsageResponse,
   WorkspaceChange,
   WorkspaceChangesResponse,
+  WorkspaceDescriptor,
+  WorkspaceView,
+  SwitchWorkspaceRequest,
+  WorkspaceDiffFile,
+  WorkspaceDiff,
   WorkspaceStatus
 } from '../../generated'
 export type {

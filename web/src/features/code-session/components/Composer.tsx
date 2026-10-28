@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import { Button } from '../../../shared/ui'
 import { useCodeSessionStore } from '../state/store'
 import { useTurn } from '../hooks/use-turn'
+import { canEditComposer, canSendToThread } from './composer-availability'
 
 const MAX_ROWS = 8
 
@@ -19,12 +20,14 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const { send, steer, interrupt, canInterrupt } = useTurn(threadId)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const disabled = !threadId || draft
+  const inputDisabled = !canEditComposer(threadId, draft)
+  const sendDisabled = !canSendToThread(threadId, draft, streamStatus)
   const notOpen = streamStatus !== 'open'
 
   const submit = async (): Promise<void> => {
     const node = inputRef.current
     if (!node) return
+    if (!canSendToThread(threadId, draft, streamStatus)) return
     const text = node.value
     if (!text.trim()) return
     const ok = canInterrupt ? await steer(text) : await send(text)
@@ -58,7 +61,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
           rows={3}
           placeholder={threadId ? (canInterrupt ? '向运行中的回合补充指令（Enter steer）' : '发送消息（Enter 发送，Shift+Enter 换行）') : '先新建或选择一个会话'}
           aria-label={canInterrupt ? '向运行中的回合补充指令' : '发送消息'}
-          disabled={disabled}
+          disabled={inputDisabled}
           onChange={(event) => {
             const node = event.currentTarget
             node.style.height = 'auto'
@@ -80,7 +83,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
               中断
             </Button>
           ) : null}
-          <Button variant="primary" size="sm" disabled={disabled} onClick={() => void submit()}>
+          <Button variant="primary" size="sm" disabled={sendDisabled} onClick={() => void submit()}>
             {draft ? '提交中…' : canInterrupt ? 'Steer' : '发送'}
           </Button>
         </div>

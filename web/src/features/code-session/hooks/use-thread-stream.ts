@@ -46,7 +46,7 @@ export function useThreadStream(threadId: ThreadId | null): void {
         const detail = await getThread(threadId, controller.signal)
         if (cancelled) return
         const watermark = detail.summary.last_seq ?? 0
-        seedItems(detail.items, watermark, detail.child_completions)
+        seedItems(detail.items, watermark, detail.child_completions, detail.runtime)
 
         await subscribeThreadEvents({
           threadId,

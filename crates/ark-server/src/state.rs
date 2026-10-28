@@ -17,7 +17,7 @@ use ark_contract::{RuntimeEvent, TurnSummary, UsageResponse};
 use ark_obs::UsageRecorder;
 use ark_ports::{BaseServices, SessionStore, SubagentRegistry, SubagentRunner, ToolRegistryPort};
 use chrono::{DateTime, Utc};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Mutex as AsyncMutex};
 
 use crate::gates::InteractiveGates;
 
@@ -239,6 +239,10 @@ pub struct AppState {
     /// Held as port traits so this crate never depends on the concrete stores;
     /// a missing service makes its routes answer a structured "unavailable".
     pub base: BaseServices,
+    /// Serializes a workspace switch with parent-turn registration. A lease is
+    /// captured immediately after registration, so neither operation can slip
+    /// through the other's zero-active check.
+    pub workspace_gate: Arc<AsyncMutex<()>>,
     shutdown: Arc<broadcast::Sender<&'static str>>,
     turns_completed: Arc<AtomicU64>,
 }
@@ -281,6 +285,7 @@ impl AppState {
             subagents: SubagentServices::default(),
             auth_token: None,
             base: BaseServices::default(),
+            workspace_gate: Arc::new(AsyncMutex::new(())),
             shutdown: Arc::new(shutdown),
             turns_completed: Arc::new(AtomicU64::new(0)),
         }

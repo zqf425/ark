@@ -40,6 +40,9 @@ data/threads/<thread>/
 事件历史。压缩的截断点不能晚于最早未确认 `child_completed`，并须保留仍在 retained suffix 中的重复完成
 事件所依赖的确认记录，防止折叠掉仍须至少一次投递的权威记录或让已确认通知重新投递。
 
+线程 detail 的交互恢复也经 writer actor 的窄查询，只读取 turn 与 approval/user-input 生命周期事件；它是
+渲染候选而非可操作性真源，不能据此重建 oneshot waiter。
+
 ## 索引现状
 
 当前 v1 使用内存索引加原子 `data/index.json` 快照，并由单一 `IndexProjector` 维护

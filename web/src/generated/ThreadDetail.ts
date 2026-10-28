@@ -2,9 +2,10 @@
 import type { ChildCompletionNotice } from "./ChildCompletionNotice";
 import type { ChildId } from "./ChildId";
 import type { ThreadItem } from "./ThreadItem";
+import type { ThreadRuntimeSnapshot } from "./ThreadRuntimeSnapshot";
 import type { ThreadSummary } from "./ThreadSummary";
 
 /**
  * `GET /v1/threads/{id}` — metadata, items and durable child terminal summaries.
  */
-export type ThreadDetail = { summary: ThreadSummary, items: Array<ThreadItem>, child_ids: Array<ChildId>, child_completions: Array<ChildCompletionNotice>, };
+export type ThreadDetail = { summary: ThreadSummary, items: Array<ThreadItem>, child_ids: Array<ChildId>, child_completions: Array<ChildCompletionNotice>, runtime: ThreadRuntimeSnapshot, };

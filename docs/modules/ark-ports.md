@@ -15,6 +15,8 @@
 - `SessionStore::subscribe` 返回的 `SubscribeTicket` 必须保证 backlog、水位和 live 通道来自同一序列化临界区。
 - `SessionStore::replay_child_completion_events` 只返回 `child_completed` 与
   `child_completion_acknowledged`，供收件箱和线程详情投影使用；不得为此克隆完整转录事件历史。
+- `SessionStore::replay_interaction_events` 只返回 turn 起止与 approval/user-input 生命周期，供 detail 恢复
+  使用；是否仍可操作必须再由进程内 `InteractiveGates` waiter 快照判断。
 - 插件只能经 `HttpCapability`、`McpCapability` 和 `UiCapability` 与基础设施或其它插件交互。
 
 ## 变更规则

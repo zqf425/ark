@@ -55,6 +55,8 @@ export type ItemsSnapshot = {
   approvals: Record<string, PendingApproval>
   userInputs: Record<string, PendingUserInput>
   childCompletions: Record<string, ChildCompletionNotice>
+  /** Advances only for child lifecycle events, not every streamed token. */
+  childRunRevision: number
 }
 
 export type ThreadListSnapshot = {

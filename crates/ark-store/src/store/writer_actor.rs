@@ -36,6 +36,9 @@ pub enum WriterCmd {
     ChildCompletionEvents {
         reply: oneshot::Sender<Vec<RuntimeEvent>>,
     },
+    InteractionEvents {
+        reply: oneshot::Sender<Vec<RuntimeEvent>>,
+    },
     Events {
         reply: oneshot::Sender<Vec<RuntimeEvent>>,
     },
@@ -106,6 +109,13 @@ impl WriterHandle {
         rx.await.map_err(|_| self.closed())
     }
 
+    /// Reads only turn and interactive-gate lifecycle records from this writer.
+    pub async fn interaction_events(&self) -> Result<Vec<RuntimeEvent>> {
+        let (reply, rx) = oneshot::channel();
+        self.send(WriterCmd::InteractionEvents { reply })?;
+        rx.await.map_err(|_| self.closed())
+    }
+
     pub async fn events(&self) -> Result<Vec<RuntimeEvent>> {
         let (reply, rx) = oneshot::channel();
         self.send(WriterCmd::Events { reply })?;
@@ -163,6 +173,9 @@ async fn run(mut state: WriterState, mut rx: mpsc::Receiver<WriterCmd>) {
             }
             WriterCmd::ChildCompletionEvents { reply } => {
                 let _ = reply.send(state.child_completion_events());
+            }
+            WriterCmd::InteractionEvents { reply } => {
+                let _ = reply.send(state.interaction_events());
             }
             WriterCmd::Events { reply } => {
                 let _ = reply.send(state.events().to_vec());

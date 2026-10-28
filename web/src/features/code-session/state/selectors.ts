@@ -52,16 +52,15 @@ export function orderedItems(snapshot: ItemsSnapshot): ThreadItem[] {
   return rows
 }
 
-/** Only `pending` gates need user action; resolved ones stay as history. */
-export function openApprovals(snapshot: ItemsSnapshot): PendingApproval[] {
+/** Both pending and resolved approvals stay visible for the current session. */
+export function approvalCards(snapshot: ItemsSnapshot): PendingApproval[] {
   return Object.values(snapshot.approvals)
-    .filter((row) => row.status === 'pending')
     .sort((a, b) => Date.parse(a.requested_at) - Date.parse(b.requested_at))
 }
 
-export function openUserInputs(snapshot: ItemsSnapshot): PendingUserInput[] {
+/** Both pending and answered prompts stay visible for the current session. */
+export function userInputCards(snapshot: ItemsSnapshot): PendingUserInput[] {
   return Object.values(snapshot.userInputs)
-    .filter((row) => row.status === 'pending')
     .sort((a, b) => Date.parse(a.requested_at) - Date.parse(b.requested_at))
 }
 

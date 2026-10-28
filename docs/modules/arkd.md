@@ -27,6 +27,10 @@ source 注入 reactor。父回合成功后再追加 completion acknowledgement�
 `ModelSeed`，不会被设置页静默忽略。模型目录明确提供 context window 时，组合根将全局 compaction
 threshold 收窄到可用输入空间（扣除用户明确设置的 max_tokens）；已运行回合继续使用创建时快照。
 
+工作区由组合根持有 canonical-root/generation 状态。父回合在 runner 入口捕获 lease，动态 prompt 和所有
+工具调用都使用同一 root；子回合继承 delegation tool context 的 workspace。切换只改变后续回合，且必须
+在没有 parent/child active run 时完成；它不会重启 arkd、sidecar、端口或 data-dir。
+
 ## 验证
 
 装配变更至少执行 `cargo check -p arkd`；涉及运行时、存储或并发时执行 workspace 测试，并验证启动/停机

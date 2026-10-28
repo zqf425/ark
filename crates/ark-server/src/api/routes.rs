@@ -142,6 +142,18 @@ fn protected_routes() -> Router<AppState> {
             get(crate::api::handlers::base::workspace_status),
         )
         .route(
+            "/v1/workspace",
+            get(crate::api::handlers::base::workspace_view),
+        )
+        .route(
+            "/v1/workspace/switch",
+            post(crate::api::handlers::base::workspace_switch),
+        )
+        .route(
+            "/v1/workspace/diff",
+            get(crate::api::handlers::base::workspace_diff),
+        )
+        .route(
             "/v1/workspace/validate",
             post(crate::api::handlers::base::workspace_validate),
         )

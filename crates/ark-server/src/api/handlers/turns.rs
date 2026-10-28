@@ -41,6 +41,7 @@ pub async fn start(
     // (`conflictPolicy: 'reject'` -> 409) instead of interleaving two model loops
     // over one event log. The renderer keeps the message queued and retries after
     // the running turn settles.
+    let _workspace_guard = state.workspace_gate.lock().await;
     let Some(registration) = state.turns.try_register(thread_id, turn_id, cancel.clone()) else {
         let running = state
             .turns

@@ -131,6 +131,12 @@ pub trait SessionStore: Send + Sync {
     /// `child_completed` and its acknowledgement records.
     async fn replay_child_completion_events(&self, thread: ThreadId) -> Result<Vec<RuntimeEvent>>;
 
+    /// Replay only the turn and interactive-gate lifecycle records for a thread.
+    ///
+    /// Thread detail uses this bounded vocabulary to rebuild controls after a
+    /// refresh without cloning ordinary transcript events into a second view.
+    async fn replay_interaction_events(&self, thread: ThreadId) -> Result<Vec<RuntimeEvent>>;
+
     /// Highest durable `seq` for the thread (0 when the log is empty).
     async fn highest_seq(&self, thread: ThreadId) -> Result<u64>;
 

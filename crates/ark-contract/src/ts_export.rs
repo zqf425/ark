@@ -26,15 +26,17 @@ use crate::{
     ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
     CreateThreadRequest, EventKind, FieldPath, FilePreview, GoalRequest, HealthResponse,
     ItemStatus, McpServerEntry, McpServerListResponse, McpServerTestResponse, McpServerView,
-    McpTransportKind, PlanView, ProviderEntry, ProviderListResponse,
-    ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
-    ProviderModelSummary, ProviderTestRequest, ProviderTestResponse, ProviderView,
-    ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, RuntimeConfigView,
-    RuntimeEvent, RuntimeInfo, SkillDiagnostics, SkillLoadWarning, SkillSource, SkillSummary,
-    SteerChildRequest, SubagentSettings, TerminalEntriesResponse, TerminalEntry, ThreadDetail,
-    ThreadItem, ThreadSkillsResponse, ThreadSummary, TodoEntry, TodoStatus, TodosRequest,
-    TuningSettings, TurnRequest, TurnSummary, UpdateThreadRequest, UsageResponse, WorkspaceChange,
-    WorkspaceChangesResponse, WorkspaceStatus,
+    McpTransportKind, PendingApprovalView, PendingUserInputView, PlanView, ProviderEntry,
+    ProviderListResponse, ProviderModelCatalogConnection, ProviderModelCatalogRequest,
+    ProviderModelCatalogResponse, ProviderModelSummary, ProviderTestRequest, ProviderTestResponse,
+    ProviderView, ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest,
+    RuntimeConfigView, RuntimeEvent, RuntimeInfo, SkillDiagnostics, SkillLoadWarning, SkillSource,
+    SkillSummary, SteerChildRequest, SubagentSettings, SwitchWorkspaceRequest,
+    TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadItem, ThreadRuntimeSnapshot,
+    ThreadSkillsResponse, ThreadSummary, TodoEntry, TodoStatus, TodosRequest, TuningSettings,
+    TurnRequest, TurnSummary, UpdateThreadRequest, UsageResponse, WorkspaceChange,
+    WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile,
+    WorkspaceStatus, WorkspaceView,
 };
 use ark_common::{ArkErrorCode, ArkErrorPayload, ChildId, ItemId, ThreadId, TurnId, Usage};
 
@@ -61,6 +63,9 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     CreateThreadRequest::export_all_to(dir)?;
     UpdateThreadRequest::export_all_to(dir)?;
     ThreadDetail::export_all_to(dir)?;
+    ThreadRuntimeSnapshot::export_all_to(dir)?;
+    PendingApprovalView::export_all_to(dir)?;
+    PendingUserInputView::export_all_to(dir)?;
     TurnRequest::export_all_to(dir)?;
     TurnSummary::export_all_to(dir)?;
     ResolveApprovalRequest::export_all_to(dir)?;
@@ -72,6 +77,11 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     TodoStatus::export_all_to(dir)?;
     WorkspaceChangesResponse::export_all_to(dir)?;
     WorkspaceChange::export_all_to(dir)?;
+    WorkspaceDescriptor::export_all_to(dir)?;
+    WorkspaceView::export_all_to(dir)?;
+    SwitchWorkspaceRequest::export_all_to(dir)?;
+    WorkspaceDiffFile::export_all_to(dir)?;
+    WorkspaceDiff::export_all_to(dir)?;
     FilePreview::export_all_to(dir)?;
     TerminalEntriesResponse::export_all_to(dir)?;
     TerminalEntry::export_all_to(dir)?;
@@ -169,6 +179,9 @@ const ROOT_NAMES: &[&str] = &[
     "CreateThreadRequest",
     "UpdateThreadRequest",
     "ThreadDetail",
+    "ThreadRuntimeSnapshot",
+    "PendingApprovalView",
+    "PendingUserInputView",
     "TurnRequest",
     "TurnSummary",
     "ResolveApprovalRequest",
@@ -180,6 +193,11 @@ const ROOT_NAMES: &[&str] = &[
     "TodoStatus",
     "WorkspaceChangesResponse",
     "WorkspaceChange",
+    "WorkspaceDescriptor",
+    "WorkspaceView",
+    "SwitchWorkspaceRequest",
+    "WorkspaceDiffFile",
+    "WorkspaceDiff",
     "FilePreview",
     "TerminalEntriesResponse",
     "TerminalEntry",

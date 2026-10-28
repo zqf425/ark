@@ -11,8 +11,8 @@ use chrono::Utc;
 
 use ark_common::ThreadId;
 use ark_contract::{
-    ChildCompletionNotice, CreateThreadRequest, RuntimeEvent, ThreadDetail, ThreadSummary,
-    UpdateThreadRequest,
+    ChildCompletionNotice, CreateThreadRequest, PendingApprovalView, PendingUserInputView,
+    RuntimeEvent, ThreadDetail, ThreadRuntimeSnapshot, ThreadSummary, UpdateThreadRequest,
 };
 use ark_ports::ThreadMeta;
 use std::collections::HashSet;
@@ -83,6 +83,12 @@ pub async fn get(
         items,
         child_ids,
         child_completions,
+        runtime: project_runtime_snapshot(
+            state.turns.active_for(thread_id),
+            state.store.replay_interaction_events(thread_id).await?,
+            state.gates.pending_approval_ids(),
+            state.gates.pending_user_input_ids(),
+        ),
     }))
 }
 
@@ -199,10 +205,106 @@ fn recent_child_completions(events: Vec<RuntimeEvent>) -> Vec<ChildCompletionNot
     notices
 }
 
+/// Builds the refresh snapshot from durable lifecycle events, then intersects
+/// it with the live process-owned waiters. Durable history supplies display
+/// fields; the waiter snapshot is the authorization boundary.
+fn project_runtime_snapshot(
+    active_turn: Option<ark_contract::TurnSummary>,
+    events: Vec<RuntimeEvent>,
+    live_approval_ids: impl IntoIterator<Item = impl AsRef<str>>,
+    live_input_ids: impl IntoIterator<Item = impl AsRef<str>>,
+) -> ThreadRuntimeSnapshot {
+    let Some(active_turn) = active_turn else {
+        return ThreadRuntimeSnapshot::default();
+    };
+    let live_approvals: HashSet<String> = live_approval_ids
+        .into_iter()
+        .map(|id| id.as_ref().to_string())
+        .collect();
+    let live_inputs: HashSet<String> = live_input_ids
+        .into_iter()
+        .map(|id| id.as_ref().to_string())
+        .collect();
+    let mut approvals = std::collections::HashMap::new();
+    let mut inputs = std::collections::HashMap::new();
+    for event in events {
+        match event {
+            RuntimeEvent::ApprovalRequested {
+                approval_id,
+                turn_id,
+                tool,
+                summary,
+                timestamp,
+                ..
+            } if turn_id == active_turn.turn_id => {
+                approvals.insert(
+                    approval_id,
+                    PendingApprovalView {
+                        approval_id: String::new(),
+                        turn_id,
+                        tool,
+                        summary,
+                        requested_at: timestamp,
+                    },
+                );
+            }
+            RuntimeEvent::ApprovalResolved { approval_id, .. } => {
+                approvals.remove(&approval_id);
+            }
+            RuntimeEvent::UserInputRequested {
+                request_id,
+                turn_id,
+                prompt,
+                timestamp,
+                ..
+            } if turn_id == active_turn.turn_id => {
+                inputs.insert(
+                    request_id,
+                    PendingUserInputView {
+                        request_id: String::new(),
+                        turn_id,
+                        prompt,
+                        requested_at: timestamp,
+                    },
+                );
+            }
+            RuntimeEvent::UserInputResolved { request_id, .. } => {
+                inputs.remove(&request_id);
+            }
+            _ => {}
+        }
+    }
+    let mut pending_approvals: Vec<_> = approvals
+        .into_iter()
+        .filter_map(|(approval_id, mut view)| {
+            live_approvals.contains(&approval_id).then(|| {
+                view.approval_id = approval_id;
+                view
+            })
+        })
+        .collect();
+    pending_approvals.sort_by_key(|view| view.requested_at);
+    let mut pending_user_inputs: Vec<_> = inputs
+        .into_iter()
+        .filter_map(|(request_id, mut view)| {
+            live_inputs.contains(&request_id).then(|| {
+                view.request_id = request_id;
+                view
+            })
+        })
+        .collect();
+    pending_user_inputs.sort_by_key(|view| view.requested_at);
+    ThreadRuntimeSnapshot {
+        active_turn: Some(active_turn),
+        pending_approvals,
+        pending_user_inputs,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_common::ChildId;
+    use ark_common::{ChildId, TurnId};
 
     #[test]
     fn invalid_thread_ids_are_validation_errors() {
@@ -255,5 +357,66 @@ mod tests {
         assert_eq!(notices.len(), MAX_CHILD_COMPLETION_NOTICES);
         assert_eq!(notices.first().unwrap().seq, 6);
         assert_eq!(notices.last().unwrap().seq, 55);
+    }
+
+    #[test]
+    fn interaction_projection_keeps_only_unresolved_live_gate_for_active_turn() {
+        let thread = ThreadId::new();
+        let active = TurnId::new();
+        let finished = TurnId::new();
+        let now = Utc::now();
+        let runtime = project_runtime_snapshot(
+            Some(ark_contract::TurnSummary {
+                turn_id: active,
+                thread_id: thread,
+                state: "running".into(),
+                started_at: now,
+                ended_at: None,
+                error: None,
+            }),
+            vec![
+                RuntimeEvent::ApprovalRequested {
+                    seq: 1,
+                    thread_id: thread,
+                    turn_id: active,
+                    timestamp: now,
+                    approval_id: "live".into(),
+                    tool: "bash".into(),
+                    summary: "run command".into(),
+                },
+                RuntimeEvent::ApprovalRequested {
+                    seq: 2,
+                    thread_id: thread,
+                    turn_id: active,
+                    timestamp: now,
+                    approval_id: "resolved".into(),
+                    tool: "write".into(),
+                    summary: "update file".into(),
+                },
+                RuntimeEvent::ApprovalResolved {
+                    seq: 3,
+                    thread_id: thread,
+                    turn_id: active,
+                    timestamp: now,
+                    approval_id: "resolved".into(),
+                    approved: true,
+                },
+                RuntimeEvent::UserInputRequested {
+                    seq: 4,
+                    thread_id: thread,
+                    turn_id: finished,
+                    timestamp: now,
+                    request_id: "old".into(),
+                    prompt: "old prompt".into(),
+                },
+            ],
+            ["live"],
+            std::iter::empty::<&str>(),
+        );
+
+        assert_eq!(runtime.active_turn.unwrap().turn_id, active);
+        assert_eq!(runtime.pending_approvals.len(), 1);
+        assert_eq!(runtime.pending_approvals[0].approval_id, "live");
+        assert!(runtime.pending_user_inputs.is_empty());
     }
 }

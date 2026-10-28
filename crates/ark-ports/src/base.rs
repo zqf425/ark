@@ -13,7 +13,7 @@ use ark_contract::{
     McpServerEntry, McpServerListResponse, McpServerTestResponse, ProviderEntry,
     ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SkillTurnResolution,
-    ThreadSkillsResponse, WorkspaceStatus,
+    ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
 };
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -84,6 +84,16 @@ pub trait WorkspaceService: Send + Sync {
     fn validate(&self, raw: &str) -> Result<PathBuf>;
 
     fn status(&self, path: &str) -> WorkspaceStatus;
+
+    /// Snapshot of the process-owned active workspace.
+    fn view(&self) -> WorkspaceView;
+
+    /// Switch after the HTTP boundary has checked that no parent/child runs are
+    /// active. Returns a conflict instead of cancelling work.
+    fn switch(&self, path: &str, active_runs: usize) -> Result<WorkspaceView>;
+
+    /// Bounded Git diff for the active canonical root.
+    fn diff(&self) -> Result<WorkspaceDiff>;
 }
 
 /// External MCP server connections (design §7.6).

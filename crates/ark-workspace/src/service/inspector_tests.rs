@@ -164,6 +164,29 @@ fn untracked_file_marks_workspace_dirty() {
 }
 
 #[test]
+fn diff_separates_staged_unstaged_and_untracked_files() {
+    if !git_available() {
+        eprintln!("skipping: git is not on PATH (mark #[ignore] on such a machine)");
+        return;
+    }
+    let fixture = TempDir::new("diff");
+    init_repo(fixture.path());
+    std::fs::write(fixture.path().join("README.md"), "staged\n").expect("write staged file");
+    git(fixture.path(), &["add", "README.md"]);
+    std::fs::write(fixture.path().join("README.md"), "unstaged\n").expect("write unstaged file");
+    std::fs::write(fixture.path().join("new.txt"), "new\n").expect("write untracked file");
+
+    let diff = WorkspaceInspector::new()
+        .diff(fixture.path())
+        .expect("git diff");
+
+    assert_eq!(diff.staged.len(), 1);
+    assert_eq!(diff.unstaged.len(), 1);
+    assert_eq!(diff.untracked.len(), 1);
+    assert_eq!(diff.untracked[0].path, "new.txt");
+}
+
+#[test]
 fn validate_rejects_missing_path() {
     let fixture = TempDir::new("validate-missing");
     let missing = fixture.path().join("nope");

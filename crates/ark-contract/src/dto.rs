@@ -76,6 +76,39 @@ pub struct ThreadDetail {
     pub child_ids: Vec<ark_common::ChildId>,
     #[serde(default)]
     pub child_completions: Vec<ChildCompletionNotice>,
+    #[serde(default)]
+    pub runtime: ThreadRuntimeSnapshot,
+}
+
+/// Controls that exist only while the current arkd process owns the turn.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ThreadRuntimeSnapshot {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_turn: Option<TurnSummary>,
+    #[serde(default)]
+    pub pending_approvals: Vec<PendingApprovalView>,
+    #[serde(default)]
+    pub pending_user_inputs: Vec<PendingUserInputView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct PendingApprovalView {
+    pub approval_id: String,
+    pub turn_id: TurnId,
+    pub tool: String,
+    pub summary: String,
+    pub requested_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct PendingUserInputView {
+    pub request_id: String,
+    pub turn_id: TurnId,
+    pub prompt: String,
+    pub requested_at: DateTime<Utc>,
 }
 
 /// `POST /v1/threads/{id}/turns`.
@@ -160,6 +193,75 @@ pub struct WorkspaceChange {
 pub struct WorkspaceChangesResponse {
     #[serde(default)]
     pub changes: Vec<WorkspaceChange>,
+}
+
+/// A workspace known to the runtime. `path` is always the canonical root chosen
+/// by the host, never an untrusted request string.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct WorkspaceDescriptor {
+    pub path: String,
+    #[ts(as = "f64")]
+    pub generation: u64,
+}
+
+/// `GET /v1/workspace` — active workspace plus the bounded recent history.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct WorkspaceView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active: Option<WorkspaceDescriptor>,
+    #[serde(default)]
+    pub recent: Vec<WorkspaceDescriptor>,
+    #[ts(as = "f64")]
+    pub generation: u64,
+}
+
+/// `POST /v1/workspace/switch`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct SwitchWorkspaceRequest {
+    pub path: String,
+}
+
+/// One Git status entry. `patch` is optional because binary and capped output
+/// are represented explicitly rather than silently reading arbitrary files.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct WorkspaceDiffFile {
+    pub path: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_path: Option<String>,
+    #[serde(default)]
+    pub binary: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub patch: Option<String>,
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+/// Bounded Git view for the active workspace. Staged, unstaged and untracked
+/// are deliberately separate: session tool events are not a Git diff.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct WorkspaceDiff {
+    #[ts(as = "f64")]
+    pub generation: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_sha: Option<String>,
+    #[serde(default)]
+    pub staged: Vec<WorkspaceDiffFile>,
+    #[serde(default)]
+    pub unstaged: Vec<WorkspaceDiffFile>,
+    #[serde(default)]
+    pub untracked: Vec<WorkspaceDiffFile>,
+    #[ts(as = "f64")]
+    pub file_count: u64,
+    #[ts(as = "f64")]
+    pub patch_bytes: u64,
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 /// `GET /v1/threads/{id}/files?path=...`.
@@ -351,5 +453,16 @@ mod tests {
 
         assert_eq!(payload.get("toolInvocations"), Some(&serde_json::json!(3)));
         assert!(payload.get("tool_invocations").is_none());
+    }
+
+    #[test]
+    fn thread_detail_runtime_defaults_for_older_payloads() {
+        let detail: ThreadDetail = serde_json::from_value(serde_json::json!({
+            "summary": {"thread_id": ThreadId::new(), "title": "t", "created_at": Utc::now(), "updated_at": Utc::now(), "archived": false},
+            "items": [], "child_ids": [], "child_completions": []
+        }))
+        .unwrap();
+        assert!(detail.runtime.active_turn.is_none());
+        assert!(detail.runtime.pending_approvals.is_empty());
     }
 }

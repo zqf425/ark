@@ -1,104 +1,151 @@
-//! Live workspace root resolution (design §7.15).
+//! Process-owned active workspace state.
 //!
-//! `default_workspace` is a `Hot` config field, so a value chosen in Settings has
-//! to apply to the *next* tool call, not the next process start. The tool runner
-//! therefore asks for the root on every call instead of capturing it once.
-//!
-//! Two sources, in order:
-//!
-//! 1. `config.default_workspace` — what the settings screen writes;
-//! 2. the CLI `--workspace` value — the fallback, so a runtime started without a
-//!    saved setting still has somewhere to work.
-//!
-//! A path that no longer exists falls back as well: a deleted folder must not
-//! make every tool call fail with a confusing "not found" from deep inside a tool.
+//! A turn receives a copy of [`WorkspaceLease`] before it starts. It never
+//! consults configuration again, so a switch cannot make one model turn run
+//! tools in two different roots.
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 
-use ark_config::ConfigStore;
+use ark_common::{ArkError, Result};
+use ark_contract::{WorkspaceDescriptor, WorkspaceView};
 
-/// Resolves the workspace root that tools should operate in.
+const RECENT_LIMIT: usize = 10;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceLease {
+    pub canonical_root: PathBuf,
+    pub generation: u64,
+}
+
+#[derive(Debug)]
+struct State {
+    active: WorkspaceLease,
+    recent: Vec<PathBuf>,
+}
+
+/// Serializes workspace changes and owns the active canonical root.
 pub struct WorkspaceRoots {
-    config: Arc<ConfigStore>,
-    fallback: PathBuf,
+    state: Mutex<State>,
 }
 
 impl WorkspaceRoots {
-    pub fn new(config: Arc<ConfigStore>, fallback: PathBuf) -> Self {
-        Self { config, fallback }
+    /// Creates the runtime state from the CLI fallback once at process start.
+    pub fn new(initial: PathBuf) -> Result<Self> {
+        let canonical_root = canonical_directory(&initial)?;
+        Ok(Self {
+            state: Mutex::new(State {
+                active: WorkspaceLease {
+                    canonical_root,
+                    generation: 0,
+                },
+                recent: Vec::new(),
+            }),
+        })
     }
 
-    /// The root to use for a tool call starting now.
+    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Captures the root for one parent or child turn.
+    pub fn lease(&self) -> WorkspaceLease {
+        self.lock().active.clone()
+    }
+
+    /// Compatibility helper for components that only need a path outside a turn.
     pub fn current(&self) -> PathBuf {
-        let configured = self
-            .config
-            .snapshot()
-            .default_workspace
-            .as_ref()
-            .filter(|path| path.is_dir())
-            .cloned();
-        configured.unwrap_or_else(|| self.fallback.clone())
+        self.lease().canonical_root
     }
 
-    /// The CLI fallback, regardless of configuration.
-    pub fn fallback(&self) -> &PathBuf {
-        &self.fallback
+    pub fn view(&self) -> WorkspaceView {
+        let state = self.lock();
+        WorkspaceView {
+            active: Some(descriptor(&state.active)),
+            recent: state
+                .recent
+                .iter()
+                .map(|path| WorkspaceDescriptor {
+                    path: path.display().to_string(),
+                    generation: state.active.generation,
+                })
+                .collect(),
+            generation: state.active.generation,
+        }
     }
+
+    /// Changes roots only while no parent or child is active. The caller passes
+    /// its authoritative activity count while holding the server's workspace
+    /// gate, so a switch never cancels work implicitly.
+    pub fn switch(&self, raw: &str, active: usize) -> Result<WorkspaceView> {
+        if active != 0 {
+            return Err(ArkError::conflict(format!(
+                "cannot switch workspace while {active} turn(s) are active"
+            )));
+        }
+        let canonical_root = canonical_directory(Path::new(raw))?;
+        let mut state = self.lock();
+        if state.active.canonical_root != canonical_root {
+            let old = state.active.canonical_root.clone();
+            state
+                .recent
+                .retain(|path| path != &canonical_root && path != &old);
+            state.recent.insert(0, old);
+            state.recent.truncate(RECENT_LIMIT);
+            state.active = WorkspaceLease {
+                canonical_root,
+                generation: state.active.generation.saturating_add(1),
+            };
+        }
+        drop(state);
+        Ok(self.view())
+    }
+}
+
+fn descriptor(lease: &WorkspaceLease) -> WorkspaceDescriptor {
+    WorkspaceDescriptor {
+        path: lease.canonical_root.display().to_string(),
+        generation: lease.generation,
+    }
+}
+
+fn canonical_directory(path: &Path) -> Result<PathBuf> {
+    if !path.is_dir() {
+        return Err(ArkError::validation(format!(
+            "workspace path is not a directory: {}",
+            path.display()
+        )));
+    }
+    path.canonicalize().map_err(|_| {
+        ArkError::validation(format!("cannot canonicalize workspace: {}", path.display()))
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_config::RuntimeConfig;
 
-    fn roots(default: Option<PathBuf>, fallback: PathBuf) -> WorkspaceRoots {
-        let mut config = RuntimeConfig::default();
-        config.default_workspace = default;
-        WorkspaceRoots::new(Arc::new(ConfigStore::new(config)), fallback)
+    #[test]
+    fn lease_keeps_the_old_root_after_a_switch() {
+        let first = std::env::temp_dir();
+        let second = std::env::current_dir().expect("cwd");
+        let roots = WorkspaceRoots::new(first).expect("initial root");
+        let lease = roots.lease();
+        roots
+            .switch(&second.display().to_string(), 0)
+            .expect("switch");
+        assert_ne!(lease.canonical_root, roots.current());
+        assert_eq!(lease.generation, 0);
+        assert_eq!(roots.lease().generation, 1);
     }
 
     #[test]
-    fn falls_back_when_no_default_is_configured() {
-        let fallback = std::env::temp_dir();
-        let roots = roots(None, fallback.clone());
-        assert_eq!(roots.current(), fallback);
-    }
-
-    #[test]
-    fn uses_the_configured_default_when_it_exists() {
-        let dir = std::env::temp_dir();
-        let roots = roots(Some(dir.clone()), PathBuf::from("D:/does-not-matter"));
-        assert_eq!(roots.current(), dir);
-    }
-
-    #[test]
-    fn falls_back_when_the_configured_default_is_missing() {
-        // A deleted folder must not turn every tool call into a confusing error.
-        let missing = std::env::temp_dir().join("ark-roots-does-not-exist-xyz");
-        let fallback = std::env::temp_dir();
-        let roots = roots(Some(missing), fallback.clone());
-        assert_eq!(roots.current(), fallback);
-    }
-
-    #[test]
-    fn a_config_change_is_visible_on_the_next_call() {
-        // This is the property the settings screen depends on: no restart.
-        let dir = std::env::temp_dir();
-        let mut config = RuntimeConfig::default();
-        config.default_workspace = None;
-        let store = Arc::new(ConfigStore::new(config));
-        let roots = WorkspaceRoots::new(Arc::clone(&store), PathBuf::from("D:/fallback"));
-        assert_eq!(roots.current(), PathBuf::from("D:/fallback"));
-
-        let patch = ark_contract::ConfigPatch {
-            default_workspace: Some(dir.to_string_lossy().to_string()),
-            ..ark_contract::ConfigPatch::default()
-        };
-        assert!(matches!(
-            store.apply(patch),
-            ark_contract::ApplyResult::Applied { .. }
-        ));
-        assert_eq!(roots.current(), dir);
+    fn active_turn_blocks_switch() {
+        let root = std::env::temp_dir();
+        let roots = WorkspaceRoots::new(root.clone()).expect("initial root");
+        let error = roots
+            .switch(&root.display().to_string(), 2)
+            .expect_err("busy");
+        assert_eq!(error.code, ark_common::ArkErrorCode::Conflict);
     }
 }

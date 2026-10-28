@@ -214,6 +214,17 @@
   overflow-wrap: anywhere;
 }
 
+.ark-childruns__row .ark-childruns__meta {
+  color: var(--ark-text-dim);
+  font-family: var(--ark-mono);
+  font-size: 10px;
+}
+
+.ark-childruns__actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 /* Accessibility: no blinking caret when the OS asks for reduced motion. */
 @media (prefers-reduced-motion: reduce) {
   .ark-caret {

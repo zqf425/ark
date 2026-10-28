@@ -374,6 +374,7 @@ pub async fn thread(
         items,
         child_ids: Vec::new(),
         child_completions: Vec::new(),
+        runtime: ark_contract::ThreadRuntimeSnapshot::default(),
     }))
 }
 
