@@ -7,7 +7,7 @@ export const UI_PREFERENCES_STORAGE_KEY = 'ark.ui.preferences'
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   locale: 'zh-CN',
   fontSize: 'medium',
-  theme: 'light'
+  theme: 'system'
 }
 
 function isLocale(value: unknown): value is UiLocale {
@@ -19,7 +19,12 @@ function isFontSize(value: unknown): value is UiFontSize {
 }
 
 function isTheme(value: unknown): value is UiTheme {
-  return value === 'light' || value === 'dark'
+  return value === 'light' || value === 'dark' || value === 'system'
+}
+
+export function resolveTheme(theme: UiTheme, systemPrefersDark: boolean): 'light' | 'dark' {
+  if (theme === 'system') return systemPrefersDark ? 'dark' : 'light'
+  return theme
 }
 
 export function normalizeUiPreferences(value: unknown): UiPreferences {

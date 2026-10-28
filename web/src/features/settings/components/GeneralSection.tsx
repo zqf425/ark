@@ -53,8 +53,8 @@ function AppearancePreferences(): JSX.Element {
         id="settings-theme"
         label={t('settings.theme')}
         value={theme}
-        options={['light', 'dark']}
-        labels={{ light: t('settings.theme.light'), dark: t('settings.theme.dark') }}
+        options={['light', 'dark', 'system']}
+        labels={{ light: t('settings.theme.light'), dark: t('settings.theme.dark'), system: t('settings.theme.system') }}
         onChange={setTheme}
       />
     </SettingsSection>

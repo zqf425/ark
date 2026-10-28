@@ -30,8 +30,8 @@
 - 设置页的分类导航是 `web` 内本地状态，只决定既有 section 的可见性；每个 section 仍独立持有既有 hook，
   不把 provider、MCP 或 runtime 配置逻辑回流到 Code 会话状态或 `ark-agent`。
 - 用户可见文本通过 `web/src/shared/i18n/` 的消息键与中英文资源提供；新增 UI 不得硬编码文案。语言、字号和
-  主题是 renderer-only 偏好，默认 `zh-CN`/中号/亮色，保存于当前浏览器的 localStorage 并即时更新根 `lang`
-  属性及字号、主题 token；
+  主题是 renderer-only 偏好，默认 `zh-CN`/中号/跟随系统，保存于当前浏览器的 localStorage 并即时更新根 `lang`
+  属性及字号、主题 token；选择“跟随系统”时监听 `prefers-color-scheme` 的变化并即时重新解析浅/深色主题。
   它们不属于 Rust wire 契约或运行时配置，不能通过设置 API 写入。
 
 ## 桌面宿主边界

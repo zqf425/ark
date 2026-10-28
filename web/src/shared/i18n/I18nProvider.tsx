@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { translate, type MessageKey } from './messages'
-import { DEFAULT_UI_PREFERENCES, readUiPreferences, type UiFontSize, type UiLocale, type UiPreferences, type UiTheme, UI_PREFERENCES_STORAGE_KEY } from './preferences'
+import { DEFAULT_UI_PREFERENCES, readUiPreferences, resolveTheme, type UiFontSize, type UiLocale, type UiPreferences, type UiTheme, UI_PREFERENCES_STORAGE_KEY } from './preferences'
 
 type I18nContextValue = UiPreferences & {
   setLocale: (locale: UiLocale) => void
@@ -16,15 +16,27 @@ function initialPreferences(): UiPreferences {
   return readUiPreferences(window.localStorage)
 }
 
+function initialSystemPrefersDark(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
+}
+
 export function I18nProvider({ children }: { children: ReactNode }): JSX.Element {
   const [preferences, setPreferences] = useState<UiPreferences>(initialPreferences)
+  const [systemPrefersDark, setSystemPrefersDark] = useState(initialSystemPrefersDark)
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = (event: MediaQueryListEvent): void => setSystemPrefersDark(event.matches)
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
+  }, [])
 
   useEffect(() => {
     document.documentElement.lang = preferences.locale
     document.documentElement.dataset.arkFontSize = preferences.fontSize
-    document.documentElement.dataset.arkTheme = preferences.theme
+    document.documentElement.dataset.arkTheme = resolveTheme(preferences.theme, systemPrefersDark)
     window.localStorage.setItem(UI_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences))
-  }, [preferences])
+  }, [preferences, systemPrefersDark])
 
   const value = useMemo<I18nContextValue>(() => ({
     ...preferences,

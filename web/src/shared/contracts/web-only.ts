@@ -45,5 +45,5 @@ export const SUBAGENT_MAX_CONCURRENCY = 8
 /** Renderer-only appearance preferences; intentionally not a Rust wire contract. */
 export type UiLocale = 'zh-CN' | 'en-US'
 export type UiFontSize = 'small' | 'medium' | 'large'
-export type UiTheme = 'light' | 'dark'
+export type UiTheme = 'light' | 'dark' | 'system'
 export type UiPreferences = { locale: UiLocale; fontSize: UiFontSize; theme: UiTheme }
