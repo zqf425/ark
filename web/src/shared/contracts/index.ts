@@ -42,6 +42,7 @@ export type {
   SubagentSettings,
   TuningSettings,
   ThreadDetail,
+  ThreadRuntimeSettings,
   ThreadId,
   ThreadItem,
   ThreadSummary,

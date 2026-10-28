@@ -63,6 +63,25 @@ pub struct UpdateThreadRequest {
     pub title: Option<String>,
     #[serde(default)]
     pub archived: Option<bool>,
+    #[serde(default)]
+    pub runtime: Option<ThreadRuntimeSettings>,
+}
+
+/// Per-thread overrides applied when the next turn is created.
+///
+/// Empty fields fall back to the runtime defaults. The values are metadata, not
+/// secrets: model credentials remain exclusively in the provider table.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ThreadRuntimeSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autonomy: Option<String>,
 }
 
 /// `GET /v1/threads/{id}` — metadata, items and durable child terminal summaries.
@@ -76,6 +95,8 @@ pub struct ThreadDetail {
     pub child_ids: Vec<ark_common::ChildId>,
     #[serde(default)]
     pub child_completions: Vec<ChildCompletionNotice>,
+    #[serde(default)]
+    pub runtime: ThreadRuntimeSettings,
 }
 
 /// `POST /v1/threads/{id}/turns`.

@@ -83,6 +83,7 @@ pub async fn get(
         items,
         child_ids,
         child_completions,
+        runtime: meta.runtime,
     }))
 }
 
@@ -113,6 +114,9 @@ pub async fn update(
     }
     if let Some(archived) = body.archived {
         meta = state.store.set_archived(thread_id, archived).await?;
+    }
+    if let Some(runtime) = body.runtime {
+        meta = state.store.set_thread_runtime(thread_id, runtime).await?;
     }
     Ok(Json(summary_of(&meta)))
 }
@@ -224,6 +228,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             archived: true,
+            runtime: ark_contract::ThreadRuntimeSettings::default(),
         };
         let summary = summary_of(&meta);
         assert_eq!(summary.title, "hello");

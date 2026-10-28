@@ -168,7 +168,6 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         tools: tool_runner,
         store: Arc::clone(&store_port),
         sink,
-        policy,
         roots: Arc::clone(&roots),
         tool_schemas: tools.schemas(),
         skills: Arc::clone(&skills),
@@ -241,7 +240,6 @@ struct AgentTurnRunner {
     tools: Arc<RegistryToolRunner>,
     store: Arc<dyn SessionStore>,
     sink: Arc<dyn EventSink>,
-    policy: Arc<dyn SandboxPolicy>,
     /// Resolved per turn so a workspace chosen in Settings applies immediately.
     roots: Arc<WorkspaceRoots>,
     tool_schemas: Vec<serde_json::Value>,
@@ -374,11 +372,23 @@ async fn finish_parent_turn(
 impl TurnRunner for AgentTurnRunner {
     async fn run_turn(&self, job: TurnJob) -> Result<TurnEnd> {
         let inbox = completion_inbox(self.store.as_ref(), job.thread_id).await?;
+        let history = conversation_history(&self.store.read_items(job.thread_id).await?);
+        let thread = self.store.get_thread(job.thread_id).await?;
+        let workspace = thread
+            .runtime
+            .workspace
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .filter(|path| path.is_dir())
+            .unwrap_or_else(|| self.roots.current());
+        let policy: Arc<dyn SandboxPolicy> = Arc::new(BuiltinSandboxPolicy::new(
+            autonomy_from_override(thread.runtime.autonomy.as_deref()),
+        ));
         let events = TurnEvents::new(job.thread_id, job.turn_id);
         let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events));
         let tools: Arc<dyn AgentToolRunner> = Arc::new(ToolRunnerAdapter {
             inner: Arc::clone(&self.tools),
-            roots: Arc::clone(&self.roots),
+            workspace: workspace.clone(),
             thread_id: job.thread_id,
             turn_id: job.turn_id,
         });
@@ -389,8 +399,9 @@ impl TurnRunner for AgentTurnRunner {
         let resolution = self.skills.resolve_for_turn(&job.text);
         let mut seed_messages = vec![
             ModelMessage::system(SYSTEM_PROMPT),
-            ModelMessage::system(workspace_line(&self.roots.current())),
+            ModelMessage::system(workspace_line(&workspace)),
         ];
+        seed_messages.extend(history);
         for instruction in &resolution.instructions {
             seed_messages.push(ModelMessage::system(format!(
                 "[skill instructions]\n{instruction}"
@@ -407,14 +418,19 @@ impl TurnRunner for AgentTurnRunner {
         // One snapshot per turn: every value below is derived from the same
         // config state, so a turn cannot mix a new model with old limits.
         let snapshot = self.config.snapshot();
-        let provider = self.providers.resolve(None);
+        let mut provider = self
+            .providers
+            .resolve(thread.runtime.provider_id.as_deref());
+        if let (Some(provider), Some(model)) = (&mut provider, thread.runtime.model) {
+            provider.model = model;
+        }
         let model = self.model_for_turn(&snapshot, provider.clone());
         let mut reactor = Reactor::new(ReactorConfig {
             model,
             tools,
             writer,
             gates: Arc::clone(&self.gates),
-            sandbox: Arc::clone(&self.policy),
+            sandbox: policy,
             events,
             cancel: job.cancel,
             seed: ModelSeed {
@@ -446,10 +462,42 @@ fn workspace_line(workspace: &std::path::Path) -> String {
     format!("workspace root: {}", workspace.display())
 }
 
+fn autonomy_from_override(value: Option<&str>) -> Autonomy {
+    match value {
+        Some("strict") => Autonomy::Strict,
+        Some("unattended") => Autonomy::Unattended,
+        _ => Autonomy::WorkspaceWrite,
+    }
+}
+
+/// Rebuild the durable conversational prefix for the next model turn.
+///
+/// Reasoning is deliberately excluded: it is renderer-only and must never be
+/// replayed as user-visible assistant text. Tool rows likewise are not replayed
+/// because the current model port has no structured tool-call history shape.
+fn conversation_history(items: &[ark_contract::ThreadItem]) -> Vec<ModelMessage> {
+    items
+        .iter()
+        .filter_map(|item| match item.kind {
+            ark_contract::item::ItemKind::UserMessage => item
+                .text
+                .as_deref()
+                .filter(|text| !text.trim().is_empty())
+                .map(ModelMessage::user),
+            ark_contract::item::ItemKind::AssistantMessage => item
+                .text
+                .as_deref()
+                .filter(|text| !text.trim().is_empty())
+                .map(ModelMessage::assistant),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Adapter from `ark-tool`'s runner to `ark-agent`'s `ToolRunner` trait.
 struct ToolRunnerAdapter {
     inner: Arc<RegistryToolRunner>,
-    roots: Arc<WorkspaceRoots>,
+    workspace: std::path::PathBuf,
     thread_id: ThreadId,
     turn_id: TurnId,
 }
@@ -465,7 +513,7 @@ impl AgentToolRunner for ToolRunnerAdapter {
             Some(decision) => {
                 self.inner
                     .run_decided(
-                        self.roots.current(),
+                        self.workspace.clone(),
                         self.thread_id,
                         self.turn_id,
                         &call.tool,
@@ -477,7 +525,7 @@ impl AgentToolRunner for ToolRunnerAdapter {
             None => {
                 self.inner
                     .run_in(
-                        self.roots.current(),
+                        self.workspace.clone(),
                         self.thread_id,
                         self.turn_id,
                         &call.tool,
@@ -651,5 +699,24 @@ mod tests {
         let limits = AgentTurnRunner::limits_for_turn(&config, Some(&provider));
 
         assert_eq!(limits.context_limit_tokens, 27_904);
+    }
+
+    #[test]
+    fn conversation_history_keeps_visible_messages_and_excludes_reasoning() {
+        let turn = TurnId::new();
+        let items = vec![
+            ark_contract::ThreadItem::new(turn, ark_contract::item::ItemKind::UserMessage)
+                .with_text("first question"),
+            ark_contract::ThreadItem::new(turn, ark_contract::item::ItemKind::Reasoning)
+                .with_text("private reasoning"),
+            ark_contract::ThreadItem::new(turn, ark_contract::item::ItemKind::AssistantMessage)
+                .with_text("first answer"),
+        ];
+
+        let history = conversation_history(&items);
+
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0], ModelMessage::user("first question"));
+        assert_eq!(history[1], ModelMessage::assistant("first answer"));
     }
 }

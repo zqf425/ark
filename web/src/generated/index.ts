@@ -11,6 +11,7 @@ export type { ThreadSummary } from "./ThreadSummary";
 export type { CreateThreadRequest } from "./CreateThreadRequest";
 export type { UpdateThreadRequest } from "./UpdateThreadRequest";
 export type { ThreadDetail } from "./ThreadDetail";
+export type { ThreadRuntimeSettings } from "./ThreadRuntimeSettings";
 export type { TurnRequest } from "./TurnRequest";
 export type { TurnSummary } from "./TurnSummary";
 export type { ResolveApprovalRequest } from "./ResolveApprovalRequest";

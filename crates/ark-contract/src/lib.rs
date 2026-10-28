@@ -36,9 +36,9 @@ pub use dto::{
     ChildRunActionResult, ChildRunAggregates, ChildRunEventsResponse, ChildRunListResponse,
     ChildRunSummary, CreateThreadRequest, FilePreview, GoalRequest, HealthResponse, PlanView,
     ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, RuntimeInfo,
-    SteerChildRequest, TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadSummary,
-    TodoEntry, TodoStatus, TodosRequest, TurnRequest, TurnSummary, UpdateThreadRequest,
-    UsageResponse, WorkspaceChange, WorkspaceChangesResponse,
+    SteerChildRequest, TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadRuntimeSettings,
+    ThreadSummary, TodoEntry, TodoStatus, TodosRequest, TurnRequest, TurnSummary,
+    UpdateThreadRequest, UsageResponse, WorkspaceChange, WorkspaceChangesResponse,
 };
 pub use event::{ChildCompletionNotice, EventKind, RuntimeEvent};
 pub use item::{ItemStatus, ThreadItem};

@@ -1,1 +1,1 @@
-export type { Usage, HealthResponse, RuntimeInfo, ThreadSummary, CreateThreadRequest, UpdateThreadRequest, ThreadDetail, TurnRequest, TurnSummary, UsageResponse } from '../../generated'
+export type { Usage, HealthResponse, RuntimeInfo, ThreadSummary, CreateThreadRequest, UpdateThreadRequest, ThreadDetail, ThreadRuntimeSettings, TurnRequest, TurnSummary, UsageResponse } from '../../generated'

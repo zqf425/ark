@@ -25,7 +25,16 @@ export const MESSAGES = {
   'settings.nav.integrations.label': ['集成', 'Integrations'],
   'settings.nav.integrations.detail': ['MCP 工具服务', 'MCP tool services'],
   'settings.nav.skills.label': ['Skills', 'Skills'],
-  'settings.nav.skills.detail': ['已发现的能力', 'Discovered capabilities']
+  'settings.nav.skills.detail': ['已发现的能力', 'Discovered capabilities'],
+  'session.runtime.title': ['本会话运行配置', 'Session runtime'],
+  'session.runtime.workspace': ['工作空间', 'Workspace'],
+  'session.runtime.provider': ['供应商', 'Provider'],
+  'session.runtime.model': ['模型覆盖', 'Model override'],
+  'session.runtime.autonomy': ['权限', 'Permissions'],
+  'session.runtime.save': ['保存（下一回合生效）', 'Save for next turn'],
+  'session.runtime.strict': ['严格：命令与写入需批准', 'Strict: approve commands and writes'],
+  'session.runtime.workspaceWrite': ['工作区写入：仅命令需批准', 'Workspace write: approve commands only'],
+  'session.runtime.unattended': ['无人值守：不请求批准', 'Unattended: no approval prompts']
 } as const
 
 export type MessageKey = keyof typeof MESSAGES

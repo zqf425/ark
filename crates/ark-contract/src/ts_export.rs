@@ -32,9 +32,9 @@ use crate::{
     ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, RuntimeConfigView,
     RuntimeEvent, RuntimeInfo, SkillDiagnostics, SkillLoadWarning, SkillSource, SkillSummary,
     SteerChildRequest, SubagentSettings, TerminalEntriesResponse, TerminalEntry, ThreadDetail,
-    ThreadItem, ThreadSkillsResponse, ThreadSummary, TodoEntry, TodoStatus, TodosRequest,
-    TuningSettings, TurnRequest, TurnSummary, UpdateThreadRequest, UsageResponse, WorkspaceChange,
-    WorkspaceChangesResponse, WorkspaceStatus,
+    ThreadItem, ThreadRuntimeSettings, ThreadSkillsResponse, ThreadSummary, TodoEntry, TodoStatus,
+    TodosRequest, TuningSettings, TurnRequest, TurnSummary, UpdateThreadRequest, UsageResponse,
+    WorkspaceChange, WorkspaceChangesResponse, WorkspaceStatus,
 };
 use ark_common::{ArkErrorCode, ArkErrorPayload, ChildId, ItemId, ThreadId, TurnId, Usage};
 
@@ -61,6 +61,7 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     CreateThreadRequest::export_all_to(dir)?;
     UpdateThreadRequest::export_all_to(dir)?;
     ThreadDetail::export_all_to(dir)?;
+    ThreadRuntimeSettings::export_all_to(dir)?;
     TurnRequest::export_all_to(dir)?;
     TurnSummary::export_all_to(dir)?;
     ResolveApprovalRequest::export_all_to(dir)?;
@@ -169,6 +170,7 @@ const ROOT_NAMES: &[&str] = &[
     "CreateThreadRequest",
     "UpdateThreadRequest",
     "ThreadDetail",
+    "ThreadRuntimeSettings",
     "TurnRequest",
     "TurnSummary",
     "ResolveApprovalRequest",

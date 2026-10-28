@@ -5,6 +5,7 @@
 
 use crate::domain::layout::ThreadPaths;
 use ark_common::ThreadId;
+use ark_contract::ThreadRuntimeSettings;
 use ark_ports::ThreadMeta;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,8 @@ pub struct ThreadFile {
     pub provider_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autonomy: Option<String>,
 }
 
 impl ThreadFile {
@@ -44,6 +47,7 @@ impl ThreadFile {
             workspace: None,
             provider_id: None,
             model: None,
+            autonomy: None,
         }
     }
 
@@ -64,6 +68,12 @@ impl ThreadFile {
             created_at: self.created_at,
             updated_at: self.updated_at,
             archived: self.archived,
+            runtime: ThreadRuntimeSettings {
+                workspace: self.workspace.clone(),
+                provider_id: self.provider_id.clone(),
+                model: self.model.clone(),
+                autonomy: self.autonomy.clone(),
+            },
         }
     }
 
@@ -78,6 +88,7 @@ impl ThreadFile {
             workspace: None,
             provider_id: None,
             model: None,
+            autonomy: None,
         }
     }
 
@@ -94,6 +105,7 @@ impl ThreadFile {
             workspace: self.workspace.clone(),
             provider_id: self.provider_id.clone(),
             model: self.model.clone(),
+            autonomy: self.autonomy.clone(),
         }
     }
 }
@@ -147,6 +159,20 @@ mod tests {
         assert_eq!(forked.thread_id, fork_id);
         assert_eq!(forked.model.as_deref(), Some("deepseek-chat"));
         assert_eq!(forked.title, "parent");
+    }
+
+    #[test]
+    fn metadata_exposes_the_thread_runtime_overrides() {
+        let mut file = ThreadFile::new(ThreadId::new(), "thread");
+        file.workspace = Some("D:/code/project".into());
+        file.provider_id = Some("fast".into());
+        file.model = Some("model-v2".into());
+
+        let runtime = file.to_meta().runtime;
+
+        assert_eq!(runtime.workspace.as_deref(), Some("D:/code/project"));
+        assert_eq!(runtime.provider_id.as_deref(), Some("fast"));
+        assert_eq!(runtime.model.as_deref(), Some("model-v2"));
     }
 
     #[test]

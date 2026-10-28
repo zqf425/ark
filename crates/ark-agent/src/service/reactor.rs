@@ -16,6 +16,7 @@
 use std::sync::Arc;
 
 use ark_common::{ArkError, ItemId, Result, Usage};
+use ark_contract::{item::ItemKind, ThreadItem};
 use ark_ports::{
     ModelChunk, ModelClient, ModelMessage, ModelRequest, ModelResponse, ModelRole, SandboxDecision,
     SandboxPolicy, ToolArgs, ToolOutput,
@@ -94,6 +95,7 @@ pub struct Reactor {
     chunk_buffer: usize,
     machine: TurnMachine,
     history: Vec<ModelMessage>,
+    pending_user_message: Option<String>,
     assistant_message_item: Option<ItemId>,
     reasoning_item: Option<ItemId>,
     /// Calls of the current round, in model order.
@@ -138,6 +140,7 @@ impl Reactor {
             chunk_buffer,
             machine,
             history: seed.messages,
+            pending_user_message: None,
             assistant_message_item: None,
             reasoning_item: None,
             pending_calls: Vec::new(),
@@ -183,6 +186,8 @@ impl Reactor {
 
     /// Append the user turn. Kept explicit so the caller controls ordering.
     pub fn push_user(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        self.pending_user_message = Some(text.clone());
         self.history.push(ModelMessage::user(text));
     }
 
@@ -221,6 +226,12 @@ impl Reactor {
     /// Emit `turn_started` and repair the history before the first round.
     async fn prepare(&mut self) -> Result<()> {
         self.writer.append(self.events.turn_started()).await?;
+        if let Some(text) = self.pending_user_message.take() {
+            let item = ThreadItem::new(self.events.turn_id, ItemKind::UserMessage)
+                .with_text(text)
+                .completed();
+            self.writer.append(self.events.item_created(item)).await?;
+        }
         let report = HistoryHygiene::new().repair(&mut self.history);
         debug_assert!(
             HistoryHygiene::new().is_legal(&self.history),
@@ -425,7 +436,11 @@ impl Reactor {
     }
 
     /// Resolve one approval gate and return the next input.
-    async fn ask_approval(&mut self, call: ToolCallRequest, summary: String) -> Result<TurnInput> {
+    async fn ask_approval(
+        &mut self,
+        mut call: ToolCallRequest,
+        summary: String,
+    ) -> Result<TurnInput> {
         // `call_id` is provider-local and may repeat across concurrent turns;
         // HTTP resolution is process-wide, so scope the public gate id by turn.
         let approval_id = format!("approval_{}_{}", self.events.turn_id, call.call_id);
@@ -456,6 +471,10 @@ impl Reactor {
         self.pending_approvals
             .retain(|ask| ask.call.call_id != call.call_id);
         if reply.approved() {
+            // A human approval is scoped to this exact, already-validated call.
+            // The runner rejects `NeedsApproval` defensively, so it must receive
+            // a concrete executable decision rather than re-consulting policy.
+            call.sandbox = Some(SandboxDecision::WorkspaceWrite);
             self.approved.push(call.clone());
         } else {
             self.denied.push(SyntheticResult::new(
@@ -842,5 +861,23 @@ mod tests {
             event => panic!("expected text delta, got {event:?}"),
         };
         assert_ne!(reasoning_id, text_id);
+    }
+
+    #[tokio::test]
+    async fn approval_promotes_the_call_to_an_executable_decision() {
+        let writer = Arc::new(MemoryWriter::new());
+        let mut reactor = reactor(writer);
+        let call = ToolCallRequest::new("call-1", "bash", serde_json::json!({ "cmd": "dir" }))
+            .with_sandbox(SandboxDecision::NeedsApproval);
+
+        reactor
+            .ask_approval(call, "run dir".to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            reactor.approved[0].sandbox,
+            Some(SandboxDecision::WorkspaceWrite)
+        );
     }
 }
