@@ -32,7 +32,8 @@ use crate::{
     ProviderView, ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest,
     RuntimeConfigView, RuntimeEvent, RuntimeInfo, SkillDiagnostics, SkillLoadWarning, SkillSource,
     SkillSummary, SteerChildRequest, SubagentSettings, SwitchWorkspaceRequest,
-    TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadItem, ThreadRuntimeSnapshot,
+    TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadItem, ThreadRuntimeSettings,
+    ThreadRuntimeSnapshot,
     ThreadSkillsResponse, ThreadSummary, TodoEntry, TodoStatus, TodosRequest, TuningSettings,
     TurnRequest, TurnSummary, UpdateThreadRequest, UsageResponse, WorkspaceChange,
     WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile,
@@ -66,6 +67,7 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     ThreadRuntimeSnapshot::export_all_to(dir)?;
     PendingApprovalView::export_all_to(dir)?;
     PendingUserInputView::export_all_to(dir)?;
+    ThreadRuntimeSettings::export_all_to(dir)?;
     TurnRequest::export_all_to(dir)?;
     TurnSummary::export_all_to(dir)?;
     ResolveApprovalRequest::export_all_to(dir)?;
@@ -182,6 +184,7 @@ const ROOT_NAMES: &[&str] = &[
     "ThreadRuntimeSnapshot",
     "PendingApprovalView",
     "PendingUserInputView",
+    "ThreadRuntimeSettings",
     "TurnRequest",
     "TurnSummary",
     "ResolveApprovalRequest",

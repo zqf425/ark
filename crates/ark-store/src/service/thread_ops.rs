@@ -56,6 +56,22 @@ impl FileSessionStore {
         Ok(file.to_meta())
     }
 
+    pub(crate) fn set_thread_runtime_blocking(
+        &self,
+        thread: ThreadId,
+        runtime: ark_contract::ThreadRuntimeSettings,
+    ) -> Result<ThreadMeta> {
+        let mut file = self.require_thread_file(thread)?;
+        file.workspace = runtime.workspace;
+        file.provider_id = runtime.provider_id;
+        file.model = runtime.model;
+        file.autonomy = runtime.autonomy;
+        file.touch();
+        crate::store::fs_util::write_json_atomic(&self.thread_paths(thread).thread_json(), &file)?;
+        self.index_upsert(&file, self.highest_seq_of(thread))?;
+        Ok(file.to_meta())
+    }
+
     /// Highest durable `seq` read straight from the log (no writer needed).
     pub(crate) fn highest_seq_of(&self, thread: ThreadId) -> u64 {
         crate::store::event_log::read_log_blocking(&self.thread_paths(thread))
@@ -153,6 +169,7 @@ fn entry_to_meta(entry: &IndexEntry) -> ThreadMeta {
         created_at: entry.updated_at,
         updated_at: entry.updated_at,
         archived: entry.archived,
+        runtime: ark_contract::ThreadRuntimeSettings::default(),
     }
 }
 
@@ -176,6 +193,14 @@ impl SessionStore for FileSessionStore {
 
     async fn set_archived(&self, thread: ThreadId, archived: bool) -> Result<ThreadMeta> {
         self.set_archived_blocking(thread, archived)
+    }
+
+    async fn set_thread_runtime(
+        &self,
+        thread: ThreadId,
+        runtime: ark_contract::ThreadRuntimeSettings,
+    ) -> Result<ThreadMeta> {
+        self.set_thread_runtime_blocking(thread, runtime)
     }
 
     async fn delete_thread(&self, thread: ThreadId) -> Result<()> {

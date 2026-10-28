@@ -7,6 +7,7 @@
  */
 import { useState } from 'react'
 import { ErrorBoundary } from '../../../shared/ui'
+import { useI18n } from '../../../shared/i18n'
 import { useSettings } from '../hooks/use-settings'
 import { useProviders } from '../hooks/use-providers'
 import { GeneralSection } from './GeneralSection'
@@ -20,6 +21,7 @@ import '../settings.css'
 import '../settings-agent.css'
 
 export function SettingsPage(): JSX.Element {
+  const { t } = useI18n()
   const settings = useSettings()
   const providers = useProviders()
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('general')
@@ -66,11 +68,11 @@ export function SettingsPage(): JSX.Element {
   })()
 
   return (
-    <div className="ark-settings" aria-label="设置">
-      <aside className="ark-settings__rail" aria-label="设置分类">
+    <div className="ark-settings" aria-label={t('settings.title')}>
+      <aside className="ark-settings__rail" aria-label={t('settings.title')}>
         <div className="ark-settings__rail-head">
-          <strong>设置</strong>
-          <p>配置本地运行时与外部能力。</p>
+          <strong>{t('settings.title')}</strong>
+          <p>{t('settings.description')}</p>
         </div>
         <nav className="ark-settings__nav">
           {SETTINGS_SECTIONS.map((section) => (
@@ -81,8 +83,8 @@ export function SettingsPage(): JSX.Element {
               aria-current={section.id === activeSection ? 'page' : undefined}
               onClick={() => setActiveSection(section.id)}
             >
-              <span>{section.label}</span>
-              <small>{section.detail}</small>
+              <span>{t(section.labelKey)}</span>
+              <small>{t(section.detailKey)}</small>
             </button>
           ))}
         </nav>
@@ -91,8 +93,8 @@ export function SettingsPage(): JSX.Element {
       <main className="ark-settings__scroll">
         <div className="ark-settings__body">
           <header className="ark-settings__hero">
-            <h1>{current?.label}</h1>
-            <p>{current?.detail}</p>
+            <h1>{current ? t(current.labelKey) : ''}</h1>
+            <p>{current ? t(current.detailKey) : ''}</p>
           </header>
           {body}
         </div>

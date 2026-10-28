@@ -23,6 +23,10 @@
 - 每轮模型可见历史必须已经落盘；每个工具调用必须与终态结果配对。
 - `ToolCallStarted` 持久化已校验参数，`ToolCallFinished` 持久化受工具上限限制的输出和 detail；这既是
   会话重放资料，也是服务端 Changes/File/Terminal 投影的唯一来源，不能由 web 解析自由文本补造。
+- 同一回合的正文 delta 与 reasoning delta 使用各自稳定的 item ID；两类内容不得合并为同一个渲染条目，
+  以保证默认折叠的 reasoning 不会遮蔽用户可见正文。
+- 新回合须从权威线程项恢复此前的 user/assistant 对话，并在回合启动时持久化当前用户消息；reasoning 不进入
+  后续模型历史。会话级工作空间、模型和权限覆盖只在创建新回合时读取，运行中回合保留其创建快照。
 - parent steer 的有界 `SteerQueue` 由 server registry 创建并由 `arkd` 注入同一个 reactor；reactor 只在
   轮次边界 drain、写 `turn_steered` 后把文本加入用户历史。
 - 子代理完成 inbox 从父线程权威事件投影为带标记的 system source，而非用户消息；按稳定通知 ID 去重，

@@ -5,7 +5,7 @@
 //! not expose "update the index" — that is the projector's private concern.
 
 use ark_common::{ChildId, Result, ThreadId};
-use ark_contract::{RuntimeEvent, ThreadItem};
+use ark_contract::{RuntimeEvent, ThreadItem, ThreadRuntimeSettings};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +18,8 @@ pub struct ThreadMeta {
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default)]
+    pub runtime: ThreadRuntimeSettings,
 }
 
 /// Authoritative child-run record, appended to `children/runs.jsonl`.
@@ -115,6 +117,12 @@ pub trait SessionStore: Send + Sync {
     async fn rename_thread(&self, thread: ThreadId, title: &str) -> Result<ThreadMeta>;
 
     async fn set_archived(&self, thread: ThreadId, archived: bool) -> Result<ThreadMeta>;
+
+    async fn set_thread_runtime(
+        &self,
+        thread: ThreadId,
+        runtime: ThreadRuntimeSettings,
+    ) -> Result<ThreadMeta>;
 
     async fn delete_thread(&self, thread: ThreadId) -> Result<()>;
 

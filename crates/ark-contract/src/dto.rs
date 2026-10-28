@@ -63,6 +63,25 @@ pub struct UpdateThreadRequest {
     pub title: Option<String>,
     #[serde(default)]
     pub archived: Option<bool>,
+    #[serde(default)]
+    pub runtime: Option<ThreadRuntimeSettings>,
+}
+
+/// Per-thread overrides applied when the next turn is created.
+///
+/// Empty fields fall back to the runtime defaults. The values are metadata, not
+/// secrets: model credentials remain exclusively in the provider table.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ThreadRuntimeSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autonomy: Option<String>,
 }
 
 /// `GET /v1/threads/{id}` — metadata, items and durable child terminal summaries.
@@ -77,7 +96,10 @@ pub struct ThreadDetail {
     #[serde(default)]
     pub child_completions: Vec<ChildCompletionNotice>,
     #[serde(default)]
-    pub runtime: ThreadRuntimeSnapshot,
+    pub runtime: ThreadRuntimeSettings,
+    /// Process-local state that is not persisted with the session settings.
+    #[serde(default)]
+    pub runtime_snapshot: ThreadRuntimeSnapshot,
 }
 
 /// Controls that exist only while the current arkd process owns the turn.
@@ -462,7 +484,7 @@ mod tests {
             "items": [], "child_ids": [], "child_completions": []
         }))
         .unwrap();
-        assert!(detail.runtime.active_turn.is_none());
-        assert!(detail.runtime.pending_approvals.is_empty());
+        assert!(detail.runtime_snapshot.active_turn.is_none());
+        assert!(detail.runtime_snapshot.pending_approvals.is_empty());
     }
 }

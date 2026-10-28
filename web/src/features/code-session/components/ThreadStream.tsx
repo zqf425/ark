@@ -11,6 +11,7 @@ import { UserInputCard } from './UserInputCard'
 import { Composer } from './Composer'
 import { StreamFooter } from './StreamFooter'
 import { ChildRunsPanel } from './ChildRunsPanel'
+import { SessionRuntimeControls } from './SessionRuntimeControls'
 
 /**
  * One row dispatcher. This is the entire "event → UI" decision surface left on
@@ -113,6 +114,7 @@ export function ThreadStream({
           <h1 title={activeThread?.title ?? ''}>{activeThread?.title || '未命名会话'}</h1>
           <p aria-live="polite">{live ? '正在执行' : groups.length > 0 ? `${groups.length} 个回合` : '准备开始'}</p>
         </div>
+        <SessionRuntimeControls threadId={threadId} />
       </header>
       <div className="ark-stream__scroll" ref={ref}>
         {detailStatus === 'loading' ? <p className="ark-stream__hint">正在载入会话…</p> : null}

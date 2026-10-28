@@ -83,7 +83,8 @@ pub async fn get(
         items,
         child_ids,
         child_completions,
-        runtime: project_runtime_snapshot(
+        runtime: meta.runtime,
+        runtime_snapshot: project_runtime_snapshot(
             state.turns.active_for(thread_id),
             state.store.replay_interaction_events(thread_id).await?,
             state.gates.pending_approval_ids(),
@@ -120,7 +121,32 @@ pub async fn update(
     if let Some(archived) = body.archived {
         meta = state.store.set_archived(thread_id, archived).await?;
     }
+    if let Some(runtime) = body.runtime {
+        let merged = merge_runtime(meta.runtime, runtime)?;
+        meta = state.store.set_thread_runtime(thread_id, merged).await?;
+    }
     Ok(Json(summary_of(&meta)))
+}
+
+fn merge_runtime(
+    current: ark_contract::ThreadRuntimeSettings,
+    patch: ark_contract::ThreadRuntimeSettings,
+) -> Result<ark_contract::ThreadRuntimeSettings, ApiError> {
+    let autonomy = patch.autonomy.or(current.autonomy);
+    if let Some(value) = autonomy.as_deref() {
+        if !matches!(value, "strict" | "workspace_write" | "unattended") {
+            return Err(ApiError::new(
+                ark_common::ArkErrorCode::ValidationError,
+                "invalid autonomy",
+            ));
+        }
+    }
+    Ok(ark_contract::ThreadRuntimeSettings {
+        workspace: patch.workspace.or(current.workspace),
+        provider_id: patch.provider_id.or(current.provider_id),
+        model: patch.model.or(current.model),
+        autonomy,
+    })
 }
 
 /// `DELETE /v1/threads/{id}`.
@@ -326,6 +352,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             archived: true,
+            runtime: ark_contract::ThreadRuntimeSettings::default(),
         };
         let summary = summary_of(&meta);
         assert_eq!(summary.title, "hello");

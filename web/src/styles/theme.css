@@ -1,0 +1,21 @@
+/* Theme tokens only. The renderer switches this selector through I18nProvider. */
+:root[data-ark-theme='dark'] {
+  color-scheme: dark;
+  --ark-bg: #17191d;
+  --ark-bg-raised: #202328;
+  --ark-bg-inset: #131519;
+  --ark-bg-hover: #2a2e34;
+  --ark-border: #32363d;
+  --ark-border-strong: #454a52;
+  --ark-text: #f1f1ec;
+  --ark-text-dim: #bac0c8;
+  --ark-text-faint: #8c939d;
+  --ark-accent: #7cb4dd;
+  --ark-accent-dim: #416f91;
+  --ark-ok: #79b99a;
+  --ark-warn: #d7ab6b;
+  --ark-error: #d9868f;
+  --ark-selection: #31404f;
+  --ark-user-message: #26333e;
+  --ark-user-border: #3b5365;
+}

@@ -14,6 +14,7 @@ export type { ThreadDetail } from "./ThreadDetail";
 export type { ThreadRuntimeSnapshot } from "./ThreadRuntimeSnapshot";
 export type { PendingApprovalView } from "./PendingApprovalView";
 export type { PendingUserInputView } from "./PendingUserInputView";
+export type { ThreadRuntimeSettings } from "./ThreadRuntimeSettings";
 export type { TurnRequest } from "./TurnRequest";
 export type { TurnSummary } from "./TurnSummary";
 export type { ResolveApprovalRequest } from "./ResolveApprovalRequest";

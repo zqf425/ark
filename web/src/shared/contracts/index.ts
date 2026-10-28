@@ -46,6 +46,7 @@ export type {
   TuningSettings,
   ThreadDetail,
   ThreadRuntimeSnapshot,
+  ThreadRuntimeSettings,
   ThreadId,
   ThreadItem,
   ThreadSummary,
