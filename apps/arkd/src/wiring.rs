@@ -374,13 +374,19 @@ impl TurnRunner for AgentTurnRunner {
         let inbox = completion_inbox(self.store.as_ref(), job.thread_id).await?;
         let history = conversation_history(&self.store.read_items(job.thread_id).await?);
         let thread = self.store.get_thread(job.thread_id).await?;
-        let workspace = thread
-            .runtime
-            .workspace
-            .as_deref()
-            .map(std::path::PathBuf::from)
-            .filter(|path| path.is_dir())
-            .unwrap_or_else(|| self.roots.current());
+        let workspace = match thread.runtime.workspace.as_deref() {
+            Some(raw) => {
+                let path = std::path::PathBuf::from(raw);
+                if !path.is_dir() {
+                    return Err(ark_common::ArkError::validation(format!(
+                        "thread workspace does not exist: {}",
+                        path.display()
+                    )));
+                }
+                path
+            }
+            None => self.roots.current(),
+        };
         let policy: Arc<dyn SandboxPolicy> = Arc::new(BuiltinSandboxPolicy::new(
             autonomy_from_override(thread.runtime.autonomy.as_deref()),
         ));
@@ -418,9 +424,12 @@ impl TurnRunner for AgentTurnRunner {
         // One snapshot per turn: every value below is derived from the same
         // config state, so a turn cannot mix a new model with old limits.
         let snapshot = self.config.snapshot();
-        let mut provider = self
-            .providers
-            .resolve(thread.runtime.provider_id.as_deref());
+        let mut provider = match thread.runtime.provider_id.as_deref() {
+            Some(id) => Some(self.providers.resolve(Some(id)).ok_or_else(|| {
+                ark_common::ArkError::validation(format!("thread provider is unavailable: {id}"))
+            })?),
+            None => self.providers.resolve(None),
+        };
         if let (Some(provider), Some(model)) = (&mut provider, thread.runtime.model) {
             provider.model = model;
         }

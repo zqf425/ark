@@ -292,6 +292,10 @@ impl Reactor {
     async fn apply_steering(&mut self) -> Result<()> {
         for text in self.drain_steering() {
             self.writer.append(self.events.turn_steered(&text)).await?;
+            let item = ThreadItem::new(self.events.turn_id, ItemKind::UserMessage)
+                .with_text(text)
+                .completed();
+            self.writer.append(self.events.item_created(item)).await?;
         }
         Ok(())
     }

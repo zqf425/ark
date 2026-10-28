@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button } from '../../../shared/ui'
+import { Button, useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import type { ThreadRuntimeSettings } from '../../../shared/contracts'
 import { getThread, updateThread } from '../api/threads-api'
@@ -9,6 +9,7 @@ const DEFAULT_RUNTIME: ThreadRuntimeSettings = { autonomy: 'workspace_write' }
 
 export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.Element {
   const { t } = useI18n()
+  const toast = useToast()
   const providers = useProviders()
   const [runtime, setRuntime] = useState<ThreadRuntimeSettings>(DEFAULT_RUNTIME)
   const [saving, setSaving] = useState(false)
@@ -25,6 +26,9 @@ export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.
     setSaving(true)
     try {
       await updateThread(threadId, { runtime })
+      toast.push('success', t('session.runtime.title'))
+    } catch (error) {
+      toast.push('error', t('session.runtime.title'), error instanceof Error ? error.message : String(error))
     } finally {
       setSaving(false)
     }
