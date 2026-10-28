@@ -558,8 +558,11 @@ impl Reactor {
     async fn compact(&mut self, keep_recent: usize) -> Result<TurnInput> {
         self.writer.append(self.events.compaction_started()).await?;
         let (removed, checkpoint) = self.compact_history(keep_recent);
+        if removed == 0 {
+            return Ok(self.input_of(InputKind::CompactionSettled { removed_items: 0 }));
+        }
         let item = ThreadItem::new(self.events.turn_id, ItemKind::Notice)
-            .with_text(checkpoint)
+            .with_text(checkpoint.expect("removed context has a checkpoint"))
             .completed();
         self.writer.append(self.events.item_created(item)).await?;
         self.machine.note_compaction(removed);
@@ -572,7 +575,7 @@ impl Reactor {
     }
 
     /// Keep the system prefix and the newest messages; fold the middle away.
-    fn compact_history(&mut self, keep_recent: usize) -> (u32, String) {
+    fn compact_history(&mut self, keep_recent: usize) -> (u32, Option<String>) {
         let system_count = self
             .history
             .iter()
@@ -580,10 +583,7 @@ impl Reactor {
             .count();
         let keep = keep_recent.max(1);
         if self.history.len() <= system_count + keep {
-            return (
-                0,
-                "[context checkpoint: no messages eligible for compaction]".to_string(),
-            );
+            return (0, None);
         }
         let split = self.history.len() - keep;
         let removed = (split - system_count) as u32;
@@ -597,7 +597,7 @@ impl Reactor {
         next.push(ModelMessage::system(rendered.clone()));
         next.extend_from_slice(&self.history[split..]);
         self.history = next;
-        (removed, rendered)
+        (removed, Some(rendered))
     }
 
     /// Execute a dispatch plan: synthetic results first, then batches in order.

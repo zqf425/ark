@@ -36,7 +36,9 @@ pub mod exec;
 pub mod policy;
 pub mod service;
 
-pub use context::{CompletionInbox, HistoryHygiene, HygieneReport, TokenEstimator};
+pub use context::{
+    CompletionInbox, ContextCheckpoint, HistoryHygiene, HygieneReport, TokenEstimator,
+};
 pub use domain::{
     Action, ApprovalAsk, DispatchPlan, InputKind, Progress, StormNote, SyntheticResult,
     ToolCallRequest, ToolExecution, TurnInput, TurnLimits, TurnOutcome, TurnState,

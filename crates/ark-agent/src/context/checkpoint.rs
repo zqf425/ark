@@ -9,17 +9,27 @@ pub struct ContextCheckpoint {
 impl ContextCheckpoint {
     /// Preserve user goals and constraints plus assistant decisions verbatim.
     pub fn from_messages(messages: &[ModelMessage]) -> Self {
-        let entries = messages
-            .iter()
-            .filter_map(|message| {
-                let text = message.content.trim();
-                (text.starts_with("Goal:")
+        Self::from_texts(messages.iter().map(|message| message.content.as_str()))
+    }
+
+    /// Build a deterministic checkpoint from durable text rows.
+    pub fn from_texts<'a>(texts: impl IntoIterator<Item = &'a str>) -> Self {
+        let entries = texts
+            .into_iter()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .filter(|text| {
+                text.starts_with("Goal:")
                     || text.starts_with("Constraint:")
-                    || text.starts_with("Decision:"))
-                .then(|| text.to_string())
+                    || text.starts_with("Decision:")
             })
+            .map(ToOwned::to_owned)
             .collect();
         Self { entries }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     /// Render the durable state for the next model context window.

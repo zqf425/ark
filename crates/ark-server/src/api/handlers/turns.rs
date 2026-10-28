@@ -187,23 +187,20 @@ pub async fn compact(
     let thread_id = parse_thread(&id)?;
     state.store.get_thread(thread_id).await?;
     let turn_id = TurnId::new();
-    let facts: Vec<String> = state
-        .store
-        .read_items(thread_id)
-        .await?
-        .into_iter()
-        .filter_map(|item| item.text)
-        .filter(|text| {
-            text.starts_with("Goal:")
-                || text.starts_with("Constraint:")
-                || text.starts_with("Decision:")
-        })
-        .collect();
-    let checkpoint = if facts.is_empty() {
-        "[context checkpoint: no structured facts extracted]".to_string()
-    } else {
-        format!("[context checkpoint]\n{}", facts.join("\n"))
-    };
+    let items = state.store.read_items(thread_id).await?;
+    if let Some(existing) = items.iter().find_map(|item| {
+        item.text
+            .as_deref()
+            .filter(|text| text.starts_with("[context checkpoint]"))
+    }) {
+        return Ok(Json(
+            serde_json::json!({ "thread_id": thread_id, "checkpoint": existing }),
+        ));
+    }
+    let checkpoint = ark_agent::ContextCheckpoint::from_texts(
+        items.iter().filter_map(|item| item.text.as_deref()),
+    )
+    .render();
     state
         .store
         .append_event(
