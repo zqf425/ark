@@ -671,6 +671,15 @@ impl Reactor {
         if batch.is_empty() {
             return Ok((Vec::new(), false));
         }
+        for call in batch {
+            self.writer
+                .append(self.events.tool_call_started(
+                    &call.call_id,
+                    &call.tool,
+                    call.arguments.clone(),
+                ))
+                .await?;
+        }
         let calls = batch.to_vec();
         let tools = Arc::clone(&self.tools);
         let results = tokio::select! {
@@ -690,13 +699,6 @@ impl Reactor {
                         serde_json::Value::Null,
                     )
                 });
-            self.writer
-                .append(self.events.tool_call_started(
-                    &call.call_id,
-                    &call.tool,
-                    call.arguments.clone(),
-                ))
-                .await?;
             self.writer
                 .append(self.events.tool_call_finished(
                     &execution.call_id,
@@ -796,8 +798,8 @@ impl Accumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::exec::{AllowAllGates, MapToolRunner, MemoryWriter};
-    use ark_common::{ThreadId, TurnId};
+    use crate::exec::{AllowAllGates, MapToolRunner, MemoryWriter, ToolRunner};
+    use ark_common::{Result, ThreadId, TurnId};
     use ark_contract::RuntimeEvent;
 
     #[derive(Debug)]
@@ -828,6 +830,28 @@ mod tests {
     impl SandboxPolicy for ReadOnlySandbox {
         fn decide(&self, _tool: &str, _args: &ToolArgs) -> SandboxDecision {
             SandboxDecision::ReadOnly
+        }
+    }
+
+    struct StartedEventRunner {
+        writer: Arc<MemoryWriter>,
+    }
+
+    #[async_trait::async_trait]
+    impl ToolRunner for StartedEventRunner {
+        async fn execute(&self, _call: &ToolCallRequest) -> Result<ToolOutput> {
+            let started = self
+                .writer
+                .recorded()
+                .iter()
+                .any(|event| matches!(event, RuntimeEvent::ToolCallStarted { .. }));
+            if started {
+                Ok(ToolOutput::ok("executed"))
+            } else {
+                Ok(ToolOutput::err(
+                    "tool start was not persisted before execution",
+                ))
+            }
         }
     }
 
@@ -900,5 +924,31 @@ mod tests {
             reactor.approved[0].sandbox,
             Some(SandboxDecision::WorkspaceWrite)
         );
+    }
+
+    #[tokio::test]
+    async fn persists_tool_start_before_executing_a_batch() {
+        let writer = Arc::new(MemoryWriter::new());
+        let events = TurnEvents::new(ThreadId::new(), TurnId::new());
+        let mut reactor = Reactor::new(ReactorConfig {
+            model: Arc::new(NoopModel),
+            tools: Arc::new(StartedEventRunner {
+                writer: Arc::clone(&writer),
+            }),
+            writer,
+            gates: Arc::new(AllowAllGates),
+            sandbox: Arc::new(ReadOnlySandbox),
+            events,
+            cancel: CancelToken::new(),
+            seed: ModelSeed::default(),
+            machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+            chunk_buffer: 1,
+        });
+
+        let call = ToolCallRequest::new("call-1", "read", serde_json::json!({ "path": "a" }));
+        let (executions, interrupted) = reactor.run_batch(&[call]).await.unwrap();
+
+        assert!(!interrupted);
+        assert!(executions[0].ok);
     }
 }

@@ -21,7 +21,7 @@
 - 工具沙箱决策只在派发前计算一次，执行器仅消费不可变结果。
 - 预算、工具风暴、并发安全和历史裁剪属于独立 policy/context 模块，不得回流为巨型 reactor。
 - 每轮模型可见历史必须已经落盘；每个工具调用必须与终态结果配对。
-- `ToolCallStarted` 持久化已校验参数，`ToolCallFinished` 持久化受工具上限限制的输出和 detail；这既是
+- 每个批次在执行器启动前持久化全部 `ToolCallStarted` 已校验参数，`ToolCallFinished` 持久化受工具上限限制的输出和 detail；这既是
   会话重放资料，也是服务端 Changes/File/Terminal 投影的唯一来源，不能由 web 解析自由文本补造。
 - 同一回合的正文 delta 与 reasoning delta 使用各自稳定的 item ID；两类内容不得合并为同一个渲染条目，
   以保证默认折叠的 reasoning 不会遮蔽用户可见正文。

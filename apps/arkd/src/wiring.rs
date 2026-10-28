@@ -616,16 +616,16 @@ mod tests {
 
     #[test]
     fn conversation_history_replays_context_checkpoints_as_system_messages() {
-        let checkpoint = ark_contract::ThreadItem::new(
-            TurnId::new(),
-            ark_contract::item::ItemKind::Notice,
-        )
-        .with_text("[context checkpoint]\nGoal: preserve state")
-        .completed();
+        let checkpoint =
+            ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::Notice)
+                .with_text("[context checkpoint]\nGoal: preserve state")
+                .completed();
 
         assert_eq!(
             conversation_history(&[checkpoint]),
-            vec![ModelMessage::system("[context checkpoint]\nGoal: preserve state")]
+            vec![ModelMessage::system(
+                "[context checkpoint]\nGoal: preserve state"
+            )]
         );
     }
 

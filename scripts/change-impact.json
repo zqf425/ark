@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "areas": [
+    {
+      "id": "agent-runtime",
+      "paths": ["crates/ark-agent/"],
+      "design": ["docs/modules/ark-agent.md"],
+      "verify": ["cargo test -p ark-agent"]
+    },
+    {
+      "id": "wire-contract",
+      "paths": ["crates/ark-contract/"],
+      "design": ["docs/modules/ark-contract.md", "docs/modules/web.md"],
+      "verify": ["cargo test -p ark-contract --lib ts_export", "git diff --exit-code web/src/generated"]
+    },
+    {
+      "id": "runtime-boundary",
+      "paths": ["crates/ark-ports/", "apps/arkd/", "crates/ark-server/"],
+      "design": ["docs/modules/ark-ports.md", "docs/modules/ark-server.md", "docs/modules/arkd.md"],
+      "verify": ["cargo test --workspace --exclude ark-desktop"]
+    },
+    {
+      "id": "renderer",
+      "paths": ["web/"],
+      "design": ["docs/modules/web.md"],
+      "verify": ["npm --prefix web test", "npm --prefix web run check:rules", "npm --prefix web run build"]
+    },
+    {
+      "id": "desktop-shell",
+      "paths": ["apps/ark-desktop/"],
+      "design": ["docs/modules/ark-desktop.md"],
+      "verify": ["node --test apps/ark-desktop/scripts/desktop-layout.test.mjs", "npm --prefix apps/ark-desktop run build:web"]
+    }
+  ]
+}

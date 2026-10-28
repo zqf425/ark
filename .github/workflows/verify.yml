@@ -1,0 +1,41 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  core:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - shell: pwsh
+        run: ./scripts/verify.ps1 -Scope core
+      - shell: pwsh
+        run: ./scripts/verify.ps1 -Scope contract
+      - shell: pwsh
+        run: ./scripts/verify.ps1 -Scope web
+
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/ark-desktop/package-lock.json
+      - run: npm --prefix apps/ark-desktop ci
+      - shell: pwsh
+        run: ./scripts/verify.ps1 -Scope desktop
