@@ -6,6 +6,7 @@
 
 use ark_common::{ArkError, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// The three supported wire families.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -79,6 +80,14 @@ pub struct ProviderConfig {
     pub max_tokens: Option<u32>,
     #[serde(default)]
     pub temperature: Option<f32>,
+    /// Additional provider-specific headers. Core auth and content headers are
+    /// applied afterwards and cannot be overridden by this map.
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    /// Total model context window when a provider catalog explicitly reported
+    /// it. This is used to cap the agent's compaction threshold.
+    #[serde(default)]
+    pub context_window_tokens: Option<u64>,
 }
 
 impl ProviderConfig {
@@ -92,6 +101,8 @@ impl ProviderConfig {
             custom_endpoint: None,
             max_tokens: None,
             temperature: None,
+            headers: BTreeMap::new(),
+            context_window_tokens: None,
         }
     }
 
@@ -107,6 +118,15 @@ impl ProviderConfig {
 
     pub fn with_format(mut self, format: EndpointFormat) -> Self {
         self.endpoint_format = format;
+        self
+    }
+
+    /// Attach user-configured, non-core headers to each provider request.
+    ///
+    /// Parameter: `headers` is the provider-specific map after validation.
+    /// Returns: the updated configuration builder.
+    pub fn with_headers(mut self, headers: BTreeMap<String, String>) -> Self {
+        self.headers = headers;
         self
     }
 
@@ -206,5 +226,13 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let back: ProviderConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back, config);
+    }
+
+    #[test]
+    fn configured_headers_and_context_window_are_preserved() {
+        let config = ProviderConfig::new("test", "model")
+            .with_headers(BTreeMap::from([("X-Tenant".into(), "ark".into())]));
+        assert_eq!(config.headers.get("X-Tenant"), Some(&"ark".to_string()));
+        assert_eq!(config.context_window_tokens, None);
     }
 }

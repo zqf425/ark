@@ -14,4 +14,14 @@ id: string, label?: string, base_url: string, api_key?: string,
 /**
  * `openai_chat` | `openai_responses` | `anthropic_messages`.
  */
-endpoint_format: string, model: string, enabled: boolean, headers: { [key in string]?: string }, max_tokens?: number, temperature?: number, };
+endpoint_format: string, model: string, enabled: boolean, headers: { [key in string]?: string }, max_tokens?: number, temperature?: number, 
+/**
+ * Total tokens accepted by the selected model, when the provider catalog
+ * reported it. `None` means the provider did not publish this capability.
+ */
+context_window_tokens?: number, 
+/**
+ * Whether the selected model accepts image input. `None` means unknown,
+ * not false: generic model-list endpoints often do not publish modalities.
+ */
+supports_vision?: boolean, };

@@ -109,6 +109,18 @@ pub fn validate_max_tokens(value: Option<u32>) -> Result<Option<u32>> {
     }
 }
 
+/// `context_window_tokens` is a total model limit and must be positive when a
+/// catalog has supplied it. `None` is intentionally allowed: many standard
+/// `/models` endpoints expose identifiers but no capability metadata.
+pub fn validate_context_window_tokens(value: Option<u64>) -> Result<Option<u64>> {
+    match value {
+        Some(0) => Err(ArkError::validation(
+            "context_window_tokens must be greater than 0 when set",
+        )),
+        other => Ok(other),
+    }
+}
+
 /// Validate and canonicalize a whole entry.
 ///
 /// The returned entry has trimmed fields and a canonical `endpoint_format`
@@ -120,6 +132,7 @@ pub fn normalize_entry(entry: ProviderEntry) -> Result<ProviderEntry> {
     let base_url = validate_base_url(&entry.base_url)?;
     let temperature = validate_temperature(entry.temperature)?;
     let max_tokens = validate_max_tokens(entry.max_tokens)?;
+    let context_window_tokens = validate_context_window_tokens(entry.context_window_tokens)?;
     let label = entry
         .label
         .map(|text| text.trim().to_string())
@@ -139,6 +152,8 @@ pub fn normalize_entry(entry: ProviderEntry) -> Result<ProviderEntry> {
         headers: entry.headers,
         max_tokens,
         temperature,
+        context_window_tokens,
+        supports_vision: entry.supports_vision,
     })
 }
 
@@ -239,6 +254,16 @@ mod tests {
     fn zero_max_tokens_is_rejected() {
         assert!(validate_max_tokens(Some(0)).is_err());
         assert_eq!(validate_max_tokens(Some(16)).unwrap(), Some(16));
+    }
+
+    #[test]
+    fn zero_context_window_is_rejected_but_unknown_is_valid() {
+        assert_eq!(validate_context_window_tokens(None).unwrap(), None);
+        assert_eq!(
+            validate_context_window_tokens(Some(128_000)).unwrap(),
+            Some(128_000)
+        );
+        assert!(validate_context_window_tokens(Some(0)).is_err());
     }
 
     #[test]

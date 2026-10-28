@@ -106,6 +106,10 @@ fn protected_routes() -> Router<AppState> {
             post(crate::api::handlers::base::providers_test),
         )
         .route(
+            "/v1/runtime/providers/models",
+            post(crate::api::handlers::base::providers_models),
+        )
+        .route(
             "/v1/runtime/providers/{id}",
             delete(crate::api::handlers::base::providers_delete),
         )

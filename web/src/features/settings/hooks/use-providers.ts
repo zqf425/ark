@@ -8,12 +8,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   ProviderListResponse,
+  ProviderModelCatalogRequest,
+  ProviderModelCatalogResponse,
   ProviderTestRequest,
   ProviderTestResponse,
   ProviderUpsertRequest,
   ProviderView
 } from '../../../shared/contracts'
-import { deleteProvider, listProviders, setDefaultProvider, testProvider, upsertProvider } from '../api/providers-api'
+import { deleteProvider, listProviderModels, listProviders, setDefaultProvider, testProvider, upsertProvider } from '../api/providers-api'
 import { attempt, describeApiError, type Outcome } from '../api/outcome'
 import type { LoadStatus } from './use-settings'
 
@@ -30,6 +32,7 @@ export type ProvidersApi = {
   remove: (providerId: string) => Promise<Outcome<ProviderListResponse>>
   setDefault: (providerId: string) => Promise<Outcome<ProviderListResponse>>
   test: (request: ProviderTestRequest) => Promise<Outcome<ProviderTestResponse>>
+  models: (request: ProviderModelCatalogRequest) => Promise<Outcome<ProviderModelCatalogResponse>>
 }
 
 export function useProviders(): ProvidersApi {
@@ -103,10 +106,16 @@ export function useProviders(): ProvidersApi {
     if (mounted.current) setBusy(null)
     return outcome
   }, [])
+  const models = useCallback(async (request: ProviderModelCatalogRequest) => {
+    setBusy(`models:${request.provider_id ?? 'draft'}`)
+    const outcome = await attempt(() => listProviderModels(request))
+    if (mounted.current) setBusy(null)
+    return outcome
+  }, [])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
 
-  return { providers, defaultProviderId, activeProviderId, status, error, busy, refresh, upsert, remove, setDefault, test }
+  return { providers, defaultProviderId, activeProviderId, status, error, busy, refresh, upsert, remove, setDefault, test, models }
 }

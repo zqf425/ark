@@ -6,6 +6,8 @@
  */
 import type {
   ProviderListResponse,
+  ProviderModelCatalogRequest,
+  ProviderModelCatalogResponse,
   ProviderTestRequest,
   ProviderTestResponse,
   ProviderUpsertRequest
@@ -35,4 +37,9 @@ export function setDefaultProvider(providerId: string): Promise<ProviderListResp
 /** `POST /v1/runtime/providers/test` — probe a stored id or an unsaved entry. */
 export function testProvider(request: ProviderTestRequest): Promise<ProviderTestResponse> {
   return post<ProviderTestResponse>('/v1/runtime/providers/test', request)
+}
+
+/** `POST /v1/runtime/providers/models` — explicit provider catalog discovery. */
+export function listProviderModels(request: ProviderModelCatalogRequest): Promise<ProviderModelCatalogResponse> {
+  return post<ProviderModelCatalogResponse>('/v1/runtime/providers/models', request)
 }

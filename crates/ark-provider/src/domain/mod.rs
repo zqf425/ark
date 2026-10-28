@@ -11,6 +11,6 @@ pub mod validate;
 pub use doc::ProvidersDocument;
 pub use mask::{api_key_hint, mask_api_key, redact_url, scrub_secret};
 pub use validate::{
-    normalize_entry, validate_base_url, validate_endpoint_format, validate_id, validate_max_tokens,
-    validate_model, validate_temperature,
+    normalize_entry, validate_base_url, validate_context_window_tokens, validate_endpoint_format,
+    validate_id, validate_max_tokens, validate_model, validate_temperature,
 };

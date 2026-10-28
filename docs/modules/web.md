@@ -19,6 +19,8 @@
   输出，浏览器不得直接读取工作区。子代理控制请求始终带父线程 query，不能只凭 child id 操作。
 - 设置页的 tuning、provider 与 MCP 都使用生成契约；API key、MCP env/header 值只写不回读，编辑时的空
   secret 字段表示保留，不表示删除。
+- 新增/编辑 provider 可显式查询模型目录，在用户选择后才把远端明确声明的 context window 与识图能力写入
+  待保存表单；目录未声明时显示 unknown，不按模型名称猜测，也不自动提交配置。
 - 组件状态按 feature 拆分，避免重建旧 `Workbench.tsx` 巨型组件；UI 变更应进行实际浏览器验证。
 
 ## 计划边界

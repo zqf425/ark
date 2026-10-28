@@ -11,8 +11,9 @@ use serde::Deserialize;
 
 use ark_contract::{
     McpServerEntry, McpServerListResponse, McpServerTestResponse, ProviderEntry,
-    ProviderListResponse, ProviderTestRequest, ProviderTestResponse, SkillDiagnostics,
-    ThreadSkillsResponse, WorkspaceStatus,
+    ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
+    ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, ThreadSkillsResponse,
+    WorkspaceStatus,
 };
 
 use crate::api::error::ApiError;
@@ -99,6 +100,19 @@ pub async fn providers_test(
         .as_ref()
         .ok_or_else(|| missing("provider"))?;
     Ok(Json(service.test(body).await))
+}
+
+/// `POST /v1/runtime/providers/models` — explicit, bounded model discovery.
+pub async fn providers_models(
+    State(state): State<AppState>,
+    Json(body): Json<ProviderModelCatalogRequest>,
+) -> Result<Json<ProviderModelCatalogResponse>, ApiError> {
+    let service = state
+        .base
+        .providers
+        .as_ref()
+        .ok_or_else(|| missing("provider"))?;
+    Ok(Json(service.models(body).await?))
 }
 
 // ---------------------------------------------------------------------------

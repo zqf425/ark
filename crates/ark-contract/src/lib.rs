@@ -21,9 +21,11 @@ pub mod ts_export;
 
 pub use base::{
     McpServerEntry, McpServerListResponse, McpServerTestResponse, McpServerView, McpTransportKind,
-    ProviderEntry, ProviderListResponse, ProviderTestRequest, ProviderTestResponse, ProviderView,
-    SkillActivation, SkillDiagnostics, SkillLoadWarning, SkillManifest, SkillSource, SkillSummary,
-    SkillTriggers, SkillTurnResolution, ThreadSkillsResponse, WorkspaceStatus,
+    ProviderEntry, ProviderListResponse, ProviderModelCatalogConnection,
+    ProviderModelCatalogRequest, ProviderModelCatalogResponse, ProviderModelSummary,
+    ProviderTestRequest, ProviderTestResponse, ProviderView, SkillActivation, SkillDiagnostics,
+    SkillLoadWarning, SkillManifest, SkillSource, SkillSummary, SkillTriggers, SkillTurnResolution,
+    ThreadSkillsResponse, WorkspaceStatus,
 };
 pub use capability::{Capability, PageId, PageSpec, PanelSlot, PanelSpec, Placement};
 pub use config::{

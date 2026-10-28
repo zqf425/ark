@@ -3,7 +3,8 @@
 ## 职责与边界
 
 `ark-llm` 适配模型 endpoint、流式协议、usage 解析、重试与消息修复，并实现
-`ark-ports::ModelClient`。它不承载 provider 配置的持久化管理，该职责属于 `ark-provider`。
+`ark-ports::ModelClient`。它还规范化显式请求的 provider model catalog；不承载 provider 配置的持久化管理，
+该职责属于 `ark-provider`。
 
 ## 实现约束
 
@@ -12,6 +13,9 @@
 - 流必须逐块消费，不能为长响应无界缓冲。
 - `cache_hit_rate` 只能读取原生 hit/miss 后计算，不能由 prompt token 猜测。
 - 传输经注入的受治理 HTTP 能力复用代理、超时、凭据和审计策略。
+- model catalog 只接受远端显式返回的 context/modalities 元数据；通用 `/models` 只有 id 时，能力字段必须是
+  unknown。GET 请求 10 秒超时、响应最大 1 MiB、模型最多 500 个，错误不得回显可能携带 query secret 的 URL。
+- 自定义 provider header 可以补充请求，但不得覆盖 endpoint family 的认证、版本或 content-type 头。
 
 ## 验证
 

@@ -8,8 +8,17 @@
  */
 import { useState } from 'react'
 import { Button } from '../../../shared/ui'
-import { ENDPOINT_FORMATS, type EndpointFormat, type ProviderEntry, type ProviderView } from '../../../shared/contracts'
+import {
+  ENDPOINT_FORMATS,
+  type EndpointFormat,
+  type ProviderEntry,
+  type ProviderModelCatalogRequest,
+  type ProviderModelCatalogResponse,
+  type ProviderModelSummary,
+  type ProviderView
+} from '../../../shared/contracts'
 import { CheckField, Field, SelectField, TextField } from './Field'
+import { applyCatalogModel, buildCatalogRequest, catalogLabel, parseProviderHeaders } from './ProviderCatalog'
 import { Notice } from './SectionShell'
 
 const FORMAT_LABELS: Record<EndpointFormat, string> = {
@@ -29,6 +38,8 @@ export type ProviderDraft = {
   headers_text: string
   max_tokens: string
   temperature: string
+  context_window_tokens: string
+  supports_vision: boolean | null
 }
 
 export function emptyDraft(): ProviderDraft {
@@ -42,7 +53,9 @@ export function emptyDraft(): ProviderDraft {
     enabled: true,
     headers_text: '',
     max_tokens: '',
-    temperature: ''
+    temperature: '',
+    context_window_tokens: '',
+    supports_vision: null
   }
 }
 
@@ -61,7 +74,9 @@ export function draftFromView(view: ProviderView): ProviderDraft {
     enabled: view.enabled,
     headers_text: '',
     max_tokens: '',
-    temperature: ''
+    temperature: '',
+    context_window_tokens: view.context_window_tokens?.toString() ?? '',
+    supports_vision: view.supports_vision ?? null
   }
 }
 
@@ -91,22 +106,9 @@ export function buildEntry(draft: ProviderDraft, editing: boolean): BuiltEntry {
   if (apiKey) entry.api_key = apiKey
   else if (!editing) return { ok: false, error: '新建供应商需要填写 api_key' }
 
-  const headersText = draft.headers_text.trim()
-  if (headersText) {
-    try {
-      const parsed: unknown = JSON.parse(headersText)
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return { ok: false, error: 'headers 必须是 JSON 对象，例如 {"X-Trace":"1"}' }
-      }
-      const headers: Record<string, string> = {}
-      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-        headers[key] = typeof value === 'string' ? value : String(value)
-      }
-      entry.headers = headers
-    } catch {
-      return { ok: false, error: 'headers 不是合法 JSON' }
-    }
-  }
+  const headers = parseProviderHeaders(draft.headers_text)
+  if (!headers.ok) return headers
+  entry.headers = headers.headers
 
   if (draft.max_tokens.trim()) {
     const parsed = Number(draft.max_tokens.trim())
@@ -124,6 +126,15 @@ export function buildEntry(draft: ProviderDraft, editing: boolean): BuiltEntry {
     entry.temperature = parsed
   }
 
+  if (draft.context_window_tokens.trim()) {
+    const parsed = Number(draft.context_window_tokens.trim())
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+      return { ok: false, error: 'context_window_tokens 必须是正整数' }
+    }
+    entry.context_window_tokens = parsed
+  }
+  if (draft.supports_vision !== null) entry.supports_vision = draft.supports_vision
+
   return { ok: true, entry }
 }
 
@@ -134,13 +145,16 @@ export type ProviderFormProps = {
   onCancel: () => void
   onSubmit: (entry: ProviderEntry, makeDefault: boolean) => Promise<void>
   onTest: (entry: ProviderEntry) => Promise<void>
+  onDiscover: (request: ProviderModelCatalogRequest) => Promise<ProviderModelCatalogResponse>
 }
 
-export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTest }: ProviderFormProps): JSX.Element {
+export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTest, onDiscover }: ProviderFormProps): JSX.Element {
   const [draft, setDraft] = useState<ProviderDraft>(initial)
   const [advanced, setAdvanced] = useState(false)
   const [makeDefault, setMakeDefault] = useState(!editing)
   const [error, setError] = useState<string | null>(null)
+  const [catalog, setCatalog] = useState<ProviderModelSummary[]>([])
+  const [catalogError, setCatalogError] = useState<string | null>(null)
 
   const patch = <K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]): void => {
     setDraft((current) => ({ ...current, [key]: value }))
@@ -155,6 +169,25 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
     setError(null)
     return built.entry
   }
+
+  const discover = async (): Promise<void> => {
+    const built = buildCatalogRequest(draft, editing)
+    if (!built.ok) {
+      setCatalogError(built.error)
+      return
+    }
+    setCatalogError(null)
+    try {
+      const response = await onDiscover(built.request)
+      setCatalog(response.models)
+      if (response.models.length === 0) setCatalogError('供应商没有返回可选择的模型。')
+    } catch (thrown) {
+      setCatalog([])
+      setCatalogError(thrown instanceof Error ? thrown.message : '查询模型失败')
+    }
+  }
+
+  const catalogLabels = Object.fromEntries(catalog.map((model) => [model.id, catalogLabel(model)])) as Record<string, string>
 
   return (
     <div className="ark-card ark-card--editing">
@@ -208,6 +241,27 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
           placeholder="deepseek-chat"
           onChange={(value) => patch('model', value)}
         />
+        {catalog.length > 0 ? (
+          <Field
+            label="供应商模型目录"
+            htmlFor="provider-catalog-model"
+            hint="选择后自动填入目录明确声明的上下文窗口和识图能力；未声明的能力保持未知。"
+          >
+            <select
+              id="provider-catalog-model"
+              className="ark-field__select"
+              value={catalog.some((item) => item.id === draft.model) ? draft.model : ''}
+              disabled={busy}
+              onChange={(event) => {
+                const model = catalog.find((item) => item.id === event.target.value)
+                if (model) setDraft((current) => applyCatalogModel(current, model))
+              }}
+            >
+              <option value="">选择模型后再写入草稿</option>
+              {catalog.map((model) => <option key={model.id} value={model.id}>{catalogLabels[model.id] ?? model.id}</option>)}
+            </select>
+          </Field>
+        ) : null}
         <TextField
           id="provider-api-key"
           label="api_key"
@@ -228,6 +282,9 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
         <button type="button" className="ark-linkbtn" onClick={() => setAdvanced((value) => !value)}>
           {advanced ? '收起高级选项' : '展开高级选项（headers / max_tokens / temperature）'}
         </button>
+        <Button size="sm" disabled={busy} onClick={() => void discover()}>
+          {busy ? '查询中…' : '查询模型列表'}
+        </Button>
       </div>
 
       {advanced ? (
@@ -267,10 +324,27 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
             hint="留空则使用运行时默认值。"
             onChange={(value) => patch('temperature', value)}
           />
+          <TextField
+            id="provider-context-window"
+            label="context_window_tokens（可选）"
+            value={draft.context_window_tokens}
+            disabled={busy}
+            placeholder="128000"
+            type="number"
+            hint="模型目录有明确数据时会自动填写；运行时会用它限制上下文压缩阈值。"
+            onChange={(value) => patch('context_window_tokens', value)}
+          />
+          <CheckField
+            label="支持识图"
+            checked={draft.supports_vision === true}
+            disabled={busy}
+            onChange={(value) => patch('supports_vision', value)}
+          />
         </div>
       ) : null}
 
       {error ? <Notice tone="error" title="表单校验失败">{error}</Notice> : null}
+      {catalogError ? <Notice tone="error" title="模型目录查询失败">{catalogError}</Notice> : null}
 
       <div className="ark-settings__actions">
         <Button

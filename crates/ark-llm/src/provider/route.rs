@@ -12,6 +12,7 @@ use crate::provider::anthropic::{self, AnthropicParser};
 use crate::provider::openai_chat::{self, ChatParser};
 use crate::provider::openai_responses::{self, ResponsesParser};
 use crate::provider::StreamParser;
+use std::collections::BTreeMap;
 
 /// The resolved wire family. Obtained from [`ProviderConfig::endpoint_format`].
 pub enum Family {
@@ -55,23 +56,31 @@ impl Family {
 
     /// Auth headers for this family.
     pub fn headers(&self, config: &ProviderConfig) -> Vec<(String, String)> {
+        // Header names are ASCII case-insensitive on the wire. Normalize first
+        // and overwrite core keys afterwards so a custom header cannot replace
+        // the selected endpoint family's authentication or content type.
+        let mut headers: BTreeMap<String, String> = config
+            .headers
+            .iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
+            .collect();
         match self {
-            Family::Chat(_) | Family::Responses(_) => vec![
-                (
+            Family::Chat(_) | Family::Responses(_) => {
+                headers.insert(
                     "authorization".to_string(),
                     format!("Bearer {}", config.api_key),
-                ),
-                ("content-type".to_string(), "application/json".to_string()),
-            ],
-            Family::Anthropic(_) => vec![
-                ("x-api-key".to_string(), config.api_key.clone()),
-                (
+                );
+            }
+            Family::Anthropic(_) => {
+                headers.insert("x-api-key".to_string(), config.api_key.clone());
+                headers.insert(
                     "anthropic-version".to_string(),
                     anthropic::API_VERSION.to_string(),
-                ),
-                ("content-type".to_string(), "application/json".to_string()),
-            ],
+                );
+            }
         }
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        headers.into_iter().collect()
     }
 }
 
@@ -178,6 +187,23 @@ mod tests {
                 .unwrap();
             assert_eq!(auth.1, "Bearer key");
         }
+    }
+
+    #[test]
+    fn provider_headers_are_forwarded_but_cannot_override_core_authentication() {
+        let mut config = config(EndpointFormat::OpenAiChat);
+        config.headers.insert("X-Tenant".into(), "ark".into());
+        config
+            .headers
+            .insert("Authorization".into(), "wrong".into());
+
+        let headers = Family::of(&config).headers(&config);
+        assert!(headers
+            .iter()
+            .any(|(name, value)| name == "x-tenant" && value == "ark"));
+        assert!(headers
+            .iter()
+            .any(|(name, value)| name == "authorization" && value == "Bearer key"));
     }
 
     #[test]

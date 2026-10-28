@@ -7,7 +7,13 @@
  */
 import { useState } from 'react'
 import { Button, EmptyState, useToast } from '../../../shared/ui'
-import type { ProviderEntry, ProviderTestResponse, ProviderView } from '../../../shared/contracts'
+import type {
+  ProviderEntry,
+  ProviderModelCatalogRequest,
+  ProviderModelCatalogResponse,
+  ProviderTestResponse,
+  ProviderView
+} from '../../../shared/contracts'
 import type { ProvidersApi } from '../hooks/use-providers'
 import { describeOutcome } from '../api/outcome'
 import { draftFromView, emptyDraft, ProviderForm, type ProviderDraft } from './ProviderForm'
@@ -78,6 +84,8 @@ function ProviderRow({
         <span>
           api_key: {provider.has_api_key ? (provider.api_key_hint ? `已配置（${provider.api_key_hint}）` : '已配置') : '未配置'}
         </span>
+        {provider.context_window_tokens ? <span>context: {provider.context_window_tokens}</span> : null}
+        {provider.supports_vision !== undefined ? <span>识图: {provider.supports_vision ? '支持' : '不支持'}</span> : null}
       </div>
 
       {shown?.error ? <Notice tone="error" title="测试请求失败">{shown.error}</Notice> : null}
@@ -130,6 +138,17 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
     }
     setTestState({ key, error: describeOutcome(outcome) })
     toast.push('error', '测试请求失败', describeOutcome(outcome))
+  }
+
+  const discover = async (request: ProviderModelCatalogRequest): Promise<ProviderModelCatalogResponse> => {
+    const outcome = await api.models(request)
+    if (outcome.ok) {
+      toast.push('success', '模型列表已更新', `共 ${outcome.value.models.length} 个模型`)
+      return outcome.value
+    }
+    const message = describeOutcome(outcome)
+    toast.push('error', '查询模型列表失败', message)
+    throw new Error(message)
   }
 
   const body = ((): JSX.Element => {
@@ -195,6 +214,7 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
           onCancel={close}
           onSubmit={submit}
           onTest={(entry) => runTest({ entry }, `test:${entry.id}`)}
+          onDiscover={discover}
         />
       ) : null}
     </SettingsSection>

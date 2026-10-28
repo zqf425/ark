@@ -62,6 +62,27 @@ pub fn select_from_config(
     (Arc::new(MeteredModel::new(Arc::new(client), usage)), label)
 }
 
+/// Cap a configured compaction threshold to the selected model's known window.
+///
+/// Parameter: `configured` is the runtime-wide threshold; `provider` supplies
+/// optional catalog metadata and requested output tokens. Returns a positive
+/// threshold that reserves requested output only when the user configured one.
+pub fn context_limit_tokens(configured: u64, provider: Option<&ProviderConfig>) -> u64 {
+    let configured = configured.max(1);
+    provider
+        .and_then(|provider| {
+            provider
+                .context_window_tokens
+                .map(|window| (provider, window))
+        })
+        .map(|(provider, window)| {
+            let output_reserve = provider.max_tokens.map(u64::from).unwrap_or(0);
+            window.saturating_sub(output_reserve).max(1)
+        })
+        .map(|model_limit| configured.min(model_limit))
+        .unwrap_or(configured)
+}
+
 /// Extract a usable provider from the opaque `model_providers` value.
 ///
 /// Accepted shapes: `{"provider_id","model","api_key","base_url"}` or an array
@@ -262,6 +283,16 @@ mod tests {
         assert!(http_provider(&keyless).is_none());
         let array = config_with(serde_json::json!([{ "model": "m", "api_key": "sk" }]));
         assert!(http_provider(&array).is_some());
+    }
+
+    #[test]
+    fn explicit_model_window_caps_context_after_reserving_output() {
+        let mut provider = ProviderConfig::new("p", "m");
+        provider.context_window_tokens = Some(32_000);
+        provider.max_tokens = Some(4_096);
+        assert_eq!(context_limit_tokens(100_000, Some(&provider)), 27_904);
+        assert_eq!(context_limit_tokens(20_000, Some(&provider)), 20_000);
+        assert_eq!(context_limit_tokens(20_000, None), 20_000);
     }
 
     #[tokio::test]

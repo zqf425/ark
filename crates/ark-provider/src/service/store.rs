@@ -17,13 +17,17 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use ark_common::{ArkError, Result};
 use ark_contract::{
-    ProviderEntry, ProviderListResponse, ProviderTestRequest, ProviderTestResponse,
+    ProviderEntry, ProviderListResponse, ProviderModelCatalogConnection,
+    ProviderModelCatalogRequest, ProviderModelCatalogResponse, ProviderTestRequest,
+    ProviderTestResponse,
 };
-use ark_llm::ProviderConfig;
+use ark_llm::{ModelCatalogClient, ProviderConfig};
 use tracing::warn;
 
 use crate::config::providers_path;
-use crate::domain::{normalize_entry, validate_endpoint_format, ProvidersDocument as Document};
+use crate::domain::{
+    normalize_entry, validate_base_url, validate_endpoint_format, ProvidersDocument as Document,
+};
 use crate::service::entry_config::config_from_entry;
 use crate::service::persist::{load_document, write_document, DocumentLoad};
 use crate::service::probe;
@@ -42,6 +46,8 @@ pub struct ProviderStore {
     path: PathBuf,
     /// Snapshot of the persisted document. Swapped wholesale after a write.
     inner: Mutex<Document>,
+    /// One reusable client for explicit model-discovery actions.
+    catalog: ModelCatalogClient,
 }
 
 impl std::fmt::Debug for ProviderStore {
@@ -60,6 +66,14 @@ impl ProviderStore {
     /// but warns loudly: refusing to start would lock the user out of the very
     /// dialog needed to fix it.
     pub fn new(data_dir: PathBuf) -> Self {
+        Self::with_catalog_client(data_dir, ModelCatalogClient::default())
+    }
+
+    /// Open the table with an injected model-catalog client.
+    ///
+    /// Parameter: `data_dir` owns the provider document; `catalog` carries the
+    /// process HTTP pool and transport policy. Returns the initialized store.
+    pub fn with_catalog_client(data_dir: PathBuf, catalog: ModelCatalogClient) -> Self {
         let path = providers_path(&data_dir);
         let document = match load_document(&path) {
             DocumentLoad::Loaded(document) => document,
@@ -72,6 +86,7 @@ impl ProviderStore {
         Self {
             path,
             inner: Mutex::new(document),
+            catalog,
         }
     }
 
@@ -211,6 +226,55 @@ impl ProviderStore {
         }
     }
 
+    /// List models exposed by a saved provider or an unsaved settings draft.
+    ///
+    /// Parameter: `request` identifies a persisted provider or supplies the
+    /// connection values currently in the form. Returns a normalized catalog or
+    /// a structured validation/transport error.
+    ///
+    /// Catalog metadata is never persisted by this method: the caller must
+    /// explicitly choose a returned model and save the provider entry. That
+    /// prevents a transient remote catalog response from silently changing a
+    /// running configuration.
+    pub async fn models(
+        &self,
+        request: ProviderModelCatalogRequest,
+    ) -> Result<ProviderModelCatalogResponse> {
+        let config = self.config_for_catalog(request)?;
+        self.catalog.list(&config).await
+    }
+
+    /// Resolve the catalog connection without requiring a model id.
+    fn config_for_catalog(&self, request: ProviderModelCatalogRequest) -> Result<ProviderConfig> {
+        let id = request
+            .provider_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let stored =
+            match id {
+                Some(id) => self.lock().get(id).cloned().ok_or_else(|| {
+                    ArkError::not_found(format!("provider `{id}` does not exist"))
+                })?,
+                None => ProviderEntry::new("catalog-draft", "catalog"),
+            };
+        match request.connection {
+            None if id.is_some() => catalog_config_from_connection(
+                ProviderModelCatalogConnection {
+                    base_url: stored.base_url.clone(),
+                    api_key: None,
+                    endpoint_format: stored.endpoint_format.clone(),
+                    headers: Default::default(),
+                },
+                &stored,
+            ),
+            None => Err(ArkError::validation(
+                "send a saved provider_id or a draft catalog connection",
+            )),
+            Some(connection) => catalog_config_from_connection(connection, &stored),
+        }
+    }
+
     /// Pick the entry to probe, reusing a stored key for a draft that omits it.
     fn entry_for_probe(
         &self,
@@ -280,6 +344,36 @@ impl ProviderStore {
     }
 }
 
+/// Build a catalog-only config from a draft, preserving write-only values from
+/// the stored entry when the edit form left them blank.
+fn catalog_config_from_connection(
+    connection: ProviderModelCatalogConnection,
+    stored: &ProviderEntry,
+) -> Result<ProviderConfig> {
+    let base_url = validate_base_url(&connection.base_url)?;
+    let endpoint_format = validate_endpoint_format(&connection.endpoint_format)?;
+    let api_key = connection
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| stored.api_key.clone())
+        .ok_or_else(|| ArkError::validation("api_key is required before querying models"))?;
+    let headers = if connection.headers.is_empty() {
+        stored.headers.clone()
+    } else {
+        connection.headers
+    };
+    let mut config = ProviderConfig::new(&stored.id, "catalog")
+        .with_base_url(base_url)
+        .with_api_key(api_key)
+        .with_format(endpoint_format)
+        .with_headers(headers);
+    config.context_window_tokens = None;
+    Ok(config)
+}
+
 /// The current settings form does not receive secret or advanced values back
 /// from the redacted list response. Empty/absent values therefore mean "not
 /// edited", not "erase the persisted value". A later explicit patch shape
@@ -303,6 +397,12 @@ fn keep_omitted_edit_fields(
     if candidate.temperature.is_none() {
         candidate.temperature = previous.temperature;
     }
+    if candidate.context_window_tokens.is_none() {
+        candidate.context_window_tokens = previous.context_window_tokens;
+    }
+    if candidate.supports_vision.is_none() {
+        candidate.supports_vision = previous.supports_vision;
+    }
     candidate
 }
 
@@ -321,7 +421,7 @@ fn validate_for_probe(entry: &ProviderEntry) -> std::result::Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_contract::ProviderEntry;
+    use ark_contract::{ProviderEntry, ProviderModelCatalogRequest};
     use std::path::Path;
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -342,6 +442,92 @@ mod tests {
 
     fn store(dir: &Path) -> ProviderStore {
         ProviderStore::new(dir.to_path_buf())
+    }
+
+    #[tokio::test]
+    async fn model_catalog_rejects_an_unknown_stored_provider_without_network_access() {
+        let dir = temp_dir("catalog-missing");
+        let error = store(&dir)
+            .models(ProviderModelCatalogRequest {
+                provider_id: Some("missing".into()),
+                connection: None,
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code, ark_common::ArkErrorCode::NotFound);
+        assert!(
+            error.message.contains("does not exist"),
+            "{}",
+            error.message
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn model_catalog_uses_the_saved_auth_and_custom_headers() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4_096];
+            let count = socket.read(&mut request).unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 102\r\nConnection: close\r\n\r\n{\"data\":[{\"id\":\"vision\",\"context_length\":65536,\"architecture\":{\"input_modalities\":[\"text\",\"image\"]}}]}",
+                )
+                .unwrap();
+            String::from_utf8_lossy(&request[..count]).into_owned()
+        });
+        let dir = temp_dir("catalog-http");
+        let store = store(&dir);
+        let mut configured = entry("p", Some("secret-catalog-key"));
+        configured.base_url = format!("http://{address}/v1");
+        configured.headers.insert("X-Tenant".into(), "ark".into());
+        store.upsert(configured, false).unwrap();
+
+        let catalog = store
+            .models(ProviderModelCatalogRequest {
+                provider_id: Some("p".into()),
+                connection: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(catalog.models[0].id, "vision");
+        assert_eq!(catalog.models[0].context_window_tokens, Some(65_536));
+        assert_eq!(catalog.models[0].supports_vision, Some(true));
+        let seen = server.join().unwrap().to_ascii_lowercase();
+        assert!(seen.starts_with("get /v1/models"), "{seen}");
+        assert!(
+            seen.contains("authorization: bearer secret-catalog-key"),
+            "{seen}"
+        );
+        assert!(seen.contains("x-tenant: ark"), "{seen}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_disabled_provider_can_still_be_discovered_before_it_is_enabled() {
+        let dir = temp_dir("catalog-disabled");
+        let store = store(&dir);
+        let mut configured = entry("p", Some("secret-catalog-key"));
+        configured.enabled = false;
+        store.upsert(configured, false).unwrap();
+
+        let config = store
+            .config_for_catalog(ProviderModelCatalogRequest {
+                provider_id: Some("p".into()),
+                connection: None,
+            })
+            .unwrap();
+
+        assert_eq!(config.provider_id, "p");
+        assert_eq!(config.api_key, "secret-catalog-key");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

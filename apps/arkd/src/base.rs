@@ -15,8 +15,9 @@ use std::sync::Arc;
 use ark_common::Result;
 use ark_contract::{
     McpServerEntry, McpServerListResponse, McpServerTestResponse, ProviderEntry,
-    ProviderListResponse, ProviderTestRequest, ProviderTestResponse, SkillDiagnostics,
-    SkillTurnResolution, ThreadSkillsResponse, WorkspaceStatus,
+    ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
+    ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SkillTurnResolution,
+    ThreadSkillsResponse, WorkspaceStatus,
 };
 use ark_ports::{
     McpServerService, ModelEndpoint, ProviderService, SkillService, Tool, WorkspaceService,
@@ -57,6 +58,13 @@ impl ProviderService for ProviderAdapter {
 
     async fn test(&self, request: ProviderTestRequest) -> ProviderTestResponse {
         self.inner.test(request).await
+    }
+
+    async fn models(
+        &self,
+        request: ProviderModelCatalogRequest,
+    ) -> Result<ProviderModelCatalogResponse> {
+        self.inner.models(request).await
     }
 
     fn resolve_endpoint(&self, id: Option<&str>) -> Option<ModelEndpoint> {

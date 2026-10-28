@@ -257,8 +257,12 @@ impl AgentTurnRunner {
     /// The provider table wins; `model_providers` in `config.json` remains the
     /// legacy fallback. Rebuilt per turn so an added/edited provider applies to
     /// the next turn without a restart.
-    fn model_for_turn(&self, snapshot: &RuntimeConfig) -> Arc<dyn ModelClient> {
-        match self.providers.resolve(None) {
+    fn model_for_turn(
+        &self,
+        snapshot: &RuntimeConfig,
+        provider: Option<ark_llm::ProviderConfig>,
+    ) -> Arc<dyn ModelClient> {
+        match provider {
             Some(endpoint) => model::select_from_config(endpoint, Arc::clone(&self.usage)).0,
             None => model::select(snapshot, Arc::clone(&self.usage)).0,
         }
@@ -268,14 +272,19 @@ impl AgentTurnRunner {
     ///
     /// A running turn keeps the snapshot it started with; the next turn sees the
     /// edit. That is the bounded-lifetime semantics the design asks for.
-    fn limits_for_turn(snapshot: &RuntimeConfig) -> TurnLimits {
+    fn limits_for_turn(
+        snapshot: &RuntimeConfig,
+        provider: Option<&ark_llm::ProviderConfig>,
+    ) -> TurnLimits {
         let tuning = &snapshot.tuning;
+        let context_limit_tokens =
+            model::context_limit_tokens(tuning.context_limit_tokens, provider);
         TurnLimits {
             max_rounds: tuning.max_rounds.max(1),
             max_tokens: tuning.max_tokens.max(1),
             max_tool_calls: tuning.max_tool_calls.max(1),
             max_identical_calls: tuning.max_identical_calls.max(1),
-            context_limit_tokens: tuning.context_limit_tokens.max(1),
+            context_limit_tokens,
             keep_recent_messages: tuning.keep_recent_messages.max(1),
             max_compactions: TurnLimits::default().max_compactions,
         }
@@ -398,7 +407,8 @@ impl TurnRunner for AgentTurnRunner {
         // One snapshot per turn: every value below is derived from the same
         // config state, so a turn cannot mix a new model with old limits.
         let snapshot = self.config.snapshot();
-        let model = self.model_for_turn(&snapshot);
+        let provider = self.providers.resolve(None);
+        let model = self.model_for_turn(&snapshot, provider.clone());
         let mut reactor = Reactor::new(ReactorConfig {
             model,
             tools,
@@ -410,10 +420,10 @@ impl TurnRunner for AgentTurnRunner {
             seed: ModelSeed {
                 messages: seed_messages,
                 tools: self.tool_schemas.clone(),
-                temperature: None,
-                max_tokens: None,
+                temperature: provider.as_ref().and_then(|provider| provider.temperature),
+                max_tokens: provider.as_ref().and_then(|provider| provider.max_tokens),
             },
-            machine: TurnMachine::new(Self::limits_for_turn(&snapshot)),
+            machine: TurnMachine::new(Self::limits_for_turn(&snapshot, provider.as_ref())),
             chunk_buffer: Self::chunk_buffer_for_turn(&snapshot),
         })
         .with_steering(job.steering);
@@ -485,6 +495,7 @@ mod tests {
 
     use ark_common::ChildId;
     use ark_contract::RuntimeEvent;
+    use ark_llm::ProviderConfig;
     use chrono::Utc;
 
     struct TestDataDir(std::path::PathBuf);
@@ -627,5 +638,18 @@ mod tests {
                 .notification_ids(),
             &["child:one".to_string()]
         );
+    }
+
+    #[test]
+    fn provider_context_window_caps_the_next_turn_and_reserves_requested_output() {
+        let mut config = RuntimeConfig::default();
+        config.tuning.context_limit_tokens = 100_000;
+        let mut provider = ProviderConfig::new("p", "m");
+        provider.context_window_tokens = Some(32_000);
+        provider.max_tokens = Some(4_096);
+
+        let limits = AgentTurnRunner::limits_for_turn(&config, Some(&provider));
+
+        assert_eq!(limits.context_limit_tokens, 27_904);
     }
 }

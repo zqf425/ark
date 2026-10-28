@@ -32,6 +32,8 @@ pub fn config_from_entry(entry: &ProviderEntry) -> Option<ProviderConfig> {
         .with_format(format);
     config.max_tokens = entry.max_tokens;
     config.temperature = entry.temperature;
+    config.headers = entry.headers.clone();
+    config.context_window_tokens = entry.context_window_tokens;
     Some(config)
 }
 
@@ -91,6 +93,16 @@ mod tests {
         let config = config_from_entry(&tuned).unwrap();
         assert_eq!(config.max_tokens, Some(512));
         assert_eq!(config.temperature, Some(0.2));
+    }
+
+    #[test]
+    fn provider_capabilities_and_headers_reach_the_runtime_config() {
+        let mut configured = entry();
+        configured.headers.insert("X-Tenant".into(), "ark".into());
+        configured.context_window_tokens = Some(128_000);
+        let config = config_from_entry(&configured).unwrap();
+        assert_eq!(config.headers.get("X-Tenant"), Some(&"ark".to_string()));
+        assert_eq!(config.context_window_tokens, Some(128_000));
     }
 
     #[test]

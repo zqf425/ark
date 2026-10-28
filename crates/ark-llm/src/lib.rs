@@ -39,4 +39,4 @@ pub use config::{EndpointFormat, ProviderConfig};
 pub use domain::{StreamEvent, ToolFragment};
 pub use provider::route::Family;
 pub use provider::StreamParser;
-pub use service::{HttpModelClient, MockModelClient, Script, ScriptedCall};
+pub use service::{HttpModelClient, MockModelClient, ModelCatalogClient, Script, ScriptedCall};

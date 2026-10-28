@@ -11,8 +11,9 @@
 use ark_common::Result;
 use ark_contract::{
     McpServerEntry, McpServerListResponse, McpServerTestResponse, ProviderEntry,
-    ProviderListResponse, ProviderTestRequest, ProviderTestResponse, SkillDiagnostics,
-    SkillTurnResolution, ThreadSkillsResponse, WorkspaceStatus,
+    ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
+    ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SkillTurnResolution,
+    ThreadSkillsResponse, WorkspaceStatus,
 };
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -49,6 +50,16 @@ pub trait ProviderService: Send + Sync {
 
     /// Real connectivity probe; `request.entry` tests an unsaved draft.
     async fn test(&self, request: ProviderTestRequest) -> ProviderTestResponse;
+
+    /// Query a provider's model catalog for the settings picker.
+    ///
+    /// Parameter: `request` identifies a saved provider or carries an unsaved
+    /// connection draft. Returns the normalized, explicitly reported model
+    /// metadata, or a structured validation/transport error.
+    async fn models(
+        &self,
+        request: ProviderModelCatalogRequest,
+    ) -> Result<ProviderModelCatalogResponse>;
 
     /// Resolve the endpoint a turn should use. `None` when nothing usable is
     /// configured, so `arkd` can fall back deliberately instead of guessing.

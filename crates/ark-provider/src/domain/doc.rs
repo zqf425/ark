@@ -71,6 +71,8 @@ impl ProvidersDocument {
             is_default: self.effective_default() == Some(entry.id.as_str()),
             has_api_key: api_key_hint(entry.api_key.as_deref()).is_some(),
             api_key_hint: api_key_hint(entry.api_key.as_deref()),
+            context_window_tokens: entry.context_window_tokens,
+            supports_vision: entry.supports_vision,
         }
     }
 

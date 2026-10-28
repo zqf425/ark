@@ -17,6 +17,8 @@
   实际消费回复后写入，取消时 Drop 守卫必须移除 waiter。
 - workbench 的 Plan、Changes、File、Terminal 投影均在 `service/workbench.rs`，handler 只读取权威事件并
   调用该纯函数；File 不直接访问磁盘，而是返回已持久化的 `read` 工具输出。
+- provider model catalog 路由只转发 `ProviderService::models`，不读取、记录或回显 api key/header；具体
+  限时、限体积和元数据规范化留在 `ark-llm` / `ark-provider`。
 
 ## 路由清单
 

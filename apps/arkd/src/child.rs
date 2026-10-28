@@ -136,38 +136,58 @@ impl ChildTurnExecutorImpl {
     /// for a narrower one. Copying the values here (instead of hardcoding
     /// defaults) is what makes a Settings change apply to the next child without
     /// a restart, which is the `Hot` contract for `tuning`.
-    fn limits_of(&self, ctx: &ChildTurnContext) -> TurnLimits {
-        let snapshot = self.config.snapshot();
+    fn limits_of(
+        snapshot: &RuntimeConfig,
+        provider: Option<&ark_llm::ProviderConfig>,
+    ) -> TurnLimits {
         let tuning = &snapshot.tuning;
         // A child is a *bounded* sub-task: it gets the same ceilings, never more.
-        let _ = ctx;
         TurnLimits {
             max_rounds: tuning.max_rounds.max(1),
             max_tokens: tuning.max_tokens.max(1),
             max_tool_calls: tuning.max_tool_calls.max(1),
             max_identical_calls: tuning.max_identical_calls.max(1),
-            context_limit_tokens: tuning.context_limit_tokens.max(1),
+            context_limit_tokens: crate::model::context_limit_tokens(
+                tuning.context_limit_tokens,
+                provider,
+            ),
             keep_recent_messages: tuning.keep_recent_messages.max(1),
             max_compactions: TurnLimits::default().max_compactions,
         }
     }
 
-    /// Client for this child: an override when it resolves, else the parent's.
-    fn model_for(&self, ctx: &ChildTurnContext) -> Arc<dyn ModelClient> {
+    /// Resolve this child's provider from the live table before using its parent
+    /// fallback. That gives children the same hot-update semantics as parents.
+    fn provider_for(&self, ctx: &ChildTurnContext) -> Option<ark_llm::ProviderConfig> {
         let explicit = ctx
             .provider_id
             .as_deref()
             .filter(|id| !id.trim().is_empty());
-        if explicit.is_some() || ctx.model.is_some() {
-            if let Some(mut provider) = self.providers.resolve(explicit) {
-                if let Some(model) = ctx.model.as_deref().filter(|m| !m.trim().is_empty()) {
-                    provider.model = model.to_string();
-                }
-                let (client, _label) = model::select_from_config(provider, Arc::clone(&self.usage));
-                return client;
+        let mut provider = self.providers.resolve(explicit)?;
+        if let Some(model) = ctx
+            .model
+            .as_deref()
+            .filter(|model| !model.trim().is_empty())
+        {
+            if model != provider.model {
+                // Catalog metadata belongs to the stored model id. A child
+                // override has no associated catalog response, so retaining
+                // the old window would incorrectly compact against another
+                // model's limit.
+                provider.model = model.to_string();
+                provider.context_window_tokens = None;
             }
         }
-        Arc::clone(&self.parent_model)
+        Some(provider)
+    }
+
+    /// Build the transport client for a resolved provider, or retain the local
+    /// parent fallback when no usable provider is configured.
+    fn model_for(&self, provider: Option<ark_llm::ProviderConfig>) -> Arc<dyn ModelClient> {
+        match provider {
+            Some(provider) => model::select_from_config(provider, Arc::clone(&self.usage)).0,
+            None => Arc::clone(&self.parent_model),
+        }
     }
 }
 
@@ -219,8 +239,10 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             )));
         }
 
+        let snapshot = self.config.snapshot();
+        let provider = self.provider_for(&ctx);
         let mut reactor = Reactor::new(ReactorConfig {
-            model: self.model_for(&ctx),
+            model: self.model_for(provider.clone()),
             tools,
             writer,
             gates: Arc::new(ark_agent::AllowAllGates),
@@ -230,10 +252,10 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             seed: ModelSeed {
                 messages: seed_messages,
                 tools: self.tool_schemas.clone(),
-                temperature: None,
-                max_tokens: None,
+                temperature: provider.as_ref().and_then(|provider| provider.temperature),
+                max_tokens: provider.as_ref().and_then(|provider| provider.max_tokens),
             },
-            machine: TurnMachine::new(self.limits_of(&ctx)),
+            machine: TurnMachine::new(Self::limits_of(&snapshot, provider.as_ref())),
             chunk_buffer: crate::wiring::CHUNK_BUFFER,
         })
         .with_steering(steer);

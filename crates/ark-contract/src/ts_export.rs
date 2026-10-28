@@ -26,13 +26,15 @@ use crate::{
     ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
     CreateThreadRequest, EventKind, FieldPath, FilePreview, GoalRequest, HealthResponse,
     ItemStatus, McpServerEntry, McpServerListResponse, McpServerTestResponse, McpServerView,
-    McpTransportKind, PlanView, ProviderEntry, ProviderListResponse, ProviderTestRequest,
-    ProviderTestResponse, ProviderView, ResolveApprovalRequest, ResolveUserInputRequest,
-    ResumeChildRequest, RuntimeConfigView, RuntimeEvent, RuntimeInfo, SkillDiagnostics,
-    SkillLoadWarning, SkillSource, SkillSummary, SteerChildRequest, SubagentSettings,
-    TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadItem, ThreadSkillsResponse,
-    ThreadSummary, TodoEntry, TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary,
-    UpdateThreadRequest, UsageResponse, WorkspaceChange, WorkspaceChangesResponse, WorkspaceStatus,
+    McpTransportKind, PlanView, ProviderEntry, ProviderListResponse,
+    ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
+    ProviderModelSummary, ProviderTestRequest, ProviderTestResponse, ProviderView,
+    ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, RuntimeConfigView,
+    RuntimeEvent, RuntimeInfo, SkillDiagnostics, SkillLoadWarning, SkillSource, SkillSummary,
+    SteerChildRequest, SubagentSettings, TerminalEntriesResponse, TerminalEntry, ThreadDetail,
+    ThreadItem, ThreadSkillsResponse, ThreadSummary, TodoEntry, TodoStatus, TodosRequest,
+    TuningSettings, TurnRequest, TurnSummary, UpdateThreadRequest, UsageResponse, WorkspaceChange,
+    WorkspaceChangesResponse, WorkspaceStatus,
 };
 use ark_common::{ArkErrorCode, ArkErrorPayload, ChildId, ItemId, ThreadId, TurnId, Usage};
 
@@ -104,6 +106,10 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     ProviderEntry::export_all_to(dir)?;
     ProviderView::export_all_to(dir)?;
     ProviderListResponse::export_all_to(dir)?;
+    ProviderModelCatalogConnection::export_all_to(dir)?;
+    ProviderModelCatalogRequest::export_all_to(dir)?;
+    ProviderModelSummary::export_all_to(dir)?;
+    ProviderModelCatalogResponse::export_all_to(dir)?;
     ProviderTestRequest::export_all_to(dir)?;
     ProviderTestResponse::export_all_to(dir)?;
     WorkspaceStatus::export_all_to(dir)?;
@@ -202,6 +208,10 @@ const ROOT_NAMES: &[&str] = &[
     "ProviderEntry",
     "ProviderView",
     "ProviderListResponse",
+    "ProviderModelCatalogConnection",
+    "ProviderModelCatalogRequest",
+    "ProviderModelSummary",
+    "ProviderModelCatalogResponse",
     "ProviderTestRequest",
     "ProviderTestResponse",
     "WorkspaceStatus",

@@ -41,6 +41,15 @@ pub struct ProviderEntry {
     pub max_tokens: Option<u32>,
     #[serde(default)]
     pub temperature: Option<f32>,
+    /// Total tokens accepted by the selected model, when the provider catalog
+    /// reported it. `None` means the provider did not publish this capability.
+    #[serde(default)]
+    #[ts(as = "Option<f64>")]
+    pub context_window_tokens: Option<u64>,
+    /// Whether the selected model accepts image input. `None` means unknown,
+    /// not false: generic model-list endpoints often do not publish modalities.
+    #[serde(default)]
+    pub supports_vision: Option<bool>,
 }
 
 fn default_true() -> bool {
@@ -60,6 +69,8 @@ impl ProviderEntry {
             headers: BTreeMap::new(),
             max_tokens: None,
             temperature: None,
+            context_window_tokens: None,
+            supports_vision: None,
         }
     }
 }
@@ -80,6 +91,11 @@ pub struct ProviderView {
     /// First and last four characters only, e.g. `sk-a...cdef`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub context_window_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supports_vision: Option<bool>,
 }
 
 /// `GET /v1/runtime/model-providers`.
@@ -119,6 +135,63 @@ pub struct ProviderTestResponse {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_url: Option<String>,
+}
+
+/// Connection fields required to query a provider's model catalog.
+///
+/// This intentionally excludes a model id: discovery happens before the user
+/// picks one. Secret fields are write-only and are never echoed in a response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ProviderModelCatalogConnection {
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub endpoint_format: String,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+}
+
+/// `POST /v1/runtime/providers/models`.
+///
+/// A saved `provider_id` reuses the stored secret. A draft connection lets the
+/// settings form discover models before it persists a provider. When both are
+/// supplied, blank draft secrets mean "reuse the saved value", matching normal
+/// provider edit semantics.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ProviderModelCatalogRequest {
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    #[serde(default)]
+    pub connection: Option<ProviderModelCatalogConnection>,
+}
+
+/// One model supplied by a provider catalog.
+///
+/// Metadata is only populated when the remote response explicitly includes it;
+/// ark never infers a context window or vision support from a model name.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ProviderModelSummary {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub context_window_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supports_vision: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
+}
+
+/// Successful model-catalog response, bounded and sorted by stable model id.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ProviderModelCatalogResponse {
+    pub models: Vec<ProviderModelSummary>,
 }
 
 // ---------------------------------------------------------------------------

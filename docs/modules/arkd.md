@@ -23,6 +23,10 @@ source 注入 reactor。父回合成功后再追加 completion acknowledgement�
 父回合使用 `InteractiveGates`，该实例同时注入 `AppState` 的 HTTP handler 与 `AgentTurnRunner` 的
 `ReactorConfig`；不得回退为 `AllowAllGates`，否则审批和用户输入卡片会变成无法影响执行的装饰。
 
+每个父/子回合在开始时读取同一份 provider 配置：自定义 headers、temperature 和 max_tokens 传入
+`ModelSeed`，不会被设置页静默忽略。模型目录明确提供 context window 时，组合根将全局 compaction
+threshold 收窄到可用输入空间（扣除用户明确设置的 max_tokens）；已运行回合继续使用创建时快照。
+
 ## 验证
 
 装配变更至少执行 `cargo check -p arkd`；涉及运行时、存储或并发时执行 workspace 测试，并验证启动/停机
