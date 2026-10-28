@@ -11,7 +11,7 @@ export type ChildRunSummary = { id: ChildId, parentThreadId: ThreadId, parentTur
 /**
  * `queued` | `running` | `completed` | `failed` | `aborted`.
  */
-status: string, summary?: string, error?: string, model?: string, providerId?: string, 
+status: string, summary?: string, error?: string, model?: string, providerId?: string, autonomy?: string, 
 /**
  * Real counters the child reported; absent when it never reached a model.
  */

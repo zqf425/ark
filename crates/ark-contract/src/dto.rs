@@ -370,6 +370,8 @@ pub struct ChildRunSummary {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autonomy: Option<String>,
     /// Real counters the child reported; absent when it never reached a model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,

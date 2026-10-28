@@ -234,27 +234,48 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
                 workspace.display()
             )));
         }
-        let provider_id = child_setting(
-            ctx.provider_id
-                .as_deref()
-                .filter(|value| !value.trim().is_empty()),
-            parent_runtime.provider_id.as_deref(),
-        );
-        let model_override = child_setting(
+        let workspace = workspace
+            .canonicalize()
+            .map_err(|_| ark_common::ArkError::validation("cannot canonicalize child workspace"))?;
+        let requested_provider = ctx
+            .provider_id
+            .as_deref()
+            .filter(|value| !value.trim().is_empty());
+        let provider_id = child_setting(requested_provider, parent_runtime.provider_id.as_deref());
+        // A different provider owns its own default model. Only inherit a parent
+        // model when the child retains the parent's provider selection.
+        let model_override = if requested_provider.is_some() {
             ctx.model
                 .as_deref()
-                .filter(|value| !value.trim().is_empty()),
-            parent_runtime.model.as_deref(),
-        );
-        let autonomy = child_setting(
-            ctx.autonomy
-                .as_deref()
-                .filter(|value| !value.trim().is_empty()),
-            parent_runtime.autonomy.as_deref(),
-        );
-        let sandbox: Arc<dyn SandboxPolicy> = Arc::new(ark_tool::BuiltinSandboxPolicy::new(
-            crate::wiring::autonomy_from_override(autonomy)?,
-        ));
+                .filter(|value| !value.trim().is_empty())
+        } else {
+            child_setting(
+                ctx.model
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty()),
+                parent_runtime.model.as_deref(),
+            )
+        };
+        let parent_autonomy =
+            crate::wiring::autonomy_from_override(parent_runtime.autonomy.as_deref())?;
+        let autonomy = match ctx
+            .autonomy
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            Some(value) => {
+                let requested = crate::wiring::autonomy_from_override(Some(value))?;
+                if autonomy_rank(requested) > autonomy_rank(parent_autonomy) {
+                    return Err(ark_common::ArkError::validation(
+                        "child autonomy cannot exceed the parent thread",
+                    ));
+                }
+                requested
+            }
+            None => parent_autonomy,
+        };
+        let sandbox: Arc<dyn SandboxPolicy> =
+            Arc::new(ark_tool::BuiltinSandboxPolicy::new(autonomy));
         let tools: Arc<dyn ark_agent::ToolRunner> = Arc::new(ChildToolRunner {
             inner: Arc::clone(&self.tools),
             workspace: workspace.clone(),
@@ -347,6 +368,14 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
                 tool_invocations,
             },
         })
+    }
+}
+
+fn autonomy_rank(value: ark_tool::Autonomy) -> u8 {
+    match value {
+        ark_tool::Autonomy::Strict => 0,
+        ark_tool::Autonomy::WorkspaceWrite => 1,
+        ark_tool::Autonomy::Unattended => 2,
     }
 }
 

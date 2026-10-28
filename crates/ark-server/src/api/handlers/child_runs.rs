@@ -126,6 +126,7 @@ fn summary_of_record(record: &ChildRunRecord) -> ChildRunSummary {
         error: record.error.clone(),
         model: record.model.clone(),
         provider_id: record.provider_id.clone(),
+        autonomy: record.autonomy.clone(),
         usage: record.usage.clone(),
         tool_invocations: record.tool_invocations,
         resume_count: record.resume_count,
