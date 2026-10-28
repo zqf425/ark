@@ -53,6 +53,10 @@ pub struct SubagentRequest {
     /// Provider override; falls back to the parent turn's provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
+    /// Permission override (`strict`, `workspace_write`, or `unattended`);
+    /// absent values inherit the parent thread's effective setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autonomy: Option<String>,
     /// Continue an interrupted run on its original session instead of creating a
     /// new child. When set, `prompt` is the correction instruction.
     #[serde(default, skip_serializing_if = "Option::is_none")]

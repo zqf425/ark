@@ -304,6 +304,7 @@ pub async fn resume(
         workspace: None,
         model: None,
         provider_id: None,
+        autonomy: None,
         resume_child_id: Some(child),
     };
 

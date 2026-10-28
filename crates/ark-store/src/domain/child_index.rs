@@ -43,6 +43,8 @@ pub struct ChildIndexEntry {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autonomy: Option<String>,
 }
 
 impl ChildIndexEntry {
@@ -57,6 +59,7 @@ impl ChildIndexEntry {
             ended_at: record.ended_at,
             model: record.model.clone(),
             provider_id: record.provider_id.clone(),
+            autonomy: record.autonomy.clone(),
         }
     }
 

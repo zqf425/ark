@@ -102,6 +102,7 @@ impl DelegateTaskTool {
             workspace: Some(ctx.workspace.display().to_string()),
             model: parsed.model,
             provider_id: parsed.provider_id,
+            autonomy: parsed.autonomy,
             resume_child_id,
         };
 

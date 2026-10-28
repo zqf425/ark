@@ -444,7 +444,7 @@ impl TurnRunner for AgentTurnRunner {
             None => self.roots.lease().canonical_root,
         };
         let policy: Arc<dyn SandboxPolicy> = Arc::new(BuiltinSandboxPolicy::new(
-            autonomy_from_override(thread.runtime.autonomy.as_deref()),
+            autonomy_from_override(thread.runtime.autonomy.as_deref())?,
         ));
         let events = TurnEvents::new(job.thread_id, job.turn_id);
         let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events));
@@ -527,11 +527,14 @@ fn workspace_line(workspace: &std::path::Path) -> String {
     format!("workspace root: {}", workspace.display())
 }
 
-fn autonomy_from_override(value: Option<&str>) -> Autonomy {
+pub(crate) fn autonomy_from_override(value: Option<&str>) -> ark_common::Result<Autonomy> {
     match value {
-        Some("strict") => Autonomy::Strict,
-        Some("unattended") => Autonomy::Unattended,
-        _ => Autonomy::WorkspaceWrite,
+        None | Some("workspace_write") => Ok(Autonomy::WorkspaceWrite),
+        Some("strict") => Ok(Autonomy::Strict),
+        Some("unattended") => Ok(Autonomy::Unattended),
+        Some(value) => Err(ark_common::ArkError::validation(format!(
+            "invalid autonomy: {value}"
+        ))),
     }
 }
 

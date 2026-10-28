@@ -112,6 +112,8 @@ pub struct DelegateArgs {
     pub model: Option<String>,
     #[serde(default)]
     pub provider_id: Option<String>,
+    #[serde(default)]
+    pub autonomy: Option<String>,
     /// Return as soon as the queued record and abort handle are installed.
     #[serde(default)]
     pub background: bool,

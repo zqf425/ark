@@ -49,6 +49,12 @@ use crate::workspace::WorkspaceRoots;
 /// path. Neither loop runs a model round, so they cannot stall a turn.
 const BRIDGE_TICK: Duration = Duration::from_millis(50);
 
+/// Resolve a child override against its parent setting. A `None` child value is
+/// intentionally not a reset: only an explicit value changes inherited state.
+fn child_setting<T>(child: Option<T>, parent: Option<T>) -> Option<T> {
+    child.or(parent)
+}
+
 /// Owns bridge tasks so panic unwinding cannot detach permanent polling loops.
 struct BridgeTasks {
     handles: Vec<tokio::task::JoinHandle<()>>,
@@ -90,7 +96,6 @@ pub struct ChildTurnExecutorImpl {
     tool_schemas: Vec<serde_json::Value>,
     sink: Arc<dyn EventSink>,
     store: Arc<dyn SessionStore>,
-    policy: Arc<dyn SandboxPolicy>,
     roots: Arc<WorkspaceRoots>,
     skills: Arc<ark_skills::SkillRuntime>,
 }
@@ -124,7 +129,6 @@ impl ChildTurnExecutorImpl {
             tool_schemas,
             sink,
             store,
-            policy,
             roots,
             skills,
         }
@@ -158,17 +162,22 @@ impl ChildTurnExecutorImpl {
 
     /// Resolve this child's provider from the live table before using its parent
     /// fallback. That gives children the same hot-update semantics as parents.
-    fn provider_for(&self, ctx: &ChildTurnContext) -> Option<ark_llm::ProviderConfig> {
-        let explicit = ctx
-            .provider_id
-            .as_deref()
-            .filter(|id| !id.trim().is_empty());
-        let mut provider = self.providers.resolve(explicit)?;
-        if let Some(model) = ctx
-            .model
-            .as_deref()
-            .filter(|model| !model.trim().is_empty())
-        {
+    fn provider_for(
+        &self,
+        provider_id: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<Option<ark_llm::ProviderConfig>> {
+        let provider_id = provider_id.filter(|id| !id.trim().is_empty());
+        let mut provider = match provider_id {
+            Some(id) => Some(self.providers.resolve(Some(id)).ok_or_else(|| {
+                ark_common::ArkError::validation(format!("child provider is unavailable: {id}"))
+            })?),
+            None => self.providers.resolve(None),
+        };
+        if let (Some(provider), Some(model)) = (
+            &mut provider,
+            model.filter(|model| !model.trim().is_empty()),
+        ) {
             if model != provider.model {
                 // Catalog metadata belongs to the stored model id. A child
                 // override has no associated catalog response, so retaining
@@ -178,7 +187,7 @@ impl ChildTurnExecutorImpl {
                 provider.context_window_tokens = None;
             }
         }
-        Some(provider)
+        Ok(provider)
     }
 
     /// Build the transport client for a resolved provider, or retain the local
@@ -207,12 +216,45 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
         let steer_bridge = spawn_steer_bridge(Arc::clone(&ctx.steer), Arc::clone(&steer));
         let bridges = BridgeTasks::new(vec![cancel_bridge, steer_bridge]);
 
-        // The workspace a child edits is the one its request named, falling back
-        // to the live default. Resolved per run so a Settings change applies.
-        let workspace = ctx
-            .workspace
-            .clone()
-            .unwrap_or_else(|| self.roots.current());
+        // Child defaults are the parent thread's effective runtime settings.
+        // Explicit child values win, and process defaults are used only when the
+        // parent has no override. This keeps a delegated task in the same
+        // workspace, permission envelope and model unless it deliberately asks
+        // to narrow or replace them.
+        let parent = self.store.get_thread(ctx.parent_thread_id).await?;
+        let parent_runtime = parent.runtime;
+        let workspace = child_setting(
+            ctx.workspace.clone(),
+            parent_runtime.workspace.clone().map(PathBuf::from),
+        )
+        .unwrap_or_else(|| self.roots.current());
+        if !workspace.is_dir() {
+            return Err(ark_common::ArkError::validation(format!(
+                "child workspace does not exist: {}",
+                workspace.display()
+            )));
+        }
+        let provider_id = child_setting(
+            ctx.provider_id
+                .as_deref()
+                .filter(|value| !value.trim().is_empty()),
+            parent_runtime.provider_id.as_deref(),
+        );
+        let model_override = child_setting(
+            ctx.model
+                .as_deref()
+                .filter(|value| !value.trim().is_empty()),
+            parent_runtime.model.as_deref(),
+        );
+        let autonomy = child_setting(
+            ctx.autonomy
+                .as_deref()
+                .filter(|value| !value.trim().is_empty()),
+            parent_runtime.autonomy.as_deref(),
+        );
+        let sandbox: Arc<dyn SandboxPolicy> = Arc::new(ark_tool::BuiltinSandboxPolicy::new(
+            crate::wiring::autonomy_from_override(autonomy)?,
+        ));
         let tools: Arc<dyn ark_agent::ToolRunner> = Arc::new(ChildToolRunner {
             inner: Arc::clone(&self.tools),
             workspace: workspace.clone(),
@@ -240,13 +282,13 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
         }
 
         let snapshot = self.config.snapshot();
-        let provider = self.provider_for(&ctx);
+        let provider = self.provider_for(provider_id, model_override)?;
         let mut reactor = Reactor::new(ReactorConfig {
             model: self.model_for(provider.clone()),
             tools,
             writer,
             gates: Arc::new(ark_agent::AllowAllGates),
-            sandbox: Arc::clone(&self.policy),
+            sandbox,
             events,
             cancel: cancel.clone(),
             seed: ModelSeed {
@@ -490,6 +532,25 @@ mod tests {
 
     use super::*;
     use ark_ports::SubagentPolicySource;
+
+    #[test]
+    fn child_runtime_override_wins_and_absence_inherits_parent() {
+        assert_eq!(
+            child_setting(Some("strict".to_string()), Some("unattended".to_string())),
+            Some("strict".to_string())
+        );
+        assert_eq!(
+            child_setting::<String>(None, Some("parent-model".to_string())),
+            Some("parent-model".to_string())
+        );
+        assert_eq!(
+            child_setting(
+                Some("".to_string()).filter(|value| !value.trim().is_empty()),
+                Some("workspace_write".to_string()),
+            ),
+            Some("workspace_write".to_string())
+        );
+    }
 
     #[derive(Default)]
     struct TestCancelHandle {

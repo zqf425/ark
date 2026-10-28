@@ -419,6 +419,7 @@ impl RuntimeCore {
         record.prompt = Some(prompt.clone());
         record.model = request.model.clone();
         record.provider_id = request.provider_id.clone();
+        record.autonomy = request.autonomy.clone();
         self.store.append_child_run(record.clone()).await?;
         self.lock_known().insert(child_id, record.clone());
         self.publish_activity(&record).await;
@@ -482,6 +483,7 @@ impl RuntimeCore {
             workspace: request.workspace.map(std::path::PathBuf::from),
             model: request.model.or(existing.model),
             provider_id: request.provider_id.or(existing.provider_id),
+            autonomy: request.autonomy.or(existing.autonomy),
             cancel: Arc::new(NoCancel),
             steer: Arc::new(NoSteer),
         };
@@ -864,6 +866,7 @@ fn child_context(request: &SubagentRequest, child_id: ChildId, prompt: String) -
         workspace: request.workspace.clone().map(std::path::PathBuf::from),
         model: request.model.clone(),
         provider_id: request.provider_id.clone(),
+        autonomy: request.autonomy.clone(),
         cancel: Arc::new(NoCancel),
         steer: Arc::new(NoSteer),
     }

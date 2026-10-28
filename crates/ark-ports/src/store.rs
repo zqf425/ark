@@ -44,6 +44,9 @@ pub struct ChildRunRecord {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
+    /// Explicit permission override retained for a resumed child run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autonomy: Option<String>,
     /// The task the child was given. Persisted so a resume can replay it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
@@ -84,6 +87,7 @@ impl ChildRunRecord {
             ended_at: None,
             model: None,
             provider_id: None,
+            autonomy: None,
             prompt: None,
             summary: None,
             error: None,

@@ -79,6 +79,8 @@ pub struct ChildTurnContext {
     pub workspace: Option<PathBuf>,
     pub model: Option<String>,
     pub provider_id: Option<String>,
+    /// Permission override; `None` inherits the parent thread's setting.
+    pub autonomy: Option<String>,
     /// Trips when the child is aborted (explicit abort, or parent shutdown).
     pub cancel: Arc<dyn CancelHandle>,
     /// Mid-run corrections, drained by the reactor at a round boundary.

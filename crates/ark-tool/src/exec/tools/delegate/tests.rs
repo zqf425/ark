@@ -249,7 +249,7 @@ async fn a_child_cannot_choose_its_own_workspace() {
 }
 
 #[tokio::test]
-async fn the_model_can_override_the_label_model_and_workspace() {
+async fn the_model_can_override_the_label_model_and_autonomy() {
     let runner = FakeRunner::new(true, completed("ok"));
     let tool = DelegateTaskTool::new(runner.clone());
 
@@ -260,6 +260,7 @@ async fn the_model_can_override_the_label_model_and_workspace() {
             "label": "reviewer",
             "model": "other-model",
             "provider_id": "other-provider",
+            "autonomy": "strict",
             "workspace": "/tmp/elsewhere",
         })),
     )
@@ -270,6 +271,7 @@ async fn the_model_can_override_the_label_model_and_workspace() {
     assert_eq!(request.label, "reviewer");
     assert_eq!(request.model.as_deref(), Some("other-model"));
     assert_eq!(request.provider_id.as_deref(), Some("other-provider"));
+    assert_eq!(request.autonomy.as_deref(), Some("strict"));
     // Workspace is always the parent's, even when the model supplies one.
     let expected = ctx().workspace.display().to_string();
     assert_eq!(request.workspace.as_deref(), Some(expected.as_str()));

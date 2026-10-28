@@ -142,6 +142,7 @@ fn delegate_task_schema() -> serde_json::Value {
             "label": { "type": "string", "description": "Short human label shown in the parent thread" },
             "model": { "type": "string", "description": "Model override; defaults to the parent turn's model" },
             "provider_id": { "type": "string", "description": "Provider override; defaults to the parent turn's provider" },
+            "autonomy": { "type": "string", "enum": ["strict", "workspace_write", "unattended"], "description": "Permission override; defaults to the parent thread's permission" },
             "background": { "type": "boolean", "description": "Return after the child is queued and keep it running under the runtime supervisor" },
             "resumeChildId": { "type": "string", "description": "Resume this interrupted child on its existing session instead of creating a new child" },
         }),
