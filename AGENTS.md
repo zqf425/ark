@@ -6,9 +6,10 @@
 
 ## 1. 开发流程
 
-1. **代码修改必须使用独立 worktree**：在已忽略的 `.worktrees/<任务名>/` 下从 `master` 创建
-   worktree，在其中实现、验证并检查 diff；确认后合入 `master`，再用 `git worktree remove` 删除该
-   worktree。并行任务不得共用 worktree。
+1. **所有修改必须经独立 worktree 提交再合入 `master`**：代码、文档、配置和规范改动都必须在已忽略的
+   `.worktrees/<任务名>/` 下从 `master` 创建的 worktree 中完成、验证、检查 diff 并提交；随后将该提交合入
+   `master`，再用 `git worktree remove` 删除 worktree。禁止直接在 `master` 修改或提交；并行任务不得共用
+   worktree。
 2. 新增功能前先检查同模块是否已有相同或相近能力；能扩展或复用时不得重复实现。
 3. 修改范围保持最小：只改完成当前任务必需的代码与引用，不顺手重构或改变无关行为。
 4. 修改前必须阅读：
@@ -79,7 +80,7 @@ docs/
 
 ## 6. Git
 
-- 不创建 commit，除非用户明确要求；不覆盖已有用户改动。
+- 每次变更均按第 1 节的 worktree → 验证 → 提交 → 合入 `master` 流程执行；不覆盖已有用户改动。
 - 提交信息使用简体中文，格式为 `[类型]简短描述`；类型为 `feat`、`fix`、`refactor`、`docs`、
   `test`、`chore` 或 `perf`。
 - 一次提交只做一件事，不提交 `target/`、`web/dist/`、`web/node_modules/` 或 `.tmp/` 内容。
