@@ -10,6 +10,7 @@ import type { ApplyResult, ConfigPatch, RuntimeConfigView, WorkspaceStatus, Work
 import { getRuntimeConfig, patchRuntimeConfig } from '../api/settings-api'
 import { getWorkspaceStatus, validateWorkspace } from '../api/workspace-api'
 import { attempt, describeApiError, type Outcome } from '../api/outcome'
+import { isLatestWorkspaceProbe } from './workspace-probe-guard'
 
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -93,33 +94,42 @@ export function useWorkspaceProbe(): WorkspaceProbeApi {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const mounted = useRef(true)
+  const probeSequence = useRef(0)
+  const activeProbe = useRef<AbortController | null>(null)
 
   useEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
+      activeProbe.current?.abort()
     }
   }, [])
 
   const probe = useCallback(async (path: string) => {
     const trimmed = path.trim()
+    activeProbe.current?.abort()
+    const request = probeSequence.current + 1
+    probeSequence.current = request
     if (!trimmed) {
       setStatus(null)
       setError(null)
+      setLoading(false)
       return
     }
+    const controller = new AbortController()
+    activeProbe.current = controller
     setLoading(true)
     try {
-      const next = await getWorkspaceStatus(trimmed)
-      if (!mounted.current) return
+      const next = await getWorkspaceStatus(trimmed, controller.signal)
+      if (!mounted.current || controller.signal.aborted || !isLatestWorkspaceProbe(probeSequence.current, request)) return
       setStatus(next)
       setError(null)
     } catch (thrown) {
-      if (!mounted.current) return
+      if (!mounted.current || controller.signal.aborted || !isLatestWorkspaceProbe(probeSequence.current, request)) return
       setStatus(null)
       setError(describeApiError(thrown).message)
     } finally {
-      if (mounted.current) setLoading(false)
+      if (mounted.current && isLatestWorkspaceProbe(probeSequence.current, request)) setLoading(false)
     }
   }, [])
 

@@ -1,0 +1,35 @@
+.ark-workspace-status {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius);
+  background: var(--ark-bg-inset);
+  font-size: 11px;
+}
+
+.ark-workspace-status__summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.ark-workspace-status__label {
+  overflow: hidden;
+  color: var(--ark-text-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-workspace-status__detail {
+  flex: none;
+  color: var(--ark-text-faint);
+}
+
+.ark-workspace-status--ok .ark-workspace-status__detail { color: var(--ark-ok); }
+.ark-workspace-status--warn .ark-workspace-status__detail { color: var(--ark-warn); }
+.ark-workspace-status--error .ark-workspace-status__detail { color: var(--ark-error); }

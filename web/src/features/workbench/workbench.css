@@ -148,6 +148,10 @@
   font-size: 12px;
 }
 
+.ark-panel__hint--flush {
+  margin: -4px 0 2px;
+}
+
 .ark-panel__error {
   color: var(--ark-error);
 }
