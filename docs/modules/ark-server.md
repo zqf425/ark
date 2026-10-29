@@ -13,9 +13,10 @@
 - 路径、HTTP 方法、字段名和兼容别名均是对外契约；变更前必须检查 `ark-contract`、`web` 与集成方。
 - `GET /v1/threads/{id}` 的 `child_completions` 是最新 50 个不同通知 ID 的有界视图；它从 store 的窄
   completion 查询投影，不能全量回放普通会话事件。
-- `InteractiveGates` 只做 HTTP 决议与 reactor waiter 的一次性 rendezvous；resolved 事件仍由 reactor 在
-  实际消费回复后写入，取消时 Drop 守卫必须移除 waiter。
-- `GET /v1/threads/{id}` 把 active `TurnRegistry` entry、interaction 窄事件投影和 live waiter id 三者取交集
+- `InteractiveGates` 只做 HTTP 决议与 reactor gate future 的一次性 rendezvous；`prepare_*` 同步插入
+  registry 后才返回 future，resolved 事件仍由 reactor 在实际消费回复后写入。future 自带 Drop 守卫，
+  按（id, generation）移除自己的注册：取消/丢弃清理自身，且同 id 重新注册后旧守卫不会误删新注册。
+- `GET /v1/threads/{id}` 把 active `TurnRegistry` entry、interaction 窄事件投影和 live gate id 三者取交集
   写入 `ThreadDetail.runtime`；历史 gate 或已移除 waiter 不得出现在可操作快照中。
 - workbench 的 Plan、Changes、File、Terminal 投影均在 `service/workbench.rs`，handler 只读取权威事件并
   调用该纯函数；File 不直接访问磁盘，而是返回已持久化的 `read` 工具输出。

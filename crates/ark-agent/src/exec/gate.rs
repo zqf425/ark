@@ -4,6 +4,9 @@
 //! it inside a `tokio::select!` alongside the cancel token, so an interrupt
 //! leaves a waiting gate immediately.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use ark_common::Result;
 
 use crate::domain::tool::ToolCallRequest;
@@ -69,29 +72,44 @@ pub struct UserInputRequest {
     pub prompt: String,
 }
 
-/// Boundary that resolves gates.
-#[async_trait::async_trait]
-pub trait GateBroker: Send + Sync {
-    async fn request_approval(&self, request: ApprovalRequest) -> Result<ApprovalReply>;
+/// Future returned by [`GateBroker::prepare_*`]: the gate is already
+/// registered when the future exists, and dropping the future (cancel, abort,
+/// append failure) removes the registration — no 404 window, no leak.
+pub type GateFuture<T> = Pin<Box<dyn Future<Output = Result<T>> + Send>>;
 
-    async fn request_user_input(&self, request: UserInputRequest) -> Result<String>;
+/// Boundary that resolves gates.
+///
+/// `prepare_*` is synchronous and must complete the registration **before**
+/// returning: the reactor appends the `*_requested` event only after prepare,
+/// so the moment a client sees the event the id is resolvable over HTTP.
+/// The returned future resolves when the human answers; dropping it before
+/// resolution removes the registration.
+pub trait GateBroker: Send + Sync {
+    /// Register an approval gate and return its wait future.
+    fn prepare_approval(&self, request: ApprovalRequest) -> Result<GateFuture<ApprovalReply>>;
+
+    /// Register a free-form input gate and return its wait future.
+    fn prepare_user_input(&self, request: UserInputRequest) -> Result<GateFuture<String>>;
 }
 
 /// Gate implementation for unattended runs (`arkd --headless`, tests).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AllowAllGates;
 
-#[async_trait::async_trait]
 impl GateBroker for AllowAllGates {
-    async fn request_approval(&self, _request: ApprovalRequest) -> Result<ApprovalReply> {
-        Ok(ApprovalReply::Approved)
+    fn prepare_approval(&self, _request: ApprovalRequest) -> Result<GateFuture<ApprovalReply>> {
+        // No registration is needed: an unattended run has no human, so the
+        // future is already resolved and dropping it cannot leak anything.
+        Ok(Box::pin(async { Ok(ApprovalReply::Approved) }))
     }
 
-    async fn request_user_input(&self, request: UserInputRequest) -> Result<String> {
-        Ok(format!(
-            "unattended run: no user available for `{}`",
-            request.request_id
-        ))
+    fn prepare_user_input(&self, request: UserInputRequest) -> Result<GateFuture<String>> {
+        Ok(Box::pin(async move {
+            Ok(format!(
+                "unattended run: no user available for `{}`",
+                request.request_id
+            ))
+        }))
     }
 }
 
@@ -100,17 +118,20 @@ impl GateBroker for AllowAllGates {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DenyAllGates;
 
-#[async_trait::async_trait]
 impl GateBroker for DenyAllGates {
-    async fn request_approval(&self, _request: ApprovalRequest) -> Result<ApprovalReply> {
-        Ok(ApprovalReply::denied("approvals are disabled in this run"))
+    fn prepare_approval(&self, _request: ApprovalRequest) -> Result<GateFuture<ApprovalReply>> {
+        Ok(Box::pin(async {
+            Ok(ApprovalReply::denied("approvals are disabled in this run"))
+        }))
     }
 
-    async fn request_user_input(&self, request: UserInputRequest) -> Result<String> {
-        Ok(format!(
-            "approvals are disabled: `{}` was not answered",
-            request.request_id
-        ))
+    fn prepare_user_input(&self, request: UserInputRequest) -> Result<GateFuture<String>> {
+        Ok(Box::pin(async move {
+            Ok(format!(
+                "approvals are disabled: `{}` was not answered",
+                request.request_id
+            ))
+        }))
     }
 }
 
@@ -126,7 +147,7 @@ mod tests {
     async fn allow_all_gates_approves() {
         let gates = AllowAllGates;
         let request = ApprovalRequest::new("a1", call(), "run ls");
-        let reply = gates.request_approval(request).await.unwrap();
+        let reply = gates.prepare_approval(request).unwrap().await.unwrap();
         assert!(reply.approved());
         assert_eq!(reply.reason(), "");
     }
@@ -135,7 +156,7 @@ mod tests {
     async fn deny_all_gates_denies_with_a_reason() {
         let gates = DenyAllGates;
         let request = ApprovalRequest::new("a1", call(), "run ls");
-        let reply = gates.request_approval(request).await.unwrap();
+        let reply = gates.prepare_approval(request).unwrap().await.unwrap();
         assert!(!reply.approved());
         assert!(reply.reason().contains("disabled"));
     }
@@ -148,7 +169,7 @@ mod tests {
             call: call(),
             prompt: "which branch?".into(),
         };
-        let answer = gates.request_user_input(request).await.unwrap();
+        let answer = gates.prepare_user_input(request).unwrap().await.unwrap();
         assert!(answer.contains("r1"));
     }
 

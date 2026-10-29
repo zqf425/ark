@@ -512,19 +512,27 @@ impl Reactor {
         // `call_id` is provider-local and may repeat across concurrent turns;
         // HTTP resolution is process-wide, so scope the public gate id by turn.
         let approval_id = format!("approval_{}_{}", self.events.turn_id, call.call_id);
+        let gates = Arc::clone(&self.gates);
+        let request = ApprovalRequest::new(approval_id.clone(), call.clone(), summary.clone());
+        // Prepare **before** the event becomes observable: prepare completes
+        // the registration synchronously, so the moment a client sees
+        // `approval_requested` it may resolve over HTTP. Writing the event
+        // first left a real 404 window (observed 4/4 against a live harness).
+        let reply_future = gates.prepare_approval(request)?;
         self.writer
             .append(
                 self.events
                     .approval_requested(&approval_id, &call.tool, &summary),
             )
             .await?;
-        let gates = Arc::clone(&self.gates);
-        let request = ApprovalRequest::new(approval_id.clone(), call.clone(), summary);
         let reply = tokio::select! {
             _ = self.cancel.cancelled() => {
+                // No explicit drop: the registered future was moved into this
+                // select branch, and `select!` drops the losing branch's
+                // future, whose internal guard removes the registration.
                 return Ok(self.interrupt_input("turn interrupted while awaiting approval"))
             }
-            reply = gates.request_approval(request) => reply?,
+            reply = reply_future => reply?,
         };
         self.writer
             .append(
@@ -575,20 +583,26 @@ impl Reactor {
     /// sees it in the same turn.
     async fn ask_user(&mut self, call: ToolCallRequest, prompt: String) -> Result<TurnInput> {
         let request_id = format!("ask_{}_{}", self.events.turn_id, call.call_id);
-        self.writer
-            .append(self.events.user_input_requested(&request_id, &prompt))
-            .await?;
         let gates = Arc::clone(&self.gates);
         let request = UserInputRequest {
             request_id: request_id.clone(),
             call: call.clone(),
-            prompt,
+            prompt: prompt.clone(),
         };
+        // Same ordering as approvals: prepare registers synchronously before
+        // the event is observable, so an immediate HTTP answer can never miss
+        // the window.
+        let answer_future = gates.prepare_user_input(request)?;
+        self.writer
+            .append(self.events.user_input_requested(&request_id, &prompt))
+            .await?;
         let answer = tokio::select! {
             _ = self.cancel.cancelled() => {
+                // Same as approvals: the losing select branch's future is
+                // dropped and its internal guard cleans up the registration.
                 return Ok(self.interrupt_input("turn interrupted while awaiting user input"))
             }
-            answer = gates.request_user_input(request) => answer?,
+            answer = answer_future => answer?,
         };
         self.writer
             .append(self.events.user_input_resolved(&request_id, &answer))
@@ -892,6 +906,12 @@ mod tests {
     use crate::exec::{AllowAllGates, MapToolRunner, MemoryWriter, ToolRunner};
     use ark_common::{Result, ThreadId, TurnId};
     use ark_contract::RuntimeEvent;
+
+    // Gate/append-failure tests live in their own file (AGENTS §4 file-size
+    // limit); declared as a descendant so `use super::*` reaches the shared
+    // doubles and the private `ask_approval`/`ask_user`.
+    #[path = "reactor_gate_tests.rs"]
+    mod gate_tests;
 
     #[derive(Debug)]
     struct NoopModel;

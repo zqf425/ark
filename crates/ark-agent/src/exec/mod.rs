@@ -14,7 +14,8 @@ pub mod tool_runner;
 pub use cancel::CancelToken;
 pub use events::TurnEvents;
 pub use gate::{
-    AllowAllGates, ApprovalReply, ApprovalRequest, DenyAllGates, GateBroker, UserInputRequest,
+    AllowAllGates, ApprovalReply, ApprovalRequest, DenyAllGates, GateBroker, GateFuture,
+    UserInputRequest,
 };
 pub use journal::{EventSinkWriter, MemoryWriter, SessionWriter};
 pub use steer::SteerQueue;
