@@ -474,6 +474,9 @@ pub enum RuntimeEvent {
         timestamp: DateTime<Utc>,
         #[ts(as = "f64")]
         removed_items: u32,
+        #[serde(default)]
+        #[ts(as = "f64")]
+        checkpoint_chars: u32,
     },
 }
 
@@ -1036,6 +1039,7 @@ impl RuntimeEvent {
                 turn_id,
                 timestamp,
                 removed_items,
+                checkpoint_chars,
                 ..
             } => RuntimeEvent::CompactionCompleted {
                 seq,
@@ -1043,6 +1047,7 @@ impl RuntimeEvent {
                 turn_id,
                 timestamp,
                 removed_items,
+                checkpoint_chars,
             },
             RuntimeEvent::ChildActivity {
                 thread_id,
@@ -1178,6 +1183,40 @@ mod tests {
             timestamp: Utc::now(),
         };
         assert_eq!(event.with_seq(42).seq(), 42);
+    }
+
+    #[test]
+    fn compaction_completed_without_checkpoint_chars_remains_readable() {
+        let thread_id = ThreadId::new();
+        let turn_id = ark_common::TurnId::new();
+        let timestamp = Utc::now();
+        let mut old_event = serde_json::to_value(RuntimeEvent::CompactionCompleted {
+            seq: 17,
+            thread_id,
+            turn_id,
+            timestamp,
+            removed_items: 3,
+            checkpoint_chars: 42,
+        })
+        .expect("compaction event serializes");
+        old_event
+            .as_object_mut()
+            .expect("event is a JSON object")
+            .remove("checkpoint_chars");
+
+        let parsed: RuntimeEvent =
+            serde_json::from_value(old_event).expect("old compaction event remains readable");
+        assert!(matches!(
+            parsed,
+            RuntimeEvent::CompactionCompleted {
+                seq: 17,
+                thread_id: parsed_thread_id,
+                turn_id: parsed_turn_id,
+                timestamp: parsed_timestamp,
+                removed_items: 3,
+                checkpoint_chars: 0,
+            } if parsed_thread_id == thread_id && parsed_turn_id == turn_id && parsed_timestamp == timestamp
+        ));
     }
 
     #[test]

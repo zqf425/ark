@@ -619,13 +619,16 @@ impl Reactor {
         if removed == 0 {
             return Ok(self.input_of(InputKind::CompactionSettled { removed_items: 0 }));
         }
+        let checkpoint_chars = checkpoint
+            .as_ref()
+            .map_or(0, |text| text.chars().count() as u32);
         let item = ThreadItem::new(self.events.turn_id, ItemKind::Notice)
             .with_text(checkpoint.expect("removed context has a checkpoint"))
             .completed();
         self.writer.append(self.events.item_created(item)).await?;
         self.machine.note_compaction(removed);
         self.writer
-            .append(self.events.compaction_completed(removed))
+            .append(self.events.compaction_completed(removed, checkpoint_chars))
             .await?;
         Ok(self.input_of(InputKind::CompactionSettled {
             removed_items: removed,
@@ -637,7 +640,9 @@ impl Reactor {
         let system_count = self
             .history
             .iter()
-            .take_while(|message| TokenEstimator::is_system(message))
+            .take_while(|message| {
+                TokenEstimator::is_system(message) && !is_generated_checkpoint(message)
+            })
             .count();
         let keep = keep_recent.max(1);
         if self.history.len() <= system_count + keep {
@@ -648,9 +653,15 @@ impl Reactor {
         let mut next: Vec<ModelMessage> = self.history[..system_count].to_vec();
         let checkpoint =
             crate::context::ContextCheckpoint::from_messages(&self.history[system_count..split]);
+        let compacted_note = format!("[{removed} earlier messages compacted]");
+        let checkpoint_budget = self
+            .machine
+            .limits()
+            .context_limit_tokens
+            .saturating_sub(TokenEstimator::new().estimate_text(&compacted_note));
         let rendered = format!(
-            "{}\n[{removed} earlier messages compacted]",
-            checkpoint.render()
+            "{}\n{compacted_note}",
+            checkpoint.render_with_token_limit(checkpoint_budget)
         );
         next.push(ModelMessage::system(rendered.clone()));
         next.extend_from_slice(&self.history[split..]);
@@ -796,6 +807,10 @@ impl Reactor {
             .map_err(|err| ArkError::internal(err.to_string()))?;
         Ok(outcome)
     }
+}
+
+fn is_generated_checkpoint(message: &ModelMessage) -> bool {
+    TokenEstimator::is_system(message) && message.content.starts_with("[context checkpoint")
 }
 
 /// A streamed render item kept until its model round reaches a terminal edge.
@@ -1060,5 +1075,82 @@ mod tests {
 
         assert!(!interrupted);
         assert!(executions[0].ok);
+    }
+
+    #[test]
+    fn compaction_keeps_recent_messages_verbatim() {
+        let writer = Arc::new(MemoryWriter::new());
+        let mut reactor = reactor(writer);
+        reactor.history = vec![
+            ModelMessage::system("system prompt"),
+            ModelMessage::user("old fact ZEBRA-77"),
+            ModelMessage::assistant("old answer"),
+            ModelMessage::user("recent user message"),
+            ModelMessage::assistant("recent assistant message"),
+        ];
+
+        let (removed, _) = reactor.compact_history(2);
+
+        assert_eq!(removed, 2);
+        assert_eq!(
+            reactor.history[2],
+            ModelMessage::user("recent user message")
+        );
+        assert_eq!(
+            reactor.history[3],
+            ModelMessage::assistant("recent assistant message")
+        );
+    }
+
+    #[test]
+    fn repeated_compaction_replaces_the_previous_checkpoint() {
+        let writer = Arc::new(MemoryWriter::new());
+        let mut reactor = reactor(writer);
+        reactor.history = vec![
+            ModelMessage::system("stable system prompt"),
+            ModelMessage::user("Goal: preserve legacy fact ZEBRA-77"),
+            ModelMessage::assistant("old answer"),
+            ModelMessage::user("first recent message"),
+            ModelMessage::assistant("first recent answer"),
+        ];
+
+        reactor.compact_history(2);
+        reactor
+            .history
+            .push(ModelMessage::user("second recent message"));
+        reactor
+            .history
+            .push(ModelMessage::assistant("second recent answer"));
+        reactor.compact_history(2);
+
+        assert_eq!(
+            reactor
+                .history
+                .iter()
+                .filter(|message| message.content.starts_with("[context checkpoint"))
+                .count(),
+            1
+        );
+        let checkpoint = reactor
+            .history
+            .iter()
+            .find(|message| message.content.starts_with("[context checkpoint"))
+            .expect("a generated checkpoint remains");
+        assert!(checkpoint.content.contains("ZEBRA-77"));
+        assert!(checkpoint
+            .content
+            .contains("Goal: preserve legacy fact ZEBRA-77"));
+        assert_eq!(
+            reactor.history[0],
+            ModelMessage::system("stable system prompt")
+        );
+        assert_eq!(
+            reactor.history[2],
+            ModelMessage::user("second recent message")
+        );
+        assert_eq!(
+            reactor.history[3],
+            ModelMessage::assistant("second recent answer")
+        );
     }
 }

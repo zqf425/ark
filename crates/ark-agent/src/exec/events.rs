@@ -218,13 +218,14 @@ impl TurnEvents {
         }
     }
 
-    pub fn compaction_completed(&self, removed_items: u32) -> RuntimeEvent {
+    pub fn compaction_completed(&self, removed_items: u32, checkpoint_chars: u32) -> RuntimeEvent {
         RuntimeEvent::CompactionCompleted {
             seq: Self::UNASSIGNED,
             thread_id: self.thread_id,
             turn_id: self.turn_id,
             timestamp: Utc::now(),
             removed_items,
+            checkpoint_chars,
         }
     }
 
@@ -311,7 +312,7 @@ mod tests {
             EventKind::UserInputResolved
         );
         assert_eq!(
-            events.compaction_completed(2).kind(),
+            events.compaction_completed(2, 0).kind(),
             EventKind::CompactionCompleted
         );
     }

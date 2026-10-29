@@ -47,6 +47,8 @@
 
 - SSE keep-alive/idle-timeout 控制帧必须复用该订阅已发送的最大 seq，不能使用旧 watermark 倒退。
 - `ChildRunAggregates` 使用 camelCase wire 字段并重新生成 TypeScript。
+- `compaction_completed` 复用 `removed_items` 表示被折叠消息数，并提供 checkpoint 字符数；压缩后的
+  checkpoint 优先保留可识别的短标识符，预算不足时明确标识裁剪，避免模型对不可恢复的早期内容作误导性回答。
 
 ### A.3 Parent steer
 
