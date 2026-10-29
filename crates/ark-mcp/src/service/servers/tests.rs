@@ -420,7 +420,21 @@ async fn test_and_connect_all_reach_a_live_server() {
     let registry = McpServerRegistry::new(temp_dir("live"));
     registry.upsert(http_entry("mock", &server.url)).unwrap();
 
-    let result = registry.test("mock").await;
+    // Under full-workspace parallel load the first connection attempt can lose
+    // the race with the mock listener's accept loop and fail with "error
+    // sending request". Retry until the server is reachable, the same way
+    // `adapter_exposes_qualified_name_and_forwards_calls` already does.
+    let result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let result = registry.test("mock").await;
+            if result.ok {
+                return result;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("mock MCP server must become reachable");
     assert!(result.ok, "test failed: {}", result.message);
     assert!(
         result.tools.contains(&"mock.echo".to_string()),
