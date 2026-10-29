@@ -1,4 +1,4 @@
-//! `GET /v1/threads/{id}/export` 鈥?a versioned, deterministic thread snapshot.
+//! `GET /v1/threads/{id}/export` - a versioned, deterministic thread snapshot.
 //!
 //! The export is built only from the durable store: summary metadata plus the
 //! full authoritative event log in ascending `seq` order. It adds no export

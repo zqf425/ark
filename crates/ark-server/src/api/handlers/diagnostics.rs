@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use ark_common::{ArkErrorCode, ThreadId, TurnId};
+use ark_common::{ArkErrorCode, ThreadId, TurnId, Usage};
 use ark_contract::{
     LlmRound, LlmRoundError, LlmRoundsResponse, RuntimeEvent, ThreadUsageResponse,
     LLM_ROUNDS_DEFAULT_LIMIT, LLM_ROUNDS_MAX_LIMIT, LLM_ROUNDS_MAX_THREADS,
@@ -150,6 +150,56 @@ struct TurnAccum {
     rounds: Vec<LlmRound>,
 }
 
+/// Close one model round: drain the errors recorded inside its window, defer
+/// anything later, and push the finished round onto the accumulator.
+fn close_round(
+    acc: &mut TurnAccum,
+    thread_id: ThreadId,
+    turn_id: TurnId,
+    ended_at: DateTime<Utc>,
+    usage: &Usage,
+) {
+    let started_at = acc.last_end.or(acc.started_at).unwrap_or(ended_at);
+    acc.round += 1;
+    let round = acc.round;
+    let mut errors = Vec::new();
+    let mut deferred = Vec::new();
+    for (at, error) in acc.pending_errors.drain(..) {
+        if at <= ended_at {
+            errors.push(error);
+        } else {
+            deferred.push((at, error));
+        }
+    }
+    acc.pending_errors = deferred;
+    acc.rounds.push(LlmRound {
+        thread_id,
+        turn_id,
+        round,
+        started_at,
+        ended_at,
+        duration_ms: (ended_at - started_at).num_milliseconds().max(0) as u64,
+        errors,
+        usage: usage.clone(),
+    });
+    acc.last_end = Some(ended_at);
+}
+
+/// Flush the errors a turn still holds when it ends.
+///
+/// Errors recorded after the final round still belong to that turn's last
+/// round, because they happened while the runtime was working on it. A turn
+/// without rounds simply drops its pending errors.
+fn flush_turn_errors(acc: &mut TurnAccum) {
+    if let Some(last) = acc.rounds.last_mut() {
+        for (_, error) in acc.pending_errors.drain(..) {
+            last.errors.push(error);
+        }
+    } else {
+        acc.pending_errors.clear();
+    }
+}
+
 /// Derive completed model rounds from the authoritative event log.
 ///
 /// A round closes on the `Usage` event the loop appends right after a model
@@ -157,7 +207,7 @@ struct TurnAccum {
 /// turn (the previous round's end, or `turn_started` for the first round).
 /// Errors recorded inside a round's window attach to that round; errors after
 /// the final round of a turn attach to that last round. A model call that dies
-/// before settling produces no `Usage` event and therefore no round — the turn
+/// before settling produces no `Usage` event and therefore no round - the turn
 /// failure stays visible through `TurnFailed`/`Error` events on the thread.
 fn derive_rounds(events: &[RuntimeEvent], turn_filter: Option<TurnId>) -> Vec<LlmRound> {
     let mut turns: HashMap<TurnId, TurnAccum> = HashMap::new();
@@ -187,33 +237,9 @@ fn derive_rounds(events: &[RuntimeEvent], turn_filter: Option<TurnId>) -> Vec<Ll
                 usage,
                 ..
             } => {
-                let Some(acc) = turns.get_mut(turn_id) else {
-                    continue;
-                };
-                let started_at = acc.last_end.or(acc.started_at).unwrap_or(*timestamp);
-                acc.round += 1;
-                let round = acc.round;
-                let mut errors = Vec::new();
-                let mut deferred = Vec::new();
-                for (at, error) in acc.pending_errors.drain(..) {
-                    if at <= *timestamp {
-                        errors.push(error);
-                    } else {
-                        deferred.push((at, error));
-                    }
+                if let Some(acc) = turns.get_mut(turn_id) {
+                    close_round(acc, *thread_id, *turn_id, *timestamp, usage);
                 }
-                acc.pending_errors = deferred;
-                acc.rounds.push(LlmRound {
-                    thread_id: *thread_id,
-                    turn_id: *turn_id,
-                    round,
-                    started_at,
-                    ended_at: *timestamp,
-                    duration_ms: (*timestamp - started_at).num_milliseconds().max(0) as u64,
-                    errors,
-                    usage: usage.clone(),
-                });
-                acc.last_end = Some(*timestamp);
             }
             RuntimeEvent::Error {
                 timestamp,
@@ -236,17 +262,8 @@ fn derive_rounds(events: &[RuntimeEvent], turn_filter: Option<TurnId>) -> Vec<Ll
             RuntimeEvent::TurnCompleted { turn_id, .. }
             | RuntimeEvent::TurnFailed { turn_id, .. }
             | RuntimeEvent::TurnAborted { turn_id, .. } => {
-                // Errors recorded after the final round still belong to that
-                // turn's last round, because they happened while the runtime
-                // was working on it.
                 if let Some(acc) = turns.get_mut(turn_id) {
-                    if let Some(last) = acc.rounds.last_mut() {
-                        for (_, error) in acc.pending_errors.drain(..) {
-                            last.errors.push(error);
-                        }
-                    } else {
-                        acc.pending_errors.clear();
-                    }
+                    flush_turn_errors(acc);
                 }
                 if current == Some(*turn_id) {
                     current = None;
@@ -351,14 +368,6 @@ mod tests {
             "test",
         );
         (router(state), store)
-    }
-
-    fn event(
-        seq: u64,
-        turn: TurnId,
-        build: impl FnOnce(u64, TurnId) -> RuntimeEvent,
-    ) -> RuntimeEvent {
-        build(seq, turn)
     }
 
     fn at(offset_ms: i64) -> DateTime<Utc> {
@@ -474,7 +483,6 @@ mod tests {
         assert_eq!(rounds[1].duration_ms, 30);
         assert_eq!(rounds[1].errors.len(), 1);
         assert_eq!(rounds[1].errors[0].message, "late failure");
-        let _ = ItemKind::UserMessage; // keep the item import honest for future tests
     }
 
     #[test]

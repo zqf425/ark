@@ -1,9 +1,13 @@
-//! `POST /v1/threads/{id}/review` 鈥?a real code-review turn.
+//! `POST /v1/threads/{id}/review` - a real code-review turn.
 //!
 //! The review is not a static placeholder: it starts an actual agent turn with
 //! the same model/provider/permissions the thread already uses, seeded with the
 //! thread's authoritative workspace-change projection. Conflict and unknown
 //! thread semantics come from the shared [`start_turn`] core.
+//!
+//! This file is deliberately ASCII-only: its earlier revision lost Chinese
+//! strings to an encoding round-trip, and the review instruction does not need
+//! non-ASCII text to work.
 
 use ark_contract::{ReviewRequest, TurnSummary, WorkspaceChangesResponse};
 use axum::body::Bytes;
@@ -25,6 +29,11 @@ const MAX_CHANGE_LIST_BYTES: usize = 8 * 1024;
 /// Accepts an optional `{ "focus": "..." }` body. The response is the same
 /// `202` + `TurnSummary` envelope as a normal turn start: the review's progress
 /// is traceable through the thread's event stream under the returned turn id.
+///
+/// The change projection is a near-time snapshot taken before the turn
+/// registers: if another turn is writing the workspace, this request either
+/// answers 409 or sees a slightly stale projection. The model can re-read
+/// current state with its tools, so freshness is advisory, not authoritative.
 pub async fn review(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -57,23 +66,27 @@ pub async fn review(
 /// Compose the bounded review instruction from the change projection.
 fn review_prompt(changes: &WorkspaceChangesResponse, focus: Option<&str>) -> String {
     let mut prompt = String::from(
-        "璇峰褰撳墠宸ヤ綔鍖轰腑鏈嚎绋嬩骇鐢熺殑鏈彁浜ゅ彉鏇村仛涓€娆′唬鐮佹瑙嗭細\
-         閫愭枃浠惰鏄庨棶棰樸€侀闄╀笌鏀硅繘寤鸿锛屾渶鍚庣粰鍑烘暣浣撶粨璁恒€俓
-         鏈嚎绋嬬殑鍙樻洿娓呭崟锛堣矾寰?+ 鎿嶄綔锛夛細\n",
+        "Perform a code review of the uncommitted workspace changes produced \
+         by this thread. Go file by file: describe problems, risks, and \
+         improvement suggestions, then give an overall conclusion.\n\
+         Change list of this thread (path + operation):\n",
     );
     for change in &changes.changes {
         let line = format!("- {} ({})\n", change.path, change.operation);
         if prompt.len() + line.len() > MAX_CHANGE_LIST_BYTES {
-            prompt.push_str("- 鈥︼紙鍏朵綑鍙樻洿宸叉埅鏂紝鍙敤 read 宸ュ叿鎸夐渶鏌ョ湅锛塡n");
+            prompt.push_str("- ... (remaining changes truncated; use the read tool as needed)\n");
             break;
         }
         prompt.push_str(&line);
     }
     if changes.changes.is_empty() {
-        prompt.push_str("锛堜簨浠舵棩蹇椾腑娌℃湁璁板綍鍒板伐浣滃尯鍙樻洿锛涜妫€鏌ュ伐浣滃尯褰撳墠鐘舵€佸悗璇存槑缁撹銆傦級\n");
+        prompt.push_str(
+            "(No workspace changes were recorded in the event log; inspect the \
+             current workspace state and state your conclusion.)\n",
+        );
     }
     if let Some(focus) = focus.map(str::trim).filter(|focus| !focus.is_empty()) {
-        prompt.push_str("\n妫€瑙嗛噸鐐癸細");
+        prompt.push_str("\nReview focus: ");
         prompt.push_str(focus);
         prompt.push('\n');
     }
@@ -229,5 +242,27 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn review_prompt_stays_ascii_and_bounded() {
+        let changes = WorkspaceChangesResponse {
+            changes: (0..1000)
+                .map(|i| ark_contract::WorkspaceChange {
+                    path: format!("src/file_{i}.rs"),
+                    operation: "write".into(),
+                    turn_id: ark_common::TurnId::new(),
+                    seq: i,
+                })
+                .collect(),
+        };
+        let prompt = review_prompt(&changes, Some("  src/api  "));
+        assert!(prompt.is_ascii(), "prompt must stay ASCII-only");
+        assert!(
+            prompt.len() <= MAX_CHANGE_LIST_BYTES + 256,
+            "prompt must stay bounded"
+        );
+        assert!(prompt.contains("Review focus: src/api"));
+        assert!(prompt.contains("truncated"));
     }
 }

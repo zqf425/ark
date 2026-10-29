@@ -441,7 +441,9 @@ pub struct LlmRound {
     #[ts(as = "f64")]
     pub duration_ms: u64,
     /// Errors the runtime recorded inside this round's window, newest last.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Always serialized (possibly empty) so the wire shape matches the
+    /// generated TS type, where `errors` is a required array.
+    #[serde(default)]
     pub errors: Vec<LlmRoundError>,
     #[serde(flatten)]
     pub usage: Usage,

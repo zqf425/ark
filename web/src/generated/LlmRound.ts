@@ -19,5 +19,7 @@ export type LlmRound = { thread_id: ThreadId, turn_id: TurnId,
 round: number, started_at: string, ended_at: string, duration_ms: number, 
 /**
  * Errors the runtime recorded inside this round's window, newest last.
+ * Always serialized (possibly empty) so the wire shape matches the
+ * generated TS type, where `errors` is a required array.
  */
 errors: Array<LlmRoundError>, prompt_tokens: number, completion_tokens: number, total_tokens: number, cache_hit_tokens?: number, cache_miss_tokens?: number, cache_hit_rate?: number, cost_usd?: number, };

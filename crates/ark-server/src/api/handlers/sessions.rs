@@ -2,7 +2,7 @@
 //!
 //! The runtime has one durable conversation object: the thread. `POST
 //! /v1/sessions/{id}/resume-thread` therefore accepts the session id as the
-//! thread id itself 鈥?a compat adapter, not a second session data model.
+//! thread id itself - a compat adapter, not a second session data model.
 //! Resuming never creates anything implicitly: an unknown id is a structured
 //! 404 and a corrupt store error surfaces as its structured code.
 
