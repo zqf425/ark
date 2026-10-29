@@ -5,6 +5,9 @@
 
 pub mod child_service;
 pub mod delegation;
+pub mod memory;
+
+pub use memory::MemoryFileStore;
 pub mod reconcile;
 pub mod store;
 pub mod thread_ops;

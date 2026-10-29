@@ -20,6 +20,8 @@
 - 插件只能经 `HttpCapability`、`McpCapability` 和 `UiCapability` 与基础设施或其它插件交互。
 - `McpServerService` 的 upsert/delete 是异步边界：实现可以在返回前发现远程工具并原子刷新运行时 catalog，
   但不得在 registry 锁持有期间 await。
+- `MemoryService` 管理用户明确维护的跨会话长期偏好/事实。未注入的构建必须让 HTTP 层返回结构化
+  `runtime_unavailable`，不得返回伪造的空成功结果。
 
 ## 变更规则
 

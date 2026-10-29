@@ -20,12 +20,13 @@ pub mod item;
 pub mod ts_export;
 
 pub use base::{
-    McpServerEntry, McpServerListResponse, McpServerTestResponse, McpServerView, McpTransportKind,
+    CreateMemoryRequest, McpServerEntry, McpServerListResponse, McpServerTestResponse,
+    McpServerView, McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse,
     ProviderEntry, ProviderListResponse, ProviderModelCatalogConnection,
     ProviderModelCatalogRequest, ProviderModelCatalogResponse, ProviderModelSummary,
     ProviderTestRequest, ProviderTestResponse, ProviderView, SkillActivation, SkillDiagnostics,
     SkillLoadWarning, SkillManifest, SkillSource, SkillSummary, SkillTriggers, SkillTurnResolution,
-    ThreadSkillsResponse, WorkspaceStatus,
+    ThreadSkillsResponse, UpdateMemoryRequest, WorkspaceStatus,
 };
 pub use capability::{Capability, PageId, PageSpec, PanelSlot, PanelSpec, Placement};
 pub use config::{

@@ -49,6 +49,15 @@ data/threads/<thread>/
 `indexed_seq` 和重建计划；它尚不是早期设计中设想的 SQLite/FTS。两者共享“日志权威、索引可重建、
 单写者”的架构约束。是否迁移 SQLite 由实际跨会话检索规模决定，不能把未实现目标写成现状。
 
+## 长期 memory
+
+当前实现使用 `<data_dir>/memory.json` 保存用户显式维护的长期偏好和事实。文件通过
+`ark_common::write_json_file` 原子替换，读取使用 `read_json_file_opt`：缺失或损坏文件均以空集合恢复，
+不会阻断 arkd 启动。进程内 mutex 将读改写串行化，写失败不会提交内存中的变更。
+
+文本上限为 16 KiB UTF-8 字节；空文本、超限文本和未知 id 是结构化错误。自动抽取、检索、模型 prompt
+注入和损坏文件的备份/告警策略尚属待决，当前不会暗中执行。
+
 ## 迁移与删除
 
 子会话内联于 `threads/<parent>/children/<child>/`。删除父会话前必须处理活动 child；迁移按父会话、

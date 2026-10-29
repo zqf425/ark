@@ -8,6 +8,9 @@
 `wiring` 仅做显式装配，不能包含业务规则、平台特例或生命周期状态机。新增实现应先落入所属 crate；
 只有装配代码才允许在这里引用多个实现 crate。
 
+长期 memory 由组合根以同一 `data_dir` 创建 `ark_store::MemoryFileStore`，再用 `MemoryAdapter` 注入
+`BaseServices`。业务校验、JSON 恢复及并发控制不位于组合根。
+
 ## 子代理装配
 
 child executor 在此复用同一个 `ark-agent::Reactor`，并桥接 cancel/steer、工具集和会话 writer。

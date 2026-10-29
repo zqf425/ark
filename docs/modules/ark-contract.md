@@ -31,3 +31,6 @@ skill 视图。所有 GUI 字段使用 camelCase；既有查询参数保持既�
 工作区 wire 包含 `WorkspaceView`、`SwitchWorkspaceRequest` 和 `WorkspaceDiff`。后者独立于线程
 Changes 投影，明确提供 staged/unstaged/untracked、rename、二进制、patch 上限和 truncation；所有
 generation 均以 JSON number 输出。
+
+长期 memory wire 包含 `MemoryEntry`、创建/更新请求、列表和诊断响应。它只表达跨会话可复用的
+用户偏好或事实，不包含模型推理、检索排名或自动注入策略；这些后续能力仍属待决。

@@ -56,9 +56,13 @@ pub use domain::{
     SessionState, SessionStatus, StoreDiagnostic, ThreadFile, ThreadPaths,
 };
 pub use service::{
-    reconcile_index, ChildStore, DelegationPolicy, FileSessionStore, ReconcileReport,
+    reconcile_index, ChildStore, DelegationPolicy, FileSessionStore, MemoryFileStore,
+    ReconcileReport,
 };
 pub use store::{
     load_snapshot, plan_reconcile, DiskFacts, IndexEntry, IndexProjector, IndexSnapshot, LogParse,
     ReconcileAction, ThreadIndex, WriterHandle,
 };
+
+#[cfg(test)]
+mod memory_tests;

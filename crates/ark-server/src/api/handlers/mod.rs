@@ -11,6 +11,7 @@ pub mod config_view;
 pub mod events;
 pub mod gates;
 pub mod health;
+pub mod memory;
 pub mod pending;
 pub mod runtime;
 pub mod threads;

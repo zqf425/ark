@@ -24,17 +24,18 @@ use crate::item::{ItemKind, ToolPayload};
 use crate::{
     ApplyResult, ChildCompletionNotice, ChildRunActionResult, ChildRunAggregates,
     ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
-    CreateThreadRequest, EventKind, FieldPath, FilePreview, GoalRequest, HealthResponse,
-    ItemStatus, McpServerEntry, McpServerListResponse, McpServerTestResponse, McpServerView,
-    McpTransportKind, PendingApprovalView, PendingUserInputView, PlanView, ProviderEntry,
-    ProviderListResponse, ProviderModelCatalogConnection, ProviderModelCatalogRequest,
-    ProviderModelCatalogResponse, ProviderModelSummary, ProviderTestRequest, ProviderTestResponse,
-    ProviderView, ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest,
-    RuntimeConfigView, RuntimeEvent, RuntimeInfo, SkillDiagnostics, SkillLoadWarning, SkillSource,
-    SkillSummary, SteerChildRequest, SubagentSettings, SwitchWorkspaceRequest,
-    TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadItem, ThreadRuntimeSettings,
-    ThreadRuntimeSnapshot, ThreadSkillsResponse, ThreadSummary, TodoEntry, TodoStatus,
-    TodosRequest, TuningSettings, TurnRequest, TurnSummary, UpdateThreadRequest, UsageResponse,
+    CreateMemoryRequest, CreateThreadRequest, EventKind, FieldPath, FilePreview, GoalRequest,
+    HealthResponse, ItemStatus, McpServerEntry, McpServerListResponse, McpServerTestResponse,
+    McpServerView, McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse,
+    PendingApprovalView, PendingUserInputView, PlanView, ProviderEntry, ProviderListResponse,
+    ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
+    ProviderModelSummary, ProviderTestRequest, ProviderTestResponse, ProviderView,
+    ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, RuntimeConfigView,
+    RuntimeEvent, RuntimeInfo, SkillDiagnostics, SkillLoadWarning, SkillSource, SkillSummary,
+    SteerChildRequest, SubagentSettings, SwitchWorkspaceRequest, TerminalEntriesResponse,
+    TerminalEntry, ThreadDetail, ThreadItem, ThreadRuntimeSettings, ThreadRuntimeSnapshot,
+    ThreadSkillsResponse, ThreadSummary, TodoEntry, TodoStatus, TodosRequest, TuningSettings,
+    TurnRequest, TurnSummary, UpdateMemoryRequest, UpdateThreadRequest, UsageResponse,
     WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
     WorkspaceDiffFile, WorkspaceStatus, WorkspaceView,
 };
@@ -89,6 +90,13 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     UsageResponse::export_all_to(dir)?;
     HealthResponse::export_all_to(dir)?;
     RuntimeInfo::export_all_to(dir)?;
+
+    // ---- long-term memory ----
+    MemoryEntry::export_all_to(dir)?;
+    CreateMemoryRequest::export_all_to(dir)?;
+    UpdateMemoryRequest::export_all_to(dir)?;
+    MemoryListResponse::export_all_to(dir)?;
+    MemoryDiagnosticsResponse::export_all_to(dir)?;
 
     // ---- render items and events ----
     ItemKind::export_all_to(dir)?;
@@ -206,6 +214,11 @@ const ROOT_NAMES: &[&str] = &[
     "UsageResponse",
     "HealthResponse",
     "RuntimeInfo",
+    "MemoryEntry",
+    "CreateMemoryRequest",
+    "UpdateMemoryRequest",
+    "MemoryListResponse",
+    "MemoryDiagnosticsResponse",
     "ItemKind",
     "ItemStatus",
     "ToolPayload",

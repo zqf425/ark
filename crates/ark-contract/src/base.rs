@@ -10,6 +10,65 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 // ---------------------------------------------------------------------------
+// Long-term memory
+// ---------------------------------------------------------------------------
+
+/// A user-maintained fact or preference reusable across sessions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct MemoryEntry {
+    pub id: String,
+    pub text: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// `POST /v1/memory`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct CreateMemoryRequest {
+    pub text: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+/// `PATCH /v1/memory/{id}`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct UpdateMemoryRequest {
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+/// `GET /v1/memory`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct MemoryListResponse {
+    pub entries: Vec<MemoryEntry>,
+}
+
+/// `GET /v1/memory/diagnostics`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct MemoryDiagnosticsResponse {
+    pub storage_path: String,
+    #[ts(as = "f64")]
+    pub entry_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_written_at: Option<DateTime<Utc>>,
+}
+
+// ---------------------------------------------------------------------------
 // Model providers
 // ---------------------------------------------------------------------------
 

@@ -10,10 +10,11 @@
 
 use ark_common::Result;
 use ark_contract::{
-    McpServerEntry, McpServerListResponse, McpServerTestResponse, ProviderEntry,
+    CreateMemoryRequest, McpServerEntry, McpServerListResponse, McpServerTestResponse,
+    MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, ProviderEntry,
     ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SkillTurnResolution,
-    ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
+    ThreadSkillsResponse, UpdateMemoryRequest, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
 };
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -113,7 +114,20 @@ pub trait McpServerService: Send + Sync {
     async fn connect_all(&self) -> Vec<Arc<dyn Tool>>;
 }
 
-/// The four platform services, as one injectable bundle.
+/// Durable long-term user memory shared across sessions.
+pub trait MemoryService: Send + Sync {
+    fn list(&self) -> Result<MemoryListResponse>;
+
+    fn create(&self, request: CreateMemoryRequest) -> Result<MemoryEntry>;
+
+    fn update(&self, id: &str, request: UpdateMemoryRequest) -> Result<MemoryEntry>;
+
+    fn delete(&self, id: &str) -> Result<()>;
+
+    fn diagnostics(&self) -> Result<MemoryDiagnosticsResponse>;
+}
+
+/// The platform services, as one injectable bundle.
 ///
 /// A field is `Option` so a minimal build (or a test) can serve only some of
 /// them; the route then answers a structured "not available" instead of
@@ -124,6 +138,7 @@ pub struct BaseServices {
     pub skills: Option<Arc<dyn SkillService>>,
     pub workspace: Option<Arc<dyn WorkspaceService>>,
     pub mcp: Option<Arc<dyn McpServerService>>,
+    pub memory: Option<Arc<dyn MemoryService>>,
 }
 
 impl BaseServices {
@@ -148,6 +163,11 @@ impl BaseServices {
 
     pub fn with_mcp(mut self, service: Arc<dyn McpServerService>) -> Self {
         self.mcp = Some(service);
+        self
+    }
+
+    pub fn with_memory(mut self, service: Arc<dyn MemoryService>) -> Self {
+        self.memory = Some(service);
         self
     }
 }

@@ -12,7 +12,6 @@ use crate::api::error::ApiError;
 pub const M_FORK: &str = "M2 thread forking";
 pub const M_PLAN: &str = "M3 goal and todo planning";
 pub const M_GATE: &str = "M3 approvals and user inputs";
-pub const M_MEMORY: &str = "M4 memory store";
 pub const M_ATTACH: &str = "M4 attachment store";
 pub const M_CHILD: &str = "M5 child runs";
 pub const M_SKILLS: &str = "M5 skills";
@@ -55,11 +54,6 @@ pub async fn user_inputs() -> Result<Json<serde_json::Value>, ApiError> {
         "POST /v1/user-inputs/{id}",
         M_GATE,
     ))
-}
-
-/// `GET /v1/memory*`.
-pub async fn memory() -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::not_implemented("GET|POST /v1/memory", M_MEMORY))
 }
 
 /// `POST /v1/attachments` and the read routes.
@@ -165,7 +159,6 @@ mod tests {
             todos().await.err(),
             approvals().await.err(),
             user_inputs().await.err(),
-            memory().await.err(),
             attachments().await.err(),
             skills().await.err(),
             child_runs().await.err(),

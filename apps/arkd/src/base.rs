@@ -14,15 +14,54 @@ use std::sync::Arc;
 
 use ark_common::Result;
 use ark_contract::{
-    McpServerEntry, McpServerListResponse, McpServerTestResponse, ProviderEntry,
+    CreateMemoryRequest, McpServerEntry, McpServerListResponse, McpServerTestResponse,
+    MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, ProviderEntry,
     ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SkillTurnResolution,
-    ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
+    ThreadSkillsResponse, UpdateMemoryRequest, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
 };
 use ark_ports::{
-    McpServerService, ModelEndpoint, ProviderService, SkillService, Tool, WorkspaceService,
+    McpServerService, MemoryService, ModelEndpoint, ProviderService, SkillService, Tool,
+    WorkspaceService,
 };
 use ark_tool::ToolRegistry;
+
+// ---------------------------------------------------------------------------
+// Long-term memory
+// ---------------------------------------------------------------------------
+
+/// Forwards to `ark-store::MemoryFileStore`.
+pub struct MemoryAdapter {
+    inner: Arc<ark_store::MemoryFileStore>,
+}
+
+impl MemoryAdapter {
+    pub fn new(inner: Arc<ark_store::MemoryFileStore>) -> Self {
+        Self { inner }
+    }
+}
+
+impl MemoryService for MemoryAdapter {
+    fn list(&self) -> Result<MemoryListResponse> {
+        self.inner.list()
+    }
+
+    fn create(&self, request: CreateMemoryRequest) -> Result<MemoryEntry> {
+        self.inner.create(request)
+    }
+
+    fn update(&self, id: &str, request: UpdateMemoryRequest) -> Result<MemoryEntry> {
+        self.inner.update(id, request)
+    }
+
+    fn delete(&self, id: &str) -> Result<()> {
+        self.inner.delete(id)
+    }
+
+    fn diagnostics(&self) -> Result<MemoryDiagnosticsResponse> {
+        self.inner.diagnostics()
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Providers

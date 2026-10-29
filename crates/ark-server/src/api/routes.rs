@@ -224,16 +224,16 @@ fn protected_routes() -> Router<AppState> {
         )
         .route(
             "/v1/memory",
-            get(crate::api::handlers::pending::memory).post(crate::api::handlers::pending::memory),
+            get(crate::api::handlers::memory::list).post(crate::api::handlers::memory::create),
         )
         .route(
             "/v1/memory/{id}",
-            patch(crate::api::handlers::pending::memory)
-                .delete(crate::api::handlers::pending::memory),
+            patch(crate::api::handlers::memory::update)
+                .delete(crate::api::handlers::memory::delete),
         )
         .route(
             "/v1/memory/diagnostics",
-            get(crate::api::handlers::pending::memory),
+            get(crate::api::handlers::memory::diagnostics),
         )
         .route(
             "/v1/attachments",

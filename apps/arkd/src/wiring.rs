@@ -26,7 +26,9 @@ use ark_tool::{Autonomy, BuiltinSandboxPolicy, RegistryToolRunner, ToolRegistry}
 
 use ark_server::{AppState, TurnEnd, TurnJob, TurnRunner};
 
-use crate::base::{McpServerAdapter, ProviderAdapter, SkillAdapter, WorkspaceAdapter};
+use crate::base::{
+    McpServerAdapter, MemoryAdapter, ProviderAdapter, SkillAdapter, WorkspaceAdapter,
+};
 use crate::cli::ServeArgs;
 use crate::load_skill::LoadSkillTool;
 use crate::model;
@@ -102,6 +104,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     ));
     let workspace = Arc::new(ark_workspace::WorkspaceInspector::new());
     let mcp = Arc::new(ark_mcp::McpServerRegistry::new(args.data_dir.clone()));
+    let memory = Arc::new(ark_store::MemoryFileStore::open(&args.data_dir)?);
 
     // The provider table is the source of truth for the model client, so a
     // provider added through the GUI takes effect on the next turn instead of
@@ -191,7 +194,8 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         .with_mcp(Arc::new(McpServerAdapter::new(
             Arc::clone(&mcp),
             Arc::clone(&tools),
-        )));
+        )))
+        .with_memory(Arc::new(MemoryAdapter::new(Arc::clone(&memory))));
 
     let state = AppState::new(
         store_port,
