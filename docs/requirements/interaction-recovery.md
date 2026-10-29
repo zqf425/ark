@@ -45,6 +45,14 @@ gate view 必须带稳定 gate id、turn id、请求内容与请求时间；不�
 live active turn”的候选 gate，再以 `InteractiveGates` 的 live id 快照交集过滤。HTTP 的 resolve 仍只向
 存活 oneshot sender 发送；历史事件绝不能使已取消/重启的 gate 可提交。
 
+reactor 的 gate 顺序固定为：先同步 `prepare_*` 注册（方法返回前完成 registry 插入），再 append
+`*_requested` 事件使其对 SSE 可观察，最后 await 返回的 gate future。事件可观察时 id 必须已可 resolve，
+否则客户端收到事件立即 resolve 会命中 404 窗口（实测 4/4 复现）。gate future 所有权单一：select 落败
+分支被丢弃时其内部 Drop 守卫按（id, generation）移除自己的注册，取消路径不显式重复清理，且同 id
+重新注册后旧守卫不会误删新注册。append 失败（`?` 提前返回）同样丢弃已注册 future 并触发守卫清理；
+append 是短时本地持久化边界，跨 crate 断言“append 后无 live id”依赖与 direct-drop 的所有权测试等价，
+不为此引入生产测试钩子。
+
 detail 与随后 SSE 水位允许有短暂竞态：SSE 的 resolved/terminal 事件补齐状态；POST 若 waiter 已移除返回
 既有 404。web 不把 204 当作权威 resolved，仍等待 SSE 或下次 detail。
 
