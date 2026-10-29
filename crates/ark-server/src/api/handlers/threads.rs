@@ -99,6 +99,17 @@ pub async fn get(
     Path(id): Path<String>,
 ) -> Result<Json<ThreadDetail>, ApiError> {
     let thread_id = parse_thread(&id)?;
+    Ok(Json(load_detail(&state, thread_id).await?))
+}
+
+/// Build the full wire detail for one thread.
+///
+/// Shared by `GET /v1/threads/{id}` and `POST /v1/sessions/{id}/resume-thread`
+/// so a resumed session observes exactly what a thread read observes.
+pub(crate) async fn load_detail(
+    state: &AppState,
+    thread_id: ThreadId,
+) -> Result<ThreadDetail, ApiError> {
     let meta = state.store.get_thread(thread_id).await?;
     let items = state.store.read_items(thread_id).await?;
     let child_completions = recent_child_completions(
@@ -115,7 +126,7 @@ pub async fn get(
         .unwrap_or_default();
     let mut summary = summary_of(&meta);
     summary.last_seq = state.store.highest_seq(thread_id).await.ok();
-    Ok(Json(ThreadDetail {
+    Ok(ThreadDetail {
         summary,
         items,
         child_ids,
@@ -127,7 +138,7 @@ pub async fn get(
             state.gates.pending_approval_ids(),
             state.gates.pending_user_input_ids(),
         ),
-    }))
+    })
 }
 
 /// `PATCH /v1/threads/{id}`.

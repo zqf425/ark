@@ -25,13 +25,27 @@ pub async fn start(
     Json(body): Json<TurnRequest>,
 ) -> Result<(StatusCode, Json<TurnSummary>), ApiError> {
     let thread_id = parse_thread(&id)?;
-    if body.text.len() > MAX_TURN_TEXT_BYTES {
+    start_turn(&state, thread_id, body.text).await
+}
+
+/// Shared turn-start core: validate the text, register the turn, spawn the
+/// worker.
+///
+/// `POST /v1/threads/{id}/turns` and `POST /v1/threads/{id}/review` both go
+/// through this, so a review observes exactly the same size limit, unknown
+/// thread, and one-turn-per-thread conflict semantics as a normal message.
+pub(crate) async fn start_turn(
+    state: &AppState,
+    thread_id: ThreadId,
+    raw_text: String,
+) -> Result<(StatusCode, Json<TurnSummary>), ApiError> {
+    if raw_text.len() > MAX_TURN_TEXT_BYTES {
         return Err(ApiError::new(
             ark_common::ArkErrorCode::ValidationError,
             format!("turn text exceeds the {MAX_TURN_TEXT_BYTES}-byte UTF-8 limit"),
         ));
     }
-    let text = body.text.trim().to_string();
+    let text = raw_text.trim().to_string();
     if text.is_empty() {
         return Err(ApiError::new(
             ark_common::ArkErrorCode::ValidationError,

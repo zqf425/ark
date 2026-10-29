@@ -310,7 +310,7 @@ fn protected_routes() -> Router<AppState> {
         )
         .route(
             "/v1/sessions/{id}/resume-thread",
-            post(crate::api::handlers::pending::resume_thread),
+            post(crate::api::handlers::sessions::resume_thread),
         )
         .route(
             "/v1/threads/{id}/rewind",
@@ -318,7 +318,11 @@ fn protected_routes() -> Router<AppState> {
         )
         .route(
             "/v1/threads/{id}/review",
-            post(crate::api::handlers::pending::review),
+            post(crate::api::handlers::review::review),
+        )
+        .route(
+            "/v1/threads/{id}/export",
+            get(crate::api::handlers::export::export),
         )
         .route(
             "/v1/runtime/model-providers",

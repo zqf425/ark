@@ -70,27 +70,11 @@ pub async fn child_runs() -> Result<Json<serde_json::Value>, ApiError> {
     Err(ApiError::not_implemented("GET /v1/child-runs", M_CHILD))
 }
 
-/// `POST /v1/sessions/{id}/resume-thread`.
-pub async fn resume_thread() -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::not_implemented(
-        "POST /v1/sessions/{id}/resume-thread",
-        M_FORK,
-    ))
-}
-
 /// `POST /v1/threads/{id}/rewind`.
 pub async fn rewind() -> Result<Json<serde_json::Value>, ApiError> {
     Err(ApiError::not_implemented(
         "POST /v1/threads/{id}/rewind",
         M_FORK,
-    ))
-}
-
-/// `POST /v1/threads/{id}/review`.
-pub async fn review() -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::not_implemented(
-        "POST /v1/threads/{id}/review",
-        M_PLAN,
     ))
 }
 
@@ -169,8 +153,6 @@ mod tests {
             attachments().await.err(),
             skills().await.err(),
             child_runs().await.err(),
-            resume_thread().await.err(),
-            review().await.err(),
             model_providers().await.err(),
             tuning().await.err(),
             connector_env().await.err(),

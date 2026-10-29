@@ -8,7 +8,7 @@ use ark_common::{ThreadId, TurnId, Usage};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{item::ThreadItem, ChildCompletionNotice};
+use crate::{event::RuntimeEvent, item::ThreadItem, ChildCompletionNotice};
 
 /// Maximum UTF-8 byte length accepted for one turn request.
 pub const MAX_TURN_TEXT_BYTES: usize = 1024 * 1024;
@@ -476,6 +476,55 @@ pub const LLM_ROUNDS_DEFAULT_LIMIT: u32 = 100;
 pub const LLM_ROUNDS_MAX_LIMIT: u32 = 500;
 /// Threads scanned when `GET /v1/debug/llm-rounds` has no `thread_id`.
 pub const LLM_ROUNDS_MAX_THREADS: usize = 20;
+
+/// Wire format version of `GET /v1/threads/{id}/export`.
+pub const THREAD_EXPORT_FORMAT_VERSION: u32 = 1;
+
+/// `POST /v1/sessions/{id}/resume-thread`.
+///
+/// The runtime has one durable conversation object: the thread. A session id
+/// is therefore accepted as the thread id itself (compat adapter), so resuming
+/// restores the existing thread instead of duplicating the data model.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct SessionResumeResponse {
+    pub session_id: ThreadId,
+    pub thread: ThreadDetail,
+}
+
+/// `POST /v1/threads/{id}/review`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ReviewRequest {
+    /// Optional area to focus the review on (a path or a short description);
+    /// it is appended to the review instruction as plain text.
+    #[serde(default)]
+    pub focus: Option<String>,
+}
+
+/// `GET /v1/threads/{id}/export`.
+///
+/// A versioned, deterministic, portable snapshot of the thread's durable
+/// history: the summary metadata plus the full authoritative event log in
+/// ascending `seq` order. It intentionally contains no export timestamp, no
+/// credentials, no API keys or headers, and no attachment payloads — replaying
+/// the events is exactly what a resumed session needs, nothing else.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ThreadExport {
+    #[ts(as = "f64")]
+    pub format_version: u32,
+    pub thread_id: ThreadId,
+    pub title: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default)]
+    pub runtime: ThreadRuntimeSettings,
+    #[serde(default)]
+    pub events: Vec<RuntimeEvent>,
+}
 
 // ---------------------------------------------------------------------------
 // Child runs (design §7.8 / appendix A)

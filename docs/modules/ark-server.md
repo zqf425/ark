@@ -44,6 +44,15 @@
   恰好一条），不维护第二套用量真源。llm-rounds 以 `limit`（缺省
   `LLM_ROUNDS_DEFAULT_LIMIT`，clamp 到 `LLM_ROUNDS_MAX_LIMIT`）与 `offset` 分页，无 `thread_id`
   时至多扫描最近 `LLM_ROUNDS_MAX_THREADS` 个线程；诊断字段不包含 prompt、API key、header 或用户敏感正文。
+- `POST /v1/sessions/{id}/resume-thread` 把 session id 兼容为 thread id（本运行时只有线程一个持久
+  会话对象）：返回与 `GET /v1/threads/{id}` 完全一致的 `ThreadDetail`；未知 id 结构化 404，坏 id 400，
+  绝不隐式创建会话。
+- `POST /v1/threads/{id}/review` 启动真实的代码检视回合：复用 `start_turn` 的注册/冲突/未知线程语义，
+  提示词由该线程权威的 workspace change 投影构成（有界，不回显敏感正文）；响应与普通回合相同为
+  `202` + `TurnSummary`，进度经事件流按返回的 turn id 追蹤。
+- `GET /v1/threads/{id}/export` 输出版本化（`THREAD_EXPORT_FORMAT_VERSION`）、确定性、可移植的会话
+  导出：仅含摘要元数据与升序 `seq` 的完整权威事件日志，不含导出时间戳、凭证、API key、header 或
+  附件载荷；相同 store 状态两次导出字节一致。
 
 ## 路由清单
 

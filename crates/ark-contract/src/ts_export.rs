@@ -32,15 +32,15 @@ use crate::{
     PendingUserInputView, PlanView, ProviderEntry, ProviderListResponse,
     ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderModelSummary, ProviderTestRequest, ProviderTestResponse, ProviderView,
-    ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, RewindRequest,
-    RewindResponse, RuntimeConfigView, RuntimeEvent, RuntimeInfo, SkillDiagnostics,
-    SkillLoadWarning, SkillSource, SkillSummary, SteerChildRequest, SubagentSettings,
-    SwitchWorkspaceRequest, TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadItem,
-    ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSkillsResponse,
-    ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest, TuningSettings,
-    TurnRequest, TurnSummary, UpdateMemoryRequest, UpdateThreadRequest, UsageResponse,
-    WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
-    WorkspaceDiffFile, WorkspaceStatus, WorkspaceView,
+    ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, ReviewRequest,
+    RewindRequest, RewindResponse, RuntimeConfigView, RuntimeEvent, RuntimeInfo,
+    SessionResumeResponse, SkillDiagnostics, SkillLoadWarning, SkillSource, SkillSummary,
+    SteerChildRequest, SubagentSettings, SwitchWorkspaceRequest, TerminalEntriesResponse,
+    TerminalEntry, ThreadDetail, ThreadExport, ThreadItem, ThreadListQuery, ThreadRuntimeSettings,
+    ThreadRuntimeSnapshot, ThreadSkillsResponse, ThreadSummary, ThreadUsageResponse, TodoEntry,
+    TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary, UpdateMemoryRequest,
+    UpdateThreadRequest, UsageResponse, WorkspaceChange, WorkspaceChangesResponse,
+    WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile, WorkspaceStatus, WorkspaceView,
 };
 use ark_common::{
     ArkErrorCode, ArkErrorPayload, AttachmentId, ChildId, ItemId, ThreadId, TurnId, Usage,
@@ -101,6 +101,9 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     LlmRound::export_all_to(dir)?;
     LlmRoundError::export_all_to(dir)?;
     LlmRoundsResponse::export_all_to(dir)?;
+    SessionResumeResponse::export_all_to(dir)?;
+    ReviewRequest::export_all_to(dir)?;
+    ThreadExport::export_all_to(dir)?;
     HealthResponse::export_all_to(dir)?;
     RuntimeInfo::export_all_to(dir)?;
     AttachmentEntry::export_all_to(dir)?;
@@ -208,6 +211,9 @@ const ROOT_NAMES: &[&str] = &[
     "LlmRound",
     "LlmRoundError",
     "LlmRoundsResponse",
+    "SessionResumeResponse",
+    "ReviewRequest",
+    "ThreadExport",
     "CreateThreadRequest",
     "UpdateThreadRequest",
     "ThreadDetail",
