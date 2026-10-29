@@ -4,8 +4,8 @@
 //! therefore exposes append + replay + atomic subscribe, and deliberately does
 //! not expose "update the index" — that is the projector's private concern.
 
-use ark_common::{ChildId, Result, ThreadId};
-use ark_contract::{RuntimeEvent, ThreadItem, ThreadRuntimeSettings};
+use ark_common::{ChildId, Result, ThreadId, TurnId};
+use ark_contract::{RewindResponse, RuntimeEvent, ThreadItem, ThreadRuntimeSettings};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -160,6 +160,23 @@ pub trait SessionStore: Send + Sync {
 
     /// Fork a thread: copy events up to and including `seq` into a new thread.
     async fn fork_thread(&self, thread: ThreadId, upto_seq: u64) -> Result<ThreadMeta>;
+
+    /// Physically truncate the authoritative event history at `rewind_from_seq`.
+    /// The returned durable reset event lets SSE consumers discard stale state.
+    async fn rewind_thread(
+        &self,
+        thread: ThreadId,
+        rewind_from_seq: u64,
+        target_turn_id: Option<ark_common::TurnId>,
+    ) -> Result<RewindResponse>;
+
+    /// Return a durable rewind marker even after ordinary event compaction.
+    async fn rewind_record(
+        &self,
+        thread: ThreadId,
+        rewind_from_seq: Option<u64>,
+        target_turn_id: Option<TurnId>,
+    ) -> Result<Option<RewindResponse>>;
 
     /// Create `threads/<parent>/children/<child>/` with its `thread.json`.
     ///

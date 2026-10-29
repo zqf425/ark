@@ -286,7 +286,7 @@ fn protected_routes() -> Router<AppState> {
         )
         .route(
             "/v1/threads/{id}/rewind",
-            post(crate::api::handlers::pending::rewind),
+            post(crate::api::handlers::rewind::rewind),
         )
         .route(
             "/v1/threads/{id}/review",
@@ -298,15 +298,16 @@ fn protected_routes() -> Router<AppState> {
         )
         .route(
             "/v1/subagents/config",
-            post(crate::api::handlers::pending::model_providers),
+            get(crate::api::handlers::subagents::view)
+                .post(crate::api::handlers::subagents::configure),
         )
         .route(
             "/v1/runtime/tuning",
-            post(crate::api::handlers::pending::model_providers),
+            post(crate::api::handlers::pending::tuning),
         )
         .route(
             "/v1/connector-env",
-            post(crate::api::handlers::pending::model_providers),
+            post(crate::api::handlers::pending::connector_env),
         )
         .route(
             "/v1/debug/llm-rounds",

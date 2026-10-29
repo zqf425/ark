@@ -13,11 +13,12 @@ use crate::domain::session_state::SessionState;
 use crate::store::event_log::{
     append_text, encode_event, plan_compaction, read_markers_blocking, repair_log_blocking,
 };
-use crate::store::fs_util::{remove_dir_all, write_atomic, write_json_atomic};
+use crate::store::fs_util::{read_json_opt, remove_dir_all, write_atomic, write_json_atomic};
 use crate::store::items_log::{append_item_blocking, append_usage_blocking, UsageRecord};
 use ark_common::{ArkError, Result, ThreadId};
-use ark_contract::RuntimeEvent;
-use std::collections::HashMap;
+use ark_contract::{RewindResponse, RuntimeEvent};
+use chrono::Utc;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -34,6 +35,13 @@ pub struct Snapshot {
     pub live: mpsc::Receiver<RuntimeEvent>,
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct RewindRecord {
+    rewind_from_seq: u64,
+    target_turn_id: Option<ark_common::TurnId>,
+    last_seq: u64,
+}
+
 /// Mutable state owned exclusively by one writer actor.
 pub struct WriterState {
     thread_id: ThreadId,
@@ -45,6 +53,7 @@ pub struct WriterState {
     needs_newline: bool,
     projector: ItemProjector,
     session: SessionState,
+    rewinds: Vec<RewindRecord>,
     diagnostics: Arc<dyn DiagnosticSink>,
 }
 
@@ -71,6 +80,7 @@ impl WriterState {
             projector.apply(event);
         }
         let session = SessionState::replay(&parsed.events);
+        let rewinds = read_json_opt(&paths.rewinds_json()).unwrap_or_default();
         Ok(Self {
             thread_id,
             paths,
@@ -81,6 +91,7 @@ impl WriterState {
             limits,
             projector,
             session,
+            rewinds,
             diagnostics,
         })
     }
@@ -211,6 +222,99 @@ impl WriterState {
         let cutoff = marker.to_seq;
         self.events.retain(|event| event.seq() > cutoff);
         Ok(Some(cutoff))
+    }
+
+    /// Physically discard every event at or after `rewind_from_seq` and append
+    /// one durable reset notification. Derived files are rebuilt from the kept
+    /// prefix before subscribers receive the notification.
+    pub fn rewind(
+        &mut self,
+        rewind_from_seq: u64,
+        target_turn_id: Option<ark_common::TurnId>,
+    ) -> Result<RewindResponse> {
+        if self.has_running_turn() {
+            return Err(ArkError::conflict(
+                "cannot rewind a thread with a running turn",
+            ));
+        }
+        let previous_watermark = self.seq;
+        self.events.retain(|event| event.seq() < rewind_from_seq);
+        let mut body = String::new();
+        for event in &self.events {
+            body.push_str(&encode_event(event)?);
+        }
+        write_atomic(&self.paths.events_jsonl(), body.as_bytes())?;
+
+        self.projector = ItemProjector::new();
+        for event in &self.events {
+            self.projector.apply(event);
+        }
+        crate::store::items_log::write_items_blocking(
+            &self.paths,
+            &crate::domain::items::project_items(&self.events),
+        )?;
+        self.session = SessionState::replay(&self.events);
+        write_json_atomic(&self.paths.session_json(), &self.session)?;
+        self.needs_newline = false;
+        // Sequence numbers are never reused: an SSE consumer that has already
+        // observed the discarded suffix receives this higher reset event.
+        self.seq = previous_watermark;
+        let stored = self.append(RuntimeEvent::ThreadRewound {
+            seq: 0,
+            thread_id: self.thread_id,
+            timestamp: Utc::now(),
+            rewind_from_seq,
+            target_turn_id,
+        })?;
+        let response = RewindResponse {
+            last_seq: stored.seq(),
+            rewind_from_seq,
+            already_rewound: false,
+        };
+        self.rewinds.push(RewindRecord {
+            rewind_from_seq,
+            target_turn_id,
+            last_seq: response.last_seq,
+        });
+        write_json_atomic(&self.paths.rewinds_json(), &self.rewinds)?;
+        Ok(response)
+    }
+
+    /// Find a rewind marker retained independently from the compactable event log.
+    pub fn rewind_record(
+        &self,
+        rewind_from_seq: Option<u64>,
+        target_turn_id: Option<ark_common::TurnId>,
+    ) -> Option<RewindResponse> {
+        self.rewinds
+            .iter()
+            .find(|record| {
+                rewind_from_seq.is_some_and(|seq| record.rewind_from_seq == seq)
+                    || target_turn_id.is_some_and(|turn| record.target_turn_id == Some(turn))
+            })
+            .map(|record| RewindResponse {
+                last_seq: self.seq,
+                rewind_from_seq: record.rewind_from_seq,
+                already_rewound: true,
+            })
+    }
+
+    fn has_running_turn(&self) -> bool {
+        let mut running = HashSet::new();
+        for event in &self.events {
+            match event {
+                RuntimeEvent::TurnStarted { turn_id, .. } => {
+                    running.insert(*turn_id);
+                }
+                RuntimeEvent::TurnCompleted { turn_id, .. }
+                | RuntimeEvent::TurnFailed { turn_id, .. }
+                | RuntimeEvent::TurnAborted { turn_id, .. } => {
+                    running.remove(turn_id);
+                }
+                _ => {}
+            }
+        }
+        !running.is_empty()
     }
 
     /// Increases the requested retained suffix when completion semantics need
@@ -465,6 +569,67 @@ mod tests {
         assert!(events
             .iter()
             .all(|event| !matches!(event, RuntimeEvent::Error { .. })));
+    }
+
+    #[test]
+    fn rewind_physically_discards_the_suffix_and_notifies_subscribers() {
+        let dir = TempDir::new("rewind-physical-truncation");
+        let thread = ThreadId::new();
+        let mut state = state(&dir, thread);
+        for _ in 0..4 {
+            state.append(event_at(thread, 1)).unwrap();
+        }
+        let mut subscription = state.snapshot_and_subscribe(0).unwrap();
+
+        let result = state.rewind(3, None).unwrap();
+
+        assert_eq!(result.last_seq, 5);
+        assert!(state
+            .events()
+            .iter()
+            .all(|event| event.seq() < 3 || event.seq() == 5));
+        assert!(matches!(
+            subscription.live.try_recv(),
+            Ok(RuntimeEvent::ThreadRewound { .. })
+        ));
+    }
+
+    #[test]
+    fn rewind_marker_survives_compaction_of_its_notification() {
+        let dir = TempDir::new("rewind-marker-compaction");
+        let thread = ThreadId::new();
+        let mut state = state(&dir, thread);
+        for _ in 0..4 {
+            state.append(event_at(thread, 1)).unwrap();
+        }
+
+        state.rewind(3, None).unwrap();
+        state.append(event_at(thread, 1)).unwrap();
+        state.append(event_at(thread, 1)).unwrap();
+        state.compact(1).unwrap();
+
+        assert!(state.rewind_record(Some(3), None).is_some());
+    }
+
+    #[test]
+    fn rewind_rejects_a_thread_with_a_running_persisted_turn() {
+        let dir = TempDir::new("rewind-running-turn");
+        let thread = ThreadId::new();
+        let turn = ark_common::TurnId::new();
+        let mut state = state(&dir, thread);
+        state
+            .append(RuntimeEvent::TurnStarted {
+                seq: 0,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: Utc::now(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            state.rewind(1, Some(turn)).unwrap_err().code,
+            ark_common::ArkErrorCode::Conflict
+        );
     }
 
     #[test]

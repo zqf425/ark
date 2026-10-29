@@ -281,6 +281,30 @@ impl SessionStore for FileSessionStore {
         self.fork_blocking(thread, upto_seq)
     }
 
+    async fn rewind_thread(
+        &self,
+        thread: ThreadId,
+        rewind_from_seq: u64,
+        target_turn_id: Option<ark_common::TurnId>,
+    ) -> Result<ark_contract::RewindResponse> {
+        let paths = self.resolve_paths(thread);
+        let writer = self.registry.writer_for(thread, &paths)?;
+        let result = writer.rewind(rewind_from_seq, target_turn_id).await?;
+        self.index_set_watermark(thread, result.last_seq);
+        Ok(result)
+    }
+
+    async fn rewind_record(
+        &self,
+        thread: ThreadId,
+        rewind_from_seq: Option<u64>,
+        target_turn_id: Option<ark_common::TurnId>,
+    ) -> Result<Option<ark_contract::RewindResponse>> {
+        let paths = self.resolve_paths(thread);
+        let writer = self.registry.writer_for(thread, &paths)?;
+        writer.rewind_record(rewind_from_seq, target_turn_id).await
+    }
+
     async fn create_child_run(
         &self,
         parent: ThreadId,

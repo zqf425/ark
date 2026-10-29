@@ -8,6 +8,9 @@
 当前公开面包括线程/回合/子代理 DTO、运行时事件、渲染 item、能力目录、配置视图、provider 与
 skill 视图。所有 GUI 字段使用 camelCase；既有查询参数保持既有命名，例如 `since_seq`。
 
+线程公开面还包括 `RewindRequest`（`turn_id` 或 `seq` 二选一）与 `RewindResponse`。`RuntimeEvent` 的
+`thread_rewound` 是持久化的 SSE 重置通知，不是被删除历史的替代投影。
+
 后台子代理终态使用 `child_completed` 事件传递稳定 `notification_id`、状态、摘要/错误和用量；
 消费者按通知 ID 去重，不得把 child 的完整原始转录复制到父线程。父回合正常完成后以
 `child_completion_acknowledged` 确认已消费的通知；确认失败保留至少一次重投递语义。

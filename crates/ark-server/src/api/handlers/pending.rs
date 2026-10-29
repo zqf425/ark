@@ -103,6 +103,22 @@ pub async fn model_providers() -> Result<Json<serde_json::Value>, ApiError> {
     )
 }
 
+/// Legacy tuning route; clients must use the single config patch entry point.
+pub async fn tuning() -> Result<Json<serde_json::Value>, ApiError> {
+    Err(
+        ApiError::not_implemented("POST /v1/runtime/tuning", M_CONFIG)
+            .with_hint("use POST /v1/runtime/config with a ConfigPatch instead"),
+    )
+}
+
+/// Connector environment storage has not landed in this runtime.
+pub async fn connector_env() -> Result<Json<serde_json::Value>, ApiError> {
+    Err(ApiError::not_implemented(
+        "POST /v1/connector-env",
+        M_CONFIG,
+    ))
+}
+
 /// `GET /v1/debug/llm-rounds`.
 pub async fn llm_rounds() -> Result<Json<serde_json::Value>, ApiError> {
     Err(ApiError::not_implemented(
@@ -163,14 +179,29 @@ mod tests {
             skills().await.err(),
             child_runs().await.err(),
             resume_thread().await.err(),
-            rewind().await.err(),
             review().await.err(),
+            model_providers().await.err(),
+            tuning().await.err(),
+            connector_env().await.err(),
             llm_rounds().await.err(),
             workspace_status().await.err(),
         ];
         for case in cases {
             let error = case.expect("pending route must fail");
             assert_eq!(error.0.code, ArkErrorCode::NotFound);
+        }
+    }
+
+    #[tokio::test]
+    async fn split_config_errors_name_their_own_routes() {
+        let cases = [
+            ("POST /v1/runtime/model-providers", model_providers().await),
+            ("POST /v1/runtime/tuning", tuning().await),
+            ("POST /v1/connector-env", connector_env().await),
+        ];
+        for (route, result) in cases {
+            let error = result.expect_err("pending route must fail");
+            assert!(error.payload().message.contains(route));
         }
     }
 }

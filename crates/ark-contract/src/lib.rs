@@ -37,11 +37,12 @@ pub use dto::{
     ChildRunActionResult, ChildRunAggregates, ChildRunEventsResponse, ChildRunListResponse,
     ChildRunSummary, CreateThreadRequest, FilePreview, GoalRequest, HealthResponse,
     PendingApprovalView, PendingUserInputView, PlanView, ResolveApprovalRequest,
-    ResolveUserInputRequest, ResumeChildRequest, RuntimeInfo, SteerChildRequest,
-    SwitchWorkspaceRequest, TerminalEntriesResponse, TerminalEntry, ThreadDetail,
-    ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSummary, TodoEntry, TodoStatus,
-    TodosRequest, TurnRequest, TurnSummary, UpdateThreadRequest, UsageResponse, WorkspaceChange,
-    WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile, WorkspaceView,
+    ResolveUserInputRequest, ResumeChildRequest, RewindRequest, RewindResponse, RuntimeInfo,
+    SteerChildRequest, SwitchWorkspaceRequest, TerminalEntriesResponse, TerminalEntry,
+    ThreadDetail, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSummary, TodoEntry,
+    TodoStatus, TodosRequest, TurnRequest, TurnSummary, UpdateThreadRequest, UsageResponse,
+    WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
+    WorkspaceDiffFile, WorkspaceView,
 };
 pub use event::{ChildCompletionNotice, EventKind, RuntimeEvent};
 pub use item::{ItemStatus, ThreadItem};

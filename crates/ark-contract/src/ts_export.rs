@@ -30,13 +30,14 @@ use crate::{
     PendingApprovalView, PendingUserInputView, PlanView, ProviderEntry, ProviderListResponse,
     ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderModelSummary, ProviderTestRequest, ProviderTestResponse, ProviderView,
-    ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, RuntimeConfigView,
-    RuntimeEvent, RuntimeInfo, SkillDiagnostics, SkillLoadWarning, SkillSource, SkillSummary,
-    SteerChildRequest, SubagentSettings, SwitchWorkspaceRequest, TerminalEntriesResponse,
-    TerminalEntry, ThreadDetail, ThreadItem, ThreadRuntimeSettings, ThreadRuntimeSnapshot,
-    ThreadSkillsResponse, ThreadSummary, TodoEntry, TodoStatus, TodosRequest, TuningSettings,
-    TurnRequest, TurnSummary, UpdateMemoryRequest, UpdateThreadRequest, UsageResponse,
-    WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
+    ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, RewindRequest,
+    RewindResponse, RuntimeConfigView, RuntimeEvent, RuntimeInfo, SkillDiagnostics,
+    SkillLoadWarning, SkillSource, SkillSummary, SteerChildRequest, SubagentSettings,
+    SwitchWorkspaceRequest, TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadItem,
+    ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSkillsResponse, ThreadSummary,
+    TodoEntry, TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary,
+    UpdateMemoryRequest, UpdateThreadRequest, UsageResponse, WorkspaceChange,
+    WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
     WorkspaceDiffFile, WorkspaceStatus, WorkspaceView,
 };
 use ark_common::{ArkErrorCode, ArkErrorPayload, ChildId, ItemId, ThreadId, TurnId, Usage};
@@ -69,6 +70,8 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     PendingUserInputView::export_all_to(dir)?;
     ThreadRuntimeSettings::export_all_to(dir)?;
     TurnRequest::export_all_to(dir)?;
+    RewindRequest::export_all_to(dir)?;
+    RewindResponse::export_all_to(dir)?;
     TurnSummary::export_all_to(dir)?;
     ResolveApprovalRequest::export_all_to(dir)?;
     ResolveUserInputRequest::export_all_to(dir)?;
@@ -193,6 +196,8 @@ const ROOT_NAMES: &[&str] = &[
     "PendingUserInputView",
     "ThreadRuntimeSettings",
     "TurnRequest",
+    "RewindRequest",
+    "RewindResponse",
     "TurnSummary",
     "ResolveApprovalRequest",
     "ResolveUserInputRequest",

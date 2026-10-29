@@ -16,6 +16,8 @@ export type { PendingApprovalView } from "./PendingApprovalView";
 export type { PendingUserInputView } from "./PendingUserInputView";
 export type { ThreadRuntimeSettings } from "./ThreadRuntimeSettings";
 export type { TurnRequest } from "./TurnRequest";
+export type { RewindRequest } from "./RewindRequest";
+export type { RewindResponse } from "./RewindResponse";
 export type { TurnSummary } from "./TurnSummary";
 export type { ResolveApprovalRequest } from "./ResolveApprovalRequest";
 export type { ResolveUserInputRequest } from "./ResolveUserInputRequest";

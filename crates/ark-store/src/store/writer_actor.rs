@@ -12,7 +12,7 @@
 
 use crate::store::writer_state::{Snapshot, WriterState};
 use ark_common::{ArkError, Result, ThreadId};
-use ark_contract::RuntimeEvent;
+use ark_contract::{RewindResponse, RuntimeEvent};
 use tokio::sync::{mpsc, oneshot};
 
 /// Commands accepted by a writer actor (design 7.4.3, extended with the reads
@@ -45,6 +45,16 @@ pub enum WriterCmd {
     Compact {
         keep_last: usize,
         reply: oneshot::Sender<Result<Option<u64>>>,
+    },
+    Rewind {
+        rewind_from_seq: u64,
+        target_turn_id: Option<ark_common::TurnId>,
+        reply: oneshot::Sender<Result<RewindResponse>>,
+    },
+    RewindRecord {
+        rewind_from_seq: Option<u64>,
+        target_turn_id: Option<ark_common::TurnId>,
+        reply: oneshot::Sender<Option<RewindResponse>>,
     },
     /// Stop accepting work and drop the actor.
     Shutdown,
@@ -128,6 +138,35 @@ impl WriterHandle {
         rx.await.map_err(|_| self.closed())?
     }
 
+    pub async fn rewind(
+        &self,
+        rewind_from_seq: u64,
+        target_turn_id: Option<ark_common::TurnId>,
+    ) -> Result<RewindResponse> {
+        let (reply, rx) = oneshot::channel();
+        self.send(WriterCmd::Rewind {
+            rewind_from_seq,
+            target_turn_id,
+            reply,
+        })?;
+        rx.await.map_err(|_| self.closed())?
+    }
+
+    /// Look up a durable rewind marker without replaying compacted history.
+    pub async fn rewind_record(
+        &self,
+        rewind_from_seq: Option<u64>,
+        target_turn_id: Option<ark_common::TurnId>,
+    ) -> Result<Option<RewindResponse>> {
+        let (reply, rx) = oneshot::channel();
+        self.send(WriterCmd::RewindRecord {
+            rewind_from_seq,
+            target_turn_id,
+            reply,
+        })?;
+        rx.await.map_err(|_| self.closed())
+    }
+
     /// Ask the actor to stop, then wait for the queue to drain.
     pub async fn shutdown(&self) {
         let _ = self.tx.send(WriterCmd::Shutdown).await;
@@ -183,6 +222,21 @@ async fn run(mut state: WriterState, mut rx: mpsc::Receiver<WriterCmd>) {
             WriterCmd::Compact { keep_last, reply } => {
                 let result = state.compact(keep_last);
                 let _ = reply.send(result);
+            }
+            WriterCmd::Rewind {
+                rewind_from_seq,
+                target_turn_id,
+                reply,
+            } => {
+                let result = state.rewind(rewind_from_seq, target_turn_id);
+                let _ = reply.send(result);
+            }
+            WriterCmd::RewindRecord {
+                rewind_from_seq,
+                target_turn_id,
+                reply,
+            } => {
+                let _ = reply.send(state.rewind_record(rewind_from_seq, target_turn_id));
             }
             WriterCmd::Shutdown => break,
         }

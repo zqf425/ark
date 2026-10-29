@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 pub enum EventKind {
     ThreadCreated,
     ThreadUpdated,
+    ThreadRewound,
     TurnStarted,
     TurnCompleted,
     TurnFailed,
@@ -71,6 +72,7 @@ impl EventKind {
         match self {
             EventKind::ThreadCreated => "thread_created",
             EventKind::ThreadUpdated => "thread_updated",
+            EventKind::ThreadRewound => "thread_rewound",
             EventKind::TurnStarted => "turn_started",
             EventKind::TurnCompleted => "turn_completed",
             EventKind::TurnFailed => "turn_failed",
@@ -163,6 +165,18 @@ pub enum RuntimeEvent {
         thread_id: ThreadId,
         timestamp: DateTime<Utc>,
         title: String,
+    },
+    /// A physical history truncation. This is retained solely to notify SSE
+    /// consumers that their local projection must reload from thread detail.
+    ThreadRewound {
+        #[ts(as = "f64")]
+        seq: u64,
+        thread_id: ThreadId,
+        timestamp: DateTime<Utc>,
+        #[ts(as = "f64")]
+        rewind_from_seq: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_turn_id: Option<ark_common::TurnId>,
     },
 
     // ---- turn lifecycle ----
@@ -509,6 +523,7 @@ impl RuntimeEvent {
         match self {
             RuntimeEvent::ThreadCreated { seq, .. }
             | RuntimeEvent::ThreadUpdated { seq, .. }
+            | RuntimeEvent::ThreadRewound { seq, .. }
             | RuntimeEvent::TurnStarted { seq, .. }
             | RuntimeEvent::TurnCompleted { seq, .. }
             | RuntimeEvent::TurnFailed { seq, .. }
@@ -547,6 +562,7 @@ impl RuntimeEvent {
         match self {
             RuntimeEvent::ThreadCreated { thread_id, .. }
             | RuntimeEvent::ThreadUpdated { thread_id, .. }
+            | RuntimeEvent::ThreadRewound { thread_id, .. }
             | RuntimeEvent::TurnStarted { thread_id, .. }
             | RuntimeEvent::TurnCompleted { thread_id, .. }
             | RuntimeEvent::TurnFailed { thread_id, .. }
@@ -585,6 +601,7 @@ impl RuntimeEvent {
         match self {
             RuntimeEvent::ThreadCreated { .. } => EventKind::ThreadCreated,
             RuntimeEvent::ThreadUpdated { .. } => EventKind::ThreadUpdated,
+            RuntimeEvent::ThreadRewound { .. } => EventKind::ThreadRewound,
             RuntimeEvent::TurnStarted { .. } => EventKind::TurnStarted,
             RuntimeEvent::TurnCompleted { .. } => EventKind::TurnCompleted,
             RuntimeEvent::TurnFailed { .. } => EventKind::TurnFailed,
@@ -645,6 +662,19 @@ impl RuntimeEvent {
                 thread_id,
                 timestamp,
                 title,
+            },
+            RuntimeEvent::ThreadRewound {
+                thread_id,
+                timestamp,
+                rewind_from_seq,
+                target_turn_id,
+                ..
+            } => RuntimeEvent::ThreadRewound {
+                seq,
+                thread_id,
+                timestamp,
+                rewind_from_seq,
+                target_turn_id,
             },
             RuntimeEvent::TurnStarted {
                 thread_id,
@@ -1074,6 +1104,7 @@ impl RuntimeEvent {
         match self {
             RuntimeEvent::ThreadCreated { timestamp, .. }
             | RuntimeEvent::ThreadUpdated { timestamp, .. }
+            | RuntimeEvent::ThreadRewound { timestamp, .. }
             | RuntimeEvent::TurnStarted { timestamp, .. }
             | RuntimeEvent::TurnCompleted { timestamp, .. }
             | RuntimeEvent::TurnFailed { timestamp, .. }

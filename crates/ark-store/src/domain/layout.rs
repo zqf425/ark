@@ -12,6 +12,7 @@ pub mod names {
     pub const SESSION_JSON: &str = "session.json";
     pub const EVENTS_JSONL: &str = "events.jsonl";
     pub const COMPACTED_JSONL: &str = "events.jsonl.compacted";
+    pub const REWINDS_JSON: &str = "rewinds.json";
     pub const ITEMS_JSONL: &str = "items.jsonl";
     pub const USAGE_JSONL: &str = "usage.jsonl";
     pub const ATTACHMENTS: &str = "attachments";
@@ -117,6 +118,10 @@ impl ThreadPaths {
         self.dir.join(names::COMPACTED_JSONL)
     }
 
+    pub fn rewinds_json(&self) -> PathBuf {
+        self.dir.join(names::REWINDS_JSON)
+    }
+
     pub fn items_jsonl(&self) -> PathBuf {
         self.dir.join(names::ITEMS_JSONL)
     }
@@ -188,6 +193,7 @@ mod tests {
         assert!(paths.session_json().ends_with("session.json"));
         assert!(paths.events_jsonl().ends_with("events.jsonl"));
         assert!(paths.compacted_jsonl().ends_with("events.jsonl.compacted"));
+        assert!(paths.rewinds_json().ends_with("rewinds.json"));
         assert!(paths.items_jsonl().ends_with("items.jsonl"));
         assert!(paths.usage_jsonl().ends_with("usage.jsonl"));
         assert!(paths.attachments_dir().ends_with("attachments"));

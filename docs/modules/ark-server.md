@@ -24,6 +24,12 @@
 - loopback API 默认不对浏览器开放跨域访问。为 Tauri 桌面壳，仅精确允许 Windows 的
   `http://tauri.localhost` 与 macOS/Linux 的 `tauri://localhost` origin，且只允许 GET/POST/PATCH/DELETE
   和 `accept`、`authorization`、`content-type` headers；禁止将其放宽为 `*`。
+- `POST /v1/threads/{id}/rewind` 仅在没有活动回合时接受 `turn_id` 或 `seq` 之一；目标 turn 从其
+  `turn_started` 处开始物理删除。成功响应含新的 `last_seq`，重复请求同一已记录目标幂等返回；SSE 的
+  `thread_rewound` 事件要求客户端重新读取线程详情。
+- `POST /v1/subagents/config` 是子代理开关和并发上限的专用热更新入口，内部复用
+  `ConfigPatch.subagents` 的校验、替换和持久化语义，并与 `/v1/runtime/config` 一样返回
+  `ApplyResult`；不得路由到其他 split-config 占位 handler。
 
 ## 路由清单
 

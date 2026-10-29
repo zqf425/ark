@@ -140,6 +140,32 @@ pub struct TurnRequest {
     pub text: String,
 }
 
+/// `POST /v1/threads/{id}/rewind`.
+///
+/// Exactly one target must be provided. A turn target means the rewind starts
+/// at that turn's `turn_started` event; a sequence target starts at that event.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct RewindRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<TurnId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub seq: Option<u64>,
+}
+
+/// Result of physically truncating a thread's authoritative event history.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct RewindResponse {
+    #[ts(as = "f64")]
+    pub last_seq: u64,
+    #[ts(as = "f64")]
+    pub rewind_from_seq: u64,
+    #[serde(default)]
+    pub already_rewound: bool,
+}
+
 /// `POST /v1/approvals/{id}`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]

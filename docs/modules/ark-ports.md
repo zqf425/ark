@@ -17,6 +17,9 @@
   `child_completion_acknowledged`，供收件箱和线程详情投影使用；不得为此克隆完整转录事件历史。
 - `SessionStore::replay_interaction_events` 只返回 turn 起止与 approval/user-input 生命周期，供 detail 恢复
   使用；是否仍可操作必须再由进程内 `InteractiveGates` waiter 快照判断。
+- `SessionStore::rewind_thread` 是物理截断边界：实现必须在同一 writer 序列化点删去目标及之后的权威事件、
+  重建投影并发出可使 SSE 客户端失效旧状态的持久化通知；实现还必须拒绝有未终结持久化回合的线程，且
+  `rewind_record` 的幂等标记不得随普通事件压缩丢失。
 - 插件只能经 `HttpCapability`、`McpCapability` 和 `UiCapability` 与基础设施或其它插件交互。
 - `McpServerService` 的 upsert/delete 是异步边界：实现可以在返回前发现远程工具并原子刷新运行时 catalog，
   但不得在 registry 锁持有期间 await。
