@@ -1,12 +1,14 @@
 # 附件、PTY 与 Studio 浏览器自动化边界
 
-> 状态：**已批准设计边界，未批准实现**。三项能力须各自补充可验收需求后再进入代码。
+> 状态：附件基础存储与 HTTP 读取已实现；附件授权、线程/turn 关联与模型多模态传递仍待决。PTY 与
+> Studio 浏览器自动化仍为已批准设计边界，未批准实现。
 
 ## 附件上下文
 
-V1 需定义 `AttachmentId`、元数据/引用、上传/finalize、线程/turn 授权、配额、哈希、MIME+magic-byte
-校验、原子落盘、GC 与删除。bytes/base64 不进入 JSONL/SSE；web 不能读取任意路径；agent 只接收已授权的
-不可变 ref。多模态模型内容必须由 port/adapter 显式支持，不能由 web/provider 特例拼接。
+当前实现定义 `AttachmentId`、不可变元数据、25 MiB 单附件上限、原子落盘和诊断/内容读取路由；上传
+使用 JSON Base64，字节不会写入 JSON 元数据、JSONL 或 SSE。服务端生成 UUID 并以其构造文件路径，
+因此 web 不能读取任意路径。上传/finalize 分离、线程/turn 授权、哈希、MIME+magic-byte 校验、GC、删除
+路由和模型多模态传递仍待决；agent 在这些授权与 adapter 边界落定前不得把未授权附件传给模型。
 
 ## PTY
 

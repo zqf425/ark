@@ -10,6 +10,9 @@
 
 长期 memory 由组合根以同一 `data_dir` 创建 `ark_store::MemoryFileStore`，再用 `MemoryAdapter` 注入
 `BaseServices`。业务校验、JSON 恢复及并发控制不位于组合根。
+附件由组合根以同一个 `data_dir` 创建 `ark_store::AttachmentStore`，并以 `AttachmentStore` 端口注入
+`AppState`；大小上限使用存储 crate 的 `DEFAULT_MAX_ATTACHMENT_BYTES`。组合根不解析上传内容或决定
+附件路径。
 
 ## 子代理装配
 

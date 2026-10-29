@@ -17,6 +17,12 @@
 
 ## 目录与恢复
 
+全局附件存储位于 `<data_dir>/attachments/<attachment-id>`，其不可变元数据表位于
+`<data_dir>/attachments.json`。二进制与 JSON 均先写同目录临时文件后 rename；元数据使用
+`ark_common::write_json_file`，故为 UTF-8 无 BOM。读取同时要求元数据和最终二进制文件存在，
+所以崩溃留下的临时文件或已删除条目不会被暴露。`AttachmentId` 是 UUID newtype，文件路径只由该
+服务端生成 ID 组成，绝不拼接客户端路径。
+
 ```text
 data/threads/<thread>/
 ├── thread.json                 # 线程元数据

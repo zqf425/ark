@@ -4,6 +4,7 @@
 //! rules live behind the ports, which is what keeps the HTTP layer testable with
 //! fakes and prevents a second copy of a domain rule here.
 
+pub mod attachments;
 pub mod base;
 pub mod child_runs;
 pub mod config;

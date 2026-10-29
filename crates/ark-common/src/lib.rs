@@ -17,5 +17,5 @@ pub use encoding::{
     write_text_atomic, DecodedText, TextEncoding, UTF8_BOM_BYTES, UTF8_BOM_CHAR,
 };
 pub use error::{ArkError, ArkErrorCode, ArkErrorPayload, Result};
-pub use ids::{ChildId, ItemId, RunId, ThreadId, TurnId};
+pub use ids::{AttachmentId, ChildId, ItemId, RunId, ThreadId, TurnId};
 pub use usage::Usage;

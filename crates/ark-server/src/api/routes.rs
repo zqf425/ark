@@ -237,19 +237,19 @@ fn protected_routes() -> Router<AppState> {
         )
         .route(
             "/v1/attachments",
-            post(crate::api::handlers::pending::attachments),
+            post(crate::api::handlers::attachments::upload),
         )
         .route(
             "/v1/attachments/{id}",
-            get(crate::api::handlers::pending::attachments),
+            get(crate::api::handlers::attachments::get),
         )
         .route(
             "/v1/attachments/{id}/content",
-            get(crate::api::handlers::pending::attachments),
+            get(crate::api::handlers::attachments::content),
         )
         .route(
             "/v1/attachments/diagnostics",
-            get(crate::api::handlers::pending::attachments),
+            get(crate::api::handlers::attachments::diagnostics),
         )
         .route(
             "/v1/child-runs",

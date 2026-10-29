@@ -6,6 +6,7 @@
 //! client. Nothing here touches I/O, so the renderer-facing shapes can be
 //! code-generated from these types without dragging runtime code along.
 
+pub mod attachment;
 pub mod base;
 pub mod capability;
 pub mod config;
@@ -19,6 +20,9 @@ pub mod item;
 #[cfg(test)]
 pub mod ts_export;
 
+pub use attachment::{
+    AttachmentDiagnostics, AttachmentEntry, AttachmentUploadRequest, AttachmentUploadResponse,
+};
 pub use base::{
     CreateMemoryRequest, McpServerEntry, McpServerListResponse, McpServerTestResponse,
     McpServerView, McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse,

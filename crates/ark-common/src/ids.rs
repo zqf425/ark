@@ -75,6 +75,7 @@ define_id!(TurnId);
 define_id!(ItemId);
 define_id!(ChildId);
 define_id!(RunId);
+define_id!(AttachmentId);
 
 #[cfg(test)]
 mod tests {

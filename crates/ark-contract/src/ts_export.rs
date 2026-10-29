@@ -22,7 +22,8 @@ use ts_rs::TS;
 
 use crate::item::{ItemKind, ToolPayload};
 use crate::{
-    ApplyResult, ChildCompletionNotice, ChildRunActionResult, ChildRunAggregates,
+    ApplyResult, AttachmentDiagnostics, AttachmentEntry, AttachmentUploadRequest,
+    AttachmentUploadResponse, ChildCompletionNotice, ChildRunActionResult, ChildRunAggregates,
     ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
     CreateMemoryRequest, CreateThreadRequest, EventKind, FieldPath, FilePreview, GoalRequest,
     HealthResponse, ItemStatus, McpServerEntry, McpServerListResponse, McpServerTestResponse,
@@ -34,13 +35,14 @@ use crate::{
     RewindResponse, RuntimeConfigView, RuntimeEvent, RuntimeInfo, SkillDiagnostics,
     SkillLoadWarning, SkillSource, SkillSummary, SteerChildRequest, SubagentSettings,
     SwitchWorkspaceRequest, TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadItem,
-    ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSkillsResponse, ThreadSummary,
-    TodoEntry, TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary,
-    UpdateMemoryRequest, UpdateThreadRequest, UsageResponse, WorkspaceChange,
-    WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
-    WorkspaceDiffFile, WorkspaceStatus, WorkspaceView,
+    ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSkillsResponse, ThreadSummary, TodoEntry,
+    TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary, UpdateMemoryRequest,
+    UpdateThreadRequest, UsageResponse, WorkspaceChange, WorkspaceChangesResponse,
+    WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile, WorkspaceStatus, WorkspaceView,
 };
-use ark_common::{ArkErrorCode, ArkErrorPayload, ChildId, ItemId, ThreadId, TurnId, Usage};
+use ark_common::{
+    ArkErrorCode, ArkErrorPayload, AttachmentId, ChildId, ItemId, ThreadId, TurnId, Usage,
+};
 
 /// Directory the bindings are written to, relative to this crate.
 pub const OUT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/src/generated");
@@ -56,6 +58,7 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     TurnId::export_all_to(dir)?;
     ItemId::export_all_to(dir)?;
     ChildId::export_all_to(dir)?;
+    AttachmentId::export_all_to(dir)?;
     Usage::export_all_to(dir)?;
     ArkErrorCode::export_all_to(dir)?;
     ArkErrorPayload::export_all_to(dir)?;
@@ -93,6 +96,10 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     UsageResponse::export_all_to(dir)?;
     HealthResponse::export_all_to(dir)?;
     RuntimeInfo::export_all_to(dir)?;
+    AttachmentEntry::export_all_to(dir)?;
+    AttachmentUploadRequest::export_all_to(dir)?;
+    AttachmentUploadResponse::export_all_to(dir)?;
+    AttachmentDiagnostics::export_all_to(dir)?;
 
     // ---- long-term memory ----
     MemoryEntry::export_all_to(dir)?;
@@ -184,6 +191,7 @@ const ROOT_NAMES: &[&str] = &[
     "TurnId",
     "ItemId",
     "ChildId",
+    "AttachmentId",
     "Usage",
     "ArkErrorCode",
     "ArkErrorPayload",
@@ -224,6 +232,10 @@ const ROOT_NAMES: &[&str] = &[
     "UpdateMemoryRequest",
     "MemoryListResponse",
     "MemoryDiagnosticsResponse",
+    "AttachmentEntry",
+    "AttachmentUploadRequest",
+    "AttachmentUploadResponse",
+    "AttachmentDiagnostics",
     "ItemKind",
     "ItemStatus",
     "ToolPayload",

@@ -4,6 +4,7 @@
 //! agent loop never learns about `reqwest`, SQLite, axum or a concrete provider.
 //! Implementations live in `arkd`'s wiring module; nothing here performs I/O.
 
+pub mod attachment;
 pub mod backend;
 pub mod base;
 pub mod bus;
@@ -14,6 +15,7 @@ pub mod store;
 pub mod subagent;
 pub mod tool;
 
+pub use attachment::{AttachmentStore, AttachmentUpload};
 pub use backend::{
     ArtifactRef, AuthContext, BackendProvider, BackendSession, CaseDetail, CaseDraft, CaseId,
     CaseQuery, CaseSummary, CaseVersionRef, ExecutionRef, ExecutionState, Page, PublishRequest,

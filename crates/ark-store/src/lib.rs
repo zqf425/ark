@@ -49,6 +49,7 @@ pub mod domain;
 pub mod service;
 pub mod store;
 
+pub use ark_ports::AttachmentUpload;
 pub use config::{StoreConfig, StoreLimits};
 pub use domain::{
     project_items, ChildIndexEntry, ChildIndexFile, ChildLocator, CompactionMarker, DiagnosticKind,
@@ -56,8 +57,8 @@ pub use domain::{
     SessionState, SessionStatus, StoreDiagnostic, ThreadFile, ThreadPaths,
 };
 pub use service::{
-    reconcile_index, ChildStore, DelegationPolicy, FileSessionStore, MemoryFileStore,
-    ReconcileReport,
+    reconcile_index, AttachmentStore, ChildStore, DelegationPolicy, FileSessionStore,
+    MemoryFileStore, ReconcileReport, DEFAULT_MAX_ATTACHMENT_BYTES,
 };
 pub use store::{
     load_snapshot, plan_reconcile, DiskFacts, IndexEntry, IndexProjector, IndexSnapshot, LogParse,

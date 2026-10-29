@@ -36,6 +36,12 @@
 当前路由以 `src/api/routes.rs` 为准。新增或修改路由必须同步更新 wire DTO、接口测试、渲染层 client
 和对应需求设计；不在本文维护第二份易漂移的完整路由表。
 
+附件路由为 `POST /v1/attachments`、`GET /v1/attachments/{id}`、
+`GET /v1/attachments/{id}/content` 与 `GET /v1/attachments/diagnostics`。上传采用 JSON Base64；
+handler 在解码前按存储端口的最大字节数限制编码长度，超限或非法 Base64 返回结构化 400。内容下载
+设置持久化 MIME（无效或缺失时为 `application/octet-stream`）和精确 `content-length`；非 UUID、
+缺元数据或缺字节文件统一为 404。
+
 工作区路由只经 `WorkspaceService` 读取 active view、执行 switch 和取得 diff。切换时将 parent
 `TurnRegistry` 与 active child 数相加；非零即返回 `Conflict`/409，不能隐式取消。diff 响应带
 generation，客户端必须丢弃 generation 已变的旧响应。

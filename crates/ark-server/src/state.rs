@@ -15,7 +15,9 @@ use ark_common::{Result, ThreadId, TurnId, Usage};
 use ark_config::{ConfigStore, TuningConfig};
 use ark_contract::{RuntimeEvent, TurnSummary, UsageResponse};
 use ark_obs::UsageRecorder;
-use ark_ports::{BaseServices, SessionStore, SubagentRegistry, SubagentRunner, ToolRegistryPort};
+use ark_ports::{
+    AttachmentStore, BaseServices, SessionStore, SubagentRegistry, SubagentRunner, ToolRegistryPort,
+};
 use chrono::{DateTime, Utc};
 use tokio::sync::{broadcast, Mutex as AsyncMutex};
 
@@ -217,6 +219,8 @@ impl TurnRegistry {
 /// Everything a route needs. Constructed once by `arkd` and cloned per request.
 #[derive(Clone)]
 pub struct AppState {
+    /// Immutable attachment storage injected by the composition root.
+    pub attachments: Option<Arc<dyn AttachmentStore>>,
     pub store: Arc<dyn SessionStore>,
     pub tools: Arc<dyn ToolRegistryPort>,
     pub config: Arc<ConfigStore>,
@@ -272,6 +276,7 @@ impl AppState {
     ) -> Self {
         let (shutdown, _) = broadcast::channel(4);
         Self {
+            attachments: None,
             store,
             tools,
             config,
@@ -289,6 +294,12 @@ impl AppState {
             shutdown: Arc::new(shutdown),
             turns_completed: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Attach the immutable attachment-store implementation.
+    pub fn with_attachments(mut self, attachments: Arc<dyn AttachmentStore>) -> Self {
+        self.attachments = Some(attachments);
+        self
     }
 
     /// Attach the platform services (design §7.5.4).

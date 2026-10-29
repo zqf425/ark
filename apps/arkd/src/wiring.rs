@@ -21,7 +21,7 @@ use ark_ports::{
     BaseServices, EventSink, ModelClient, ModelMessage, SandboxPolicy, SessionStore, ToolOutput,
     ToolRegistryPort,
 };
-use ark_store::{FileSessionStore, StoreConfig};
+use ark_store::{AttachmentStore, FileSessionStore, StoreConfig, DEFAULT_MAX_ATTACHMENT_BYTES};
 use ark_tool::{Autonomy, BuiltinSandboxPolicy, RegistryToolRunner, ToolRegistry};
 
 use ark_server::{AppState, TurnEnd, TurnJob, TurnRunner};
@@ -72,6 +72,10 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
 
     // Real store: the session directory is the system of record.
     let store = Arc::new(FileSessionStore::open(StoreConfig::new(&args.data_dir))?);
+    let attachments = Arc::new(AttachmentStore::open(
+        &args.data_dir,
+        DEFAULT_MAX_ATTACHMENT_BYTES,
+    )?);
     store.reconcile()?;
     let interrupted = abort_interrupted_turns(store.as_ref()).await?;
     if interrupted != 0 {
@@ -206,6 +210,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         args.data_dir.clone(),
         env!("CARGO_PKG_VERSION"),
     )
+    .with_attachments(attachments)
     .with_base_services(base)
     .with_subagents(
         Arc::clone(&delegation) as Arc<dyn ark_ports::SubagentRunner>,

@@ -10,6 +10,9 @@ skill 视图。所有 GUI 字段使用 camelCase；既有查询参数保持既�
 
 线程公开面还包括 `RewindRequest`（`turn_id` 或 `seq` 二选一）与 `RewindResponse`。`RuntimeEvent` 的
 `thread_rewound` 是持久化的 SSE 重置通知，不是被删除历史的替代投影。
+附件当前提供 `AttachmentId`、不可变 `AttachmentEntry`、Base64 JSON 上传请求/响应和诊断 DTO。
+上传体的 `content` 是标准 Base64，原始字节不会进入附件元数据或任何事件流；下载字节是独立的 HTTP
+响应体。附件 ID 由服务端生成，客户端只能在读取请求中把它作为不透明字符串传回。
 
 后台子代理终态使用 `child_completed` 事件传递稳定 `notification_id`、状态、摘要/错误和用量；
 消费者按通知 ID 去重，不得把 child 的完整原始转录复制到父线程。父回合正常完成后以

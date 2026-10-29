@@ -8,6 +8,10 @@
 端口按领域分组：模型、工具与沙箱、会话存储和事件、子代理、后端集成、HTTP/MCP/UI 总线、
 平台服务及工作区/provider/skill 基础服务。
 
+`AttachmentStore` 是附件字节与元数据的专用边界：上传端在交给实现前解码 transport Base64，读取端
+只能通过服务端生成的 `AttachmentId` 取得元数据或原始字节。端口不接受路径，因此 HTTP 或 agent
+层不能借此访问任意本地文件。
+
 ## 硬约束
 
 - `ark-agent` 只能依赖到本 crate，不得引用 `ark-store`、`ark-llm`、`ark-tool` 等实现。

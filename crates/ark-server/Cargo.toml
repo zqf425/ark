@@ -22,6 +22,8 @@ tracing = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
 tower-http = { workspace = true }
+base64 = "0.22"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+async-trait = { workspace = true }
