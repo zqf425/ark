@@ -23,6 +23,7 @@ fn view_of(state: &AppState) -> RuntimeConfigView {
             .default_workspace
             .as_ref()
             .map(|path| path.to_string_lossy().to_string()),
+        default_autonomy: snapshot.default_autonomy.clone(),
         subagents: snapshot.subagents,
         tuning: (&snapshot.tuning).into(),
     }

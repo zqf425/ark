@@ -256,8 +256,11 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
                 parent_runtime.model.as_deref(),
             )
         };
-        let parent_autonomy =
-            crate::wiring::autonomy_from_override(parent_runtime.autonomy.as_deref())?;
+        let config = self.config.snapshot();
+        let parent_autonomy = crate::wiring::autonomy_from_override_or_default(
+            parent_runtime.autonomy.as_deref(),
+            &config,
+        )?;
         let autonomy = match ctx
             .autonomy
             .as_deref()

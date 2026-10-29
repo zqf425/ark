@@ -14,6 +14,10 @@ export type ConfigPatch = { model_providers?: JsonValue, tuning?: TuningSettings
  */
 default_workspace?: string, 
 /**
+ * Default sandbox autonomy for threads without an explicit override.
+ */
+default_autonomy?: string, 
+/**
  * Sub-agent switch plus the concurrency cap.
  */
 subagents?: SubagentSettings, };

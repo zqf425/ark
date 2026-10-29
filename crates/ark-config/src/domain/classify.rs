@@ -14,6 +14,7 @@ pub const FIELD_CLASSES: &[(&str, ReloadClass)] = &[
     ("log_level", ReloadClass::Hot),
     ("model_providers", ReloadClass::HotRelisten),
     ("default_workspace", ReloadClass::Hot),
+    ("default_autonomy", ReloadClass::Hot),
     ("subagents", ReloadClass::Hot),
     ("tuning", ReloadClass::Hot),
 ];

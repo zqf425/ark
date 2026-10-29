@@ -119,6 +119,8 @@ pub struct RuntimeConfig {
     /// Default workspace for tools. `None` means "no default chosen", which is
     /// different from an empty path: the GUI shows an explicit empty state.
     pub default_workspace: Option<PathBuf>,
+    /// Default autonomy for a thread that does not override the global mode.
+    pub default_autonomy: String,
     /// Sub-agent switch and concurrency cap (design §7.8).
     pub subagents: SubagentSettings,
     pub tuning: TuningConfig,
@@ -132,6 +134,7 @@ impl Default for RuntimeConfig {
             log_level: "info".to_string(),
             model_providers: serde_json::Value::Null,
             default_workspace: None,
+            default_autonomy: "workspace_write".to_string(),
             subagents: SubagentSettings::default(),
             tuning: TuningConfig::default(),
         }
@@ -161,6 +164,14 @@ impl RuntimeConfig {
             if workspace.as_os_str().is_empty() {
                 return Err("default_workspace must not be an empty path".to_string());
             }
+        }
+        if !matches!(
+            self.default_autonomy.as_str(),
+            "strict" | "workspace_write" | "unattended"
+        ) {
+            return Err(
+                "default_autonomy must be strict, workspace_write, or unattended".to_string(),
+            );
         }
         if self.subagents.max_concurrency < SUBAGENT_CONCURRENCY_MIN
             || self.subagents.max_concurrency > SUBAGENT_CONCURRENCY_MAX
@@ -216,6 +227,12 @@ impl RuntimeConfig {
                 changed.push(FieldPath::new("default_workspace"));
             }
         }
+        if let Some(value) = &patch.default_autonomy {
+            if next.default_autonomy != *value {
+                next.default_autonomy = value.clone();
+                changed.push(FieldPath::new("default_autonomy"));
+            }
+        }
         if let Some(value) = &patch.subagents {
             if next.subagents != *value {
                 next.subagents = *value;
@@ -264,5 +281,16 @@ mod tests {
         let (next, changed) = config.candidate(&ConfigPatch::default()).unwrap();
         assert_eq!(next, config);
         assert!(changed.is_empty());
+    }
+
+    #[test]
+    fn invalid_default_autonomy_is_rejected_without_mutating_the_snapshot() {
+        let config = RuntimeConfig::default();
+        let patch = ConfigPatch {
+            default_autonomy: Some("unsafe".into()),
+            ..ConfigPatch::default()
+        };
+        assert!(config.candidate(&patch).is_err());
+        assert_eq!(config.default_autonomy, "workspace_write");
     }
 }

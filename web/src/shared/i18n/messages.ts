@@ -32,9 +32,15 @@ export const MESSAGES = {
   'session.runtime.model': ['模型覆盖', 'Model override'],
   'session.runtime.autonomy': ['权限', 'Permissions'],
   'session.runtime.save': ['保存（下一回合生效）', 'Save for next turn'],
-  'session.runtime.strict': ['严格：命令与写入需批准', 'Strict: approve commands and writes'],
-  'session.runtime.workspaceWrite': ['工作区写入：仅命令需批准', 'Workspace write: approve commands only'],
-  'session.runtime.unattended': ['无人值守：不请求批准', 'Unattended: no approval prompts']
+  'session.runtime.strict': ['永远询问：命令与写入需批准', 'Ask every time: approve commands and writes'],
+  'session.runtime.workspaceWrite': ['仅工作区修改：命令需批准', 'Workspace edits only: approve commands'],
+  'session.runtime.unattended': ['完全访问：可越出工作区，不再询问', 'Full access: outside workspace, no approvals'],
+  'settings.autonomy.label': ['默认权限', 'Default permissions'],
+  'settings.autonomy.hint': ['未单独设置权限的会话在下一回合使用此权限。', 'Threads without an override use this on their next turn.'],
+  'settings.autonomy.save': ['保存默认权限', 'Save default permissions'],
+  'settings.autonomy.saving': ['保存中…', 'Saving…'],
+  'settings.autonomy.saved': ['默认权限已保存', 'Default permissions saved'],
+  'settings.autonomy.saveFailed': ['保存默认权限失败', 'Failed to save default permissions']
   ,'session.context.compact': ['创建上下文检查点', 'Create context checkpoint']
   ,'session.context.compacted': ['上下文检查点已创建', 'Context checkpoint created']
 } as const

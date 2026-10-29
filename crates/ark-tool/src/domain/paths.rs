@@ -44,6 +44,46 @@ pub fn resolve(root: &Path, input: &str) -> Result<PathBuf> {
     Ok(resolved)
 }
 
+/// Resolve a path without workspace containment checks.
+///
+/// Full-access calls still reject malformed path input, but deliberately skip
+/// lexical and real-path containment so the selected sandbox policy, rather
+/// than this helper, defines the accessible filesystem boundary.
+pub fn resolve_unrestricted(root: &Path, input: &str) -> Result<PathBuf> {
+    validate_path_input(input)?;
+    let root_key = path::normalize(&root.to_string_lossy());
+    if root_key.is_empty() && !Path::new(input).is_absolute() {
+        return Err(ArkError::validation("workspace root is empty"));
+    }
+    let candidate = if Path::new(input).is_absolute() {
+        input.to_string()
+    } else {
+        format!("{root_key}/{input}")
+    };
+    let normalized = path::normalize(&candidate);
+    if normalized.is_empty() {
+        return Err(ArkError::validation("path is empty"));
+    }
+    Ok(PathBuf::from(
+        normalized.replace('/', std::path::MAIN_SEPARATOR_STR),
+    ))
+}
+
+fn validate_path_input(input: &str) -> Result<()> {
+    if input.contains('\0') {
+        return Err(ArkError::validation("path contains NUL"));
+    }
+    if let Some(colon) = input.find(':') {
+        let drive = input.as_bytes();
+        if colon != 1 || !drive[0].is_ascii_alphabetic() || input[2..].starts_with(':') {
+            return Err(ArkError::validation(
+                "path contains an invalid drive prefix",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Reject a path whose existing portion resolves outside `root` via a link.
 ///
 /// `canonicalize` follows symlinks and Windows junctions, so comparing the
@@ -160,6 +200,18 @@ mod tests {
     #[test]
     fn absolute_path_inside_the_root_is_accepted() {
         assert!(resolve(&root(), "D:/ws/project/a.txt").is_ok());
+    }
+
+    #[test]
+    fn unrestricted_resolution_allows_an_absolute_path_outside_the_workspace() {
+        assert!(resolve_unrestricted(&root(), "C:/Windows/System32").is_ok());
+    }
+
+    #[test]
+    fn unrestricted_resolution_rejects_nul_and_invalid_drive_prefixes() {
+        assert!(resolve_unrestricted(&root(), "bad\0path").is_err());
+        assert!(resolve_unrestricted(&root(), "1:/invalid").is_err());
+        assert!(resolve_unrestricted(&root(), "C::/invalid").is_err());
     }
 
     #[test]

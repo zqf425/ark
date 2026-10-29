@@ -57,10 +57,7 @@ impl SandboxPolicy for BuiltinSandboxPolicy {
                 _ => SandboxDecision::NeedsApproval,
             },
             Autonomy::WorkspaceWrite => baseline,
-            Autonomy::Unattended => match baseline {
-                SandboxDecision::NeedsApproval => SandboxDecision::WorkspaceWrite,
-                other => other,
-            },
+            Autonomy::Unattended => SandboxDecision::Unrestricted,
         }
     }
 }
@@ -69,7 +66,7 @@ impl SandboxPolicy for BuiltinSandboxPolicy {
 pub fn is_self_service(decision: SandboxDecision) -> bool {
     matches!(
         decision,
-        SandboxDecision::ReadOnly | SandboxDecision::WorkspaceWrite
+        SandboxDecision::ReadOnly | SandboxDecision::WorkspaceWrite | SandboxDecision::Unrestricted
     )
 }
 
@@ -82,17 +79,17 @@ mod tests {
     }
 
     #[test]
-    fn read_only_tools_stay_read_only_in_every_mode() {
-        for mode in [
-            Autonomy::Strict,
-            Autonomy::WorkspaceWrite,
-            Autonomy::Unattended,
-        ] {
+    fn read_only_tools_stay_read_only_except_with_full_access() {
+        for mode in [Autonomy::Strict, Autonomy::WorkspaceWrite] {
             assert_eq!(
                 BuiltinSandboxPolicy::new(mode).decide("read", &args()),
                 SandboxDecision::ReadOnly
             );
         }
+        assert_eq!(
+            BuiltinSandboxPolicy::new(Autonomy::Unattended).decide("read", &args()),
+            SandboxDecision::Unrestricted
+        );
     }
 
     #[test]
@@ -126,7 +123,7 @@ mod tests {
         let policy = BuiltinSandboxPolicy::new(Autonomy::Unattended);
         assert_eq!(
             policy.decide("bash", &args()),
-            SandboxDecision::WorkspaceWrite
+            SandboxDecision::Unrestricted
         );
         assert!(is_self_service(policy.decide("bash", &args())));
     }

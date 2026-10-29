@@ -11,4 +11,4 @@ export type RuntimeConfigView = { version: number, port: number, data_dir: strin
  * Always serialized, including `null`: the renderer's contract is
  * `string | null`, and omitting the key would make it `undefined` instead.
  */
-default_workspace?: string, subagents: SubagentSettings, tuning: TuningSettings, };
+default_workspace?: string, default_autonomy: string, subagents: SubagentSettings, tuning: TuningSettings, };

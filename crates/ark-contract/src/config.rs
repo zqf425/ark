@@ -54,6 +54,9 @@ pub struct ConfigPatch {
     /// the setting back to "no default".
     #[serde(default)]
     pub default_workspace: Option<String>,
+    /// Default sandbox autonomy for threads without an explicit override.
+    #[serde(default)]
+    pub default_autonomy: Option<String>,
     /// Sub-agent switch plus the concurrency cap.
     #[serde(default)]
     pub subagents: Option<SubagentSettings>,
@@ -154,6 +157,7 @@ pub struct RuntimeConfigView {
     /// Always serialized, including `null`: the renderer's contract is
     /// `string | null`, and omitting the key would make it `undefined` instead.
     pub default_workspace: Option<String>,
+    pub default_autonomy: String,
     pub subagents: SubagentSettings,
     pub tuning: TuningSettings,
 }

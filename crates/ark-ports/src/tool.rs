@@ -68,6 +68,8 @@ pub enum SandboxDecision {
     WorkspaceWrite,
     /// Requires an approval gate before execution.
     NeedsApproval,
+    /// Allows this invocation to access paths outside the workspace.
+    Unrestricted,
 }
 
 /// Policy that turns a request into a `SandboxDecision`. One implementation,

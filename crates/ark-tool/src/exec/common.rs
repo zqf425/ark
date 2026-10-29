@@ -4,7 +4,7 @@
 //! so the seven implementations stay short and behave identically.
 
 use ark_common::{ArkError, Result};
-use ark_ports::{ToolContext, ToolOutput};
+use ark_ports::{SandboxDecision, ToolContext, ToolOutput};
 use std::path::PathBuf;
 
 use crate::domain::paths;
@@ -12,8 +12,15 @@ use crate::domain::paths;
 /// Resolve a tool-supplied path inside the workspace, or fail with validation.
 pub fn workspace_path(ctx: &ToolContext, input: Option<&str>) -> Result<PathBuf> {
     match input {
-        Some(value) if !value.trim().is_empty() => paths::resolve(&ctx.workspace, value.trim()),
-        Some(_) | None => paths::resolve(&ctx.workspace, "."),
+        Some(value) if !value.trim().is_empty() => resolve_path(ctx, value.trim()),
+        Some(_) | None => resolve_path(ctx, "."),
+    }
+}
+
+fn resolve_path(ctx: &ToolContext, input: &str) -> Result<PathBuf> {
+    match ctx.sandbox {
+        SandboxDecision::Unrestricted => paths::resolve_unrestricted(&ctx.workspace, input),
+        _ => paths::resolve(&ctx.workspace, input),
     }
 }
 
@@ -93,6 +100,14 @@ mod tests {
     fn escapes_are_refused() {
         let dir = std::env::temp_dir().join("ws");
         assert!(workspace_path(&ctx(&dir), Some("../../x")).is_err());
+    }
+
+    #[test]
+    fn unrestricted_mode_allows_a_valid_path_outside_the_workspace() {
+        let dir = std::env::temp_dir().join("ws");
+        let mut context = ctx(&dir);
+        context.sandbox = SandboxDecision::Unrestricted;
+        assert!(workspace_path(&context, Some("C:/Windows/System32")).is_ok());
     }
 
     #[test]

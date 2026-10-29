@@ -83,8 +83,9 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
 
     // The sandbox policy is shared by parent and child turns: a delegated task
     // must never get a laxer sandbox than the turn that spawned it.
-    let policy: Arc<dyn SandboxPolicy> =
-        Arc::new(BuiltinSandboxPolicy::new(Autonomy::WorkspaceWrite));
+    let policy: Arc<dyn SandboxPolicy> = Arc::new(BuiltinSandboxPolicy::new(
+        autonomy_from_override(Some(&config.snapshot().default_autonomy))?,
+    ));
     // A workspace root is leased once per turn. Switching is handled through
     // the workspace HTTP surface and never re-reads the Hot config mid-turn.
     let roots = Arc::new(WorkspaceRoots::new(args.workspace.clone())?);
@@ -458,8 +459,9 @@ impl TurnRunner for AgentTurnRunner {
             }
             None => self.roots.lease().canonical_root,
         };
+        let snapshot = self.config.snapshot();
         let policy: Arc<dyn SandboxPolicy> = Arc::new(BuiltinSandboxPolicy::new(
-            autonomy_from_override(thread.runtime.autonomy.as_deref())?,
+            autonomy_from_override_or_default(thread.runtime.autonomy.as_deref(), &snapshot)?,
         ));
         let events = TurnEvents::new(job.thread_id, job.turn_id);
         let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events));
@@ -494,7 +496,6 @@ impl TurnRunner for AgentTurnRunner {
         }
         // One snapshot per turn: every value below is derived from the same
         // config state, so a turn cannot mix a new model with old limits.
-        let snapshot = self.config.snapshot();
         let mut provider = match thread.runtime.provider_id.as_deref() {
             Some(id) => Some(self.providers.resolve(Some(id)).ok_or_else(|| {
                 ark_common::ArkError::validation(format!("thread provider is unavailable: {id}"))
@@ -544,12 +545,37 @@ fn workspace_line(workspace: &std::path::Path) -> String {
 
 pub(crate) fn autonomy_from_override(value: Option<&str>) -> ark_common::Result<Autonomy> {
     match value {
-        None | Some("workspace_write") => Ok(Autonomy::WorkspaceWrite),
+        Some("workspace_write") => Ok(Autonomy::WorkspaceWrite),
         Some("strict") => Ok(Autonomy::Strict),
         Some("unattended") => Ok(Autonomy::Unattended),
         Some(value) => Err(ark_common::ArkError::validation(format!(
             "invalid autonomy: {value}"
         ))),
+        None => Err(ark_common::ArkError::validation("autonomy is missing")),
+    }
+}
+
+pub(crate) fn autonomy_from_override_or_default(
+    value: Option<&str>,
+    config: &RuntimeConfig,
+) -> ark_common::Result<Autonomy> {
+    autonomy_from_override(value.or(Some(&config.default_autonomy)))
+}
+
+#[cfg(test)]
+mod autonomy_tests {
+    use super::*;
+
+    #[test]
+    fn unset_session_autonomy_uses_the_global_default() {
+        let config = RuntimeConfig {
+            default_autonomy: "strict".to_string(),
+            ..RuntimeConfig::default()
+        };
+        assert_eq!(
+            autonomy_from_override_or_default(None, &config).unwrap(),
+            Autonomy::Strict
+        );
     }
 }
 
