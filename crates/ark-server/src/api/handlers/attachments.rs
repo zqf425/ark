@@ -2,10 +2,11 @@
 
 use std::str::FromStr;
 
-use ark_common::{ArkError, ArkErrorCode, AttachmentId};
+use ark_common::{ArkErrorCode, AttachmentId};
 use ark_contract::{AttachmentUploadRequest, AttachmentUploadResponse};
 use ark_ports::AttachmentUpload;
 use axum::body::Body;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderValue, Response, StatusCode};
 use axum::response::IntoResponse;
@@ -18,14 +19,19 @@ use crate::state::AppState;
 /// `POST /v1/attachments` with a Base64 JSON body.
 pub async fn upload(
     State(state): State<AppState>,
-    Json(request): Json<AttachmentUploadRequest>,
+    request: Result<Json<AttachmentUploadRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<AttachmentUploadResponse>), ApiError> {
     let store = attachment_store(&state)?;
+    let Json(request) = request.map_err(|rejection| match rejection {
+        JsonRejection::BytesRejection(_) => upload_size_error(store.max_bytes()),
+        _ => ApiError::new(
+            ArkErrorCode::ValidationError,
+            "invalid attachment upload request",
+        ),
+    })?;
     let max_encoded = encoded_limit(store.max_bytes());
     if request.content.len() > max_encoded {
-        return Err(
-            ArkError::validation("attachment content exceeds the configured size limit").into(),
-        );
+        return Err(upload_size_error(store.max_bytes()));
     }
     let content = base64::engine::general_purpose::STANDARD
         .decode(request.content)
@@ -75,6 +81,14 @@ pub async fn content(
         [
             (header::CONTENT_TYPE, content_type),
             (header::CONTENT_LENGTH, length),
+            (
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            ),
+            (
+                header::CONTENT_DISPOSITION,
+                content_disposition(&entry.original_filename),
+            ),
         ],
         bytes,
     )
@@ -109,6 +123,29 @@ fn encoded_limit(max_bytes: u64) -> usize {
         .saturating_add(2)
         .saturating_div(3)
         .saturating_mul(4) as usize
+}
+
+fn upload_size_error(max_bytes: u64) -> ApiError {
+    ApiError::new(
+        ArkErrorCode::ValidationError,
+        format!("attachment content exceeds the {max_bytes} byte limit"),
+    )
+}
+
+fn content_disposition(original_filename: &str) -> HeaderValue {
+    let mut filename: String = original_filename
+        .chars()
+        .take(128)
+        .map(|character| match character {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '_' | '-' => character,
+            _ => '_',
+        })
+        .collect();
+    if filename.is_empty() {
+        filename.push_str("attachment");
+    }
+    HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
+        .expect("sanitized attachment filename is a valid header value")
 }
 
 #[cfg(test)]
@@ -154,9 +191,14 @@ mod tests {
     }
 
     fn test_state(data_dir: &std::path::Path) -> AppState {
+        test_state_with_attachment_limit(data_dir, 32)
+    }
+
+    fn test_state_with_attachment_limit(data_dir: &std::path::Path, max_bytes: u64) -> AppState {
         let sessions =
             Arc::new(FileSessionStore::open(StoreConfig::new(data_dir)).expect("sessions open"));
-        let attachments = Arc::new(AttachmentStore::open(data_dir, 32).expect("attachments open"));
+        let attachments =
+            Arc::new(AttachmentStore::open(data_dir, max_bytes).expect("attachments open"));
         AppState::new(
             sessions,
             Arc::new(EmptyTools),
@@ -263,6 +305,155 @@ mod tests {
             .await
             .expect("route responds");
         assert_eq!(invalid.status(), StatusCode::NOT_FOUND);
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn attachment_uploads_larger_than_axums_default_body_limit() {
+        let data_dir = test_dir();
+        let app = router(test_state_with_attachment_limit(&data_dir, 4 * 1024 * 1024));
+        let body = serde_json::json!({
+            "original_filename": "large.bin",
+            "mime_type": "application/octet-stream",
+            "content": base64::engine::general_purpose::STANDARD
+                .encode(vec![0_u8; 4 * 1024 * 1024 - 1024]),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/attachments")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("route responds");
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn oversized_attachment_upload_returns_a_structured_error() {
+        let data_dir = test_dir();
+        let app = router(test_state_with_attachment_limit(&data_dir, 32));
+        let body = serde_json::json!({
+            "original_filename": "too-large.bin",
+            "content": base64::engine::general_purpose::STANDARD.encode(vec![0_u8; 33]),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/attachments")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("route responds");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let payload: serde_json::Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("response body reads"),
+        )
+        .expect("response is json");
+        assert_eq!(payload["code"], "validation_error");
+        assert!(payload["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("32"));
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn upload_body_limit_returns_a_structured_error() {
+        let data_dir = test_dir();
+        let app = router(test_state_with_attachment_limit(&data_dir, 32));
+        let body = serde_json::json!({
+            "original_filename": "large-metadata.bin",
+            "content": "AA==",
+            "preview_text": "x".repeat(70 * 1024),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/attachments")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("route responds");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let payload: serde_json::Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("response body reads"),
+        )
+        .expect("response is json");
+        assert_eq!(payload["code"], "validation_error");
+        assert!(payload["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("32"));
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn attachment_content_is_downloaded_with_nosniff_protection() {
+        let data_dir = test_dir();
+        let app = router(test_state(&data_dir));
+        let body = serde_json::json!({
+            "original_filename": "unsafe\".html",
+            "mime_type": "text/html",
+            "content": base64::engine::general_purpose::STANDARD.encode("<script>alert(1)</script>"),
+        });
+        let upload = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/attachments")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("route responds");
+        let uploaded: serde_json::Value = serde_json::from_slice(
+            &to_bytes(upload.into_body(), usize::MAX)
+                .await
+                .expect("upload body reads"),
+        )
+        .expect("upload response is json");
+        let id = uploaded["attachment"]["id"].as_str().expect("id exists");
+
+        let content = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/v1/attachments/{id}/content"))
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("route responds");
+
+        assert_eq!(content.status(), StatusCode::OK);
+        assert_eq!(content.headers()["content-type"], "text/html");
+        assert_eq!(content.headers()["x-content-type-options"], "nosniff");
+        assert_eq!(
+            content.headers()["content-disposition"],
+            "attachment; filename=\"unsafe_.html\""
+        );
         let _ = std::fs::remove_dir_all(data_dir);
     }
 }

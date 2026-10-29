@@ -6,9 +6,11 @@
 ## 附件上下文
 
 当前实现定义 `AttachmentId`、不可变元数据、25 MiB 单附件上限、原子落盘和诊断/内容读取路由；上传
-使用 JSON Base64，字节不会写入 JSON 元数据、JSONL 或 SSE。服务端生成 UUID 并以其构造文件路径，
-因此 web 不能读取任意路径。上传/finalize 分离、线程/turn 授权、哈希、MIME+magic-byte 校验、GC、删除
-路由和模型多模态传递仍待决；agent 在这些授权与 adapter 边界落定前不得把未授权附件传给模型。
+使用 JSON Base64，上传路由的 body 限额覆盖 Base64 膨胀和 JSON 余量，超限以结构化校验错误返回，字节
+不会写入 JSON 元数据、JSONL 或 SSE。服务端生成 UUID 并以其构造文件路径，因此 web 不能读取任意路径。
+内容读取以 `nosniff` 和安全文件名的附件下载响应防止用户声明的 MIME 在应用源内被内联执行。上传/finalize
+分离、线程/turn 授权、哈希、MIME+magic-byte 校验、GC、删除路由和模型多模态传递仍待决；agent 在这些授权
+与 adapter 边界落定前不得把未授权附件传给模型。
 
 ## PTY
 

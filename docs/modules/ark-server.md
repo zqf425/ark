@@ -38,9 +38,11 @@
 
 附件路由为 `POST /v1/attachments`、`GET /v1/attachments/{id}`、
 `GET /v1/attachments/{id}/content` 与 `GET /v1/attachments/diagnostics`。上传采用 JSON Base64；
-handler 在解码前按存储端口的最大字节数限制编码长度，超限或非法 Base64 返回结构化 400。内容下载
-设置持久化 MIME（无效或缺失时为 `application/octet-stream`）和精确 `content-length`；非 UUID、
-缺元数据或缺字节文件统一为 404。
+handler 在解码前按存储端口的最大字节数限制编码长度，超限或非法 Base64 返回结构化 400。仅上传路由
+以 `DefaultBodyLimit` 放宽至 Base64 编码上限加 64 KiB JSON 余量，并把提取阶段的超限映射为同一结构化
+校验错误；其它 API 路由仍保留框架默认限制。内容下载设置持久化 MIME（无效或缺失时为
+`application/octet-stream`）、精确 `content-length`、`X-Content-Type-Options: nosniff`，以及采用仅
+ASCII 安全文件名的 `Content-Disposition: attachment`；非 UUID、缺元数据或缺字节文件统一为 404。
 
 工作区路由只经 `WorkspaceService` 读取 active view、执行 switch 和取得 diff。切换时将 parent
 `TurnRegistry` 与 active child 数相加；非零即返回 `Conflict`/409，不能隐式取消。diff 响应带

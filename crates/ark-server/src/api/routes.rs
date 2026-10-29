@@ -5,6 +5,7 @@
 //! landed are registered explicitly and answer a structured `NotFound` from
 //! [`crate::api::handlers::pending`] instead of 404-ing at the router level.
 
+use axum::extract::DefaultBodyLimit;
 use axum::http::{header, HeaderValue, Method};
 use axum::routing::{delete, get, patch, post};
 use axum::Router;
@@ -24,10 +25,9 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(crate::api::handlers::health::health))
         .with_state(state.clone());
 
-    let protected = protected_routes().layer(axum::middleware::from_fn_with_state(
-        state.clone(),
-        require_token,
-    ));
+    let protected = protected_routes().merge(attachment_routes(&state)).layer(
+        axum::middleware::from_fn_with_state(state.clone(), require_token),
+    );
 
     open.merge(protected)
         .layer(desktop_cors())
@@ -35,6 +35,42 @@ pub fn router(state: AppState) -> Router {
             crate::api::middleware::declare_utf8_charset,
         ))
         .with_state(state)
+}
+
+const ATTACHMENT_JSON_OVERHEAD_BYTES: usize = 64 * 1024;
+
+fn attachment_routes(state: &AppState) -> Router<AppState> {
+    let max_bytes = state
+        .attachments
+        .as_ref()
+        .map(|store| store.max_bytes())
+        .unwrap_or_default();
+    let max_body_bytes = max_bytes
+        .saturating_add(2)
+        .saturating_div(3)
+        .saturating_mul(4)
+        .saturating_add(ATTACHMENT_JSON_OVERHEAD_BYTES as u64) as usize;
+
+    let upload = Router::new()
+        .route(
+            "/v1/attachments",
+            post(crate::api::handlers::attachments::upload),
+        )
+        .layer(DefaultBodyLimit::max(max_body_bytes));
+
+    upload
+        .route(
+            "/v1/attachments/{id}",
+            get(crate::api::handlers::attachments::get),
+        )
+        .route(
+            "/v1/attachments/{id}/content",
+            get(crate::api::handlers::attachments::content),
+        )
+        .route(
+            "/v1/attachments/diagnostics",
+            get(crate::api::handlers::attachments::diagnostics),
+        )
 }
 
 /// Allow only the native shell origins to call the loopback runtime directly.
@@ -234,22 +270,6 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/memory/diagnostics",
             get(crate::api::handlers::memory::diagnostics),
-        )
-        .route(
-            "/v1/attachments",
-            post(crate::api::handlers::attachments::upload),
-        )
-        .route(
-            "/v1/attachments/{id}",
-            get(crate::api::handlers::attachments::get),
-        )
-        .route(
-            "/v1/attachments/{id}/content",
-            get(crate::api::handlers::attachments::content),
-        )
-        .route(
-            "/v1/attachments/diagnostics",
-            get(crate::api::handlers::attachments::diagnostics),
         )
         .route(
             "/v1/child-runs",
