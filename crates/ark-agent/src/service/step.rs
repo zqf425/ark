@@ -124,11 +124,14 @@ fn dispatch(
     let storm = StormBreaker::new(input.limits.max_identical_calls).check(calls, repeats);
     let mut synthetic = carry.synthetic;
     for suppressed in &storm.suppressed {
-        synthetic.push(SyntheticResult::new(
-            &suppressed.call,
-            false,
-            suppression_message(&suppressed.call.tool, suppressed.count),
-        ));
+        synthetic.push(
+            SyntheticResult::new(
+                &suppressed.call,
+                false,
+                suppression_message(&suppressed.call.tool, suppressed.count),
+            )
+            .with_storm_count(suppressed.count),
+        );
     }
     let mut runnable = storm.allowed;
     runnable.extend(carry.extra);
@@ -320,6 +323,55 @@ mod tests {
                 assert!(plan.batches.is_empty());
                 assert_eq!(plan.synthetic_results.len(), 1);
                 assert!(!plan.synthetic_results[0].ok);
+            }
+            other => panic!("expected dispatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn settled_with_identical_calls_suppresses_the_excess_in_one_batch() {
+        let calls = (1..=6)
+            .map(|id| call(&format!("c{id}"), "ls", "."))
+            .collect::<Vec<_>>();
+        let action = step(
+            TurnState::AwaitingModel,
+            &input(Progress::default(), settled(calls)),
+        );
+
+        match action {
+            Action::Dispatch(plan) => {
+                assert_eq!(plan.synthetic_results.len(), 3);
+                assert_eq!(plan.batches.iter().map(Vec::len).sum::<usize>(), 3);
+                assert_eq!(plan.total_calls(), 6);
+                assert_eq!(
+                    plan.synthetic_results
+                        .iter()
+                        .map(|result| result.storm_count)
+                        .collect::<Vec<_>>(),
+                    vec![Some(4), Some(5), Some(6)]
+                );
+            }
+            other => panic!("expected dispatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn settled_with_different_call_arguments_keeps_all_calls_runnable() {
+        let calls = vec![
+            call("c1", "ls", "a"),
+            call("c2", "ls", "b"),
+            call("c3", "ls", "c"),
+            call("c4", "ls", "d"),
+        ];
+        let action = step(
+            TurnState::AwaitingModel,
+            &input(Progress::default(), settled(calls)),
+        );
+
+        match action {
+            Action::Dispatch(plan) => {
+                assert!(plan.synthetic_results.is_empty());
+                assert_eq!(plan.batches.iter().map(Vec::len).sum::<usize>(), 4);
             }
             other => panic!("expected dispatch, got {other:?}"),
         }

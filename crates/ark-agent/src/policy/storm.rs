@@ -5,6 +5,8 @@
 //! synthetic tool result for it: dropping the call outright would leave an
 //! unanswered `tool_call` and poison the history for every later round.
 
+use std::collections::BTreeMap;
+
 use crate::domain::tool::ToolCallRequest;
 
 /// One refused call.
@@ -43,14 +45,18 @@ impl StormBreaker {
 
     /// Split calls into "run these" and "refuse these".
     ///
-    /// `repeats[i]` is how many times `calls[i]`'s signature already ran in this
-    /// turn, so the call is refused once `repeats[i] + 1 > max_identical_calls`.
+    /// `repeats[i]` is how many times `calls[i]`'s signature already ran before
+    /// this batch. Earlier matching calls in this batch count too, so the call
+    /// is refused once its effective count exceeds `max_identical_calls`.
     /// A `repeats` slice shorter than `calls` is treated as zeros.
     pub fn check(&self, calls: &[ToolCallRequest], repeats: &[u32]) -> StormReport {
         let mut report = StormReport::default();
+        let mut seen_in_batch = BTreeMap::<String, u32>::new();
         for (idx, call) in calls.iter().enumerate() {
             let already = repeats.get(idx).copied().unwrap_or(0);
-            let count = already.saturating_add(1);
+            let seen = seen_in_batch.entry(call.signature()).or_insert(0);
+            let count = already.saturating_add(*seen).saturating_add(1);
+            *seen = seen.saturating_add(1);
             if count > self.max_identical_calls {
                 report.suppressed.push(SuppressedCall {
                     call: call.clone(),
@@ -118,6 +124,38 @@ mod tests {
         let calls = vec![call("c1", "read", "a"), call("c2", "read", "b")];
         let report = breaker.check(&calls, &[]);
         assert_eq!(report.allowed.len(), 2);
+    }
+
+    #[test]
+    fn repeated_calls_in_one_batch_are_suppressed_after_the_limit() {
+        let breaker = StormBreaker::new(3);
+        let calls = (1..=6)
+            .map(|id| call(&format!("c{id}"), "ls", "."))
+            .collect::<Vec<_>>();
+
+        let report = breaker.check(&calls, &[0; 6]);
+
+        assert_eq!(report.allowed.len(), 3);
+        assert_eq!(report.suppressed.len(), 3);
+        assert_eq!(
+            report
+                .suppressed
+                .iter()
+                .map(|suppressed| suppressed.count)
+                .collect::<Vec<_>>(),
+            vec![4, 5, 6]
+        );
+    }
+
+    #[test]
+    fn calls_with_different_arguments_do_not_share_a_batch_limit() {
+        let breaker = StormBreaker::new(1);
+        let calls = vec![call("c1", "ls", "a"), call("c2", "ls", "b")];
+
+        let report = breaker.check(&calls, &[0; 2]);
+
+        assert_eq!(report.allowed.len(), 2);
+        assert!(report.suppressed.is_empty());
     }
 
     #[test]

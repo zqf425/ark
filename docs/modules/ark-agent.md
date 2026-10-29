@@ -20,6 +20,7 @@
 - 子代理不是第二个 agent：它是同一 `Reactor` 驱动的独立 child turn。
 - 工具沙箱决策只在派发前计算一次，执行器仅消费不可变结果。
 - 预算、工具风暴、并发安全和历史裁剪属于独立 policy/context 模块，不得回流为巨型 reactor。
+- 工具风暴按工具名与规范化参数组成的签名计数；跨轮已执行次数与同一 `DispatchPlan` 内先前出现次数共同计入上限。被抑制调用必须以合成结果配对 `ToolCallStarted`/`ToolCallFinished`，并写入 `ToolStormSuppressed` 事件。
 - 每轮模型可见历史必须已经落盘；每个工具调用必须与终态结果配对。
 - 每个批次在执行器启动前持久化全部 `ToolCallStarted` 已校验参数，`ToolCallFinished` 持久化受工具上限限制的输出和 detail；这既是
   会话重放资料，也是服务端 Changes/File/Terminal 投影的唯一来源，不能由 web 解析自由文本补造。
