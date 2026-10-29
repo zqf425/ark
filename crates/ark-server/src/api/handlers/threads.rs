@@ -122,7 +122,7 @@ pub async fn update(
         meta = state.store.set_archived(thread_id, archived).await?;
     }
     if let Some(runtime) = body.runtime {
-        let merged = merge_runtime(meta.runtime, runtime)?;
+        let merged = merge_runtime(meta.runtime, runtime, state.base.providers.as_deref())?;
         meta = state.store.set_thread_runtime(thread_id, merged).await?;
     }
     Ok(Json(summary_of(&meta)))
@@ -131,6 +131,7 @@ pub async fn update(
 fn merge_runtime(
     current: ark_contract::ThreadRuntimeSettings,
     patch: ark_contract::ThreadRuntimeSettings,
+    providers: Option<&dyn ark_ports::ProviderService>,
 ) -> Result<ark_contract::ThreadRuntimeSettings, ApiError> {
     let autonomy = patch.autonomy.or(current.autonomy);
     if let Some(value) = autonomy.as_deref() {
@@ -141,10 +142,30 @@ fn merge_runtime(
             ));
         }
     }
+    let provider_id = patch.provider_id.or(current.provider_id);
+    let model = patch.model.or(current.model);
+    if provider_id.is_some() || model.as_deref().is_some_and(|value| !value.is_empty()) {
+        let providers = providers.ok_or_else(|| {
+            ApiError::new(
+                ark_common::ArkErrorCode::RuntimeUnavailable,
+                "provider service is not available in this build",
+            )
+        })?;
+        if providers.resolve_endpoint(provider_id.as_deref()).is_none() {
+            let message = provider_id
+                .as_deref()
+                .map(|id| format!("thread provider is unavailable: {id}"))
+                .unwrap_or_else(|| "thread model requires an available provider".to_string());
+            return Err(ApiError::new(
+                ark_common::ArkErrorCode::ValidationError,
+                message,
+            ));
+        }
+    }
     Ok(ark_contract::ThreadRuntimeSettings {
         workspace: patch.workspace.or(current.workspace),
-        provider_id: patch.provider_id.or(current.provider_id),
-        model: patch.model.or(current.model),
+        provider_id,
+        model,
         autonomy,
     })
 }
@@ -329,8 +350,109 @@ fn project_runtime_snapshot(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
     use super::*;
     use ark_common::{ChildId, TurnId};
+    use ark_config::{ConfigStore, RuntimeConfig};
+    use ark_obs::UsageRecorder;
+    use ark_ports::{BaseServices, ModelEndpoint, ProviderService, SessionStore, ToolRegistryPort};
+    use ark_store::{FileSessionStore, StoreConfig};
+    use axum::extract::{Path, State};
+
+    struct EmptyTools;
+
+    impl ToolRegistryPort for EmptyTools {
+        fn names(&self) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn schemas(&self) -> Vec<serde_json::Value> {
+            Vec::new()
+        }
+
+        fn version(&self) -> u64 {
+            0
+        }
+    }
+
+    struct NoopRunner;
+
+    #[async_trait::async_trait]
+    impl crate::TurnRunner for NoopRunner {
+        async fn run_turn(&self, _job: crate::TurnJob) -> ark_common::Result<crate::TurnEnd> {
+            Ok(crate::TurnEnd::Completed)
+        }
+    }
+
+    struct Providers;
+
+    #[async_trait::async_trait]
+    impl ProviderService for Providers {
+        fn list(&self) -> ark_contract::ProviderListResponse {
+            ark_contract::ProviderListResponse::default()
+        }
+
+        fn upsert(
+            &self,
+            _entry: ark_contract::ProviderEntry,
+            _make_default: bool,
+        ) -> ark_common::Result<ark_contract::ProviderListResponse> {
+            unreachable!("not used by this test")
+        }
+
+        fn delete(&self, _id: &str) -> ark_common::Result<ark_contract::ProviderListResponse> {
+            unreachable!("not used by this test")
+        }
+
+        fn set_default(&self, _id: &str) -> ark_common::Result<ark_contract::ProviderListResponse> {
+            unreachable!("not used by this test")
+        }
+
+        async fn test(
+            &self,
+            _request: ark_contract::ProviderTestRequest,
+        ) -> ark_contract::ProviderTestResponse {
+            unreachable!("not used by this test")
+        }
+
+        async fn models(
+            &self,
+            _request: ark_contract::ProviderModelCatalogRequest,
+        ) -> ark_common::Result<ark_contract::ProviderModelCatalogResponse> {
+            unreachable!("not used by this test")
+        }
+
+        fn resolve_endpoint(&self, id: Option<&str>) -> Option<ModelEndpoint> {
+            (id == Some("known")).then(|| ModelEndpoint {
+                provider_id: "known".to_string(),
+                model: "model".to_string(),
+                base_url: "https://example.invalid".to_string(),
+                api_key: "secret".to_string(),
+                endpoint_format: "openai".to_string(),
+                custom_endpoint: None,
+                max_tokens: None,
+                temperature: None,
+            })
+        }
+    }
+
+    fn state(data_dir: &std::path::Path) -> AppState {
+        let sessions =
+            Arc::new(FileSessionStore::open(StoreConfig::new(data_dir)).expect("session store"));
+        let store: Arc<dyn SessionStore> = sessions;
+        AppState::new(
+            store,
+            Arc::new(EmptyTools),
+            Arc::new(ConfigStore::new(RuntimeConfig::default())),
+            Arc::new(UsageRecorder::new()),
+            Arc::new(NoopRunner),
+            data_dir.to_path_buf(),
+            "test",
+        )
+        .with_base_services(BaseServices::new().with_providers(Arc::new(Providers)))
+    }
 
     #[test]
     fn invalid_thread_ids_are_validation_errors() {
@@ -445,5 +567,41 @@ mod tests {
         assert_eq!(runtime.pending_approvals.len(), 1);
         assert_eq!(runtime.pending_approvals[0].approval_id, "live");
         assert!(runtime.pending_user_inputs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn unknown_provider_patch_is_rejected_without_changing_runtime() {
+        let data_dir = std::env::temp_dir().join(format!("ark-thread-provider-{}", TurnId::new()));
+        let state = state(&data_dir);
+        let thread = state.store.create_thread("provider").await.expect("thread");
+
+        let error = update(
+            State(state.clone()),
+            Path(thread.thread_id.to_string()),
+            Json(UpdateThreadRequest {
+                title: None,
+                archived: None,
+                runtime: Some(ark_contract::ThreadRuntimeSettings {
+                    provider_id: Some("does-not-exist".to_string()),
+                    ..Default::default()
+                }),
+            }),
+        )
+        .await
+        .expect_err("unknown provider must be rejected");
+
+        assert_eq!(error.0.code, ark_common::ArkErrorCode::ValidationError);
+        assert_eq!(error.0.code.http_status(), 400);
+        assert_eq!(
+            state
+                .store
+                .get_thread(thread.thread_id)
+                .await
+                .expect("thread")
+                .runtime
+                .provider_id,
+            None
+        );
+        let _ = std::fs::remove_dir_all(PathBuf::from(data_dir));
     }
 }

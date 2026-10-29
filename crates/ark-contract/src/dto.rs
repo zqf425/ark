@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{item::ThreadItem, ChildCompletionNotice};
 
+/// Maximum UTF-8 byte length accepted for one turn request.
+pub const MAX_TURN_TEXT_BYTES: usize = 1024 * 1024;
+
 /// `GET /health` — unauthenticated liveness probe.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]

@@ -46,7 +46,7 @@ pub use dto::{
     ThreadDetail, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSummary, TodoEntry,
     TodoStatus, TodosRequest, TurnRequest, TurnSummary, UpdateThreadRequest, UsageResponse,
     WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
-    WorkspaceDiffFile, WorkspaceView,
+    WorkspaceDiffFile, WorkspaceView, MAX_TURN_TEXT_BYTES,
 };
 pub use event::{ChildCompletionNotice, EventKind, RuntimeEvent};
 pub use item::{ItemStatus, ThreadItem};

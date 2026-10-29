@@ -30,6 +30,11 @@
 - `POST /v1/subagents/config` 是子代理开关和并发上限的专用热更新入口，内部复用
   `ConfigPatch.subagents` 的校验、替换和持久化语义，并与 `/v1/runtime/config` 一样返回
   `ApplyResult`；不得路由到其他 split-config 占位 handler。
+- `PATCH /v1/threads/{id}` 写入 runtime 前必须通过 `ProviderService::resolve_endpoint` 校验显式
+  provider，且非空 model 必须有可解析 provider；校验失败不得写入 store。`POST /v1/threads/{id}/turns`
+  在注册回合前拒绝超过 `ark_contract::MAX_TURN_TEXT_BYTES` 的 UTF-8 文本。
+- `POST /v1/workspace/validate` 只转发 `WorkspaceService::validate` 的目录存在性校验，并使用
+  `ark_common::path::normalize` 返回规范化路径；handler 不得复制工作区解析规则。
 
 ## 路由清单
 

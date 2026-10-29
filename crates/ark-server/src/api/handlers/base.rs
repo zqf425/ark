@@ -203,7 +203,7 @@ pub async fn workspace_validate(
     let resolved = service.validate(&body.path)?;
     Ok(Json(serde_json::json!({
         "ok": true,
-        "path": resolved.to_string_lossy(),
+        "path": ark_common::path::normalize(&resolved.to_string_lossy()),
     })))
 }
 
@@ -288,4 +288,126 @@ pub async fn mcp_test(
 ) -> Result<Json<McpServerTestResponse>, ApiError> {
     let service = state.base.mcp.as_ref().ok_or_else(|| missing("mcp"))?;
     Ok(Json(service.test(&id).await))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use ark_config::{ConfigStore, RuntimeConfig};
+    use ark_obs::UsageRecorder;
+    use ark_ports::{BaseServices, SessionStore, ToolRegistryPort, WorkspaceService};
+    use ark_store::{FileSessionStore, StoreConfig};
+    use axum::extract::State;
+
+    use super::*;
+
+    struct EmptyTools;
+
+    impl ToolRegistryPort for EmptyTools {
+        fn names(&self) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn schemas(&self) -> Vec<serde_json::Value> {
+            Vec::new()
+        }
+
+        fn version(&self) -> u64 {
+            0
+        }
+    }
+
+    struct NoopRunner;
+
+    #[async_trait::async_trait]
+    impl crate::TurnRunner for NoopRunner {
+        async fn run_turn(&self, _job: crate::TurnJob) -> ark_common::Result<crate::TurnEnd> {
+            Ok(crate::TurnEnd::Completed)
+        }
+    }
+
+    struct Workspace;
+
+    impl WorkspaceService for Workspace {
+        fn validate(&self, raw: &str) -> ark_common::Result<PathBuf> {
+            match raw {
+                "../.." => Ok(PathBuf::from(r"C:\\workspace\\child\\..\\..")),
+                "missing" => Err(ark_common::ArkError::validation(
+                    "workspace path does not exist",
+                )),
+                _ => unreachable!("unexpected workspace input"),
+            }
+        }
+
+        fn status(&self, _path: &str) -> ark_contract::WorkspaceStatus {
+            unreachable!("not used by this test")
+        }
+
+        fn view(&self) -> ark_contract::WorkspaceView {
+            unreachable!("not used by this test")
+        }
+
+        fn switch(
+            &self,
+            _path: &str,
+            _active_runs: usize,
+        ) -> ark_common::Result<ark_contract::WorkspaceView> {
+            unreachable!("not used by this test")
+        }
+
+        fn diff(&self) -> ark_common::Result<ark_contract::WorkspaceDiff> {
+            unreachable!("not used by this test")
+        }
+    }
+
+    fn state(data_dir: &Path) -> AppState {
+        let sessions =
+            Arc::new(FileSessionStore::open(StoreConfig::new(data_dir)).expect("session store"));
+        let store: Arc<dyn SessionStore> = sessions;
+        AppState::new(
+            store,
+            Arc::new(EmptyTools),
+            Arc::new(ConfigStore::new(RuntimeConfig::default())),
+            Arc::new(UsageRecorder::new()),
+            Arc::new(NoopRunner),
+            data_dir.to_path_buf(),
+            "test",
+        )
+        .with_base_services(BaseServices::new().with_workspace(Arc::new(Workspace)))
+    }
+
+    #[tokio::test]
+    async fn workspace_validation_returns_a_normalized_path() {
+        let data_dir = std::env::temp_dir().join("ark-workspace-validate-normalized");
+        let response = workspace_validate(
+            State(state(&data_dir)),
+            Json(ValidateWorkspaceBody {
+                path: "../..".to_string(),
+            }),
+        )
+        .await
+        .expect("validated workspace");
+
+        assert_eq!(response.0["path"], "C:/");
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn workspace_validation_rejects_a_missing_path() {
+        let data_dir = std::env::temp_dir().join("ark-workspace-validate-missing");
+        let error = workspace_validate(
+            State(state(&data_dir)),
+            Json(ValidateWorkspaceBody {
+                path: "missing".to_string(),
+            }),
+        )
+        .await
+        .expect_err("missing workspace must be rejected");
+
+        assert_eq!(error.0.code, ark_common::ArkErrorCode::ValidationError);
+        assert!(error.0.message.contains("does not exist"));
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
 }

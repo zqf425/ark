@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use ark_agent::CancelToken;
 use ark_common::{ThreadId, TurnId};
-use ark_contract::{RuntimeEvent, TurnRequest, TurnSummary};
+use ark_contract::{RuntimeEvent, TurnRequest, TurnSummary, MAX_TURN_TEXT_BYTES};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -25,6 +25,12 @@ pub async fn start(
     Json(body): Json<TurnRequest>,
 ) -> Result<(StatusCode, Json<TurnSummary>), ApiError> {
     let thread_id = parse_thread(&id)?;
+    if body.text.len() > MAX_TURN_TEXT_BYTES {
+        return Err(ApiError::new(
+            ark_common::ArkErrorCode::ValidationError,
+            format!("turn text exceeds the {MAX_TURN_TEXT_BYTES}-byte UTF-8 limit"),
+        ));
+    }
     let text = body.text.trim().to_string();
     if text.is_empty() {
         return Err(ApiError::new(
@@ -241,7 +247,58 @@ pub fn thread_of(summary: &TurnSummary) -> ThreadId {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use ark_config::{ConfigStore, RuntimeConfig};
+    use ark_obs::UsageRecorder;
+    use ark_ports::{SessionStore, ToolRegistryPort};
+    use ark_store::{FileSessionStore, StoreConfig};
+    use axum::extract::{Path, State};
+    use axum::http::StatusCode;
+
     use super::*;
+
+    struct EmptyTools;
+
+    impl ToolRegistryPort for EmptyTools {
+        fn names(&self) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn schemas(&self) -> Vec<serde_json::Value> {
+            Vec::new()
+        }
+
+        fn version(&self) -> u64 {
+            0
+        }
+    }
+
+    struct CountingRunner(AtomicUsize);
+
+    #[async_trait::async_trait]
+    impl crate::TurnRunner for CountingRunner {
+        async fn run_turn(&self, _job: crate::TurnJob) -> ark_common::Result<crate::TurnEnd> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(crate::TurnEnd::Completed)
+        }
+    }
+
+    fn state(data_dir: &std::path::Path, runner: Arc<CountingRunner>) -> AppState {
+        let sessions =
+            Arc::new(FileSessionStore::open(StoreConfig::new(data_dir)).expect("session store"));
+        let store: Arc<dyn SessionStore> = sessions;
+        AppState::new(
+            store,
+            Arc::new(EmptyTools),
+            Arc::new(ConfigStore::new(RuntimeConfig::default())),
+            Arc::new(UsageRecorder::new()),
+            runner,
+            data_dir.to_path_buf(),
+            "test",
+        )
+    }
 
     #[test]
     fn invalid_turn_ids_are_validation_errors() {
@@ -255,5 +312,27 @@ mod tests {
     fn valid_turn_ids_roundtrip() {
         let id = TurnId::new();
         assert_eq!(parse_turn(&id.to_string()).unwrap(), id);
+    }
+
+    #[tokio::test]
+    async fn oversized_turn_text_is_rejected_without_starting_a_turn() {
+        let temp = std::env::temp_dir().join(format!("ark-turn-limit-{}", TurnId::new()));
+        let runner = Arc::new(CountingRunner(AtomicUsize::new(0)));
+        let state = state(&temp, Arc::clone(&runner));
+        let thread = state.store.create_thread("limit").await.expect("thread");
+        let text = "x".repeat(1024 * 1024 + 1);
+
+        let error = start(
+            State(state),
+            Path(thread.thread_id.to_string()),
+            Json(TurnRequest { text }),
+        )
+        .await
+        .expect_err("oversized text must be rejected");
+
+        assert_eq!(error.0.code, ark_common::ArkErrorCode::ValidationError);
+        assert_eq!(error.0.code.http_status(), StatusCode::BAD_REQUEST.as_u16());
+        assert_eq!(runner.0.load(Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(temp);
     }
 }

@@ -8,6 +8,8 @@
 当前公开面包括线程/回合/子代理 DTO、运行时事件、渲染 item、能力目录、配置视图、provider 与
 skill 视图。所有 GUI 字段使用 camelCase；既有查询参数保持既有命名，例如 `since_seq`。
 
+`TurnRequest.text` 的 UTF-8 字节数上限由 `MAX_TURN_TEXT_BYTES` 定义为 1 MiB；HTTP 边界在创建回合前执行该校验。
+
 线程公开面还包括 `RewindRequest`（`turn_id` 或 `seq` 二选一）与 `RewindResponse`。`RuntimeEvent` 的
 `thread_rewound` 是持久化的 SSE 重置通知，不是被删除历史的替代投影。
 附件当前提供 `AttachmentId`、不可变 `AttachmentEntry`、Base64 JSON 上传请求/响应和诊断 DTO。
