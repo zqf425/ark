@@ -4,7 +4,7 @@
 //! translate DTOs and publish the matching lifecycle event. No thread state is
 //! cached here.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use chrono::Utc;
@@ -12,7 +12,8 @@ use chrono::Utc;
 use ark_common::ThreadId;
 use ark_contract::{
     ChildCompletionNotice, CreateThreadRequest, PendingApprovalView, PendingUserInputView,
-    RuntimeEvent, ThreadDetail, ThreadRuntimeSnapshot, ThreadSummary, UpdateThreadRequest,
+    RuntimeEvent, ThreadDetail, ThreadListQuery, ThreadRuntimeSnapshot, ThreadSummary,
+    UpdateThreadRequest, THREAD_PAGE_DEFAULT_LIMIT, THREAD_PAGE_MAX_LIMIT,
 };
 use ark_ports::ThreadMeta;
 use std::collections::HashSet;
@@ -25,9 +26,45 @@ pub const DEFAULT_TITLE: &str = "New thread";
 const MAX_CHILD_COMPLETION_NOTICES: usize = 50;
 
 /// `GET /v1/threads`.
-pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<ThreadSummary>>, ApiError> {
+///
+/// Returns a bounded page of the store's deterministic ordering (active first,
+/// then most recently updated, thread id as tiebreak). Absent query parameters
+/// keep the legacy behaviour of listing every thread, so the response stays a
+/// bare array; clients paginate with `limit` + `offset`, and an empty page
+/// marks the end.
+pub async fn list(
+    State(state): State<AppState>,
+    Query(query): Query<ThreadListQuery>,
+) -> Result<Json<Vec<ThreadSummary>>, ApiError> {
+    let limit = query
+        .limit
+        .unwrap_or(THREAD_PAGE_DEFAULT_LIMIT)
+        .clamp(1, THREAD_PAGE_MAX_LIMIT);
+    let offset = query.offset.unwrap_or(0);
+    let needle = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty());
+
     let metas = state.store.list_threads().await?;
-    let summaries = metas.iter().map(summary_of).collect();
+    // Deterministic filter-then-page: sorting here (instead of trusting index
+    // order alone) keeps pagination stable across calls, because the tiebreak
+    // is the immutable id.
+    let mut rows: Vec<&ark_ports::ThreadMeta> = metas
+        .iter()
+        .filter(|meta| query.archived.is_none_or(|want| meta.archived == want))
+        .filter(|meta| needle.is_none_or(|n| meta.title.to_lowercase().contains(&n.to_lowercase())))
+        .collect();
+    rows.sort_by(|a, b| {
+        a.archived
+            .cmp(&b.archived)
+            .then_with(|| b.updated_at.cmp(&a.updated_at))
+            .then_with(|| a.thread_id.cmp(&b.thread_id))
+    });
+
+    let summaries = rows
+        .iter()
+        .skip(offset as usize)
+        .take(limit as usize)
+        .map(|meta| summary_of(meta))
+        .collect();
     Ok(Json(summaries))
 }
 
@@ -567,6 +604,200 @@ mod tests {
         assert_eq!(runtime.pending_approvals.len(), 1);
         assert_eq!(runtime.pending_approvals[0].approval_id, "live");
         assert!(runtime.pending_user_inputs.is_empty());
+    }
+
+    /// Seed threads with distinct titles and archive flags, oldest update first.
+    async fn seed_threads(state: &AppState, count: usize) -> Vec<ThreadMeta> {
+        let mut metas = Vec::new();
+        for i in 0..count {
+            let mut meta = state
+                .store
+                .create_thread(&format!("thread-{i:02}"))
+                .await
+                .expect("thread");
+            if i % 2 == 1 {
+                meta = state
+                    .store
+                    .set_archived(meta.thread_id, true)
+                    .await
+                    .expect("archive");
+            }
+            metas.push(meta);
+        }
+        metas
+    }
+
+    async fn list_response(state: AppState, query: ThreadListQuery) -> Vec<ThreadSummary> {
+        list(State(state), Query(query)).await.expect("list").0
+    }
+
+    #[tokio::test]
+    async fn list_without_query_stays_compatible() {
+        let data_dir = std::env::temp_dir().join(format!("ark-thread-compat-{}", TurnId::new()));
+        let state = state(&data_dir);
+        seed_threads(&state, 5).await;
+
+        let summaries = list_response(state.clone(), ThreadListQuery::default()).await;
+
+        assert_eq!(summaries.len(), 5);
+        // Deterministic order: active first, then most recently updated, so
+        // the newest active thread (seeded last, even index) leads.
+        assert_eq!(summaries[0].title, "thread-04");
+        let _ = std::fs::remove_dir_all(PathBuf::from(&data_dir));
+    }
+
+    #[tokio::test]
+    async fn limit_one_returns_exactly_one_page() {
+        let data_dir = std::env::temp_dir().join(format!("ark-thread-limit-{}", TurnId::new()));
+        let state = state(&data_dir);
+        seed_threads(&state, 4).await;
+
+        let page = list_response(
+            state.clone(),
+            ThreadListQuery {
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .await;
+
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].title, "thread-02");
+        let _ = std::fs::remove_dir_all(PathBuf::from(&data_dir));
+    }
+
+    #[tokio::test]
+    async fn offset_walks_pages_without_repetition_or_gap() {
+        let data_dir = std::env::temp_dir().join(format!("ark-thread-offset-{}", TurnId::new()));
+        let state = state(&data_dir);
+        seed_threads(&state, 5).await;
+
+        let first = list_response(
+            state.clone(),
+            ThreadListQuery {
+                limit: Some(2),
+                ..Default::default()
+            },
+        )
+        .await;
+        let second = list_response(
+            state.clone(),
+            ThreadListQuery {
+                limit: Some(2),
+                offset: Some(2),
+                ..Default::default()
+            },
+        )
+        .await;
+        let third = list_response(
+            state.clone(),
+            ThreadListQuery {
+                limit: Some(2),
+                offset: Some(4),
+                ..Default::default()
+            },
+        )
+        .await;
+
+        let titles: Vec<&str> = first
+            .iter()
+            .chain(&second)
+            .chain(&third)
+            .map(|s| s.title.as_str())
+            .collect();
+        assert_eq!(
+            titles,
+            vec![
+                "thread-04",
+                "thread-02",
+                "thread-00",
+                "thread-03",
+                "thread-01"
+            ]
+        );
+        let _ = std::fs::remove_dir_all(PathBuf::from(&data_dir));
+    }
+
+    #[tokio::test]
+    async fn limit_clamps_zero_and_oversized_values() {
+        let data_dir = std::env::temp_dir().join(format!("ark-thread-clamp-{}", TurnId::new()));
+        let state = state(&data_dir);
+        seed_threads(&state, 3).await;
+
+        // limit=0 clamps to 1: still exactly one row, never an empty page.
+        let zero = list_response(
+            state.clone(),
+            ThreadListQuery {
+                limit: Some(0),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert_eq!(zero.len(), 1);
+        // Oversized values clamp to the contract maximum.
+        let huge = list_response(
+            state.clone(),
+            ThreadListQuery {
+                limit: Some(u32::MAX),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert_eq!(huge.len(), 3);
+        let _ = std::fs::remove_dir_all(PathBuf::from(&data_dir));
+    }
+
+    #[tokio::test]
+    async fn archived_filter_composes_with_pagination() {
+        let data_dir = std::env::temp_dir().join(format!("ark-thread-archived-{}", TurnId::new()));
+        let state = state(&data_dir);
+        seed_threads(&state, 4).await;
+
+        let archived = list_response(
+            state.clone(),
+            ThreadListQuery {
+                archived: Some(true),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(archived.iter().all(|s| s.archived));
+        assert_eq!(archived.len(), 2);
+
+        let active_paged = list_response(
+            state.clone(),
+            ThreadListQuery {
+                archived: Some(false),
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert_eq!(active_paged.len(), 1);
+        assert!(!active_paged[0].archived);
+        let _ = std::fs::remove_dir_all(PathBuf::from(&data_dir));
+    }
+
+    #[tokio::test]
+    async fn title_search_composes_with_pagination() {
+        let data_dir = std::env::temp_dir().join(format!("ark-thread-search-{}", TurnId::new()));
+        let state = state(&data_dir);
+        for title in ["rust review", "rust design", "other"] {
+            state.store.create_thread(title).await.expect("thread");
+        }
+
+        let hits = list_response(
+            state.clone(),
+            ThreadListQuery {
+                q: Some("RUST".into()),
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].title.starts_with("rust"));
+        let _ = std::fs::remove_dir_all(PathBuf::from(&data_dir));
     }
 
     #[tokio::test]

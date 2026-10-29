@@ -11,7 +11,7 @@ import type {
 } from '../../../shared/contracts'
 import { del, get, patch, post } from '../../../shared/api/client'
 
-/** `GET /v1/threads` — archived threads are filtered by the caller, not here. */
+/** `GET /v1/threads` — deterministic order; archived threads are filtered by the caller. */
 export function listThreads(signal?: AbortSignal): Promise<ThreadSummary[]> {
   return get<ThreadSummary[]>('/v1/threads', signal ? { signal } : {})
 }

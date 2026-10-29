@@ -9,6 +9,7 @@ export type { Usage } from "./Usage";
 export type { ArkErrorCode } from "./ArkErrorCode";
 export type { ArkErrorPayload } from "./ArkErrorPayload";
 export type { ThreadSummary } from "./ThreadSummary";
+export type { ThreadListQuery } from "./ThreadListQuery";
 export type { CreateThreadRequest } from "./CreateThreadRequest";
 export type { UpdateThreadRequest } from "./UpdateThreadRequest";
 export type { ThreadDetail } from "./ThreadDetail";

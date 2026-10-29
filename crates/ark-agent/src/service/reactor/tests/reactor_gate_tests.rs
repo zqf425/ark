@@ -112,7 +112,10 @@ impl SessionWriter for FailFirstWriter {
     async fn append(&self, event: RuntimeEvent) -> Result<RuntimeEvent> {
         match &event {
             RuntimeEvent::ApprovalRequested { approval_id, .. }
-            | RuntimeEvent::UserInputRequested { request_id: approval_id, .. } => {
+            | RuntimeEvent::UserInputRequested {
+                request_id: approval_id,
+                ..
+            } => {
                 assert!(
                     approval_id.ends_with(self.expected_call_id),
                     "unexpected gate id `{}` appended",
@@ -161,10 +164,8 @@ async fn approval_append_failure_drops_the_prepared_registration() {
     // The writer fails on the requested event only after asserting the gate
     // id derived from `call-1` is already registered — locking the ordering.
     let writer = FailFirstWriter::new("call-1", gates.shared_pending());
-    let mut reactor = gate_test_reactor(
-        Arc::clone(&gates) as Arc<dyn GateBroker>,
-        Arc::new(writer),
-    );
+    let mut reactor =
+        gate_test_reactor(Arc::clone(&gates) as Arc<dyn GateBroker>, Arc::new(writer));
     let call = ToolCallRequest::new("call-1", "bash", serde_json::json!({ "cmd": "dir" }))
         .with_sandbox(SandboxDecision::NeedsApproval);
 
@@ -182,10 +183,8 @@ async fn approval_append_failure_drops_the_prepared_registration() {
 async fn user_input_append_failure_drops_the_prepared_registration() {
     let gates = Arc::new(TrackingGates::default());
     let writer = FailFirstWriter::new("call-1", gates.shared_pending());
-    let mut reactor = gate_test_reactor(
-        Arc::clone(&gates) as Arc<dyn GateBroker>,
-        Arc::new(writer),
-    );
+    let mut reactor =
+        gate_test_reactor(Arc::clone(&gates) as Arc<dyn GateBroker>, Arc::new(writer));
     let call = ToolCallRequest::new("call-1", "request_user_input", serde_json::json!({}))
         .with_sandbox(SandboxDecision::ReadOnly);
 

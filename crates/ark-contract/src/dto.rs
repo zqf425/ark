@@ -35,6 +35,11 @@ pub struct RuntimeInfo {
     pub started_at: DateTime<Utc>,
 }
 
+/// Default page size of `GET /v1/threads`.
+pub const THREAD_PAGE_DEFAULT_LIMIT: u32 = 50;
+/// Maximum page size of `GET /v1/threads`; larger values are clamped.
+pub const THREAD_PAGE_MAX_LIMIT: u32 = 200;
+
 /// One row of `GET /v1/threads`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
@@ -48,6 +53,32 @@ pub struct ThreadSummary {
     pub last_seq: Option<u64>,
     #[serde(default)]
     pub archived: bool,
+}
+
+/// `GET /v1/threads` query parameters.
+///
+/// Ordering is the store's deterministic order (active first, then
+/// `updated_at` descending, thread id as final tiebreak); `offset` counts rows
+/// in that order so a page never repeats or skips rows between calls.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ThreadListQuery {
+    /// Page size, clamped to `[1, THREAD_PAGE_MAX_LIMIT]` when present.
+    #[serde(default)]
+    #[ts(as = "Option<f64>")]
+    pub limit: Option<u32>,
+    /// Zero-based row offset into the deterministic ordering.
+    #[serde(default)]
+    #[ts(as = "Option<f64>")]
+    pub offset: Option<u32>,
+    /// When true, return only archived threads; when false, only active ones;
+    /// when absent, return all. Composes with `limit`/`offset` and `q`.
+    #[serde(default)]
+    pub archived: Option<bool>,
+    /// Case-insensitive substring filter on the thread title; composes with
+    /// `limit`/`offset` and `archived`.
+    #[serde(default)]
+    pub q: Option<String>,
 }
 
 /// `POST /v1/threads`.

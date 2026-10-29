@@ -43,10 +43,11 @@ pub use dto::{
     PendingApprovalView, PendingUserInputView, PlanView, ResolveApprovalRequest,
     ResolveUserInputRequest, ResumeChildRequest, RewindRequest, RewindResponse, RuntimeInfo,
     SteerChildRequest, SwitchWorkspaceRequest, TerminalEntriesResponse, TerminalEntry,
-    ThreadDetail, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSummary, TodoEntry,
-    TodoStatus, TodosRequest, TurnRequest, TurnSummary, UpdateThreadRequest, UsageResponse,
-    WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
-    WorkspaceDiffFile, WorkspaceView, MAX_TURN_TEXT_BYTES,
+    ThreadDetail, ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSummary,
+    TodoEntry, TodoStatus, TodosRequest, TurnRequest, TurnSummary, UpdateThreadRequest,
+    UsageResponse, WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
+    WorkspaceDiffFile, WorkspaceView, MAX_TURN_TEXT_BYTES, THREAD_PAGE_DEFAULT_LIMIT,
+    THREAD_PAGE_MAX_LIMIT,
 };
 pub use event::{ChildCompletionNotice, EventKind, RuntimeEvent};
 pub use item::{ItemStatus, ThreadItem};

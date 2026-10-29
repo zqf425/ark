@@ -35,10 +35,11 @@ use crate::{
     RewindResponse, RuntimeConfigView, RuntimeEvent, RuntimeInfo, SkillDiagnostics,
     SkillLoadWarning, SkillSource, SkillSummary, SteerChildRequest, SubagentSettings,
     SwitchWorkspaceRequest, TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadItem,
-    ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSkillsResponse, ThreadSummary, TodoEntry,
-    TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary, UpdateMemoryRequest,
-    UpdateThreadRequest, UsageResponse, WorkspaceChange, WorkspaceChangesResponse,
-    WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile, WorkspaceStatus, WorkspaceView,
+    ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSkillsResponse,
+    ThreadSummary, TodoEntry, TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary,
+    UpdateMemoryRequest, UpdateThreadRequest, UsageResponse, WorkspaceChange,
+    WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile,
+    WorkspaceStatus, WorkspaceView,
 };
 use ark_common::{
     ArkErrorCode, ArkErrorPayload, AttachmentId, ChildId, ItemId, ThreadId, TurnId, Usage,
@@ -65,6 +66,7 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
 
     // ---- thread and turn surface ----
     ThreadSummary::export_all_to(dir)?;
+    ThreadListQuery::export_all_to(dir)?;
     CreateThreadRequest::export_all_to(dir)?;
     UpdateThreadRequest::export_all_to(dir)?;
     ThreadDetail::export_all_to(dir)?;
@@ -196,6 +198,7 @@ const ROOT_NAMES: &[&str] = &[
     "ArkErrorCode",
     "ArkErrorPayload",
     "ThreadSummary",
+    "ThreadListQuery",
     "CreateThreadRequest",
     "UpdateThreadRequest",
     "ThreadDetail",

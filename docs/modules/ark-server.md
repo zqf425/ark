@@ -11,6 +11,10 @@
 - 连接有界；慢客户端断开后从最后 `seq` 重连，绝不阻塞线程 writer。
 - `/v1/shutdown`、Ctrl-C 和任务 panic 走同一收敛流程：取消活动回合、等待有限时间、落终态并清理 registry。
 - 路径、HTTP 方法、字段名和兼容别名均是对外契约；变更前必须检查 `ark-contract`、`web` 与集成方。
+- `GET /v1/threads` 支持分页与筛选：`limit` 缺省 `THREAD_PAGE_DEFAULT_LIMIT`，clamp 到
+  `[1, THREAD_PAGE_MAX_LIMIT]`；`offset` 按确定顺序（active 优先、`updated_at` 降序、
+  `thread_id` 兜底）取页，空页即最后一页；`archived` 与 `q`（标题大小写不敏感子串）可与分页
+  组合。不带 query 的调用保持旧行为返回全部线程（响应仍为裸 `ThreadSummary` 数组）。
 - `GET /v1/threads/{id}` 的 `child_completions` 是最新 50 个不同通知 ID 的有界视图；它从 store 的窄
   completion 查询投影，不能全量回放普通会话事件。
 - `InteractiveGates` 只做 HTTP 决议与 reactor gate future 的一次性 rendezvous；`prepare_*` 同步插入
