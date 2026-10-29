@@ -84,3 +84,55 @@ docs/
 - 提交信息使用简体中文，格式为 `[类型]简短描述`；类型为 `feat`、`fix`、`refactor`、`docs`、
   `test`、`chore` 或 `perf`。
 - 一次提交只做一件事，不提交 `target/`、`web/dist/`、`web/node_modules/` 或 `.tmp/` 内容。
+
+## 7. 并行与锁竞争
+
+多个 worktree、多个 CLI 代理、正在运行的 `arkd` 同时存在时，本机实测出现过三类锁等待。
+按下面规则规避，不要靠重试硬扛。
+
+### 7.1 构建目录按 worktree 隔离
+
+- 一个 worktree 一个 `CARGO_TARGET_DIR`（例如 `$PWD\.tmp\cargo-target`），**禁止**让并行任务共用
+  仓库根的 `target/`。共用时 cargo 会打印 `Blocking waiting for file lock on build directory`，
+  任务互相排队，先完成的也会被后到的锁拖慢。
+- 同一个 target 目录不要同时跑 `cargo check`、`cargo test`、`cargo clippy`：它们争同一把锁。
+- 隔离的代价是冷编译，因此只编译受影响包，不要每次 `--workspace`。
+
+### 7.2 不要对着正在运行的二进制构建
+
+- Windows 上运行中的 `arkd.exe` 或测试二进制会锁住文件，重新构建报
+  `failed to remove file .../target/debug/arkd.exe`。
+- 验证实例必须用独立 target 与独立端口（如 18792/18794），不要复用桌面端正在跑的
+  `target/debug/arkd.exe`；需要重建时先停掉那个实例。
+
+### 7.3 `git` 写操作串行化
+
+- 同一仓库的 `git worktree add/remove`、`git commit`、`git merge` 不得并发，否则出现
+  `Unable to create '.../.git/worktrees/<name>/index.lock': Permission denied`，
+  或 `worktree remove` 返回 255 而目录仍在。
+- 派给沙箱内 CLI 代理（codex/claude）的任务**不得包含 `git commit`**：它们一般只能写 worktree，
+  写不了外层 `.git`。提交与合入由发起方统一执行。
+- 手工删掉 worktree 目录后必须 `git worktree prune`；否则 `worktree add` 会因“目录已存在”跳过，
+  留下只有 `.tmp/` 的空壳，代理读不到源码后直接放弃。
+- 复用 worktree 前先校验 `Cargo.toml` 与 `.git` 都存在，否则删掉重建。
+
+### 7.4 门禁命令按耗时分级
+
+- `cargo test --workspace` 会带上 `apps/ark-desktop` 的 Tauri 依赖，单次可超过 10 分钟。
+  自动化会话默认用 `cargo test --workspace --exclude ark-desktop`，需要覆盖桌面宿主时单独跑。
+- 超时预算按“最长可能耗时”给：批量编译/测试任务留足 2400s 以上，
+  否则仍在编译的任务会被误判为卡死（实测出现 `timeout 2400s` 杀掉编译中的会话）。
+
+### 7.5 运行时并发点显式串行
+
+- `POST /v1/threads/{id}/turns` 在启动回合时持有 `workspace_gate`，同一时刻只允许一个回合进入。
+  不要在锁内做模型调用或工具执行等长耗时动作，否则会把整个运行时排住。
+- 会话写入由 store 的单一 writer actor 串行化，不要在网络层再加一把跨 `await` 的锁。
+
+### 7.6 测试脚本自身的假等待
+
+- SSE 订阅先读 `GET /v1/threads/{id}` 的 `last_seq`，再用 `since_seq=last_seq` 订阅。
+  用 `since_seq=0` 会重放历史事件，脚本容易把上一回合的终止事件当成本回合结束。
+- 审批状态读 `runtime_snapshot.pending_approvals`，不要假设 `approval_requested` 一发就能立刻
+  resolve：实测存在注册窗口期，出现过 404 与 204 两种结果。
+- 轮询等待要有上限，并区分“还在编译”与“真卡死”：同时看日志增长与进程 CPU，不要只看日志大小。
