@@ -186,12 +186,11 @@ pub async fn compact(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let thread_id = parse_thread(&id)?;
     state.store.get_thread(thread_id).await?;
-    let turn_id = TurnId::new();
     let items = state.store.read_items(thread_id).await?;
     if let Some(existing) = items.iter().find_map(|item| {
         item.text
             .as_deref()
-            .filter(|text| text.starts_with("[context checkpoint]"))
+            .filter(|text| text.starts_with("[context checkpoint"))
     }) {
         return Ok(Json(
             serde_json::json!({ "thread_id": thread_id, "checkpoint": existing }),
@@ -201,18 +200,7 @@ pub async fn compact(
         items.iter().filter_map(|item| item.text.as_deref()),
     )
     .render();
-    state
-        .store
-        .append_event(
-            thread_id,
-            RuntimeEvent::CompactionStarted {
-                seq: 0,
-                thread_id,
-                turn_id,
-                timestamp: Utc::now(),
-            },
-        )
-        .await?;
+    let turn_id = TurnId::new();
     let item = ark_contract::ThreadItem::new(turn_id, ark_contract::item::ItemKind::Notice)
         .with_text(checkpoint.clone())
         .completed();
@@ -229,24 +217,9 @@ pub async fn compact(
             },
         )
         .await?;
-    let removed = 0u32;
-    state
-        .store
-        .append_event(
-            thread_id,
-            RuntimeEvent::CompactionCompleted {
-                seq: 0,
-                thread_id,
-                turn_id,
-                timestamp: Utc::now(),
-                removed_items: removed,
-            },
-        )
-        .await?;
     Ok(Json(serde_json::json!({
         "thread_id": thread_id,
         "turn_id": turn_id,
-        "removed_items": removed,
         "checkpoint": checkpoint,
     })))
 }
