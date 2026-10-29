@@ -8,6 +8,8 @@
 ## 核心规则
 
 - 工具名为 `<plugin_id>.<tool>`；重复注册失败，目录是能力自描述的单一来源。
+- 外部 server 成功连接后，其 `<server_id>.<tool>` adapter 由组合根发布到父工具 registry；配置 upsert/delete
+  会重新发现并替换该组，重复名称以明确冲突返回，连接失败不阻断其他 server 或进程启动。
 - cross-plugin 调用必须由 caller 的 `mcp.consume` 显式声明；调用链携带 trace，限制深度为 3，
   并拒绝循环和等待图死锁。
 - stdio、SSE 与 streamable HTTP 是 transport adapter；领域服务不因协议不同而复制实现。

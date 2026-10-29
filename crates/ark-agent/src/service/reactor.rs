@@ -96,8 +96,8 @@ pub struct Reactor {
     machine: TurnMachine,
     history: Vec<ModelMessage>,
     pending_user_message: Option<String>,
-    assistant_message_item: Option<ItemId>,
-    reasoning_item: Option<ItemId>,
+    assistant_message_item: Option<StreamItem>,
+    reasoning_item: Option<StreamItem>,
     /// Calls of the current round, in model order.
     pending_calls: Vec<ToolCallRequest>,
     /// Gates not yet resolved, in model order.
@@ -341,17 +341,23 @@ impl Reactor {
     async fn observe(&mut self, chunk: ModelChunk, acc: &mut Accumulator) -> Result<()> {
         match chunk {
             ModelChunk::TextDelta { delta } => {
-                let item = Self::ensure_item(&mut self.assistant_message_item);
+                let item = self.ensure_stream_item(ItemKind::AssistantMessage).await?;
                 self.writer
                     .append(self.events.text_delta(item, delta.clone()))
                     .await?;
+                self.stream_item_mut(ItemKind::AssistantMessage)?
+                    .text
+                    .push_str(&delta);
                 acc.text.push_str(&delta);
             }
             ModelChunk::ReasoningDelta { delta } => {
-                let item = Self::ensure_item(&mut self.reasoning_item);
+                let item = self.ensure_stream_item(ItemKind::Reasoning).await?;
                 self.writer
-                    .append(self.events.reasoning_delta(item, delta))
+                    .append(self.events.reasoning_delta(item, delta.clone()))
                     .await?;
+                self.stream_item_mut(ItemKind::Reasoning)?
+                    .text
+                    .push_str(&delta);
             }
             ModelChunk::ToolCall {
                 call_id,
@@ -366,13 +372,64 @@ impl Reactor {
         Ok(())
     }
 
-    fn ensure_item(slot: &mut Option<ItemId>) -> ItemId {
-        if let Some(item) = *slot {
-            return item;
+    async fn ensure_stream_item(&mut self, kind: ItemKind) -> Result<ItemId> {
+        let missing = match kind {
+            ItemKind::AssistantMessage => self.assistant_message_item.is_none(),
+            ItemKind::Reasoning => self.reasoning_item.is_none(),
+            _ => unreachable!("only streamed item kinds are requested"),
+        };
+        if missing {
+            let item = ThreadItem::new(self.events.turn_id, kind);
+            self.writer
+                .append(self.events.item_created(item.clone()))
+                .await?;
+            match kind {
+                ItemKind::AssistantMessage => {
+                    self.assistant_message_item = Some(StreamItem::from(item))
+                }
+                ItemKind::Reasoning => self.reasoning_item = Some(StreamItem::from(item)),
+                _ => unreachable!("only streamed item kinds are requested"),
+            }
         }
-        let item_id = ItemId::new();
-        *slot = Some(item_id);
-        item_id
+        Ok(self.stream_item_mut(kind)?.item_id)
+    }
+
+    fn stream_item_mut(&mut self, kind: ItemKind) -> Result<&mut StreamItem> {
+        let item = match kind {
+            ItemKind::AssistantMessage => self.assistant_message_item.as_mut(),
+            ItemKind::Reasoning => self.reasoning_item.as_mut(),
+            _ => unreachable!("only streamed item kinds are requested"),
+        };
+        match item {
+            Some(item) => Ok(item),
+            None => Err(ArkError::internal("stream item was not created")),
+        }
+    }
+
+    /// Complete each item opened by the current model round exactly once.
+    async fn complete_stream_items(&mut self) -> Result<()> {
+        for item in [
+            self.assistant_message_item.take(),
+            self.reasoning_item.take(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let completed = ThreadItem {
+                item_id: item.item_id,
+                turn_id: self.events.turn_id,
+                kind: item.kind,
+                status: ark_contract::ItemStatus::Completed,
+                created_at: chrono::Utc::now(),
+                text: Some(item.text),
+                tool: None,
+                detail: None,
+            };
+            self.writer
+                .append(self.events.item_completed(completed))
+                .await?;
+        }
+        Ok(())
     }
 
     /// Fold the settled response into history and build the `ModelSettled` input.
@@ -390,6 +447,7 @@ impl Reactor {
         self.record_assistant_turn(&response.text, &calls);
         self.machine.note_usage(&usage);
         self.writer.append(self.events.usage(usage.clone())).await?;
+        self.complete_stream_items().await?;
 
         self.pending_calls = calls.clone();
         self.approved.clear();
@@ -726,6 +784,7 @@ impl Reactor {
 
     /// Write the terminal event, then land on the terminal state.
     async fn finish(&mut self, outcome: TurnOutcome) -> Result<TurnOutcome> {
+        self.complete_stream_items().await?;
         self.writer.finish(&outcome).await?;
         if self.machine.state() == TurnState::Finalizing {
             self.machine
@@ -736,6 +795,23 @@ impl Reactor {
             .settle(&outcome)
             .map_err(|err| ArkError::internal(err.to_string()))?;
         Ok(outcome)
+    }
+}
+
+/// A streamed render item kept until its model round reaches a terminal edge.
+struct StreamItem {
+    item_id: ItemId,
+    kind: ItemKind,
+    text: String,
+}
+
+impl From<ThreadItem> for StreamItem {
+    fn from(item: ThreadItem) -> Self {
+        Self {
+            item_id: item.item_id,
+            kind: item.kind,
+            text: item.text.unwrap_or_default(),
+        }
     }
 }
 
@@ -897,15 +973,49 @@ mod tests {
             .unwrap();
 
         let events = writer.recorded();
-        let reasoning_id = match &events[0] {
-            RuntimeEvent::AssistantReasoningDelta { item_id, .. } => item_id,
-            event => panic!("expected reasoning delta, got {event:?}"),
-        };
-        let text_id = match &events[1] {
-            RuntimeEvent::AssistantTextDelta { item_id, .. } => item_id,
-            event => panic!("expected text delta, got {event:?}"),
-        };
+        // Each stream now opens with an `ItemCreated`, so select the deltas by
+        // kind instead of by position.
+        let reasoning_id = events
+            .iter()
+            .find_map(|event| match event {
+                RuntimeEvent::AssistantReasoningDelta { item_id, .. } => Some(item_id),
+                _ => None,
+            })
+            .expect("reasoning delta recorded");
+        let text_id = events
+            .iter()
+            .find_map(|event| match event {
+                RuntimeEvent::AssistantTextDelta { item_id, .. } => Some(item_id),
+                _ => None,
+            })
+            .expect("text delta recorded");
         assert_ne!(reasoning_id, text_id);
+    }
+
+    #[tokio::test]
+    async fn streamed_items_are_created_and_completed_with_their_final_text() {
+        let writer = Arc::new(MemoryWriter::new());
+        let mut reactor = reactor(Arc::clone(&writer));
+        let mut acc = Accumulator::default();
+        reactor
+            .observe(
+                ModelChunk::TextDelta {
+                    delta: "answer".to_string(),
+                },
+                &mut acc,
+            )
+            .await
+            .unwrap();
+        reactor.complete_stream_items().await.unwrap();
+
+        let events = writer.recorded();
+        assert!(matches!(events[0], RuntimeEvent::ItemCreated { .. }));
+        assert!(matches!(
+            &events[2],
+            RuntimeEvent::ItemCompleted { item, .. }
+                if item.status == ark_contract::ItemStatus::Completed
+                    && item.text.as_deref() == Some("answer")
+        ));
     }
 
     #[tokio::test]

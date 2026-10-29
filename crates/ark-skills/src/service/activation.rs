@@ -50,6 +50,11 @@ pub fn match_skills(skills: &[LoadedSkill], prompt: &str) -> Vec<Match> {
 fn match_one(skill: &LoadedSkill, lower_prompt: &str, prompt_types: &[String]) -> Option<Match> {
     let mut reasons: Vec<String> = Vec::new();
     let triggers = &skill.triggers;
+    if contains_word(lower_prompt, &skill.id.to_lowercase()) {
+        reasons.push(format!("id:{}", skill.id));
+    } else if contains_word(lower_prompt, &skill.name.to_lowercase()) {
+        reasons.push(format!("name:{}", skill.name));
+    }
     if let Some(command) = first_command(triggers, lower_prompt) {
         reasons.push(format!("command:{command}"));
     }
@@ -275,6 +280,16 @@ mod tests {
         let matches = match_skills(&skills, "add a unit TEST please");
         assert_eq!(matches.len(), 1);
         assert!(matches[0].reason.contains("pattern:"));
+    }
+
+    #[test]
+    fn explicit_skill_id_or_name_activates_without_frontmatter_triggers() {
+        let mut named = skill("pdf-tools", 0, SkillTriggers::default());
+        named.name = "PDF Tools".to_string();
+        assert_eq!(match_skills(&[named.clone()], "use pdf-tools now").len(), 1);
+        let matches = match_skills(&[named], "please use PDF Tools");
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0].reason.starts_with("name:"));
     }
 
     #[test]

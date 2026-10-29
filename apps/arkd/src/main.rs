@@ -8,6 +8,7 @@
 mod base;
 mod child;
 mod cli;
+mod load_skill;
 mod model;
 mod wiring;
 mod workspace;

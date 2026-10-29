@@ -7,7 +7,7 @@
 use ark_common::{ArkError, Result};
 use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput, ToolRegistryPort};
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::domain::schema::fingerprint;
 
@@ -16,6 +16,13 @@ struct Entry {
     tool: Arc<dyn Tool>,
     schema: serde_json::Value,
     fingerprint: u64,
+    group: Option<String>,
+}
+
+#[derive(Default)]
+struct State {
+    entries: BTreeMap<String, Entry>,
+    version: u64,
 }
 
 /// Registry of tools available to one runtime.
@@ -23,17 +30,23 @@ struct Entry {
 /// Names are unique: a second registration of the same name is a `Conflict`, not
 /// a silent override, because a silent override would change which code runs
 /// behind an unchanged schema.
-#[derive(Default)]
 pub struct ToolRegistry {
-    entries: BTreeMap<String, Entry>,
-    version: u64,
+    state: RwLock<State>,
+}
+
+impl Default for ToolRegistry {
+    fn default() -> Self {
+        Self {
+            state: RwLock::new(State::default()),
+        }
+    }
 }
 
 impl std::fmt::Debug for ToolRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ToolRegistry")
             .field("names", &self.names())
-            .field("version", &self.version)
+            .field("version", &self.version())
             .finish()
     }
 }
@@ -44,43 +57,88 @@ impl ToolRegistry {
     }
 
     /// Register `tool`, failing when the name is already taken.
-    pub fn register(&mut self, tool: Arc<dyn Tool>) -> Result<()> {
+    pub fn register(&self, tool: Arc<dyn Tool>) -> Result<()> {
         let name = tool.name().to_string();
-        if self.entries.contains_key(&name) {
+        let mut state = self.write()?;
+        if state.entries.contains_key(&name) {
             return Err(ArkError::conflict(format!(
                 "tool `{name}` is already registered"
             )));
         }
-        let schema = tool.schema().clone();
-        let fingerprint = fingerprint(&schema);
-        self.entries.insert(
-            name,
-            Entry {
-                tool,
-                schema,
-                fingerprint,
-            },
-        );
-        self.version += 1;
+        state.entries.insert(name, Entry::new(tool, None));
+        state.version += 1;
         Ok(())
     }
 
     /// Register every tool, reporting the first conflict.
-    pub fn register_all(&mut self, tools: Vec<Box<dyn Tool>>) -> Result<()> {
+    pub fn register_all(&self, tools: Vec<Box<dyn Tool>>) -> Result<()> {
         for tool in tools {
             self.register(Arc::from(tool))?;
         }
         Ok(())
     }
 
+    /// Replace the tools owned by one dynamic source.
+    ///
+    /// The replacement is atomic: callers may await while discovering remote
+    /// tools, then acquire this short write lock only to publish the finished
+    /// catalogue. Names owned by another source remain protected from a silent
+    /// override. A schema/name change bumps the catalogue version; reconnecting
+    /// an unchanged catalogue still swaps implementations so fresh sessions are
+    /// used by subsequent calls.
+    pub fn replace_group(&self, group: &str, tools: Vec<Arc<dyn Tool>>) -> Result<()> {
+        let group = group.trim();
+        if group.is_empty() {
+            return Err(ArkError::validation("tool group must not be empty"));
+        }
+        let mut incoming = BTreeMap::new();
+        for tool in tools {
+            let name = tool.name().to_string();
+            if incoming
+                .insert(name.clone(), Entry::new(tool, Some(group.to_string())))
+                .is_some()
+            {
+                return Err(ArkError::conflict(format!(
+                    "tool `{name}` is registered more than once by group `{group}`"
+                )));
+            }
+        }
+
+        let mut state = self.write()?;
+        for name in incoming.keys() {
+            if let Some(existing) = state.entries.get(name) {
+                if existing.group.as_deref() != Some(group) {
+                    return Err(ArkError::conflict(format!(
+                        "tool `{name}` is already registered"
+                    )));
+                }
+            }
+        }
+        let changed = group_changed(&state.entries, group, &incoming);
+        state
+            .entries
+            .retain(|_, entry| entry.group.as_deref() != Some(group));
+        state.entries.extend(incoming);
+        if changed {
+            state.version += 1;
+        }
+        Ok(())
+    }
+
     /// Look one tool up by name.
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.entries.get(name).map(|entry| Arc::clone(&entry.tool))
+        self.read()
+            .ok()?
+            .entries
+            .get(name)
+            .map(|entry| Arc::clone(&entry.tool))
     }
 
     /// Whether `name` is registered.
     pub fn contains(&self, name: &str) -> bool {
-        self.entries.contains_key(name)
+        self.read()
+            .map(|state| state.entries.contains_key(name))
+            .unwrap_or(false)
     }
 
     /// Execute one call against the registry.
@@ -101,17 +159,26 @@ impl ToolRegistry {
 
     /// Cached fingerprint of one tool schema.
     pub fn fingerprint_of(&self, name: &str) -> Option<u64> {
-        self.entries.get(name).map(|entry| entry.fingerprint)
+        self.read()
+            .ok()?
+            .entries
+            .get(name)
+            .map(|entry| entry.fingerprint)
     }
 
     /// Fingerprint over every schema in canonical order: one number that
     /// identifies the whole catalogue a prompt was built from.
     pub fn catalog_fingerprint(&self) -> u64 {
         let joined: Vec<String> = self
-            .entries
-            .values()
-            .map(|entry| crate::domain::schema::canonical(&entry.schema))
-            .collect();
+            .read()
+            .map(|state| {
+                state
+                    .entries
+                    .values()
+                    .map(|entry| crate::domain::schema::canonical(&entry.schema))
+                    .collect()
+            })
+            .unwrap_or_default();
         crate::domain::schema::fingerprint_text(&joined.join("\u{1f}"))
     }
 
@@ -119,34 +186,84 @@ impl ToolRegistry {
     pub fn port(self: &Arc<Self>) -> Arc<dyn ToolRegistryPort> {
         Arc::clone(self) as Arc<dyn ToolRegistryPort>
     }
+
+    fn read(&self) -> Result<std::sync::RwLockReadGuard<'_, State>> {
+        self.state
+            .read()
+            .map_err(|_| ArkError::internal("tool registry read lock poisoned"))
+    }
+
+    fn write(&self) -> Result<std::sync::RwLockWriteGuard<'_, State>> {
+        self.state
+            .write()
+            .map_err(|_| ArkError::internal("tool registry write lock poisoned"))
+    }
 }
 
 impl ToolRegistryPort for ToolRegistry {
     fn names(&self) -> Vec<String> {
-        self.entries.keys().cloned().collect()
+        self.read()
+            .map(|state| state.entries.keys().cloned().collect())
+            .unwrap_or_default()
     }
 
     fn schemas(&self) -> Vec<serde_json::Value> {
-        self.entries
-            .values()
-            .map(|entry| {
-                // The schema already carries `name`/`description` only where the
-                // tool declared them; expose a uniform function shape so a
-                // provider adapter needs no per-tool branch.
-                let mut value = entry.schema.clone();
-                if let Some(object) = value.as_object_mut() {
-                    object
-                        .entry("name")
-                        .or_insert_with(|| entry.tool.name().into());
-                }
-                value
+        self.read()
+            .map(|state| {
+                state
+                    .entries
+                    .values()
+                    .map(|entry| {
+                        // The schema already carries `name`/`description` only where the
+                        // tool declared them; expose a uniform function shape so a
+                        // provider adapter needs no per-tool branch.
+                        let mut value = entry.schema.clone();
+                        if let Some(object) = value.as_object_mut() {
+                            object
+                                .entry("name")
+                                .or_insert_with(|| entry.tool.name().into());
+                        }
+                        value
+                    })
+                    .collect()
             })
-            .collect()
+            .unwrap_or_default()
     }
 
     fn version(&self) -> u64 {
-        self.version
+        self.read().map(|state| state.version).unwrap_or_default()
     }
+}
+
+impl Entry {
+    fn new(tool: Arc<dyn Tool>, group: Option<String>) -> Self {
+        let schema = tool.schema().clone();
+        let fingerprint = fingerprint(&schema);
+        Self {
+            tool,
+            schema,
+            fingerprint,
+            group,
+        }
+    }
+}
+
+fn group_changed(
+    entries: &BTreeMap<String, Entry>,
+    group: &str,
+    incoming: &BTreeMap<String, Entry>,
+) -> bool {
+    let existing: BTreeMap<&str, u64> = entries
+        .iter()
+        .filter_map(|(name, entry)| {
+            (entry.group.as_deref() == Some(group)).then_some((name.as_str(), entry.fingerprint))
+        })
+        .collect();
+    let replacement: BTreeMap<&str, u64> = incoming
+        .iter()
+        .map(|(name, entry)| (name.as_str(), entry.fingerprint))
+        .collect();
+    existing != replacement
 }
 
 #[cfg(test)]
@@ -154,12 +271,40 @@ mod tests {
     use super::*;
     use crate::exec::tools::builtins;
     use ark_common::{ThreadId, TurnId};
-    use ark_ports::SandboxDecision;
+    use ark_ports::{SandboxDecision, Tool};
+    use async_trait::async_trait;
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
+    struct NamedTool {
+        name: &'static str,
+        schema: &'static serde_json::Value,
+    }
+
+    #[async_trait]
+    impl Tool for NamedTool {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+
+        fn schema(&self) -> &'static serde_json::Value {
+            &self.schema
+        }
+
+        async fn execute(&self, _ctx: &ToolContext, _args: ToolArgs) -> Result<ToolOutput> {
+            Ok(ToolOutput::ok("ok"))
+        }
+    }
+
+    fn named_tool(name: &'static str) -> Arc<dyn Tool> {
+        Arc::new(NamedTool {
+            name,
+            schema: Box::leak(Box::new(serde_json::json!({ "type": "object" }))),
+        })
+    }
+
     fn registry() -> ToolRegistry {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         registry.register_all(builtins()).unwrap();
         registry
     }
@@ -186,7 +331,7 @@ mod tests {
 
     #[test]
     fn duplicate_registration_conflicts() {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         registry.register_all(builtins()).unwrap();
         let err = registry.register_all(builtins()).unwrap_err();
         assert!(err.message.contains("already registered"));
@@ -212,6 +357,29 @@ mod tests {
             .collect();
         assert_eq!(names.len(), 7);
         assert!(names.contains(&"read".to_string()));
+    }
+
+    #[test]
+    fn replacing_a_group_refreshes_catalog_without_duplicates_and_bumps_version() {
+        let registry = ToolRegistry::new();
+        registry.register(named_tool("read")).unwrap();
+        let initial_version = registry.version();
+
+        registry
+            .replace_group("mcp", vec![named_tool("probe.ping")])
+            .unwrap();
+        assert_eq!(registry.names(), vec!["probe.ping", "read"]);
+        assert_eq!(registry.version(), initial_version + 1);
+
+        registry
+            .replace_group("mcp", vec![named_tool("probe.ping")])
+            .unwrap();
+        assert_eq!(registry.names(), vec!["probe.ping", "read"]);
+        assert_eq!(registry.version(), initial_version + 1);
+
+        registry.replace_group("mcp", Vec::new()).unwrap();
+        assert_eq!(registry.names(), vec!["read"]);
+        assert_eq!(registry.version(), initial_version + 2);
     }
 
     #[tokio::test]

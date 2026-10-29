@@ -99,7 +99,7 @@ fn is_real_inside(real_root: &Path, real_candidate: &Path) -> bool {
 }
 
 fn comparable(path: &Path) -> String {
-    path.to_string_lossy()
+    path::strip_verbatim(&path.to_string_lossy())
         .replace('\\', "/")
         .trim_end_matches('/')
         .to_lowercase()
@@ -160,6 +160,14 @@ mod tests {
     #[test]
     fn absolute_path_inside_the_root_is_accepted() {
         assert!(resolve(&root(), "D:/ws/project/a.txt").is_ok());
+    }
+
+    #[test]
+    fn verbatim_root_accepts_relative_dot_and_plain_absolute_paths() {
+        let root = PathBuf::from(r"\\?\D:\ws\project");
+        assert!(resolve(&root, "src/main.rs").is_ok());
+        assert!(resolve(&root, ".").is_ok());
+        assert!(resolve(&root, r"D:\ws\project\Cargo.toml").is_ok());
     }
 
     #[test]

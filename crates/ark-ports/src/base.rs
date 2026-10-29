@@ -101,9 +101,9 @@ pub trait WorkspaceService: Send + Sync {
 pub trait McpServerService: Send + Sync {
     fn list(&self) -> McpServerListResponse;
 
-    fn upsert(&self, entry: McpServerEntry) -> Result<McpServerListResponse>;
+    async fn upsert(&self, entry: McpServerEntry) -> Result<McpServerListResponse>;
 
-    fn delete(&self, id: &str) -> Result<McpServerListResponse>;
+    async fn delete(&self, id: &str) -> Result<McpServerListResponse>;
 
     /// Handshake + `tools/list`, with a bounded timeout.
     async fn test(&self, id: &str) -> McpServerTestResponse;

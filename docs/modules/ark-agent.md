@@ -25,6 +25,7 @@
   会话重放资料，也是服务端 Changes/File/Terminal 投影的唯一来源，不能由 web 解析自由文本补造。
 - 同一回合的正文 delta 与 reasoning delta 使用各自稳定的 item ID；两类内容不得合并为同一个渲染条目，
   以保证默认折叠的 reasoning 不会遮蔽用户可见正文。
+- 每个模型轮次创建的正文和 reasoning 条目在该轮结算时写入最终文本并完成；失败、取消和其它回合终态也会完成仍打开的条目，工具循环的下一轮使用新的 item ID。
 - 新回合须从权威线程项恢复此前的 user/assistant 对话，并在回合启动时持久化当前用户消息；reasoning 不进入
   后续模型历史。会话级工作空间、模型和权限覆盖只在创建新回合时读取，运行中回合保留其创建快照。
 - parent steer 的有界 `SteerQueue` 由 server registry 创建并由 `arkd` 注入同一个 reactor；reactor 只在

@@ -18,6 +18,8 @@
 - `SessionStore::replay_interaction_events` 只返回 turn 起止与 approval/user-input 生命周期，供 detail 恢复
   使用；是否仍可操作必须再由进程内 `InteractiveGates` waiter 快照判断。
 - 插件只能经 `HttpCapability`、`McpCapability` 和 `UiCapability` 与基础设施或其它插件交互。
+- `McpServerService` 的 upsert/delete 是异步边界：实现可以在返回前发现远程工具并原子刷新运行时 catalog，
+  但不得在 registry 锁持有期间 await。
 
 ## 变更规则
 

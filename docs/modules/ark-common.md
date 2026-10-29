@@ -8,6 +8,7 @@
 - `ThreadId`、`TurnId`、`ItemId`、`ChildId`、`RunId` 必须以 newtype 传递，禁止跨边界使用裸 `String` 或 `Uuid`。
 - `Usage` 是唯一用量结构；命中率只可由 provider 原生 `hit / (hit + miss)` 得出，字段不全时为 `None`。
 - 路径归一化的唯一实现为 `ark_common::path::normalize`；其它 crate 和前端不得复制逻辑。
+- Windows `canonicalize` 产生的 verbatim 前缀由 `ark_common::path::strip_verbatim` 在归一化入口统一移除；盘符和 UNC 路径均以非 verbatim 形式参与比较。
 - 文本写入必须 UTF-8 无 BOM，原子写入由 `write_text_atomic` 完成。
 
 ## 当前实现与注意事项

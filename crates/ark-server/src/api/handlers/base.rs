@@ -269,7 +269,7 @@ pub async fn mcp_upsert(
     Json(entry): Json<McpServerEntry>,
 ) -> Result<Json<McpServerListResponse>, ApiError> {
     let service = state.base.mcp.as_ref().ok_or_else(|| missing("mcp"))?;
-    Ok(Json(service.upsert(entry)?))
+    Ok(Json(service.upsert(entry).await?))
 }
 
 /// `DELETE /v1/mcp/servers/{id}`.
@@ -278,7 +278,7 @@ pub async fn mcp_delete(
     Path(id): Path<String>,
 ) -> Result<Json<McpServerListResponse>, ApiError> {
     let service = state.base.mcp.as_ref().ok_or_else(|| missing("mcp"))?;
-    Ok(Json(service.delete(&id)?))
+    Ok(Json(service.delete(&id).await?))
 }
 
 /// `POST /v1/mcp/servers/{id}/test` — handshake plus `tools/list`.

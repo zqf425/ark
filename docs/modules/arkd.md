@@ -31,6 +31,14 @@ threshold 收窄到可用输入空间（扣除用户明确设置的 max_tokens�
 工具调用都使用同一 root；子回合继承 delegation tool context 的 workspace。切换只改变后续回合，且必须
 在没有 parent/child active run 时完成；它不会重启 arkd、sidecar、端口或 data-dir。
 
+Windows 上组合根会在保存 canonical root 前移除 `\\?\` verbatim 前缀，因此 WorkspaceView、模型 prompt
+和工具运行器使用同一份可显示、可解析的路径。
+
+启动时组合根连接所有启用的外部 MCP server，并把成功发现的 `<server_id>.<tool>` 原子发布到父工具表；单个
+连接失败只反映到 MCP server 状态，不中止 arkd。MCP server 的 upsert/delete 在请求内重新发现并替换该动态
+分组，因此下一父回合读取的是最新 schema，而不需要重启。组合根还注册 `load_skill`：它读取 `SkillRuntime`
+的已扫描正文快照，避免 `ark-tool` 反向依赖 skills 实现。
+
 ## 验证
 
 装配变更至少执行 `cargo check -p arkd`；涉及运行时、存储或并发时执行 workspace 测试，并验证启动/停机

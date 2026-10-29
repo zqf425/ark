@@ -384,6 +384,20 @@ impl SkillRuntime {
             .map(LoadedSkill::summary)
             .collect()
     }
+
+    /// Return one discovered skill's full instruction body by its stable id.
+    ///
+    /// The text comes from the current immutable scan snapshot, so callers do
+    /// not need to rediscover a path or read arbitrary files on the model's
+    /// behalf.
+    pub fn instruction(&self, id: &str) -> Option<String> {
+        let id = id.trim();
+        self.read()
+            .skills
+            .iter()
+            .find(|skill| skill.id == id)
+            .and_then(|skill| skill.entry_text.clone())
+    }
 }
 
 #[cfg(test)]

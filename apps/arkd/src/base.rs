@@ -22,6 +22,7 @@ use ark_contract::{
 use ark_ports::{
     McpServerService, ModelEndpoint, ProviderService, SkillService, Tool, WorkspaceService,
 };
+use ark_tool::ToolRegistry;
 
 // ---------------------------------------------------------------------------
 // Providers
@@ -165,11 +166,17 @@ impl WorkspaceService for WorkspaceAdapter {
 /// Forwards to `ark-mcp::McpServerRegistry`.
 pub struct McpServerAdapter {
     inner: Arc<ark_mcp::McpServerRegistry>,
+    tools: Arc<ToolRegistry>,
 }
 
 impl McpServerAdapter {
-    pub fn new(inner: Arc<ark_mcp::McpServerRegistry>) -> Self {
-        Self { inner }
+    pub fn new(inner: Arc<ark_mcp::McpServerRegistry>, tools: Arc<ToolRegistry>) -> Self {
+        Self { inner, tools }
+    }
+
+    async fn synchronize_tools(&self) -> Result<()> {
+        let connected = self.inner.connect_all().await;
+        self.tools.replace_group("mcp", connected)
     }
 }
 
@@ -179,12 +186,16 @@ impl McpServerService for McpServerAdapter {
         self.inner.list()
     }
 
-    fn upsert(&self, entry: McpServerEntry) -> Result<McpServerListResponse> {
-        self.inner.upsert(entry)
+    async fn upsert(&self, entry: McpServerEntry) -> Result<McpServerListResponse> {
+        let response = self.inner.upsert(entry)?;
+        self.synchronize_tools().await?;
+        Ok(response)
     }
 
-    fn delete(&self, id: &str) -> Result<McpServerListResponse> {
-        self.inner.delete(id)
+    async fn delete(&self, id: &str) -> Result<McpServerListResponse> {
+        let response = self.inner.delete(id)?;
+        self.synchronize_tools().await?;
+        Ok(response)
     }
 
     async fn test(&self, id: &str) -> McpServerTestResponse {

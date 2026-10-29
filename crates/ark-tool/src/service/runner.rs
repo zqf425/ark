@@ -165,7 +165,7 @@ mod tests {
     use crate::service::registry::ToolRegistry;
 
     fn runner(dir: &std::path::Path) -> RegistryToolRunner {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         registry.register_all(builtins()).unwrap();
         RegistryToolRunner::new(
             Arc::new(registry),
@@ -228,7 +228,7 @@ mod tests {
     #[tokio::test]
     async fn unattended_mode_still_reports_an_unknown_tool_as_an_error() {
         let dir = crate::exec::testsupport::temp_workspace("runner-unknown-unattended");
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         registry.register_all(builtins()).unwrap();
         let runner = RegistryToolRunner::new(
             Arc::new(registry),

@@ -28,6 +28,7 @@ use ark_server::{AppState, TurnEnd, TurnJob, TurnRunner};
 
 use crate::base::{McpServerAdapter, ProviderAdapter, SkillAdapter, WorkspaceAdapter};
 use crate::cli::ServeArgs;
+use crate::load_skill::LoadSkillTool;
 use crate::model;
 use crate::workspace::WorkspaceRoots;
 
@@ -123,7 +124,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     //
     // Building the parent registry last is the only way to avoid a cycle: the
     // tool needs the runner, and the runner needs an executor that needs tools.
-    let child_tools = Arc::new(build_child_tools()?);
+    let child_tools = Arc::new(build_child_tools(Arc::clone(&skills))?);
     let subagent_policy = Arc::new(crate::child::ConfigSubagentPolicy::new(Arc::clone(&config)));
 
     let child_executor = Arc::new(crate::child::ChildTurnExecutorImpl::new(
@@ -152,7 +153,8 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     let hydrated = delegation.hydrate().await?;
     tracing::info!(children = hydrated, "loaded child-run records");
 
-    let tools = Arc::new(build_tools(Arc::clone(&delegation))?);
+    let tools = Arc::new(build_tools(Arc::clone(&delegation), Arc::clone(&skills))?);
+    tools.replace_group("mcp", mcp.connect_all().await)?;
     let tool_runner = Arc::new(RegistryToolRunner::new(
         Arc::clone(&tools),
         Arc::clone(&policy),
@@ -173,7 +175,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         store: Arc::clone(&store_port),
         sink,
         roots: Arc::clone(&roots),
-        tool_schemas: tools.schemas(),
+        tool_registry: Arc::clone(&tools),
         skills: Arc::clone(&skills),
         gates: gate_broker,
     });
@@ -185,7 +187,10 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
             Arc::clone(&workspace),
             Arc::clone(&roots),
         )))
-        .with_mcp(Arc::new(McpServerAdapter::new(Arc::clone(&mcp))));
+        .with_mcp(Arc::new(McpServerAdapter::new(
+            Arc::clone(&mcp),
+            Arc::clone(&tools),
+        )));
 
     let state = AppState::new(
         store_port,
@@ -217,8 +222,11 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
 /// Register every builtin plus `delegate_task` for the parent agent.
 ///
 /// A conflict here is a programming error.
-fn build_tools(runner: Arc<ark_delegation::DelegationRuntime>) -> Result<ToolRegistry> {
-    let mut registry = build_child_tools()?;
+fn build_tools(
+    runner: Arc<ark_delegation::DelegationRuntime>,
+    skills: Arc<ark_skills::SkillRuntime>,
+) -> Result<ToolRegistry> {
+    let registry = build_child_tools(skills)?;
     registry.register_all(ark_tool::delegation_tools(runner))?;
     Ok(registry)
 }
@@ -228,9 +236,10 @@ fn build_tools(runner: Arc<ark_delegation::DelegationRuntime>) -> Result<ToolReg
 /// `delegate_task` is absent on purpose. A child therefore has no way to spawn a
 /// grandchild, which enforces `max_depth = 1` without trusting a runtime check
 /// that a future refactor could bypass.
-fn build_child_tools() -> Result<ToolRegistry> {
-    let mut registry = ToolRegistry::new();
+fn build_child_tools(skills: Arc<ark_skills::SkillRuntime>) -> Result<ToolRegistry> {
+    let registry = ToolRegistry::new();
     registry.register_all(ark_tool::builtins())?;
+    registry.register(Arc::new(LoadSkillTool::new(skills)))?;
     Ok(registry)
 }
 
@@ -249,7 +258,7 @@ struct AgentTurnRunner {
     sink: Arc<dyn EventSink>,
     /// Resolved per turn so a workspace chosen in Settings applies immediately.
     roots: Arc<WorkspaceRoots>,
-    tool_schemas: Vec<serde_json::Value>,
+    tool_registry: Arc<ToolRegistry>,
     /// Skill runtime, consulted once per turn for activated instructions.
     skills: Arc<ark_skills::SkillRuntime>,
     /// Human gate broker shared with the HTTP command surface.
@@ -434,12 +443,18 @@ impl TurnRunner for AgentTurnRunner {
                         path.display()
                     )));
                 }
-                path.canonicalize().map_err(|_| {
-                    ark_common::ArkError::validation(format!(
-                        "cannot canonicalize thread workspace: {}",
-                        path.display()
-                    ))
-                })?
+                path.canonicalize()
+                    .map(|path| {
+                        std::path::PathBuf::from(ark_common::path::strip_verbatim(
+                            &path.to_string_lossy(),
+                        ))
+                    })
+                    .map_err(|_| {
+                        ark_common::ArkError::validation(format!(
+                            "cannot canonicalize thread workspace: {}",
+                            path.display()
+                        ))
+                    })?
             }
             None => self.roots.lease().canonical_root,
         };
@@ -500,7 +515,7 @@ impl TurnRunner for AgentTurnRunner {
             cancel: job.cancel,
             seed: ModelSeed {
                 messages: seed_messages,
-                tools: self.tool_schemas.clone(),
+                tools: self.tool_registry.schemas(),
                 temperature: provider.as_ref().and_then(|provider| provider.temperature),
                 max_tokens: provider.as_ref().and_then(|provider| provider.max_tokens),
             },

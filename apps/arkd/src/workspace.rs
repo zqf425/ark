@@ -116,9 +116,11 @@ fn canonical_directory(path: &Path) -> Result<PathBuf> {
             path.display()
         )));
     }
-    path.canonicalize().map_err(|_| {
-        ArkError::validation(format!("cannot canonicalize workspace: {}", path.display()))
-    })
+    path.canonicalize()
+        .map(|path| PathBuf::from(ark_common::path::strip_verbatim(&path.to_string_lossy())))
+        .map_err(|_| {
+            ArkError::validation(format!("cannot canonicalize workspace: {}", path.display()))
+        })
 }
 
 #[cfg(test)]
@@ -147,5 +149,14 @@ mod tests {
             .switch(&root.display().to_string(), 2)
             .expect_err("busy");
         assert_eq!(error.code, ark_common::ArkErrorCode::Conflict);
+    }
+
+    #[test]
+    fn exposed_workspace_root_is_not_windows_verbatim() {
+        let roots = WorkspaceRoots::new(std::env::current_dir().expect("cwd")).expect("root");
+        assert!(
+            !roots.current().to_string_lossy().starts_with(r"\\?\"),
+            "workspace root must be suitable for prompts and tool inputs"
+        );
     }
 }
