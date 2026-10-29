@@ -403,6 +403,80 @@ pub struct UsageResponse {
     pub usage: Usage,
 }
 
+/// `GET /v1/threads/{id}/usage`.
+///
+/// Aggregated from the thread's authoritative `usage` events, so it survives
+/// restarts and never drifts from what the model actually reported.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ThreadUsageResponse {
+    pub thread_id: ThreadId,
+    /// Turns that produced at least one usage sample.
+    #[ts(as = "f64")]
+    pub turns: u64,
+    /// Individual model rounds folded in.
+    #[ts(as = "f64")]
+    pub samples: u64,
+    #[serde(flatten)]
+    pub usage: Usage,
+}
+
+/// One model round in `GET /v1/debug/llm-rounds`.
+///
+/// A round is one completed model call, bounded by the authoritative `usage`
+/// event the loop appends right after the call settles. `started_at` is the
+/// previous boundary inside the same turn (the previous round's end or the
+/// `turn_started` timestamp), so `duration_ms` covers the whole call window,
+/// not just the final chunk.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct LlmRound {
+    pub thread_id: ThreadId,
+    pub turn_id: TurnId,
+    /// 1-based index of this model call within its turn.
+    #[ts(as = "f64")]
+    pub round: u64,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: DateTime<Utc>,
+    #[ts(as = "f64")]
+    pub duration_ms: u64,
+    /// Errors the runtime recorded inside this round's window, newest last.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<LlmRoundError>,
+    #[serde(flatten)]
+    pub usage: Usage,
+}
+
+/// One structured runtime error observed during a model round.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct LlmRoundError {
+    pub code: ark_common::ArkErrorCode,
+    pub message: String,
+}
+
+/// `GET /v1/debug/llm-rounds`.
+///
+/// Bounded by `limit` (clamped to `[0, LLM_ROUNDS_MAX_LIMIT]`); rounds are
+/// returned newest-last within the selected window. Without a `thread_id` the
+/// scan covers at most the `LLM_ROUNDS_MAX_THREADS` most recently updated
+/// threads, so the route can never walk the whole store.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct LlmRoundsResponse {
+    #[serde(default)]
+    pub rounds: Vec<LlmRound>,
+    /// True when more matching rounds exist beyond this page.
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+/// Page size bounds of `GET /v1/debug/llm-rounds`.
+pub const LLM_ROUNDS_DEFAULT_LIMIT: u32 = 100;
+pub const LLM_ROUNDS_MAX_LIMIT: u32 = 500;
+/// Threads scanned when `GET /v1/debug/llm-rounds` has no `thread_id`.
+pub const LLM_ROUNDS_MAX_THREADS: usize = 20;
+
 // ---------------------------------------------------------------------------
 // Child runs (design §7.8 / appendix A)
 // ---------------------------------------------------------------------------

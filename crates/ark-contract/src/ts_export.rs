@@ -26,9 +26,10 @@ use crate::{
     AttachmentUploadResponse, ChildCompletionNotice, ChildRunActionResult, ChildRunAggregates,
     ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
     CreateMemoryRequest, CreateThreadRequest, EventKind, FieldPath, FilePreview, GoalRequest,
-    HealthResponse, ItemStatus, McpServerEntry, McpServerListResponse, McpServerTestResponse,
-    McpServerView, McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse,
-    PendingApprovalView, PendingUserInputView, PlanView, ProviderEntry, ProviderListResponse,
+    HealthResponse, ItemStatus, LlmRound, LlmRoundError, LlmRoundsResponse, McpServerEntry,
+    McpServerListResponse, McpServerTestResponse, McpServerView, McpTransportKind,
+    MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, PendingApprovalView,
+    PendingUserInputView, PlanView, ProviderEntry, ProviderListResponse,
     ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderModelSummary, ProviderTestRequest, ProviderTestResponse, ProviderView,
     ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, RewindRequest,
@@ -36,10 +37,10 @@ use crate::{
     SkillLoadWarning, SkillSource, SkillSummary, SteerChildRequest, SubagentSettings,
     SwitchWorkspaceRequest, TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadItem,
     ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSkillsResponse,
-    ThreadSummary, TodoEntry, TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary,
-    UpdateMemoryRequest, UpdateThreadRequest, UsageResponse, WorkspaceChange,
-    WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile,
-    WorkspaceStatus, WorkspaceView,
+    ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest, TuningSettings,
+    TurnRequest, TurnSummary, UpdateMemoryRequest, UpdateThreadRequest, UsageResponse,
+    WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
+    WorkspaceDiffFile, WorkspaceStatus, WorkspaceView,
 };
 use ark_common::{
     ArkErrorCode, ArkErrorPayload, AttachmentId, ChildId, ItemId, ThreadId, TurnId, Usage,
@@ -96,6 +97,10 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     TerminalEntriesResponse::export_all_to(dir)?;
     TerminalEntry::export_all_to(dir)?;
     UsageResponse::export_all_to(dir)?;
+    ThreadUsageResponse::export_all_to(dir)?;
+    LlmRound::export_all_to(dir)?;
+    LlmRoundError::export_all_to(dir)?;
+    LlmRoundsResponse::export_all_to(dir)?;
     HealthResponse::export_all_to(dir)?;
     RuntimeInfo::export_all_to(dir)?;
     AttachmentEntry::export_all_to(dir)?;
@@ -199,6 +204,10 @@ const ROOT_NAMES: &[&str] = &[
     "ArkErrorPayload",
     "ThreadSummary",
     "ThreadListQuery",
+    "ThreadUsageResponse",
+    "LlmRound",
+    "LlmRoundError",
+    "LlmRoundsResponse",
     "CreateThreadRequest",
     "UpdateThreadRequest",
     "ThreadDetail",

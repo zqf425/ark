@@ -9,6 +9,7 @@ pub mod base;
 pub mod child_runs;
 pub mod config;
 pub mod config_view;
+pub mod diagnostics;
 pub mod events;
 pub mod gates;
 pub mod health;

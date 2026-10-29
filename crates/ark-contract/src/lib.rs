@@ -39,15 +39,16 @@ pub use config::{
 };
 pub use dto::{
     ChildRunActionResult, ChildRunAggregates, ChildRunEventsResponse, ChildRunListResponse,
-    ChildRunSummary, CreateThreadRequest, FilePreview, GoalRequest, HealthResponse,
-    PendingApprovalView, PendingUserInputView, PlanView, ResolveApprovalRequest,
-    ResolveUserInputRequest, ResumeChildRequest, RewindRequest, RewindResponse, RuntimeInfo,
-    SteerChildRequest, SwitchWorkspaceRequest, TerminalEntriesResponse, TerminalEntry,
-    ThreadDetail, ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSummary,
-    TodoEntry, TodoStatus, TodosRequest, TurnRequest, TurnSummary, UpdateThreadRequest,
-    UsageResponse, WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
-    WorkspaceDiffFile, WorkspaceView, MAX_TURN_TEXT_BYTES, THREAD_PAGE_DEFAULT_LIMIT,
-    THREAD_PAGE_MAX_LIMIT,
+    ChildRunSummary, CreateThreadRequest, FilePreview, GoalRequest, HealthResponse, LlmRound,
+    LlmRoundError, LlmRoundsResponse, PendingApprovalView, PendingUserInputView, PlanView,
+    ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, RewindRequest,
+    RewindResponse, RuntimeInfo, SteerChildRequest, SwitchWorkspaceRequest,
+    TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadListQuery, ThreadRuntimeSettings,
+    ThreadRuntimeSnapshot, ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest,
+    TurnRequest, TurnSummary, UpdateThreadRequest, UsageResponse, WorkspaceChange,
+    WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile, WorkspaceView,
+    LLM_ROUNDS_DEFAULT_LIMIT, LLM_ROUNDS_MAX_LIMIT, LLM_ROUNDS_MAX_THREADS, MAX_TURN_TEXT_BYTES,
+    THREAD_PAGE_DEFAULT_LIMIT, THREAD_PAGE_MAX_LIMIT,
 };
 pub use event::{ChildCompletionNotice, EventKind, RuntimeEvent};
 pub use item::{ItemStatus, ThreadItem};

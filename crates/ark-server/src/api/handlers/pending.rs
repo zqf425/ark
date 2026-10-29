@@ -16,7 +16,6 @@ pub const M_ATTACH: &str = "M4 attachment store";
 pub const M_CHILD: &str = "M5 child runs";
 pub const M_SKILLS: &str = "M5 skills";
 pub const M_CONFIG: &str = "M4 split config endpoints folded into POST /v1/runtime/config";
-pub const M_DEBUG: &str = "M5 llm round diagnostics";
 pub const M_WORKSPACE: &str = "M2 workspace status";
 
 /// `POST /v1/threads/{id}/fork`.
@@ -119,14 +118,6 @@ pub async fn connector_env() -> Result<Json<serde_json::Value>, ApiError> {
     ))
 }
 
-/// `GET /v1/debug/llm-rounds`.
-pub async fn llm_rounds() -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::not_implemented(
-        "GET /v1/debug/llm-rounds",
-        M_DEBUG,
-    ))
-}
-
 /// `GET /v1/workspace/status`.
 pub async fn workspace_status() -> Result<Json<serde_json::Value>, ApiError> {
     Err(ApiError::not_implemented(
@@ -183,7 +174,6 @@ mod tests {
             model_providers().await.err(),
             tuning().await.err(),
             connector_env().await.err(),
-            llm_rounds().await.err(),
             workspace_status().await.err(),
         ];
         for case in cases {

@@ -140,6 +140,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::api::handlers::runtime::capabilities),
         )
         .route("/v1/usage", get(crate::api::handlers::runtime::usage))
+        .route(
+            "/v1/debug/llm-rounds",
+            get(crate::api::handlers::diagnostics::llm_rounds),
+        )
         // ---- config (single entry point) ----
         .route(
             "/v1/runtime/config",
@@ -243,6 +247,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::api::handlers::base::thread_skills),
         )
         .route(
+            "/v1/threads/{id}/usage",
+            get(crate::api::handlers::diagnostics::thread_usage),
+        )
+        .route(
             "/v1/threads/{id}/skills/refresh",
             post(crate::api::handlers::base::thread_skills_refresh),
         )
@@ -328,10 +336,6 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/connector-env",
             post(crate::api::handlers::pending::connector_env),
-        )
-        .route(
-            "/v1/debug/llm-rounds",
-            get(crate::api::handlers::pending::llm_rounds),
         )
         // `cleanup` remains a maintenance stub: reconciliation already removes
         // leftover tombstones on startup, so the route exists only so an old
