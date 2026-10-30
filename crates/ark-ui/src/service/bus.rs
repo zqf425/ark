@@ -288,4 +288,16 @@ impl UiCapability for UiBus {
             .map(|state| state.pages.snapshot())
             .unwrap_or_default()
     }
+
+    fn capabilities(&self) -> Vec<Capability> {
+        // Sorted so the response is byte-stable across restarts; iterating the
+        // `HashSet` directly would make the same runtime answer differently.
+        let mut caps: Vec<Capability> = self.available_capabilities().into_iter().collect();
+        caps.sort_by_key(|cap| format!("{cap:?}"));
+        caps
+    }
+
+    fn catalog_json(&self) -> serde_json::Value {
+        UiBus::catalog_json(self)
+    }
 }

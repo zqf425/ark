@@ -18,10 +18,8 @@ ark-agent = { workspace = true }
 ark-delegation = { workspace = true }
 ark-llm = { workspace = true }
 ark-tool = { workspace = true }
-ark-http = { workspace = true }
 ark-ui = { workspace = true }
 ark-mcp = { workspace = true }
-ark-plugin = { workspace = true }
 ark-server = { workspace = true }
 ark-obs = { workspace = true }
 ark-provider = { workspace = true }

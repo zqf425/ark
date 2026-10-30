@@ -20,6 +20,7 @@ use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::bus::UiCapability;
 use crate::tool::Tool;
 
 /// Provider table, resolved into a client config.
@@ -139,6 +140,9 @@ pub struct BaseServices {
     pub workspace: Option<Arc<dyn WorkspaceService>>,
     pub mcp: Option<Arc<dyn McpServerService>>,
     pub memory: Option<Arc<dyn MemoryService>>,
+    /// The UI catalog. Absent in a build without a UI bus, which makes
+    /// `GET /v1/runtime/capabilities` report no pages instead of inventing them.
+    pub ui: Option<Arc<dyn UiCapability>>,
 }
 
 impl BaseServices {
@@ -168,6 +172,11 @@ impl BaseServices {
 
     pub fn with_memory(mut self, service: Arc<dyn MemoryService>) -> Self {
         self.memory = Some(service);
+        self
+    }
+
+    pub fn with_ui(mut self, service: Arc<dyn UiCapability>) -> Self {
+        self.ui = Some(service);
         self
     }
 }

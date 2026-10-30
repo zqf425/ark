@@ -51,6 +51,10 @@ containment 或任何工具授权判断。
 Windows 上组合根会在保存 canonical root 前移除 `\\?\` verbatim 前缀，因此 WorkspaceView、模型 prompt
 和工具运行器使用同一份可显示、可解析的路径。
 
+UI catalog 由组合根创建唯一 `UiBus`：授予本构建实际具备的能力，以 `ark.builtin.code-ui` 注册 Code 页与
+四个面板，再以 `BaseServices::with_ui` 注入 server。注册句柄必须 `forget()` 活到进程结束，否则 drop 即
+撤销路由。组合根不得再维护第二份页面或能力清单。
+
 启动时组合根连接所有启用的外部 MCP server，并把成功发现的 `<server_id>.<tool>` 原子发布到父工具表；单个
 连接失败只反映到 MCP server 状态，不中止 arkd。MCP server 的 upsert/delete 在请求内重新发现并替换该动态
 分组，因此下一父回合读取的是最新 schema，而不需要重启。组合根还注册 `load_skill`：它读取 `SkillRuntime`
