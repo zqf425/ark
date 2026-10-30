@@ -10,7 +10,7 @@
 
 ## 当前实现
 
-- `scripts/verify.ps1` 是 Rust core、wire 契约、web 与 desktop 的统一验证入口。Windows GNU 环境必须在 PATH 中提供 `dlltool.exe`，也可通过 `ARK_MINGW_BIN` 指定其目录；脚本绝不把缺失的工具链伪装为代码通过。
+- `scripts/verify.ps1` 是 Rust core、wire 契约、web 与 desktop 的统一验证入口。Windows GNU 环境必须在 PATH 中提供 `dlltool.exe`，也可通过 `ARK_MINGW_BIN` 指定其目录；脚本逐项检查原生命令退出码，绝不把缺失工具链或失败的子命令伪装为代码通过。
 - `.github/workflows/verify.yml` 在 Windows MSVC 工具链上执行 core、契约与 web 检查，并用独立 job 执行 desktop 的 Node/Vite 验证。
 - `scripts/change-impact.json` 是机器可读的影响矩阵。每条规则声明路径、应阅读的模块设计和最小验证命令；它是辅助导航，不替代修改前阅读实际受影响模块的义务。
 - `scripts/check-architecture.ps1` 检查 Rust 文件规模和禁止 glob re-export。现有超长文件列为显式存量豁免；新文件不得突破 800 行。
