@@ -144,14 +144,25 @@ export type SseFrame = {
 
 const BLOCK_END = /\r?\n\r?\n/
 
+export type StreamOptions = SendOptions & {
+  /**
+   * Called for every chunk of bytes the transport delivers, before framing.
+   *
+   * A comment block (`: keep-alive`) proves the connection is alive but parses
+   * into no frame, so idle detection must observe bytes rather than frames.
+   */
+  onActivity?: () => void
+}
+
 /**
  * Hand-written `text/event-stream` reader. `EventSource` cannot send headers,
  * so the browser-native client is not an option for a token-authenticated stream.
  */
-export async function* stream(path: string, options: SendOptions = {}): AsyncGenerator<SseFrame, void, void> {
+export async function* stream(path: string, options: StreamOptions = {}): AsyncGenerator<SseFrame, void, void> {
+  const { onActivity, ...sendOptions } = options
   const response = await send('GET', path, {
-    ...options,
-    headers: { accept: 'text/event-stream', ...options.headers }
+    ...sendOptions,
+    headers: { accept: 'text/event-stream', ...sendOptions.headers }
   })
   if (!response.body) {
     throw new ApiError({ status: response.status, code: 'internal_error', message: 'SSE 响应缺少 body' })
@@ -164,6 +175,8 @@ export async function* stream(path: string, options: SendOptions = {}): AsyncGen
     for (;;) {
       const { value, done } = await reader.read()
       if (done) return
+      // Any byte, including a keep-alive comment, proves the stream is alive.
+      if (value.byteLength > 0) onActivity?.()
       buffer += decoder.decode(value, { stream: true })
 
       for (;;) {

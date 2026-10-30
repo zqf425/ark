@@ -11,6 +11,10 @@
   `src/shared/contracts/web-only.ts`。
 - 运行时请求集中在 feature API/client 层；组件不直接裸 `fetch('/v1/...')`。
 - SSE 消费保存最后 `seq`，断线后使用 `since_seq` 恢复；页面必须能处理压缩产生的显式空洞。
+- SSE 空闲看门狗以“是否收到字节”为存活依据，不以“是否解析出事件帧”为依据：`stream()` 在每次
+  `reader.read()` 拿到非空字节时上报活动，订阅层据此重置 75s 看门狗。只到达 `: keep-alive` 注释帧的
+  空闲线程因此保持同一条连接；只有真正无字节静默超过阈值才 abort 并从最后 `seq` 重连。注释帧不进入
+  reducer，也不改变 `lastSeq`。
 - `child_completed` 按稳定 `notification_id` 去重后显示持久摘要卡片；实时到达时显示一次性提示。摘要仅作
   父线程状态展示，不能在 web 侧重建或改写模型上下文。
 - `child_completions` 详情与 reducer 内存均限制为最新 50 条；完成、失败和中止状态必须本地化为用户文案，
