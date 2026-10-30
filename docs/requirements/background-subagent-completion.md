@@ -1,5 +1,7 @@
 # 后台子代理完成通知设计
 
+> 状态：**当前实现，待真实交互验收**。通知、completion inbox 与显式 opt-in 的自动续跑三个阶段均已实现；真实浏览器和模型调用路径的最终验收由 [发布收尾与真实环境验收](release-readiness.md) 承接。
+
 ## 目标
 
 后台子代理创建后立即返回 child id，主回合可继续工作或结束。子代理达到终态后，系统必须可靠地将
@@ -60,11 +62,11 @@ source 注入，不创建伪用户消息；模型预算、provider、workspace�
 
 ## 交付阶段
 
-- **阶段 1（本次）**：`child_completed` 作为父线程持久化 SSE 事件发布，带终态摘要和稳定通知 ID；
+- **阶段 1（当前实现）**：`child_completed` 作为父线程持久化 SSE 事件发布，带终态摘要和稳定通知 ID；
   hydrate 在事件缺失时补投递，并避免重复投递。
-- **阶段 2（本次）**：将事件投影为主线程 completion inbox，在下一次用户回合前以系统来源上下文提供
+- **阶段 2（当前实现）**：将事件投影为主线程 completion inbox，在下一次用户回合前以系统来源上下文提供
   给模型；正常完成后写入确认事件。`ThreadDetail` 恢复持久摘要卡片，web 对实时完成事件显示一次性提示。
-- **阶段 3（本次）**：在显式 `subagents.auto_continue` 配置下，由 per-thread supervisor 合并通知并
+- **阶段 3（当前实现）**：在显式 `subagents.auto_continue` 配置下，由 per-thread supervisor 合并通知并
   启动普通父 continuation；默认关闭，生命周期取消与 shutdown 收敛已实现。
 
 ## 影响模块
