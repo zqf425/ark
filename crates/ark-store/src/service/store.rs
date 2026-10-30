@@ -328,11 +328,6 @@ impl FileSessionStore {
     }
 }
 
-/// Thread-directory names that are not threads themselves.
-pub(crate) fn is_thread_dir(path: &std::path::Path) -> bool {
-    path.join(names::THREAD_JSON).is_file()
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

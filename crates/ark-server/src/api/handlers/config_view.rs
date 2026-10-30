@@ -36,16 +36,17 @@ pub async fn view(State(state): State<AppState>) -> Result<Json<RuntimeConfigVie
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use ark_config::{ConfigStore, RuntimeConfig};
 
     #[test]
     fn view_reports_the_live_snapshot_not_defaults() {
         // The view must read the store, otherwise the screen shows stale values
         // right after a successful apply.
-        let mut config = RuntimeConfig::default();
-        config.log_level = "debug".to_string();
-        config.default_workspace = Some(std::path::PathBuf::from("D:/work"));
+        let config = RuntimeConfig {
+            log_level: "debug".to_string(),
+            default_workspace: Some(std::path::PathBuf::from("D:/work")),
+            ..RuntimeConfig::default()
+        };
         let store = ConfigStore::new(config);
         let snapshot = store.snapshot();
         assert_eq!(snapshot.log_level, "debug");

@@ -250,9 +250,10 @@ mod tests {
     use ark_config::RuntimeConfig;
 
     fn config_with(value: serde_json::Value) -> RuntimeConfig {
-        let mut config = RuntimeConfig::default();
-        config.model_providers = value;
-        config
+        RuntimeConfig {
+            model_providers: value,
+            ..RuntimeConfig::default()
+        }
     }
 
     #[test]

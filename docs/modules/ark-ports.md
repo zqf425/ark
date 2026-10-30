@@ -29,6 +29,8 @@
   但不得在 registry 锁持有期间 await。
 - `MemoryService` 管理用户明确维护的跨会话长期偏好/事实。未注入的构建必须让 HTTP 层返回结构化
   `runtime_unavailable`，不得返回伪造的空成功结果。
+- `SteerHandle` 同时提供 `len` 与默认实现的 `is_empty`，调用方经 `dyn SteerHandle` 判断队列是否为空，
+  不必自行写 `len() == 0`。
 
 ## 变更规则
 

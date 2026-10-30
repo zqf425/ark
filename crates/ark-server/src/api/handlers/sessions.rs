@@ -39,7 +39,6 @@ mod tests {
     use chrono::Utc;
     use tower::ServiceExt;
 
-    use super::*;
     use crate::api::routes::router;
     use crate::state::{AppState, TurnEnd, TurnJob, TurnRunner};
 

@@ -175,8 +175,7 @@ impl Harness {
         self.records()
             .await
             .into_iter()
-            .filter(|record| record.child_id == child)
-            .last()
+            .rfind(|record| record.child_id == child)
             .expect("child must have at least one record")
     }
 }
@@ -650,7 +649,7 @@ struct SteerAware {
 impl ChildTurnExecutor for SteerAware {
     async fn run_child_turn(&self, ctx: ChildTurnContext) -> Result<ChildTurnReport> {
         for _ in 0..100 {
-            if ctx.steer.len() > 0 {
+            if !ctx.steer.is_empty() {
                 let queued = ctx.steer.drain();
                 self.delivered.lock().unwrap().extend(queued);
                 return Ok(ChildTurnReport::completed("steered"));

@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn lossy_parse_falls_back_to_a_fresh_id() {
-        assert!(parse_thread_lossy("not-a-uuid").to_string().len() > 0);
+        assert!(!parse_thread_lossy("not-a-uuid").to_string().is_empty());
     }
 
     #[tokio::test]

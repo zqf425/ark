@@ -123,7 +123,8 @@ impl SkillRuntime {
                 ));
                 continue;
             }
-            let outcome = discovery::scan_roots(&[configured.clone()], SkillSource::ThreadExtra);
+            let outcome =
+                discovery::scan_roots(std::slice::from_ref(&configured), SkillSource::ThreadExtra);
             // Validation errors and warnings both surface here: this view has a
             // `warnings` list, so nothing found while loading extras is lost.
             warnings.extend(outcome.warnings);
@@ -420,9 +421,11 @@ mod tests {
     }
 
     fn runtime_with(dir: &Path, configure: impl FnOnce(&mut SkillsConfig)) -> SkillRuntime {
-        let mut config = SkillsConfig::default();
-        config.roots = vec![dir.to_path_buf()];
-        config.workspace_dirs = Vec::new();
+        let mut config = SkillsConfig {
+            roots: vec![dir.to_path_buf()],
+            workspace_dirs: Vec::new(),
+            ..SkillsConfig::default()
+        };
         configure(&mut config);
         SkillRuntime::new(config, dir.to_path_buf())
     }
@@ -489,9 +492,11 @@ mod tests {
     #[test]
     fn missing_roots_and_packages_only_warn() {
         let dir = tempfile::tempdir().unwrap();
-        let mut config = SkillsConfig::default();
-        config.roots = vec![dir.path().join("nope"), dir.path().to_path_buf()];
-        config.workspace_dirs = Vec::new();
+        let config = SkillsConfig {
+            roots: vec![dir.path().join("nope"), dir.path().to_path_buf()],
+            workspace_dirs: Vec::new(),
+            ..SkillsConfig::default()
+        };
         let runtime = SkillRuntime::new(config, dir.path().to_path_buf());
         assert_eq!(runtime.count(), 0);
         let diagnostics = runtime.diagnostics();
@@ -502,9 +507,11 @@ mod tests {
     #[test]
     fn absent_workspace_default_dirs_are_not_reported() {
         let dir = tempfile::tempdir().unwrap();
-        let mut config = SkillsConfig::default();
-        config.roots = Vec::new();
-        config.workspace_dirs = vec!["skills".to_string()];
+        let config = SkillsConfig {
+            roots: Vec::new(),
+            workspace_dirs: vec!["skills".to_string()],
+            ..SkillsConfig::default()
+        };
         let runtime = SkillRuntime::new(config, dir.path().to_path_buf());
         let diagnostics = runtime.diagnostics();
         assert!(diagnostics.roots.is_empty(), "{:?}", diagnostics.roots);

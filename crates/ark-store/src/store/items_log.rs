@@ -191,7 +191,6 @@ mod tests {
     fn usage_increments_fold_and_rebuild_from_events() {
         let dir = TempDir::new("usage-fold");
         let paths = paths(&dir);
-        let thread = ThreadId::new();
         let turn = TurnId::new();
         let first = UsageRecord::from_event(1, turn, Usage::new(10, 5));
         let second = UsageRecord::from_event(2, turn, Usage::new(20, 5));

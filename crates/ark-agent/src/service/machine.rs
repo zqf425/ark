@@ -224,7 +224,7 @@ impl TurnMachine {
     /// tests via `debug_assert!`).
     pub fn assert_invariants(&self) {
         debug_assert!(
-            !(self.state == TurnState::AwaitingModel && self.model_in_flight == false),
+            !(self.state == TurnState::AwaitingModel && !self.model_in_flight),
             "awaiting_model must have a model round in flight"
         );
         debug_assert!(
@@ -362,8 +362,8 @@ mod tests {
         assert_eq!(machine.progress().tokens_used, 30);
 
         let call = ToolCallRequest::new("c1", "read", serde_json::json!({ "path": "a" }));
-        machine.record_calls(&[call.clone()]);
-        machine.record_calls(&[call.clone()]);
+        machine.record_calls(std::slice::from_ref(&call));
+        machine.record_calls(std::slice::from_ref(&call));
         assert_eq!(machine.repeats_for(&[call]), vec![2]);
     }
 

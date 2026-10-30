@@ -6,6 +6,9 @@ pub mod hygiene;
 pub mod token;
 
 pub use checkpoint::ContextCheckpoint;
+pub use completion::CompletionInbox;
+pub use hygiene::{HistoryHygiene, HygieneReport};
+pub use token::TokenEstimator;
 
 #[cfg(test)]
 mod checkpoint_tests {
@@ -87,7 +90,3 @@ mod checkpoint_tests {
         assert!(crate::context::TokenEstimator::new().estimate_text(&rendered) <= 12);
     }
 }
-
-pub use completion::CompletionInbox;
-pub use hygiene::{HistoryHygiene, HygieneReport};
-pub use token::TokenEstimator;

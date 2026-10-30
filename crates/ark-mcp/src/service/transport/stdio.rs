@@ -81,16 +81,12 @@ impl StdioTransport {
     /// Write one framed message followed by a newline.
     async fn write_line(&self, payload: &str) -> Result<()> {
         let mut stdin = self.stdin.lock().await;
-        stdin
-            .write_all(payload.as_bytes())
-            .await
-            .and_then(|_| Ok(()))
-            .map_err(|err| {
-                ArkError::new(
-                    ArkErrorCode::RuntimeUnavailable,
-                    format!("mcp stdio write failed: {err}"),
-                )
-            })?;
+        stdin.write_all(payload.as_bytes()).await.map_err(|err| {
+            ArkError::new(
+                ArkErrorCode::RuntimeUnavailable,
+                format!("mcp stdio write failed: {err}"),
+            )
+        })?;
         stdin.write_all(b"\n").await.map_err(|err| {
             ArkError::new(
                 ArkErrorCode::RuntimeUnavailable,

@@ -20,7 +20,6 @@ use crate::common::retry::{FailureKind, RetryPolicy, RetryState};
 use crate::common::sse::SseParser;
 use crate::common::stream::StreamAccumulator;
 use crate::config::endpoint::ProviderConfig;
-use crate::domain::event::StreamEvent;
 use crate::provider::route::Family;
 use crate::provider::StreamParser;
 
@@ -250,16 +249,6 @@ impl HttpModelClient {
         let _ = accumulator.finish();
         let _ = published;
         Ok(accumulator.response())
-    }
-
-    /// The response to return when the stream carried nothing usable.
-    fn fallback(&self, accumulator: &StreamAccumulator) -> ModelResponse {
-        let mut response = accumulator.response();
-        if response.text.is_empty() && response.tool_calls.is_empty() {
-            // Not an error: a provider may legitimately end with only usage.
-            response.text = String::new();
-        }
-        response
     }
 }
 

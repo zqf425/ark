@@ -620,11 +620,13 @@ mod tests {
     }
 
     fn policy_for(enabled: bool, max_concurrency: u32) -> ark_ports::SubagentPolicy {
-        let mut config = RuntimeConfig::default();
-        config.subagents = ark_contract::SubagentSettings {
-            enabled,
-            max_concurrency,
-            auto_continue: false,
+        let config = RuntimeConfig {
+            subagents: ark_contract::SubagentSettings {
+                enabled,
+                max_concurrency,
+                auto_continue: false,
+            },
+            ..RuntimeConfig::default()
         };
         let store = Arc::new(ark_config::ConfigStore::new(config));
         ConfigSubagentPolicy::new(store).policy()

@@ -19,7 +19,11 @@ use tokio::sync::{mpsc, oneshot};
 /// the store facade needs so they also use the serialization point).
 pub enum WriterCmd {
     Append {
-        event: RuntimeEvent,
+        /// Boxed because `RuntimeEvent` is the largest payload by far: every
+        /// slot of the writer command channel holds a `WriterCmd`, so an inline
+        /// payload would cost 296 bytes per queued command even though most
+        /// commands only carry a `u64`.
+        event: Box<RuntimeEvent>,
         ack: oneshot::Sender<Result<RuntimeEvent>>,
     },
     SnapshotAndSubscribe {
@@ -87,7 +91,10 @@ impl WriterHandle {
 
     pub async fn append(&self, event: RuntimeEvent) -> Result<RuntimeEvent> {
         let (ack, rx) = oneshot::channel();
-        self.send(WriterCmd::Append { event, ack })?;
+        self.send(WriterCmd::Append {
+            event: Box::new(event),
+            ack,
+        })?;
         rx.await.map_err(|_| self.closed())?
     }
 
@@ -197,7 +204,7 @@ async fn run(mut state: WriterState, mut rx: mpsc::Receiver<WriterCmd>) {
     while let Some(cmd) = rx.recv().await {
         match cmd {
             WriterCmd::Append { event, ack } => {
-                let result = state.append(event);
+                let result = state.append(*event);
                 let _ = ack.send(result);
             }
             WriterCmd::SnapshotAndSubscribe { since_seq, reply } => {

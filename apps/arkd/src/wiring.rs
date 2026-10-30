@@ -943,8 +943,13 @@ mod tests {
 
     #[test]
     fn provider_context_window_caps_the_next_turn_and_reserves_requested_output() {
-        let mut config = RuntimeConfig::default();
-        config.tuning.context_limit_tokens = 100_000;
+        let config = RuntimeConfig {
+            tuning: ark_config::TuningConfig {
+                context_limit_tokens: 100_000,
+                ..ark_config::TuningConfig::default()
+            },
+            ..RuntimeConfig::default()
+        };
         let mut provider = ProviderConfig::new("p", "m");
         provider.context_window_tokens = Some(32_000);
         provider.max_tokens = Some(4_096);
