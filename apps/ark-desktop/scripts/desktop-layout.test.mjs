@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { resolveCargoTargetDir } from './prepare-sidecar.mjs'
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryRoot = resolve(desktopRoot, '..', '..')
@@ -57,4 +58,16 @@ test('release configuration is the only place that embeds the arkd sidecar', () 
 
   const desktopPackage = readJson(resolve(desktopRoot, 'package.json'))
   assert.equal(desktopPackage.scripts.build, 'tauri build --config src-tauri/tauri.release.conf.json')
+})
+
+test('sidecar preparation resolves default and isolated Cargo target directories', () => {
+  assert.equal(resolveCargoTargetDir(repositoryRoot, undefined), resolve(repositoryRoot, 'target'))
+  assert.equal(resolveCargoTargetDir(repositoryRoot, '   '), resolve(repositoryRoot, 'target'))
+  assert.equal(
+    resolveCargoTargetDir(repositoryRoot, 'artifacts/cargo-target'),
+    resolve(repositoryRoot, 'artifacts/cargo-target')
+  )
+
+  const absoluteTargetDir = resolve(repositoryRoot, '..', 'isolated-cargo-target')
+  assert.equal(resolveCargoTargetDir(repositoryRoot, absoluteTargetDir), absoluteTargetDir)
 })
