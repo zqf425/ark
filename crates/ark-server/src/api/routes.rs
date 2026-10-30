@@ -209,7 +209,7 @@ fn protected_routes() -> Router<AppState> {
             "/v1/mcp/servers/{id}/test",
             post(crate::api::handlers::base::mcp_test),
         )
-        // ---- not implemented in this milestone: structured NotFound ----
+        // ---- thread planning, gates, workbench projections and child runs ----
         .route(
             "/v1/threads/{id}/fork",
             post(crate::api::handlers::threads::fork),

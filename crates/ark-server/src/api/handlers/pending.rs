@@ -1,82 +1,20 @@
-//! Routes from design appendix A that have not landed yet.
+//! Routes that intentionally answer a structured `NotFound`.
 //!
-//! They answer a structured `NotFound` (`ArkErrorPayload`) naming the planned
-//! milestone. This is deliberate: the surface stays discoverable, no route
-//! panics, and a client can distinguish "not built yet" from "wrong URL".
+//! Every route registered here has a real implementation elsewhere except the
+//! three legacy split-config entry points and one maintenance stub, which are
+//! kept only so an old client gets an actionable answer instead of a router-level
+//! 404. Handlers whose milestone has since landed must be deleted from this
+//! module: leaving them behind makes the "what is still missing" question
+//! unanswerable from the route table.
 
 use axum::Json;
 
 use crate::api::error::ApiError;
 
-/// Milestone labels used in the `detail` field.
-pub const M_FORK: &str = "M2 thread forking";
-pub const M_PLAN: &str = "M3 goal and todo planning";
-pub const M_GATE: &str = "M3 approvals and user inputs";
-pub const M_ATTACH: &str = "M4 attachment store";
-pub const M_CHILD: &str = "M5 child runs";
-pub const M_SKILLS: &str = "M5 skills";
+/// Milestone label used in the `detail` field of a retired route.
 pub const M_CONFIG: &str = "M4 split config endpoints folded into POST /v1/runtime/config";
-pub const M_WORKSPACE: &str = "M2 workspace status";
-
-/// `POST /v1/threads/{id}/fork`.
-pub async fn fork() -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::not_implemented(
-        "POST /v1/threads/{id}/fork",
-        M_FORK,
-    ))
-}
-
-/// `GET|POST|DELETE /v1/threads/{id}/goal`.
-pub async fn goal() -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::not_implemented(
-        "GET|POST|DELETE /v1/threads/{id}/goal",
-        M_PLAN,
-    ))
-}
-
-/// `GET|POST|DELETE /v1/threads/{id}/todos`.
-pub async fn todos() -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::not_implemented(
-        "GET|POST|DELETE /v1/threads/{id}/todos",
-        M_PLAN,
-    ))
-}
-
-/// `POST /v1/approvals/{id}` and `POST /v1/user-inputs/{id}`.
-pub async fn approvals() -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::not_implemented("POST /v1/approvals/{id}", M_GATE))
-}
-
-/// `POST /v1/user-inputs/{id}` (alias `/v1/user-input/{id}`).
-pub async fn user_inputs() -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::not_implemented(
-        "POST /v1/user-inputs/{id}",
-        M_GATE,
-    ))
-}
-
-/// `POST /v1/attachments` and the read routes.
-pub async fn attachments() -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::not_implemented("POST /v1/attachments", M_ATTACH))
-}
-
-/// `GET /v1/threads/{id}/skills` and `GET /v1/skills`.
-pub async fn skills() -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::not_implemented("GET /v1/skills", M_SKILLS))
-}
-
-/// The `child-runs` family.
-pub async fn child_runs() -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::not_implemented("GET /v1/child-runs", M_CHILD))
-}
-
-/// `POST /v1/threads/{id}/rewind`.
-pub async fn rewind() -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::not_implemented(
-        "POST /v1/threads/{id}/rewind",
-        M_FORK,
-    ))
-}
+/// Milestone label for the child-run maintenance stub.
+pub const M_CHILD: &str = "M5 child runs";
 
 /// The old split config endpoints: folded into `POST /v1/runtime/config`.
 pub async fn model_providers() -> Result<Json<serde_json::Value>, ApiError> {
@@ -102,11 +40,15 @@ pub async fn connector_env() -> Result<Json<serde_json::Value>, ApiError> {
     ))
 }
 
-/// `GET /v1/workspace/status`.
-pub async fn workspace_status() -> Result<Json<serde_json::Value>, ApiError> {
+/// `DELETE /v1/child-runs/{child_id}/cleanup`.
+///
+/// Startup reconciliation already removes leftover tombstones, so this route
+/// exists only so an old client gets a structured answer instead of 404 at the
+/// router level.
+pub async fn child_runs() -> Result<Json<serde_json::Value>, ApiError> {
     Err(ApiError::not_implemented(
-        "GET /v1/workspace/status",
-        M_WORKSPACE,
+        "DELETE /v1/child-runs/{child_id}/cleanup",
+        M_CHILD,
     ))
 }
 
@@ -130,10 +72,17 @@ mod tests {
     use ark_common::ArkErrorCode;
 
     #[tokio::test]
-    async fn pending_routes_are_structured_not_found() {
-        let error = fork().await.unwrap_err();
-        assert_eq!(error.0.code, ArkErrorCode::NotFound);
-        assert!(error.0.detail.unwrap_or_default().contains(M_FORK));
+    async fn retired_routes_are_structured_not_found() {
+        let cases = [
+            model_providers().await.err(),
+            tuning().await.err(),
+            connector_env().await.err(),
+            child_runs().await.err(),
+        ];
+        for case in cases {
+            let error = case.expect("retired route must fail");
+            assert_eq!(error.0.code, ArkErrorCode::NotFound);
+        }
     }
 
     #[tokio::test]
@@ -144,27 +93,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn every_pending_route_returns_not_found() {
-        let cases = [
-            goal().await.err(),
-            todos().await.err(),
-            approvals().await.err(),
-            user_inputs().await.err(),
-            attachments().await.err(),
-            skills().await.err(),
-            child_runs().await.err(),
-            model_providers().await.err(),
-            tuning().await.err(),
-            connector_env().await.err(),
-            workspace_status().await.err(),
-        ];
-        for case in cases {
-            let error = case.expect("pending route must fail");
-            assert_eq!(error.0.code, ArkErrorCode::NotFound);
-        }
-    }
-
-    #[tokio::test]
     async fn split_config_errors_name_their_own_routes() {
         let cases = [
             ("POST /v1/runtime/model-providers", model_providers().await),
@@ -172,7 +100,7 @@ mod tests {
             ("POST /v1/connector-env", connector_env().await),
         ];
         for (route, result) in cases {
-            let error = result.expect_err("pending route must fail");
+            let error = result.expect_err("retired route must fail");
             assert!(error.payload().message.contains(route));
         }
     }
