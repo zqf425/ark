@@ -11,8 +11,8 @@
   `child_activity` 事件。
 - 为终态 child 增加带稳定通知 ID 的父线程完成通知；通知是持久化、幂等、可在启动时补投递的。
 - 默认 `notifyOnly`：SSE/UI 显示完成摘要，不产生额外模型调用。
-- 预留 `autoContinue`：当父线程没有活动 turn 时，按父线程批量把完成摘要作为系统来源输入交给
-  新 continuation turn；启用必须显式配置。
+- `autoContinue`：当父线程没有活动 turn 时，按父线程批量把完成摘要作为系统来源输入交给
+  新 continuation turn；通过 `subagents.auto_continue` 显式启用，默认关闭。
 
 不在本需求中实现 Studio、外部插件、跨会话消息、任务市场或多层子代理。
 
@@ -43,9 +43,20 @@
 父线程详情只返回最新 50 条不同 `notificationId` 的完成摘要；web 同样只保留 50 个摘要卡片，避免长寿命
 线程的响应或渲染状态无界增长。
 
-`autoContinue` 仅在显式启用、父线程无活动 turn、未删除/归档且没有已调度 continuation 时触发。
-同一父线程短时间内多个完成通知必须合并为一个 continuation；用户中断、删除或归档父线程时取消待执行
-continuation。自动 continuation 仍受模型预算、工具沙箱和审批约束，不能自动获得用户授权。
+`autoContinue` 仅在 `subagents.enabled=true` 且 `subagents.auto_continue=true`、父线程无活动 turn、
+未删除/归档且没有已调度 continuation 时触发。关闭 subagents 会立即取消待调度 continuation；默认值和
+旧配置缺失值均为 `false`，因此升级不得产生额外模型调用。同一父线程
+250 ms 内的多个完成通知合并为一个 continuation；活动父回合期间到达的通知保留一个待调度槽，等回合
+结束后再复核持久 inbox。用户中断、删除或归档父线程时取消待执行 continuation，并抑制迟到 child
+completion，直到下一次显式用户回合（或取消归档）开启新的生命周期。该抑制从父线程持久终态恢复，
+因此重启不会让一次用户中断失效；运行时重启时合成的 abort 不视为用户意图。shutdown 先拒绝新 wakeup
+再取消待调度任务。
+
+自动 continuation 使用普通父 `TurnRunner` 和同一个 `Reactor`，只把 completion inbox 作为 system
+source 注入，不创建伪用户消息；模型预算、provider、workspace、工具沙箱、审批/用户输入 gate 与正常父
+回合完全相同。仅正常完成后确认本次注入的 notification；失败、中断或确认写入失败仍保留至少一次投递。
+若本批最多 8 条全部确认成功且仍有未确认通知，调度下一批；确认失败不自行链式重试，避免同一通知造成
+无界模型调用。
 
 ## 交付阶段
 
@@ -53,18 +64,19 @@ continuation。自动 continuation 仍受模型预算、工具沙箱和审批约
   hydrate 在事件缺失时补投递，并避免重复投递。
 - **阶段 2（本次）**：将事件投影为主线程 completion inbox，在下一次用户回合前以系统来源上下文提供
   给模型；正常完成后写入确认事件。`ThreadDetail` 恢复持久摘要卡片，web 对实时完成事件显示一次性提示。
-- **阶段 3（后续）**：在显式 `autoContinue` 配置下，由 per-thread supervisor 合并通知并启动 continuation。
+- **阶段 3（本次）**：在显式 `subagents.auto_continue` 配置下，由 per-thread supervisor 合并通知并
+  启动普通父 continuation；默认关闭，生命周期取消与 shutdown 收敛已实现。
 
 ## 影响模块
 
 | 模块 | 变更 |
 |---|---|
-| `ark-contract` | 完成通知、消费确认事件和 TypeScript 生成 |
+| `ark-contract` | 完成通知、消费确认事件、`SubagentSettings.auto_continue` 和 TypeScript 生成 |
 | `ark-ports` | `SessionStore::replay_child_completion_events` 提供窄查询，避免回放完整事件历史 |
 | `ark-store` | 权威父事件查询与确认事件持久化；压缩保护未确认通知 |
 | `ark-delegation` | 终态后发布完成通知，恢复时幂等补发 |
-| `ark-agent` | 将 inbox 结果作为系统来源输入；后续 continuation trigger |
-| `ark-server` | SSE/查询接口与错误映射；详情摘要上限 50 条 |
+| `ark-agent` | 将 inbox 结果作为系统来源输入 |
+| `ark-server` | SSE/查询接口、详情摘要上限 50 条、per-thread debounce 与生命周期取消 |
 | `web` | child 完成提示、摘要和跳转动作；摘要卡片上限 50 条 |
 | `arkd` | 配置、supervisor、continuation 装配 |
 
@@ -75,5 +87,6 @@ continuation。自动 continuation 仍受模型预算、工具沙箱和审批约
 3. 重启发生在终态记录与父通知之间时，hydrate 补投递；重复 hydrate 不重复事件。
 4. 阶段 2 必须把未确认通知作为系统来源输入，而非伪造用户消息；只有父回合正常完成后才确认，确认失败
    必须允许下一回合重投递。
-5. 阶段 3 的多 child 完成只调度一个合并 continuation；已中断、删除或归档的父线程不得自动 continuation。
+5. 阶段 3 的多 child 完成只调度一个合并 continuation；超过 8 条时仅在前批确认成功后有界排空；已中断、
+   删除或归档的父线程不得自动 continuation，且中断抑制跨重启保持。
 6. 默认配置不产生自动模型调用；自动 continuation 仍走原审批和沙箱。

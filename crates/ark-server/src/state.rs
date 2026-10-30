@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use ark_agent::{CancelToken, SteerQueue};
@@ -22,20 +22,35 @@ use chrono::{DateTime, Utc};
 use tokio::sync::{broadcast, Mutex as AsyncMutex};
 
 use crate::gates::InteractiveGates;
+use crate::service::continuation::ContinuationRegistry;
+
+/// Durable abort reason used for process-owned shutdown cancellation.
+pub const SHUTDOWN_CANCEL_REASON: &str = "runtime shutting down";
 
 /// Terminal outcome a turn run reported (design §7.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TurnEnd {
     Completed,
+    /// Completed normally and acknowledged the delivered inbox, but more durable
+    /// completions remain for another bounded continuation batch.
+    CompletedWithPendingCompletions,
     Failed(String),
     Aborted(String),
+}
+
+/// Source that started a parent turn.
+pub enum TurnSource {
+    /// Explicit user input, persisted as a user message.
+    User(String),
+    /// System-origin continuation consuming the durable child-completion inbox.
+    AutoContinuation,
 }
 
 /// One unit of work handed to the turn runner.
 pub struct TurnJob {
     pub thread_id: ThreadId,
     pub turn_id: TurnId,
-    pub text: String,
+    pub source: TurnSource,
     pub cancel: CancelToken,
     /// The active turn's bounded correction queue. The registry creates it
     /// before the worker starts, so `/steer` and the reactor share one handle.
@@ -66,6 +81,7 @@ pub trait TurnRunner: Send + Sync {
 /// Live turn bookkeeping (state + the cancel handle used by `/interrupt`).
 pub struct TurnRegistry {
     inner: Mutex<HashMap<TurnId, TurnSlot>>,
+    latest_by_thread: Mutex<HashMap<ThreadId, TurnId>>,
 }
 
 struct TurnSlot {
@@ -84,6 +100,7 @@ impl TurnRegistry {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
+            latest_by_thread: Mutex::new(HashMap::new()),
         }
     }
 
@@ -128,6 +145,10 @@ impl TurnRegistry {
                 steering: Arc::clone(&steering),
             },
         );
+        self.latest_by_thread
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(thread_id, turn_id);
         Some(TurnRegistration { summary, steering })
     }
 
@@ -141,6 +162,22 @@ impl TurnRegistry {
 
     pub fn get(&self, turn_id: TurnId) -> Option<TurnSummary> {
         self.lock().get(&turn_id).map(|slot| slot.summary.clone())
+    }
+
+    /// The newest process-local lifecycle epoch registered for this thread.
+    pub fn latest_for(&self, thread_id: ThreadId) -> Option<TurnId> {
+        self.latest_by_thread
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&thread_id)
+            .copied()
+    }
+
+    /// True when `turn_id` is the newest turn registered for this thread.
+    /// Lifecycle handlers hold `workspace_gate`, so registration cannot advance
+    /// this marker between their check and continuation suppression.
+    pub fn is_latest_for(&self, thread_id: ThreadId, turn_id: TurnId) -> bool {
+        self.latest_for(thread_id) == Some(turn_id)
     }
 
     /// The queue the reactor must drain for this still-running turn.
@@ -182,6 +219,22 @@ impl TurnRegistry {
         Some(slot.summary.clone())
     }
 
+    /// Atomically cancel an active turn owned by `thread_id`.
+    ///
+    /// Ownership and liveness are checked under the same lock as the state
+    /// mutation, so a turn that finishes concurrently cannot be moved back from
+    /// a terminal state to `aborting`.
+    pub fn cancel_active(&self, thread_id: ThreadId, turn_id: TurnId) -> Option<TurnSummary> {
+        let mut guard = self.lock();
+        let slot = guard.get_mut(&turn_id)?;
+        if slot.summary.thread_id != thread_id || slot.summary.ended_at.is_some() {
+            return None;
+        }
+        slot.cancel.cancel();
+        slot.summary.state = "aborting".to_string();
+        Some(slot.summary.clone())
+    }
+
     /// Record the terminal state reported by the runner.
     pub fn finish(&self, turn_id: TurnId, end: &TurnEnd) {
         let mut guard = self.lock();
@@ -189,7 +242,7 @@ impl TurnRegistry {
             return;
         };
         let (state, error) = match end {
-            TurnEnd::Completed => ("completed", None),
+            TurnEnd::Completed | TurnEnd::CompletedWithPendingCompletions => ("completed", None),
             TurnEnd::Failed(message) => ("failed", Some(message.clone())),
             TurnEnd::Aborted(reason) => ("aborted", Some(reason.clone())),
         };
@@ -198,10 +251,15 @@ impl TurnRegistry {
         slot.summary.ended_at = Some(Utc::now());
     }
 
-    /// Cancel every in-flight turn: used by `/v1/shutdown` (design §7.9).
+    /// Cancel every in-flight turn with the ordinary interrupt reason.
     pub fn cancel_all(&self) {
+        self.cancel_all_with_reason("turn interrupted");
+    }
+
+    /// Cancel every in-flight turn with one durable process-owned reason.
+    pub fn cancel_all_with_reason(&self, reason: &str) {
         for slot in self.lock().values_mut() {
-            slot.cancel.cancel();
+            slot.cancel.cancel_with_reason(reason);
             if slot.summary.ended_at.is_none() {
                 slot.summary.state = "aborting".to_string();
             }
@@ -226,6 +284,10 @@ pub struct AppState {
     pub config: Arc<ConfigStore>,
     pub usage: Arc<UsageRecorder>,
     pub turns: Arc<TurnRegistry>,
+    pub continuations: Arc<ContinuationRegistry>,
+    /// Set before shutdown cancellation so late child completions cannot schedule
+    /// fresh parent work while the listener is draining.
+    shutting_down: Arc<AtomicBool>,
     /// The one-shot gate rendezvous shared with the reactor injected by arkd.
     pub gates: Arc<InteractiveGates>,
     pub runner: Arc<dyn TurnRunner>,
@@ -282,6 +344,8 @@ impl AppState {
             config,
             usage,
             turns: Arc::new(TurnRegistry::new()),
+            continuations: Arc::new(ContinuationRegistry::new()),
+            shutting_down: Arc::new(AtomicBool::new(false)),
             gates: Arc::new(InteractiveGates::new()),
             runner,
             started_at: Utc::now(),
@@ -340,8 +404,20 @@ impl AppState {
         self
     }
 
+    /// Enter shutdown before cancelling work, rejecting late continuation wakes.
+    pub fn begin_shutdown(&self) {
+        self.shutting_down.store(true, Ordering::Release);
+        self.continuations
+            .cancel_all_with_reason(SHUTDOWN_CANCEL_REASON);
+    }
+
+    pub fn is_shutting_down(&self) -> bool {
+        self.shutting_down.load(Ordering::Acquire)
+    }
+
     /// Signal graceful shutdown; returns how many subscribers were told.
     pub fn request_shutdown(&self, reason: &'static str) -> usize {
+        self.begin_shutdown();
         self.shutdown.send(reason).unwrap_or(0)
     }
 
@@ -405,12 +481,14 @@ impl AppState {
             return;
         }
         let event = match end {
-            TurnEnd::Completed => RuntimeEvent::TurnCompleted {
-                seq: 0,
-                thread_id,
-                turn_id,
-                timestamp: Utc::now(),
-            },
+            TurnEnd::Completed | TurnEnd::CompletedWithPendingCompletions => {
+                RuntimeEvent::TurnCompleted {
+                    seq: 0,
+                    thread_id,
+                    turn_id,
+                    timestamp: Utc::now(),
+                }
+            }
             TurnEnd::Failed(message) => RuntimeEvent::TurnFailed {
                 seq: 0,
                 thread_id,
@@ -553,6 +631,28 @@ mod tests {
     }
 
     #[test]
+    fn cancel_active_checks_owner_and_terminal_state_atomically() {
+        let registry = TurnRegistry::new();
+        let owner = ThreadId::new();
+        let other = ThreadId::new();
+        let turn = TurnId::new();
+        let token = CancelToken::new();
+        registry.try_register(owner, turn, token.clone());
+
+        assert!(registry.cancel_active(other, turn).is_none());
+        assert!(!token.is_cancelled());
+        let cancelled = registry
+            .cancel_active(owner, turn)
+            .expect("owned active turn");
+        assert_eq!(cancelled.state, "aborting");
+        assert!(token.is_cancelled());
+
+        registry.finish(turn, &TurnEnd::Completed);
+        assert!(registry.cancel_active(owner, turn).is_none());
+        assert_eq!(registry.get(turn).unwrap().state, "completed");
+    }
+
+    #[test]
     fn failed_turns_keep_their_message() {
         let registry = TurnRegistry::new();
         let turn = TurnId::new();
@@ -570,8 +670,25 @@ mod tests {
         let second = CancelToken::new();
         registry.try_register(ThreadId::new(), TurnId::new(), first.clone());
         registry.try_register(ThreadId::new(), TurnId::new(), second.clone());
-        registry.cancel_all();
+        registry.cancel_all_with_reason(SHUTDOWN_CANCEL_REASON);
         assert!(first.is_cancelled() && second.is_cancelled());
+        assert_eq!(first.reason().as_deref(), Some(SHUTDOWN_CANCEL_REASON));
+        assert_eq!(second.reason().as_deref(), Some(SHUTDOWN_CANCEL_REASON));
+    }
+
+    #[test]
+    fn newest_turn_marker_advances_per_thread() {
+        let registry = TurnRegistry::new();
+        let thread = ThreadId::new();
+        let first = TurnId::new();
+        let second = TurnId::new();
+        registry.try_register(thread, first, CancelToken::new());
+        registry.finish(first, &TurnEnd::Completed);
+        registry.try_register(thread, second, CancelToken::new());
+
+        assert!(!registry.is_latest_for(thread, first));
+        assert!(registry.is_latest_for(thread, second));
+        assert!(!registry.is_latest_for(ThreadId::new(), second));
     }
 
     #[test]

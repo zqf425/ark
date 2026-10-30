@@ -7,4 +7,9 @@
  * It is enforced by a real gate, so raising it above the clamp is rejected
  * instead of silently ignored.
  */
-export type SubagentSettings = { enabled: boolean, max_concurrency: number, };
+export type SubagentSettings = { enabled: boolean, max_concurrency: number, 
+/**
+ * Start a parent continuation after background child completions.
+ * Disabled by default because enabling it permits additional model calls.
+ */
+auto_continue: boolean, };

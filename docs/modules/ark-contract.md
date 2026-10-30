@@ -16,6 +16,9 @@ skill 视图。所有 GUI 字段使用 camelCase；既有查询参数保持既�
 上传体的 `content` 是标准 Base64，原始字节不会进入附件元数据或任何事件流；下载字节是独立的 HTTP
 响应体。附件 ID 由服务端生成，客户端只能在读取请求中把它作为不透明字符串传回。
 
+`SubagentSettings.auto_continue` 是显式 opt-in 的 wire 配置，serde default 为 `false`，保证旧配置不会
+产生额外模型调用；Rust 生成的 TypeScript 使用同名 snake_case 字段。
+
 后台子代理终态使用 `child_completed` 事件传递稳定 `notification_id`、状态、摘要/错误和用量；
 消费者按通知 ID 去重，不得把 child 的完整原始转录复制到父线程。父回合正常完成后以
 `child_completion_acknowledged` 确认已消费的通知；确认失败保留至少一次重投递语义。

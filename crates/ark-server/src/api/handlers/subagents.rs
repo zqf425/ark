@@ -18,6 +18,7 @@ pub async fn configure(
     State(state): State<AppState>,
     Json(settings): Json<SubagentSettings>,
 ) -> Result<Json<ApplyResult>, ApiError> {
+    let before = state.config.snapshot().subagents;
     let result = state.config.apply(ConfigPatch {
         subagents: Some(settings),
         ..ConfigPatch::default()
@@ -27,6 +28,10 @@ pub async fn configure(
         let path = ark_config::config_path(&state.data_dir);
         if let Err(message) = ark_config::save(&path, &snapshot) {
             tracing::warn!(%message, "subagent config applied in memory but not persisted");
+        }
+        let after = snapshot.subagents;
+        if before.enabled != after.enabled || before.auto_continue != after.auto_continue {
+            crate::service::continuation::sync_auto_continue_policy(state.clone()).await;
         }
     }
     Ok(Json(result))

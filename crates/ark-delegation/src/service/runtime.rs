@@ -36,7 +36,7 @@ use ark_ports::{
     SubagentPolicy, SubagentPolicySource, SubagentRegistry, SubagentRequest, SubagentRunner,
 };
 use chrono::Utc;
-use tokio::sync::{oneshot, Notify};
+use tokio::sync::{broadcast, oneshot, Notify};
 
 use crate::domain::{
     acquire_error, finished_record, ChildTurnContext, ChildTurnReport, SlotGate, StopReason,
@@ -137,6 +137,10 @@ struct RuntimeCore {
     /// Notified whenever a run reaches a terminal state (used by tests and by a
     /// future "wait for all children" shutdown path).
     settled: Arc<Notify>,
+    /// Best-effort process-local wakeup emitted only after the durable
+    /// `child_completed` append succeeds. Durable inbox events remain the source
+    /// of truth; this channel only avoids polling them.
+    completions: broadcast::Sender<ThreadId>,
 }
 
 /// Sub-agent runtime: budget, records, handles, activity events.
@@ -162,6 +166,7 @@ impl DelegationRuntime {
         policy: Arc<dyn SubagentPolicySource>,
         executor: Arc<dyn ChildTurnExecutor>,
     ) -> Self {
+        let (completions, _) = broadcast::channel(256);
         Self {
             core: Arc::new(RuntimeCore {
                 store,
@@ -175,6 +180,7 @@ impl DelegationRuntime {
                 prepared: Mutex::new(HashMap::new()),
                 deleted: Arc::new(Mutex::new(HashSet::new())),
                 settled: Arc::new(Notify::new()),
+                completions,
             }),
         }
     }
@@ -182,6 +188,11 @@ impl DelegationRuntime {
     /// Notified when any child reaches a terminal state.
     pub fn settled(&self) -> Arc<Notify> {
         Arc::clone(&self.core.settled)
+    }
+
+    /// Subscribe to successfully persisted parent completion notifications.
+    pub fn subscribe_completions(&self) -> broadcast::Receiver<ThreadId> {
+        self.core.completions.subscribe()
     }
 
     /// The live policy, read on every spawn so a Settings change applies to the
@@ -699,12 +710,17 @@ impl RuntimeCore {
             }
         }
         let event = completion_event(record, notification_id);
-        if let Err(err) = self.sink.publish(record.parent_thread_id, event).await {
-            tracing::warn!(
-                child = %record.child_id,
-                error = %err.message,
-                "child completion notification was not published"
-            );
+        match self.sink.publish(record.parent_thread_id, event).await {
+            Ok(_) => {
+                let _ = self.completions.send(record.parent_thread_id);
+            }
+            Err(err) => {
+                tracing::warn!(
+                    child = %record.child_id,
+                    error = %err.message,
+                    "child completion notification was not published"
+                );
+            }
         }
     }
 

@@ -1,5 +1,5 @@
 /**
- * Subagent section: `subagents.enabled` + `subagents.max_concurrency`.
+ * Subagent section: enabled, concurrency, and explicit auto-continue opt-in.
  *
  * The runtime hard-limits concurrency to 1–8; the input is clamped here too so
  * the user sees the limit instead of a rejected save. A `rejected` answer is
@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Button, useToast } from '../../../shared/ui'
+import { useI18n } from '../../../shared/i18n'
 import { SUBAGENT_MAX_CONCURRENCY, SUBAGENT_MIN_CONCURRENCY, type ApplyResult, type SubagentSettings } from '../../../shared/contracts'
 import type { SettingsApi } from '../hooks/use-settings'
 import { describeOutcome, type Outcome } from '../api/outcome'
@@ -19,9 +20,11 @@ function clampConcurrency(value: number): number {
 }
 
 export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.Element {
+  const { t } = useI18n()
   const toast = useToast()
   const { config, saving, save } = settings
   const [enabled, setEnabled] = useState(false)
+  const [autoContinue, setAutoContinue] = useState(false)
   const [concurrency, setConcurrency] = useState('2')
   const [rejection, setRejection] = useState<{ reason: string; restartRequired: string[] } | null>(null)
 
@@ -30,6 +33,7 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
   useEffect(() => {
     if (!config) return
     setEnabled(config.subagents.enabled)
+    setAutoContinue(config.subagents.auto_continue)
     setConcurrency(String(config.subagents.max_concurrency))
   }, [config])
 
@@ -45,7 +49,10 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
   const invalid = !Number.isInteger(parsed) || parsed < SUBAGENT_MIN_CONCURRENCY || parsed > SUBAGENT_MAX_CONCURRENCY
   const busy = saving === 'subagents'
   const dirty =
-    enabled !== config.subagents.enabled || parsed !== config.subagents.max_concurrency || invalid
+    enabled !== config.subagents.enabled ||
+    autoContinue !== config.subagents.auto_continue ||
+    parsed !== config.subagents.max_concurrency ||
+    invalid
 
   const persist = async (payload: SubagentSettings, label: string): Promise<void> => {
     setRejection(null)
@@ -65,14 +72,43 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
 
   const toggleEnabled = async (next: boolean): Promise<void> => {
     setEnabled(next)
-    await persist({ enabled: next, max_concurrency: clampConcurrency(Number(concurrency)) }, next ? '启动子 agent ' : '关闭子 agent ')
+    await persist(
+      {
+        enabled: next,
+        max_concurrency: clampConcurrency(Number(concurrency)),
+        auto_continue: autoContinue,
+      },
+      next ? '启动子 agent ' : '关闭子 agent ',
+    )
+  }
+
+  const toggleAutoContinue = async (next: boolean): Promise<void> => {
+    setAutoContinue(next)
+    await persist(
+      {
+        enabled,
+        max_concurrency: clampConcurrency(Number(concurrency)),
+        auto_continue: next,
+      },
+      next ? t('settings.subagents.autoContinue.enabled') : t('settings.subagents.autoContinue.disabled'),
+    )
   }
 
   return (
-    <SettingsSection title="子 agent" desc="并行子 agent 的开关与并发上限。">
+    <SettingsSection title="子 agent" desc={t('settings.subagents.description')}>
       <div className="ark-card__foot">
         <CheckField label="启用子 agent（subagents.enabled）" checked={enabled} disabled={busy} onChange={(next) => void toggleEnabled(next)} />
         <span className="ark-settings__hint">开关切换即保存。</span>
+      </div>
+
+      <div className="ark-card__foot">
+        <CheckField
+          label={t('settings.subagents.autoContinue.label')}
+          checked={autoContinue}
+          disabled={busy || !enabled}
+          onChange={(next) => void toggleAutoContinue(next)}
+        />
+        <span className="ark-settings__hint">{t('settings.subagents.autoContinue.hint')}</span>
       </div>
 
       <Field
@@ -99,7 +135,16 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
             variant="primary"
             size="sm"
             disabled={busy || invalid || !dirty}
-            onClick={() => void persist({ enabled, max_concurrency: clampConcurrency(parsed) }, '保存并发数')}
+            onClick={() =>
+              void persist(
+                {
+                  enabled,
+                  max_concurrency: clampConcurrency(parsed),
+                  auto_continue: autoContinue,
+                },
+                '保存并发数',
+              )
+            }
           >
             {busy ? '保存中…' : '保存'}
           </Button>
@@ -124,7 +169,7 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
       ) : null}
 
       <p className="ark-settings__hint">
-        当前运行时值：enabled = {String(config.subagents.enabled)}，max_concurrency = {config.subagents.max_concurrency}。
+        {t('settings.subagents.autoContinue.runtime')}: {String(config.subagents.auto_continue)}
       </p>
     </SettingsSection>
   )

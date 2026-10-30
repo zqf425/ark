@@ -16,7 +16,7 @@ use chrono::Utc;
 
 use crate::api::error::ApiError;
 use crate::api::handlers::threads::parse_thread;
-use crate::state::{AppState, SteerError, TurnEnd, TurnJob};
+use crate::state::{AppState, SteerError, TurnEnd, TurnJob, TurnSource};
 
 /// `POST /v1/threads/{id}/turns`.
 pub async fn start(
@@ -52,16 +52,12 @@ pub(crate) async fn start_turn(
             "turn text must not be empty",
         ));
     }
-    // Fail fast on an unknown thread instead of starting a detached task.
-    state.store.get_thread(thread_id).await?;
-
     let turn_id = TurnId::new();
     let cancel = CancelToken::new();
-    // The existing runtime rejects a second turn on a busy thread
-    // (`conflictPolicy: 'reject'` -> 409) instead of interleaving two model loops
-    // over one event log. The renderer keeps the message queued and retries after
-    // the running turn settles.
+    // Serialize explicit input with auto-continuation eligibility. User intent
+    // wins by cancelling a pending debounce before registering this turn.
     let _workspace_guard = state.workspace_gate.lock().await;
+    state.store.get_thread(thread_id).await?;
     let Some(registration) = state.turns.try_register(thread_id, turn_id, cancel.clone()) else {
         let running = state
             .turns
@@ -73,10 +69,11 @@ pub(crate) async fn start_turn(
             format!("thread already has a running turn: {running}"),
         ));
     };
+    state.continuations.allow(thread_id);
     let job = TurnJob {
         thread_id,
         turn_id,
-        text,
+        source: TurnSource::User(text),
         cancel,
         steering: registration.steering,
     };
@@ -92,9 +89,10 @@ pub(crate) async fn start_turn(
 /// aborted task still lands on a terminal state (design §3 / §7.1). Without this,
 /// one panicking turn would leave the registry reporting `running` forever and
 /// every later turn on that thread would answer 409.
-fn spawn_turn(state: AppState, job: TurnJob) {
+pub(crate) fn spawn_turn(state: AppState, job: TurnJob) {
     let turn_id = job.turn_id;
     let thread_id = job.thread_id;
+    let is_auto_continuation = matches!(&job.source, TurnSource::AutoContinuation);
     let turns = Arc::clone(&state.turns);
     let runner = Arc::clone(&state.runner);
     let supervisor_state = state.clone();
@@ -123,8 +121,30 @@ fn spawn_turn(state: AppState, job: TurnJob) {
                 .await;
             tracing::warn!(turn = %turn_id, %message, "turn ended without a terminal event");
         }
-        if matches!(end, TurnEnd::Completed) {
-            supervisor_state.note_turn_completed();
+        match end {
+            TurnEnd::CompletedWithPendingCompletions => {
+                supervisor_state.note_turn_completed();
+                // The previous batch was fully acknowledged, so another bounded
+                // turn can safely drain the next inbox page without retrying the
+                // same notification forever.
+                crate::service::schedule_auto_continuation(supervisor_state, thread_id).await;
+            }
+            TurnEnd::Completed => {
+                supervisor_state.note_turn_completed();
+                // A completion may have arrived while an explicit turn was active.
+                // Automatic turns only chain through the explicit pending variant
+                // above, which requires every acknowledgement to have succeeded.
+                if !is_auto_continuation {
+                    crate::service::schedule_auto_continuation(supervisor_state, thread_id).await;
+                }
+            }
+            TurnEnd::Failed(_) | TurnEnd::Aborted(_) if is_auto_continuation => {
+                tracing::warn!(
+                    turn = %turn_id,
+                    "automatic continuation failed or was aborted; awaiting explicit input or a new child completion"
+                );
+            }
+            TurnEnd::Failed(_) | TurnEnd::Aborted(_) => {}
         }
     });
 }
@@ -186,13 +206,25 @@ pub async fn interrupt(
     State(state): State<AppState>,
     Path((id, turn)): Path<(String, String)>,
 ) -> Result<(StatusCode, Json<TurnSummary>), ApiError> {
-    let _thread_id = parse_thread(&id)?;
+    let thread_id = parse_thread(&id)?;
     let turn_id = parse_turn(&turn)?;
-    state
-        .turns
-        .cancel(turn_id)
+    // Trip the active turn immediately; do not make user cancellation wait for
+    // an unrelated workspace operation that currently owns the lifecycle gate.
+    let cancelled = state.turns.cancel_active(thread_id, turn_id);
+    let _workspace_guard = state.workspace_gate.lock().await;
+    // Suppress only while this is still the newest epoch. A newer explicit turn
+    // may have registered while we waited for the gate and must take precedence.
+    if state.turns.is_latest_for(thread_id, turn_id) {
+        state.continuations.suppress(thread_id);
+    }
+    cancelled
         .map(|summary| (StatusCode::ACCEPTED, Json(summary)))
-        .ok_or_else(|| ApiError::new(ark_common::ArkErrorCode::NotFound, "turn is not known"))
+        .ok_or_else(|| {
+            ApiError::new(
+                ark_common::ArkErrorCode::NotFound,
+                "active turn is not known",
+            )
+        })
 }
 
 /// `POST /v1/threads/{id}/compact`.
@@ -347,6 +379,66 @@ mod tests {
         assert_eq!(error.0.code, ark_common::ArkErrorCode::ValidationError);
         assert_eq!(error.0.code.http_status(), StatusCode::BAD_REQUEST.as_u16());
         assert_eq!(runner.0.load(Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[tokio::test]
+    async fn late_interrupt_suppresses_a_pending_continuation() {
+        let temp = std::env::temp_dir().join(format!("ark-late-interrupt-{}", TurnId::new()));
+        let runner = Arc::new(CountingRunner(AtomicUsize::new(0)));
+        let state = state(&temp, runner);
+        let thread = state.store.create_thread("parent").await.expect("thread");
+        let turn = TurnId::new();
+        state
+            .turns
+            .try_register(thread.thread_id, turn, CancelToken::new())
+            .expect("turn registered");
+        state.turns.finish(turn, &TurnEnd::Completed);
+        state
+            .continuations
+            .try_schedule(thread.thread_id)
+            .expect("pending continuation");
+
+        let error = interrupt(
+            State(state.clone()),
+            Path((thread.thread_id.to_string(), turn.to_string())),
+        )
+        .await
+        .expect_err("the target turn already ended");
+
+        assert_eq!(error.0.code, ark_common::ArkErrorCode::NotFound);
+        assert!(state.continuations.try_schedule(thread.thread_id).is_none());
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[tokio::test]
+    async fn stale_interrupt_does_not_suppress_a_newer_turn_epoch() {
+        let temp = std::env::temp_dir().join(format!("ark-stale-interrupt-{}", TurnId::new()));
+        let runner = Arc::new(CountingRunner(AtomicUsize::new(0)));
+        let state = state(&temp, runner);
+        let thread = state.store.create_thread("parent").await.expect("thread");
+        let stale = TurnId::new();
+        state
+            .turns
+            .try_register(thread.thread_id, stale, CancelToken::new())
+            .expect("first turn registered");
+        state.turns.finish(stale, &TurnEnd::Completed);
+        let current = TurnId::new();
+        state
+            .turns
+            .try_register(thread.thread_id, current, CancelToken::new())
+            .expect("newer turn registered");
+        state.turns.finish(current, &TurnEnd::Completed);
+
+        let error = interrupt(
+            State(state.clone()),
+            Path((thread.thread_id.to_string(), stale.to_string())),
+        )
+        .await
+        .expect_err("the stale target already ended");
+
+        assert_eq!(error.0.code, ark_common::ArkErrorCode::NotFound);
+        assert!(state.continuations.try_schedule(thread.thread_id).is_some());
         let _ = std::fs::remove_dir_all(temp);
     }
 }

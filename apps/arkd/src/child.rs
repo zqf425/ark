@@ -624,6 +624,7 @@ mod tests {
         config.subagents = ark_contract::SubagentSettings {
             enabled,
             max_concurrency,
+            auto_continue: false,
         };
         let store = Arc::new(ark_config::ConfigStore::new(config));
         ConfigSubagentPolicy::new(store).policy()

@@ -9,7 +9,16 @@
 
 - SSE 订阅调用 `SessionStore::subscribe`，取得同一临界区内的 backlog、水位和 live receiver。
 - 连接有界；慢客户端断开后从最后 `seq` 重连，绝不阻塞线程 writer。
-- `/v1/shutdown`、Ctrl-C 和任务 panic 走同一收敛流程：取消活动回合、等待有限时间、落终态并清理 registry。
+- `/v1/shutdown`、Ctrl-C 和任务 panic 走同一收敛流程：先阻止新的 completion wakeup，再取消待调度
+  continuation 与活动回合，等待有限时间、落终态并清理 registry。
+- 后台 child 的持久 `child_completed` 成功写入后会唤醒 per-thread continuation supervisor。
+  `subagents.auto_continue` 默认关闭；仅当它与 `subagents.enabled` 同时开启时，同一父线程 250 ms 内的
+  通知共享一个可取消 debounce，关闭任一开关会立即取消待调度 continuation。
+  启动前在 `workspace_gate` 下复核 active turn、归档/删除、shutdown、配置和未确认 inbox。中断、删除、
+  归档会取消并抑制迟到 wakeup；下一次显式用户回合或取消归档解除抑制，中断抑制还会从父线程持久终态
+  跨重启恢复（启动修复合成的 abort 除外）。每批最多消费 8 条；仅当前批全部确认成功且仍有待消费项时
+  调度下一批，确认失败不会自行循环。自动作业仍调用注入的普通 `TurnRunner`，不会绕过 reactor、gate
+  或 sandbox，也不会写入伪用户消息。
 - 路径、HTTP 方法、字段名和兼容别名均是对外契约；变更前必须检查 `ark-contract`、`web` 与集成方。
 - `GET /v1/threads` 支持分页与筛选：`limit` 缺省 `THREAD_PAGE_DEFAULT_LIMIT`，clamp 到
   `[1, THREAD_PAGE_MAX_LIMIT]`；`offset` 按确定顺序（active 优先、`updated_at` 降序、

@@ -24,7 +24,7 @@ use ark_ports::{
 use ark_store::{AttachmentStore, FileSessionStore, StoreConfig, DEFAULT_MAX_ATTACHMENT_BYTES};
 use ark_tool::{Autonomy, BuiltinSandboxPolicy, RegistryToolRunner, ToolRegistry};
 
-use ark_server::{AppState, TurnEnd, TurnJob, TurnRunner};
+use ark_server::{AppState, TurnEnd, TurnJob, TurnRunner, TurnSource};
 
 use crate::base::{
     McpServerAdapter, MemoryAdapter, ProviderAdapter, SkillAdapter, WorkspaceAdapter,
@@ -153,6 +153,9 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         subagent_policy,
         child_executor,
     ));
+    // Subscribe before hydrate so repaired terminal notifications cannot race
+    // past the auto-continuation listener constructed below.
+    let completion_notifications = delegation.subscribe_completions();
     // Load the authoritative `children/runs.jsonl` records before the HTTP
     // surface exists. Without this the in-memory registry starts empty, so every
     // historical child would answer 404 after a restart even though its record
@@ -219,6 +222,11 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     .with_gates(gates)
     .with_auth_token(args.auth_token.clone());
 
+    spawn_completion_listener(state.clone(), completion_notifications);
+    // Recover unacknowledged completions that were durable before this process
+    // started (for example, a crash after `child_completed` but before debounce).
+    ark_server::service::sync_auto_continue_policy(state.clone()).await;
+
     Ok(Wiring {
         state,
         store,
@@ -227,6 +235,28 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         usage,
         model_label,
     })
+}
+
+/// Forward durable child-completion wakeups to the per-thread debounce.
+fn spawn_completion_listener(
+    state: AppState,
+    mut notifications: tokio::sync::broadcast::Receiver<ThreadId>,
+) {
+    tokio::spawn(async move {
+        loop {
+            match notifications.recv().await {
+                Ok(thread_id) => {
+                    ark_server::service::schedule_auto_continuation(state.clone(), thread_id).await;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    // Recover from the durable inbox through the same safe scan
+                    // used at startup, including persisted interrupt suppression.
+                    ark_server::service::sync_auto_continue_policy(state.clone()).await;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 /// Register every builtin plus `delegate_task` for the parent agent.
@@ -385,7 +415,8 @@ async fn acknowledge_completion_inbox(
     thread_id: ThreadId,
     turn_id: TurnId,
     notification_ids: &[String],
-) {
+) -> bool {
+    let mut all_acknowledged = true;
     for notification_id in notification_ids {
         if let Err(error) = sink
             .publish(
@@ -400,6 +431,7 @@ async fn acknowledge_completion_inbox(
             )
             .await
         {
+            all_acknowledged = false;
             tracing::warn!(
                 thread = %thread_id,
                 turn = %turn_id,
@@ -409,6 +441,7 @@ async fn acknowledge_completion_inbox(
             );
         }
     }
+    all_acknowledged
 }
 
 /// Converts a reactor outcome into the server-facing turn result.
@@ -420,6 +453,7 @@ async fn acknowledge_completion_inbox(
 /// * Returns: the terminal result without changing a failed or aborted turn.
 async fn finish_parent_turn(
     outcome: TurnOutcome,
+    store: &dyn SessionStore,
     sink: &dyn EventSink,
     thread_id: ThreadId,
     turn_id: TurnId,
@@ -427,8 +461,18 @@ async fn finish_parent_turn(
 ) -> TurnEnd {
     match outcome {
         TurnOutcome::Completed => {
-            acknowledge_completion_inbox(sink, thread_id, turn_id, inbox.notification_ids()).await;
-            TurnEnd::Completed
+            let acknowledged =
+                acknowledge_completion_inbox(sink, thread_id, turn_id, inbox.notification_ids())
+                    .await;
+            if acknowledged
+                && completion_inbox(store, thread_id)
+                    .await
+                    .is_ok_and(|remaining| !remaining.notification_ids().is_empty())
+            {
+                TurnEnd::CompletedWithPendingCompletions
+            } else {
+                TurnEnd::Completed
+            }
         }
         TurnOutcome::Failed { message } => TurnEnd::Failed(message),
         TurnOutcome::Aborted { reason } => TurnEnd::Aborted(reason),
@@ -441,6 +485,10 @@ impl TurnRunner for AgentTurnRunner {
         let inbox = completion_inbox(self.store.as_ref(), job.thread_id).await?;
         let history = conversation_history(&self.store.read_items(job.thread_id).await?);
         let thread = self.store.get_thread(job.thread_id).await?;
+        let (source_text, user_text) = match job.source {
+            TurnSource::User(text) => (text.clone(), Some(text)),
+            TurnSource::AutoContinuation => (String::new(), None),
+        };
         // Capture once before building either the prompt or tool adapter. A
         // per-session override wins, otherwise the process workspace lease is
         // used; neither can change during this turn.
@@ -484,7 +532,7 @@ impl TurnRunner for AgentTurnRunner {
         // the prompt-cache prefix stays byte-identical between turns (design
         // §7.4.6 / §7.14). Only activated skills are injected; the rest appear in
         // the catalog line so the model knows they exist.
-        let resolution = self.skills.resolve_for_turn(&job.text);
+        let resolution = self.skills.resolve_for_turn(&source_text);
         let mut seed_messages = vec![
             ModelMessage::system(SYSTEM_PROMPT),
             ModelMessage::system(workspace_line(&workspace)),
@@ -533,10 +581,13 @@ impl TurnRunner for AgentTurnRunner {
             chunk_buffer: Self::chunk_buffer_for_turn(&snapshot),
         })
         .with_steering(job.steering);
-        reactor.push_user(job.text);
+        if let Some(text) = user_text {
+            reactor.push_user(text);
+        }
         let outcome = reactor.run().await?;
         Ok(finish_parent_turn(
             outcome,
+            self.store.as_ref(),
             self.sink.as_ref(),
             job.thread_id,
             job.turn_id,
@@ -769,9 +820,72 @@ mod tests {
             "the turn receives a system source"
         );
 
-        let end = finish_parent_turn(TurnOutcome::Completed, &store, thread, turn, &inbox).await;
+        let end =
+            finish_parent_turn(TurnOutcome::Completed, &store, &store, thread, turn, &inbox).await;
 
         assert!(matches!(end, TurnEnd::Completed));
+        assert!(completion_inbox(&store, thread)
+            .await
+            .unwrap()
+            .notification_ids()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn completed_parent_turn_reports_another_bounded_inbox_page() {
+        let data_dir = TestDataDir::new();
+        let store = FileSessionStore::open(StoreConfig::new(&data_dir.0)).unwrap();
+        let thread = store.create_thread("parent").await.unwrap().thread_id;
+        for index in 0..9 {
+            store
+                .append_event(
+                    thread,
+                    RuntimeEvent::ChildCompleted {
+                        seq: 0,
+                        thread_id: thread,
+                        timestamp: Utc::now(),
+                        notification_id: format!("child:{index}"),
+                        child_id: ChildId::new(),
+                        label: format!("worker {index}"),
+                        status: "completed".to_string(),
+                        summary: Some("done".to_string()),
+                        error: None,
+                        usage: None,
+                        tool_invocations: None,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        let first = completion_inbox(&store, thread).await.unwrap();
+        assert_eq!(first.notification_ids().len(), 8);
+        let first_end = finish_parent_turn(
+            TurnOutcome::Completed,
+            &store,
+            &store,
+            thread,
+            TurnId::new(),
+            &first,
+        )
+        .await;
+        assert!(matches!(
+            first_end,
+            TurnEnd::CompletedWithPendingCompletions
+        ));
+
+        let second = completion_inbox(&store, thread).await.unwrap();
+        assert_eq!(second.notification_ids().len(), 1);
+        let second_end = finish_parent_turn(
+            TurnOutcome::Completed,
+            &store,
+            &store,
+            thread,
+            TurnId::new(),
+            &second,
+        )
+        .await;
+        assert!(matches!(second_end, TurnEnd::Completed));
         assert!(completion_inbox(&store, thread)
             .await
             .unwrap()
@@ -809,6 +923,7 @@ mod tests {
             TurnOutcome::Failed {
                 message: "model failed".to_string(),
             },
+            &store,
             &store,
             thread,
             TurnId::new(),

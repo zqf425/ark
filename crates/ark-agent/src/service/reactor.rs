@@ -249,9 +249,20 @@ impl Reactor {
     /// A cancel that arrives between actions terminates the turn immediately.
     fn cancelled_outcome(&self) -> Option<TurnOutcome> {
         if self.cancel.is_cancelled() && !self.machine.state().is_terminal() {
-            Some(TurnOutcome::aborted("turn interrupted"))
+            Some(TurnOutcome::aborted(
+                self.cancellation_reason("turn interrupted"),
+            ))
         } else {
             None
+        }
+    }
+
+    /// Preserve a boundary-supplied detail for ordinary interrupts, while a
+    /// process-owned reason such as shutdown remains distinguishable on disk.
+    fn cancellation_reason(&self, fallback: &str) -> String {
+        match self.cancel.reason().as_deref() {
+            Some("turn interrupted") | None => fallback.to_string(),
+            Some(reason) => reason.to_string(),
         }
     }
 
@@ -286,7 +297,10 @@ impl Reactor {
         self.machine.set_prompt_estimate(estimate);
         match self.pump().await? {
             Round::Settled(response) => self.settle_model(response).await,
-            Round::Aborted => Ok(self.interrupt_input("turn interrupted")),
+            Round::Aborted => {
+                let reason = self.cancellation_reason("turn interrupted");
+                Ok(self.interrupt_input(&reason))
+            }
             Round::Failed(message) => Ok(self.input_of(InputKind::ModelFailed { message })),
         }
     }
@@ -530,7 +544,8 @@ impl Reactor {
                 // No explicit drop: the registered future was moved into this
                 // select branch, and `select!` drops the losing branch's
                 // future, whose internal guard removes the registration.
-                return Ok(self.interrupt_input("turn interrupted while awaiting approval"))
+                let reason = self.cancellation_reason("turn interrupted while awaiting approval");
+                return Ok(self.interrupt_input(&reason))
             }
             reply = reply_future => reply?,
         };
@@ -600,7 +615,8 @@ impl Reactor {
             _ = self.cancel.cancelled() => {
                 // Same as approvals: the losing select branch's future is
                 // dropped and its internal guard cleans up the registration.
-                return Ok(self.interrupt_input("turn interrupted while awaiting user input"))
+                let reason = self.cancellation_reason("turn interrupted while awaiting user input");
+                return Ok(self.interrupt_input(&reason))
             }
             answer = answer_future => answer?,
         };
@@ -695,7 +711,8 @@ impl Reactor {
             executions.extend(results);
             ran.extend(batch);
             if interrupted {
-                return Ok(self.interrupt_input("turn interrupted during tool dispatch"));
+                let reason = self.cancellation_reason("turn interrupted during tool dispatch");
+                return Ok(self.interrupt_input(&reason));
             }
         }
         self.machine.record_calls(&ran);

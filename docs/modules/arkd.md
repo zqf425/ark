@@ -26,6 +26,12 @@ source 注入 reactor。父回合成功后再追加 completion acknowledgement�
 读取使用 completion 生命周期窄查询而非完整历史回放。组合根的完成处理必须保持“注入 → 正常完成才确认 →
 下一回合不再注入；失败或中断不确认”的顺序。
 
+组合根在 delegation hydrate 前订阅 completion wakeup，随后把父 thread id 转发给 `ark-server` 的
+per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启动和 `subagents.auto_continue` 热开启
+同样扫描未确认 inbox。自动 continuation 复用 `AgentTurnRunner`，以独立 system-source 作业类型启动，
+不调用 `push_user`，因此不会伪造用户消息；其 provider、workspace、预算、sandbox 和 gates 与普通父回合
+走同一路径。
+
 父回合使用 `InteractiveGates`，该实例同时注入 `AppState` 的 HTTP handler 与 `AgentTurnRunner` 的
 `ReactorConfig`；不得回退为 `AllowAllGates`，否则审批和用户输入卡片会变成无法影响执行的装饰。
 

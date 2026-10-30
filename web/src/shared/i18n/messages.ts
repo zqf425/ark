@@ -40,7 +40,13 @@ export const MESSAGES = {
   'settings.autonomy.save': ['保存默认权限', 'Save default permissions'],
   'settings.autonomy.saving': ['保存中…', 'Saving…'],
   'settings.autonomy.saved': ['默认权限已保存', 'Default permissions saved'],
-  'settings.autonomy.saveFailed': ['保存默认权限失败', 'Failed to save default permissions']
+  'settings.autonomy.saveFailed': ['保存默认权限失败', 'Failed to save default permissions'],
+  'settings.subagents.description': ['并行子 agent、并发上限与后台完成后的自动续跑。', 'Parallel subagents, concurrency limits, and automatic continuation after background completion.'],
+  'settings.subagents.autoContinue.label': ['后台完成后自动续跑（subagents.auto_continue）', 'Automatically continue after background completion (subagents.auto_continue)'],
+  'settings.subagents.autoContinue.hint': ['默认关闭；开启后会产生额外模型调用。', 'Off by default; enabling it permits additional model calls.'],
+  'settings.subagents.autoContinue.enabled': ['开启自动续跑', 'Enable automatic continuation'],
+  'settings.subagents.autoContinue.disabled': ['关闭自动续跑', 'Disable automatic continuation'],
+  'settings.subagents.autoContinue.runtime': ['当前自动续跑值', 'Current auto-continue value']
   ,'session.context.compact': ['创建上下文检查点', 'Create context checkpoint']
   ,'session.context.compacted': ['上下文检查点已创建', 'Context checkpoint created']
 } as const

@@ -745,6 +745,7 @@ async fn child_activity_events_are_published_on_the_parent_stream() {
 #[tokio::test]
 async fn a_background_child_publishes_a_terminal_completion_notification() {
     let harness = harness_async(FakeExecutor::new("final report"), (true, 2, 4)).await;
+    let mut completion_wakeup = harness.runtime.subscribe_completions();
     let child = harness
         .runtime
         .delegate_background(harness.request("research asynchronously"))
@@ -777,6 +778,13 @@ async fn a_background_child_publishes_a_terminal_completion_notification() {
     assert_eq!(completion["child_id"], child.to_string());
     assert_eq!(completion["summary"], "final report");
     assert_eq!(completion["status"], ark_ports::child_status::COMPLETED);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), completion_wakeup.recv())
+            .await
+            .expect("completion wakeup")
+            .expect("completion channel"),
+        harness.parent
+    );
 }
 
 #[tokio::test]

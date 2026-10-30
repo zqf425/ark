@@ -18,6 +18,10 @@
 
 `default_autonomy` 是未设置会话覆盖时使用的 `Hot` 全局默认值。它只接受 `strict`、`workspace_write` 或向后兼容的 `unattended`；非法 patch 会被事务性拒绝，不得静默回退。
 
+`subagents.auto_continue` 是 `Hot` 布尔开关，默认及旧配置缺失值均为 `false`。仅当
+`subagents.enabled` 与 `subagents.auto_continue` 同时为 `true` 时，server 才扫描持久 completion inbox
+并调度符合条件的父线程；关闭任一开关会立即取消进程内待调度 continuation，不影响已开始回合。
+
 ## 验证
 
 覆盖字段分类、跨字段校验、非法 patch 不修改旧快照、热字段可见性以及重启字段整批拒绝。

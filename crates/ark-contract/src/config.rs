@@ -117,6 +117,10 @@ pub struct SubagentSettings {
     pub enabled: bool,
     #[ts(as = "f64")]
     pub max_concurrency: u32,
+    /// Start a parent continuation after background child completions.
+    /// Disabled by default because enabling it permits additional model calls.
+    #[serde(default)]
+    pub auto_continue: bool,
 }
 
 /// Hard bounds on `max_concurrency`. Above 8 the local model budget and the
@@ -129,6 +133,7 @@ impl Default for SubagentSettings {
         Self {
             enabled: true,
             max_concurrency: 2,
+            auto_continue: false,
         }
     }
 }
@@ -140,6 +145,7 @@ impl SubagentSettings {
             max_concurrency: self
                 .max_concurrency
                 .clamp(SUBAGENT_CONCURRENCY_MIN, SUBAGENT_CONCURRENCY_MAX),
+            auto_continue: self.auto_continue,
         }
     }
 }
@@ -191,5 +197,13 @@ mod tests {
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("\"result\":\"rejected\""));
         assert!(json.contains("server.port"));
+    }
+
+    #[test]
+    fn auto_continue_is_disabled_by_default_and_for_legacy_json() {
+        assert!(!SubagentSettings::default().auto_continue);
+        let settings: SubagentSettings =
+            serde_json::from_str(r#"{"enabled":true,"max_concurrency":2}"#).unwrap();
+        assert!(!settings.auto_continue);
     }
 }

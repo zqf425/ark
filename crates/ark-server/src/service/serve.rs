@@ -34,14 +34,18 @@ impl AppHandle {
     pub async fn serve(self) -> Result<()> {
         let state = self.state.clone();
         let mut shutdown = state.shutdown_receiver();
+        let shutdown_state = state.clone();
         let app = router(state.clone());
         let result = axum::serve(self.listener, app)
             .with_graceful_shutdown(async move {
-                // Either the explicit route or the OS signal ends the loop.
+                // Either the explicit route or the OS signal ends the loop. Mark
+                // shutdown here (not after axum finishes draining connections),
+                // so a late child completion cannot create fresh parent work.
                 tokio::select! {
                     _ = shutdown.recv() => {}
                     _ = tokio::signal::ctrl_c() => {}
                 }
+                shutdown_state.begin_shutdown();
             })
             .await;
         drain(state).await;
@@ -69,8 +73,12 @@ pub async fn bind(state: AppState, port: u16) -> Result<AppHandle> {
 /// will ever deliver, and the drain would always burn its full timeout before the
 /// runtime dropped them mid-flight (design §7.1 / §7.9).
 async fn drain(state: AppState) {
-    // 1. Trip every cancel handle: parent turns and their child runs.
-    state.turns.cancel_all();
+    // 1. Reject late completion wakeups, then trip every cancel handle: parent
+    // turns, pending continuations and child runs.
+    state.begin_shutdown();
+    state
+        .turns
+        .cancel_all_with_reason(crate::state::SHUTDOWN_CANCEL_REASON);
     let aborted_children = state.abort_children();
     if aborted_children > 0 {
         tracing::info!(aborted_children, "shutdown requested child aborts");

@@ -14,7 +14,7 @@ use tokio::sync::watch;
 
 #[derive(Debug)]
 struct Inner {
-    sender: watch::Sender<bool>,
+    sender: watch::Sender<Option<String>>,
 }
 
 /// A cloneable cancellation handle. Cloning shares the same signal.
@@ -31,35 +31,51 @@ impl Default for CancelToken {
 
 impl CancelToken {
     pub fn new() -> Self {
-        let (sender, _receiver) = watch::channel(false);
+        let (sender, _receiver) = watch::channel(None);
         Self {
             inner: Arc::new(Inner { sender }),
         }
     }
 
-    /// Trip the signal. Idempotent: repeating it is harmless.
+    /// Trip the signal with the ordinary user-interrupt reason.
     pub fn cancel(&self) {
-        // `send` (not `send_replace`) fails when nobody is subscribed yet, which
-        // would silently drop the signal. `send_replace` always updates the
-        // channel value, so a token cancelled before any waiter exists still
-        // resolves every future waiter.
-        self.inner.sender.send_replace(true);
+        self.cancel_with_reason("turn interrupted");
+    }
+
+    /// Trip the signal with a durable reason. The first cancellation wins so a
+    /// later shutdown cannot rewrite an earlier explicit user interrupt.
+    pub fn cancel_with_reason(&self, reason: impl Into<String>) {
+        let reason = reason.into();
+        // `send_modify` holds the watch value's write lock while checking and
+        // updating it, so concurrent interrupt/shutdown callers cannot replace
+        // whichever reason arrived first. Unlike `send`, it also updates the
+        // value when no receiver has subscribed yet.
+        self.inner.sender.send_modify(|current| {
+            if current.is_none() {
+                *current = Some(reason);
+            }
+        });
     }
 
     pub fn is_cancelled(&self) -> bool {
-        *self.inner.sender.borrow()
+        self.inner.sender.borrow().is_some()
+    }
+
+    /// The durable cancellation reason, when cancelled.
+    pub fn reason(&self) -> Option<String> {
+        self.inner.sender.borrow().clone()
     }
 
     /// Resolve when the token is cancelled. Cancel-safe: dropping this future
     /// never loses the signal, because the flag lives in the channel.
     pub async fn cancelled(&self) {
         let mut receiver = self.inner.sender.subscribe();
-        if *receiver.borrow() {
+        if receiver.borrow().is_some() {
             return;
         }
-        // Keep waiting while the channel is alive without a `true` value.
+        // Keep waiting while the channel is alive without a reason.
         while receiver.changed().await.is_ok() {
-            if *receiver.borrow() {
+            if receiver.borrow().is_some() {
                 return;
             }
         }
@@ -111,8 +127,17 @@ mod tests {
     async fn clones_share_the_signal() {
         let token = CancelToken::new();
         let clone = token.clone();
-        clone.cancel();
+        clone.cancel_with_reason("runtime shutting down");
         assert!(token.is_cancelled());
+        assert_eq!(token.reason().as_deref(), Some("runtime shutting down"));
+    }
+
+    #[test]
+    fn first_cancellation_reason_wins() {
+        let token = CancelToken::new();
+        token.cancel();
+        token.cancel_with_reason("runtime shutting down");
+        assert_eq!(token.reason().as_deref(), Some("turn interrupted"));
     }
 
     #[tokio::test]

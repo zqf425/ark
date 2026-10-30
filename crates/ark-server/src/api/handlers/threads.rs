@@ -167,7 +167,14 @@ pub async fn update(
         state.store.append_event(thread_id, event).await?;
     }
     if let Some(archived) = body.archived {
+        let _workspace_guard = state.workspace_gate.lock().await;
         meta = state.store.set_archived(thread_id, archived).await?;
+        if archived {
+            state.continuations.suppress(thread_id);
+        } else {
+            state.continuations.allow(thread_id);
+            crate::service::schedule_auto_continuation(state.clone(), thread_id).await;
+        }
     }
     if let Some(runtime) = body.runtime {
         let merged = merge_runtime(meta.runtime, runtime, state.base.providers.as_deref())?;
@@ -232,6 +239,10 @@ pub async fn remove(
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let thread_id = parse_thread(&id)?;
+    let _workspace_guard = state.workspace_gate.lock().await;
+    // Validate ownership and active state before changing continuation state. A
+    // failed delete must not suppress future work for a thread that still exists.
+    state.store.get_thread(thread_id).await?;
     if let Some(active) = state.turns.active_for(thread_id) {
         return Err(ApiError::new(
             ark_common::ArkErrorCode::Conflict,
@@ -241,7 +252,17 @@ pub async fn remove(
             ),
         ));
     }
-    state.store.delete_thread(thread_id).await?;
+    let was_suppressed = state.continuations.suppress(thread_id);
+    if let Err(error) = state.store.delete_thread(thread_id).await {
+        if !was_suppressed {
+            state.continuations.allow(thread_id);
+            crate::service::schedule_auto_continuation(state.clone(), thread_id).await;
+        }
+        return Err(error.into());
+    }
+    // Thread ids are never reused. Drop the process-local tombstone after the
+    // durable deletion; late child wakeups fail the store existence check.
+    state.continuations.allow(thread_id);
     Ok(StatusCode::NO_CONTENT)
 }
 

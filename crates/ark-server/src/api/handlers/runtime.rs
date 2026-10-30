@@ -73,8 +73,12 @@ pub async fn usage(State(state): State<AppState>) -> Json<UsageResponse> {
 /// Cancels every in-flight turn (they land on disk through the reactor's
 /// terminal event) and signals the listener to stop.
 pub async fn shutdown(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
-    state.turns.cancel_all();
+    // Mark shutdown before tripping turns so late completion wakeups are rejected,
+    // and persist a process-owned reason rather than user-interrupt intent.
     let notified = state.request_shutdown("http");
+    state
+        .turns
+        .cancel_all_with_reason(crate::state::SHUTDOWN_CANCEL_REASON);
     (
         StatusCode::ACCEPTED,
         Json(json!({
