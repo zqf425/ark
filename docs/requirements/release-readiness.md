@@ -18,7 +18,7 @@
 
 使用独立 `arkd`、独立数据目录和不占用用户进程的端口启动 Web，逐项验证并留存可复现的操作记录：
 
-- 线程新建、选择、重命名、归档/恢复、删除、fork 与 rewind；
+- 线程新建、选择、重命名、归档/恢复、删除与 fork；rewind 目前只有服务端实现，web 无入口，不在本清单内；
 - 普通回合发送、运行中 steer、中断，以及审批和用户输入 gate 的成功、重复、过期和取消路径；
 - 子代理前台/后台启动、排队、完成、失败、abort、steer、resume、摘要跳转和用量展示；
 - `subagents.auto_continue` 默认关闭时不产生额外模型调用；显式开启后，多个完成通知合并、每批最多 8 条、正常确认后继续排空，中断/归档/删除/关闭配置后不再自动续跑；
@@ -79,7 +79,7 @@ Playwright Chromium 驱动真实页面，结论取自真实 HTTP 状态码与真
 
 | 场景 | 结果 | 证据文件（`.tmp/`） |
 | --- | --- | --- |
-| 线程新建/重命名/fork/归档/恢复/rewind/刷新恢复 | 通过（200/201） | `release-browser-run4/EVIDENCE-thread-management.md` |
+| 线程新建/重命名/fork/归档/恢复/刷新恢复 | 通过（200/201） | `release-browser-run4/EVIDENCE-thread-management.md` |
 | 普通回合发送与助手回复收敛 | 通过 | `release-browser-run3/EVIDENCE-turn-send.md` |
 | SSE 空 backlog 首帧 | 通过（修复后首帧 2.4ms；修复前 75s 零字节） | `release-browser-run3/EVIDENCE-sse-first-frame.md` |
 | 空闲线程不再周期性误重连 | 通过（修复后 95s 内订阅数恒为 1） | `release-browser-run3/EVIDENCE-idle-reconnect-fixed.md` |
