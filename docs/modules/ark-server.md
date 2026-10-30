@@ -8,6 +8,10 @@
 ## SSE 与生命周期
 
 - SSE 订阅调用 `SessionStore::subscribe`，取得同一临界区内的 backlog、水位和 live receiver。
+- 首帧：`GET /v1/threads/{id}/events` 在 backlog 为空时立即发送一个 `heartbeat` 控制帧，`seq` 取该次订阅的
+  watermark。它不新增 wire 类型，也不写入 store：既不能声称 writer 尚未发放的序号，也不能让重连的
+  `since_seq` 跳过事件。backlog 非空时不发送该帧，因为首个回放事件已经产生字节，且该帧会与回放末条
+  重复同一个 `seq`。因此正文是否产生首字节不再由 keep-alive 间隔决定。
 - 连接有界；慢客户端断开后从最后 `seq` 重连，绝不阻塞线程 writer。
 - `/v1/shutdown`、Ctrl-C 和任务 panic 走同一收敛流程：先阻止新的 completion wakeup，再取消待调度
   continuation 与活动回合，等待有限时间、落终态并清理 registry。
