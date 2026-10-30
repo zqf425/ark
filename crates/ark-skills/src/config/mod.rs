@@ -150,8 +150,10 @@ mod tests {
 
     #[test]
     fn base_roots_include_workspace_dirs() {
-        let mut config = SkillsConfig::default();
-        config.roots = vec![PathBuf::from("/global/skills")];
+        let config = SkillsConfig {
+            roots: vec![PathBuf::from("/global/skills")],
+            ..SkillsConfig::default()
+        };
         let roots = config.base_roots(Path::new("/ws"));
         assert_eq!(
             roots,
@@ -165,9 +167,11 @@ mod tests {
 
     #[test]
     fn base_roots_are_deduplicated_and_ignore_blank_dirs() {
-        let mut config = SkillsConfig::default();
-        config.roots = vec![PathBuf::from("/ws/skills")];
-        config.workspace_dirs = vec!["skills".to_string(), "  ".to_string()];
+        let config = SkillsConfig {
+            roots: vec![PathBuf::from("/ws/skills")],
+            workspace_dirs: vec!["skills".to_string(), "  ".to_string()],
+            ..SkillsConfig::default()
+        };
         let roots = config.base_roots(Path::new("/ws"));
         assert_eq!(roots, vec![PathBuf::from("/ws/skills")]);
     }

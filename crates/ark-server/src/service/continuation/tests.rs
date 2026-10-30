@@ -67,8 +67,13 @@ impl Harness {
     fn new(enabled: bool) -> Self {
         let root = std::env::temp_dir().join(format!("ark-auto-continue-{}", TurnId::new()));
         let store = Arc::new(FileSessionStore::open(StoreConfig::new(&root)).unwrap());
-        let mut config = RuntimeConfig::default();
-        config.subagents.auto_continue = enabled;
+        let config = RuntimeConfig {
+            subagents: ark_contract::SubagentSettings {
+                auto_continue: enabled,
+                ..ark_contract::SubagentSettings::default()
+            },
+            ..RuntimeConfig::default()
+        };
         let runner = Arc::new(CountingRunner(AtomicUsize::new(0)));
         let state = AppState::new(
             store.clone() as Arc<dyn SessionStore>,

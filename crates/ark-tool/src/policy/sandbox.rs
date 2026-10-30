@@ -11,21 +11,16 @@ use serde::{Deserialize, Serialize};
 use crate::domain::meta::meta_of;
 
 /// How much autonomy the runtime grants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Autonomy {
     /// Every mutation and every shell command needs a human decision.
     Strict,
     /// Workspace writes run unattended; shell commands still ask.
+    #[default]
     WorkspaceWrite,
     /// Everything the builtin catalogue offers runs unattended.
     Unattended,
-}
-
-impl Default for Autonomy {
-    fn default() -> Self {
-        Self::WorkspaceWrite
-    }
 }
 
 /// Policy implementation injected into the reactor.

@@ -444,5 +444,5 @@ async fn unknown_provider_patch_is_rejected_without_changing_runtime() {
             .provider_id,
         None
     );
-    let _ = std::fs::remove_dir_all(PathBuf::from(data_dir));
+    let _ = std::fs::remove_dir_all(data_dir);
 }

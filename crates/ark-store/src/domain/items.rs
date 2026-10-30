@@ -54,6 +54,19 @@ fn build(id: ItemId, turn: TurnId, kind: ItemKind, at: DateTime<Utc>) -> ThreadI
     item
 }
 
+/// The `ToolCallFinished` fields the projection reads.
+///
+/// Grouped into one value so the handler keeps a single event-shaped argument
+/// instead of nine positional ones.
+struct ToolFinished<'a> {
+    call_id: &'a str,
+    tool: &'a str,
+    ok: bool,
+    duration_ms: u64,
+    output: &'a str,
+    detail: Option<&'a str>,
+}
+
 /// Incremental folder: keeps item order and the latest snapshot per item.
 #[derive(Debug, Default)]
 pub struct ItemProjector {
@@ -115,12 +128,14 @@ impl ItemProjector {
                 ..
             } => self.apply_tool_finished(
                 *turn_id,
-                call_id,
-                tool,
-                *ok,
-                *duration_ms,
-                output,
-                detail.as_deref(),
+                &ToolFinished {
+                    call_id,
+                    tool,
+                    ok: *ok,
+                    duration_ms: *duration_ms,
+                    output,
+                    detail: detail.as_deref(),
+                },
                 *timestamp,
             ),
             RuntimeEvent::ApprovalRequested {
@@ -226,22 +241,17 @@ impl ItemProjector {
     fn apply_tool_finished(
         &mut self,
         turn: TurnId,
-        call_id: &str,
-        tool: &str,
-        ok: bool,
-        duration_ms: u64,
-        output: &str,
-        detail: Option<&str>,
+        finished: &ToolFinished<'_>,
         at: DateTime<Utc>,
     ) -> ThreadItem {
-        let id = keyed_item_id(&format!("tool_call:{call_id}"));
+        let id = keyed_item_id(&format!("tool_call:{}", finished.call_id));
         let mut item = self.ensure(id, turn, ItemKind::ToolCall, at);
-        let payload = tool_payload(&mut item, call_id, tool);
-        payload.ok = Some(ok);
-        payload.duration_ms = Some(duration_ms);
-        payload.output = (!output.is_empty()).then(|| output.to_string());
-        item.detail = detail.map(ToString::to_string);
-        item.status = if ok {
+        let payload = tool_payload(&mut item, finished.call_id, finished.tool);
+        payload.ok = Some(finished.ok);
+        payload.duration_ms = Some(finished.duration_ms);
+        payload.output = (!finished.output.is_empty()).then(|| finished.output.to_string());
+        item.detail = finished.detail.map(ToString::to_string);
+        item.status = if finished.ok {
             ItemStatus::Completed
         } else {
             ItemStatus::Failed

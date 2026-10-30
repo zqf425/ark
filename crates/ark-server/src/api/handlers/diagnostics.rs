@@ -252,7 +252,7 @@ fn derive_rounds(events: &[RuntimeEvent], turn_filter: Option<TurnId>) -> Vec<Ll
                         acc.pending_errors.push((
                             *timestamp,
                             LlmRoundError {
-                                code: code.clone(),
+                                code: *code,
                                 message: message.clone(),
                             },
                         ));
@@ -288,10 +288,8 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use ark_agent::CancelToken;
     use ark_common::{Result, Usage};
     use ark_config::{ConfigStore, RuntimeConfig};
-    use ark_contract::item::ItemKind;
     use ark_obs::UsageRecorder;
     use ark_ports::{SessionStore, ToolRegistryPort};
     use ark_store::{FileSessionStore, StoreConfig, StoreLimits};

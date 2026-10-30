@@ -71,7 +71,7 @@ pub fn changes(events: &[RuntimeEvent]) -> WorkspaceChangesResponse {
         }
     }
     let mut changes: Vec<_> = latest.into_values().collect();
-    changes.sort_by(|left, right| right.seq.cmp(&left.seq));
+    changes.sort_by_key(|change| std::cmp::Reverse(change.seq));
     WorkspaceChangesResponse { changes }
 }
 
@@ -164,7 +164,7 @@ pub fn terminal(events: &[RuntimeEvent]) -> TerminalEntriesResponse {
             _ => {}
         }
     }
-    entries.sort_by(|left, right| right.seq.cmp(&left.seq));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.seq));
     TerminalEntriesResponse { entries }
 }
 

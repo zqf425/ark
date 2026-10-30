@@ -32,12 +32,14 @@ pub fn sha256(input: &[u8]) -> [u8; 32] {
     }
     message.extend_from_slice(&bit_len.to_be_bytes());
 
-    for block in message.chunks_exact(64) {
+    // Padding above always leaves a whole number of 64-byte blocks, and 64 is
+    // divisible by 4, so neither `chunks` below can yield a short tail. Plain
+    // `chunks` is deliberate: `slice::as_chunks` only stabilized in Rust 1.88,
+    // while the workspace keeps a 1.75 baseline.
+    for block in message.chunks(64) {
         let mut w = [0u32; 64];
-        for (i, word) in block.chunks_exact(4).enumerate() {
-            let mut buf = [0u8; 4];
-            buf.copy_from_slice(word);
-            w[i] = u32::from_be_bytes(buf);
+        for (slot, word) in w.iter_mut().zip(block.chunks(4)) {
+            *slot = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
         }
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
@@ -122,7 +124,7 @@ mod tests {
         let fp = fingerprint("jira/token", secret);
         assert_eq!(
             fp,
-            format!("jira/token@{}", &hex(&sha256(secret.as_bytes())[..4]))
+            format!("jira/token@{}", hex(&sha256(secret.as_bytes())[..4]))
         );
         assert!(!fp.contains(secret));
         assert_eq!(fp.len(), "jira/token@".len() + 8);

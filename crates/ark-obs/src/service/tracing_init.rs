@@ -147,8 +147,9 @@ mod tests {
 
     #[test]
     fn json_formatter_escapes_quotes() {
-        let mut visitor = MessageVisitor::default();
-        visitor.message = "say \"hi\"".to_string();
+        let visitor = MessageVisitor {
+            message: "say \"hi\"".to_string(),
+        };
         let encoded = serde_json::to_string(&visitor.message).unwrap();
         assert_eq!(encoded, "\"say \\\"hi\\\"\"");
     }

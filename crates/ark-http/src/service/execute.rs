@@ -92,13 +92,12 @@ impl Executor {
         if let Some(body) = body {
             builder = builder.body(body.to_string());
         }
-        let response = builder.send().await.map_err(|err| {
-            if err.is_timeout() || err.is_connect() || err.is_request() {
-                ExecuteError::Transport(format!("{method} {url}: {err}"))
-            } else {
-                ExecuteError::Transport(format!("{method} {url}: {err}"))
-            }
-        })?;
+        // Timeout, connect and request errors all surface the same way: the
+        // retry policy, not this mapping, decides whether to try again.
+        let response = builder
+            .send()
+            .await
+            .map_err(|err| ExecuteError::Transport(format!("{method} {url}: {err}")))?;
         let status = response.status().as_u16();
         let headers = self.collect_headers(response.headers());
         let body = self.read_body(response).await?;
@@ -230,8 +229,10 @@ mod tests {
 
     #[test]
     fn redirect_budget_zero_when_disabled() {
-        let mut policy = HttpPolicy::default();
-        policy.follow_redirects = false;
+        let policy = HttpPolicy {
+            follow_redirects: false,
+            ..HttpPolicy::default()
+        };
         let executor = Executor::new(policy).unwrap();
         let url = Url::parse("https://api.example.com/a").unwrap();
         assert!(executor

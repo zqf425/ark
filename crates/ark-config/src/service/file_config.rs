@@ -62,8 +62,10 @@ mod tests {
     fn roundtrip_preserves_fields() {
         let dir = temp_dir("roundtrip");
         let path = config_path(&dir);
-        let mut config = RuntimeConfig::default();
-        config.log_level = "debug".into();
+        let mut config = RuntimeConfig {
+            log_level: "debug".into(),
+            ..RuntimeConfig::default()
+        };
         config.tuning.max_rounds = 7;
         save(&path, &config).unwrap();
         assert_eq!(load_or_default(&path).unwrap(), config);

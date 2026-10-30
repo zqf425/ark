@@ -215,6 +215,13 @@ pub trait CancelHandle: Send + Sync {
 pub trait SteerHandle: Send + Sync {
     fn push(&self, text: &str) -> bool;
     fn len(&self) -> usize;
+    /// Nothing is queued, so a drain would return an empty batch.
+    ///
+    /// Provided here rather than left to each implementation so that callers can
+    /// ask the question through `dyn SteerHandle` without assuming `len() == 0`.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     /// Take everything queued, in arrival order. Called by the executor at a
     /// round boundary so corrections land between model rounds, never inside a
     /// tool-call/result pair.
@@ -238,6 +245,10 @@ impl<T: SteerHandle + ?Sized> SteerHandle for std::sync::Arc<T> {
 
     fn len(&self) -> usize {
         (**self).len()
+    }
+
+    fn is_empty(&self) -> bool {
+        (**self).is_empty()
     }
 
     fn drain(&self) -> Vec<String> {

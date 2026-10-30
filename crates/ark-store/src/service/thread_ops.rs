@@ -4,15 +4,12 @@
 //! allocation, the durable append and the subscribe watermark all share one
 //! serialization point (design 7.4.3).
 
-use crate::domain::layout::ThreadPaths;
 use crate::domain::thread_file::ThreadFile;
 use crate::service::store::FileSessionStore;
 use crate::store::child_store::rebuild_child_index_blocking;
-use crate::store::event_log::read_markers_blocking;
 use crate::store::index::IndexEntry;
-use crate::store::items_log::{read_item_snapshots_blocking, write_items_blocking, UsageRecord};
 use ark_common::{ArkError, Result, ThreadId};
-use ark_contract::{RuntimeEvent, ThreadItem, ThreadSummary};
+use ark_contract::{RuntimeEvent, ThreadItem};
 use ark_ports::{ChildRunRecord, SessionStore, SubscribeTicket, ThreadMeta};
 
 impl FileSessionStore {
@@ -79,11 +76,6 @@ impl FileSessionStore {
             .unwrap_or(0)
     }
 
-    /// Rebuild `items.jsonl` from the event log.
-    pub(crate) fn rebuild_items(&self, thread: ThreadId) -> Result<Vec<ThreadItem>> {
-        crate::store::items_log::rebuild_items_blocking(&self.thread_paths(thread))
-    }
-
     /// Write a forked copy of `(0, upto_seq]` into a brand-new thread directory.
     pub(crate) fn fork_blocking(&self, thread: ThreadId, upto_seq: u64) -> Result<ThreadMeta> {
         let source = self.require_thread_file(thread)?;
@@ -107,24 +99,9 @@ impl FileSessionStore {
             body.push_str(&crate::store::event_log::encode_event(&retargeted)?);
         }
         crate::store::fs_util::write_atomic(&paths.events_jsonl(), body.as_bytes())?;
-        let items = crate::store::items_log::rebuild_items_blocking(&paths)?;
-        let _ = items;
+        crate::store::items_log::rebuild_items_blocking(&paths)?;
         self.index_upsert(&forked, upto_seq)?;
         Ok(forked.to_meta())
-    }
-
-    /// Rewrite the derived files for a thread from its event log.
-    pub(crate) fn repair_derived(&self, thread: ThreadId) -> Result<()> {
-        let paths = self.thread_paths(thread);
-        let events = crate::store::event_log::read_log_blocking(&paths)?.events;
-        write_items_blocking(&paths, &crate::domain::items::project_items(&events))?;
-        let session = crate::domain::session_state::SessionState::replay(&events);
-        crate::store::fs_util::write_json_atomic(&paths.session_json(), &session)?;
-        let mut usage = ark_common::Usage::default();
-        for record in crate::store::items_log::read_usage_blocking(&paths) {
-            usage.merge(&record.usage);
-        }
-        Ok(())
     }
 
     /// Append a child-run record and refresh the derived child index.
@@ -250,20 +227,11 @@ impl SessionStore for FileSessionStore {
 
     async fn read_items(&self, thread: ThreadId) -> Result<Vec<ThreadItem>> {
         let paths = self.resolve_paths(thread);
-        let store = self;
-        tokio::task::spawn_blocking(move || {
-            if read_item_snapshots_blocking(&paths).is_empty() {
-                crate::store::items_log::read_items_blocking(&paths)
-            } else {
-                crate::store::items_log::read_items_blocking(&paths)
-            }
-            .map(|items| {
-                let _ = store;
-                items
-            })
-        })
-        .await
-        .map_err(|err| ArkError::internal(format!("item read task failed: {err}")))?
+        // `read_items_blocking` already prefers `items.jsonl` and only falls
+        // back to a projection when it is empty, so there is one read path.
+        tokio::task::spawn_blocking(move || crate::store::items_log::read_items_blocking(&paths))
+            .await
+            .map_err(|err| ArkError::internal(format!("item read task failed: {err}")))?
     }
 
     async fn subscribe(&self, thread: ThreadId, since_seq: u64) -> Result<SubscribeTicket> {
@@ -373,37 +341,6 @@ impl ark_ports::EventSink for FileSessionStore {
             watermark: ticket.watermark,
             live: ticket.live,
         })
-    }
-}
-
-/// Compaction markers and usage increments read straight from disk.
-pub(crate) fn thread_extras(
-    paths: &ThreadPaths,
-) -> (Vec<crate::domain::CompactionMarker>, Vec<UsageRecord>) {
-    (
-        read_markers_blocking(paths),
-        crate::store::items_log::read_usage_blocking(paths),
-    )
-}
-
-/// Fresh `ThreadSummary` for the HTTP list route.
-pub(crate) fn summary_of(
-    store: &FileSessionStore,
-    thread: ThreadId,
-    file: &ThreadFile,
-) -> ThreadSummary {
-    let last_seq = store
-        .lock_index()
-        .ok()
-        .and_then(|index| index.get(&thread).map(|entry| entry.indexed_seq))
-        .unwrap_or(0);
-    ThreadSummary {
-        thread_id: file.thread_id,
-        title: file.title.clone(),
-        created_at: file.created_at,
-        updated_at: file.updated_at,
-        last_seq: Some(last_seq),
-        archived: file.archived,
     }
 }
 

@@ -30,7 +30,7 @@ pub fn next_hop(current: &Url, status: u16, location: Option<&str>) -> Result<Ho
     let target = current
         .join(location)
         .map_err(|err| ArkError::validation(format!("invalid redirect target: {err}")))?;
-    let drop_body = matches!(status, 301 | 302 | 303);
+    let drop_body = matches!(status, 301..=303);
     Ok(Hop::Follow { target, drop_body })
 }
 

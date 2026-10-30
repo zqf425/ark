@@ -131,7 +131,7 @@ fn failure(
         text.push_str(&detail);
     } else if !message.is_empty() {
         text.push_str(": ");
-        text.push_str(&truncate_utf8(&message, PROBE_BODY_LIMIT));
+        text.push_str(truncate_utf8(&message, PROBE_BODY_LIMIT));
     }
     ProviderTestResponse {
         ok: false,

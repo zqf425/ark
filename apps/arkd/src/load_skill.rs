@@ -114,11 +114,12 @@ mod tests {
         )
         .unwrap();
         fs::write(skill.join("SKILL.md"), "Read the repository first.").unwrap();
-        let mut config = ark_skills::SkillsConfig::default();
-        config.roots = vec![dir.0.clone()];
-        config.workspace_dirs.clear();
-        let runtime = Arc::new(ark_skills::SkillRuntime::new(config, dir.0.clone()));
-        runtime
+        let config = ark_skills::SkillsConfig {
+            roots: vec![dir.0.clone()],
+            workspace_dirs: Vec::new(),
+            ..ark_skills::SkillsConfig::default()
+        };
+        Arc::new(ark_skills::SkillRuntime::new(config, dir.0.clone()))
     }
 
     fn context() -> ToolContext {

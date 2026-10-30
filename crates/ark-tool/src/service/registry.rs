@@ -288,7 +288,7 @@ mod tests {
         }
 
         fn schema(&self) -> &'static serde_json::Value {
-            &self.schema
+            self.schema
         }
 
         async fn execute(&self, _ctx: &ToolContext, _args: ToolArgs) -> Result<ToolOutput> {
