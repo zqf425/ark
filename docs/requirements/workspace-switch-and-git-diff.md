@@ -1,6 +1,6 @@
 # 工作区切换与 Git diff 设计
 
-> 状态：**实现中**。本需求将工作区作为 arkd 受控运行时状态，不新增 Tauri/React 文件或
+> 状态：**已验收**。工作区由 arkd 作为受控运行时状态持有；本需求未新增 Tauri/React 文件或
 > shell 权限。
 
 ## 目标与当前缺口
@@ -34,7 +34,7 @@ timeout、真实路径 containment、`--porcelain -z`、文件/字节/行数/单
 
 Tauri 保持薄宿主：不新增 command、dialog、shell plugin 或 WebView 文件访问；工作区切换始终经 arkd HTTP。
 
-## 当前实现（2026-10-28）
+## 当前实现（2026-10-29）
 
 - `WorkspaceRoots` 持有 canonical root 与 generation；父 turn 在 runner 入口获取 lease，prompt 与每次
   工具调用均使用同一 root，delegation child 从父 tool context 继承 workspace。
@@ -42,12 +42,15 @@ Tauri 保持薄宿主：不新增 command、dialog、shell plugin 或 WebView �
   根据 parent turn 与 child run 活跃数返回 409，不取消已有任务。
 - `ark-workspace` 以 `status --porcelain=v1 -z` 和受限 diff 生成 staged/unstaged/untracked；untracked
   内容不读取，patch 总量限制 256 KiB、文件数限制 200。
-- recent descriptors 目前仅驻留进程内；持久化仍待完成，不能将其描述为已验收。web Changes 面板已经消费
-  active workspace 与有界 Git diff，但不读取目录、Git 或未跟踪文件内容。
+- recent descriptors 以 canonical 路径 best-effort 原子写入 `<data-dir>/workspace-recent.json`，arkd 启动时
+  恢复；文件缺失或损坏时降级为空集合，已失效、非目录、重复及当前 active 条目会被忽略。写入失败只记录
+  告警，不阻断 workspace switch。recent 仅是可重建的展示数据，不参与 workspace lease 或工具授权判断。
+  web Changes 面板消费 active workspace、recent 与有界 Git diff，但不读取目录、Git 或未跟踪文件内容。
 
 ## 模块责任与验证
 
 `ark-contract` 定义 wire；`ark-ports` 定义 runtime service；`ark-workspace` 实现 canonical、Git/diff；
 `arkd` 持有 gate/lease 并装配；`ark-server` 转发；`web` 渲染 active/recents/diff；desktop 无业务变更。
-覆盖路径/symlink、staged/unstaged/rename/untracked/binary/truncation、switch 与 parent/child 竞争、recent
-持久化、409、generation、契约生成与真实桌面/浏览器验证。
+已覆盖路径/symlink、staged/unstaged/rename/untracked/binary/truncation、switch 与 parent/child 竞争、recent
+写入后重启恢复、损坏降级、失效条目过滤、409、generation 递增及 Rust → TypeScript 契约生成漂移检查。
+本次收尾没有改变前端或桌面行为，因此未新增浏览器/桌面验证。

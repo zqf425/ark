@@ -37,6 +37,11 @@ threshold 收窄到可用输入空间（扣除用户明确设置的 max_tokens�
 工具调用都使用同一 root；子回合继承 delegation tool context 的 workspace。切换只改变后续回合，且必须
 在没有 parent/child active run 时完成；它不会重启 arkd、sidecar、端口或 data-dir。
 
+recent workspace descriptors 是可重建的展示数据，以 canonical 路径 best-effort 原子写入
+`<data-dir>/workspace-recent.json`。启动时缺失或损坏的文件按空集合处理，失效、非目录、重复及当前 active
+条目会被忽略；写入失败只记录告警，不能阻断 arkd 启动或 workspace switch。recent 不参与 lease、路径
+containment 或任何工具授权判断。
+
 Windows 上组合根会在保存 canonical root 前移除 `\\?\` verbatim 前缀，因此 WorkspaceView、模型 prompt
 和工具运行器使用同一份可显示、可解析的路径。
 

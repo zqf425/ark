@@ -94,7 +94,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     ));
     // A workspace root is leased once per turn. Switching is handled through
     // the workspace HTTP surface and never re-reads the Hot config mid-turn.
-    let roots = Arc::new(WorkspaceRoots::new(args.workspace.clone())?);
+    let roots = Arc::new(WorkspaceRoots::new(args.workspace.clone(), &args.data_dir)?);
     let usage = Arc::new(UsageRecorder::new());
 
     // ---- platform services (design §7.5.4) ----

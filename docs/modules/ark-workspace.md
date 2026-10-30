@@ -12,3 +12,7 @@ HTTP 请求。原始命令输出只在模块内部解析，对外暴露稳定契
 `diff` 仅接受宿主已选定的 canonical root，使用 porcelain `-z` 区分 staged、unstaged 与
 untracked；不读取 untracked 文件内容。文件数为 200、总 patch 为 256 KiB 的硬上限，二进制和
 截断均在 DTO 中明确标出。
+
+active workspace 与 generation 由 `arkd` 的进程状态持有；recent descriptors 在进程内展示，并在启动时
+从 `data-dir` 下的可重建缓存恢复。recent 不属于本模块的 Git 检查职责，也不得作为路径 containment 或
+工具授权依据。

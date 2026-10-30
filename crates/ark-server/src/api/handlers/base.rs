@@ -231,10 +231,24 @@ pub async fn workspace_switch(
         .base
         .workspace
         .as_ref()
+        .cloned()
         .ok_or_else(|| missing("workspace"))?;
-    let _workspace_guard = state.workspace_gate.lock().await;
-    let active = state.turns.active() + state.active_children();
-    Ok(Json(service.switch(&body.path, active)?))
+    let switch_state = state.clone();
+    let view = tokio::task::spawn_blocking(move || {
+        // The blocking task owns the gate so request cancellation cannot release
+        // it before path validation, state publication, and persistence finish.
+        let _workspace_guard = switch_state.workspace_gate.blocking_lock();
+        let active = switch_state.turns.active() + switch_state.active_children();
+        service.switch(&body.path, active)
+    })
+    .await
+    .map_err(|error| {
+        ApiError::new(
+            ark_common::ArkErrorCode::RuntimeUnavailable,
+            format!("workspace switch task failed: {error}"),
+        )
+    })??;
+    Ok(Json(view))
 }
 
 /// `GET /v1/workspace/diff` for the active canonical root only.
@@ -293,13 +307,22 @@ pub async fn mcp_test(
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
 
+    use ark_agent::CancelToken;
+    use ark_common::{ChildId, ThreadId, TurnId};
     use ark_config::{ConfigStore, RuntimeConfig};
     use ark_obs::UsageRecorder;
-    use ark_ports::{BaseServices, SessionStore, ToolRegistryPort, WorkspaceService};
+    use ark_ports::{
+        BaseServices, ChildRunRecord, SessionStore, SubagentRegistry, ToolRegistryPort,
+        WorkspaceService,
+    };
     use ark_store::{FileSessionStore, StoreConfig};
     use axum::extract::State;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use chrono::Utc;
 
     use super::*;
 
@@ -328,7 +351,10 @@ mod tests {
         }
     }
 
-    struct Workspace;
+    #[derive(Default)]
+    struct Workspace {
+        generation: AtomicU64,
+    }
 
     impl WorkspaceService for Workspace {
         fn validate(&self, raw: &str) -> ark_common::Result<PathBuf> {
@@ -352,13 +378,65 @@ mod tests {
         fn switch(
             &self,
             _path: &str,
-            _active_runs: usize,
+            active_runs: usize,
         ) -> ark_common::Result<ark_contract::WorkspaceView> {
-            unreachable!("not used by this test")
+            if active_runs != 0 {
+                return Err(ark_common::ArkError::conflict(format!(
+                    "cannot switch workspace while {active_runs} turn(s) are active"
+                )));
+            }
+            Ok(ark_contract::WorkspaceView {
+                active: None,
+                recent: Vec::new(),
+                generation: self.generation.fetch_add(1, Ordering::Relaxed) + 1,
+            })
         }
 
         fn diff(&self) -> ark_common::Result<ark_contract::WorkspaceDiff> {
             unreachable!("not used by this test")
+        }
+    }
+
+    struct ActiveChildRegistry;
+
+    #[async_trait::async_trait]
+    impl SubagentRegistry for ActiveChildRegistry {
+        fn list(&self, _parent: Option<ThreadId>) -> Vec<ChildRunRecord> {
+            vec![ChildRunRecord::queued(
+                ChildId::new(),
+                ThreadId::new(),
+                TurnId::new(),
+                "active child",
+                Utc::now(),
+            )]
+        }
+
+        fn get(&self, _child: ChildId) -> Option<ChildRunRecord> {
+            None
+        }
+
+        fn abort(&self, _child: ChildId) -> bool {
+            false
+        }
+
+        fn steer(&self, _child: ChildId, _text: &str) -> bool {
+            false
+        }
+
+        async fn destroy_child(
+            &self,
+            _parent: ThreadId,
+            _child: ChildId,
+        ) -> ark_common::Result<bool> {
+            Ok(false)
+        }
+
+        fn active_count(&self) -> u32 {
+            1
+        }
+
+        fn is_enabled(&self) -> bool {
+            true
         }
     }
 
@@ -375,7 +453,64 @@ mod tests {
             data_dir.to_path_buf(),
             "test",
         )
-        .with_base_services(BaseServices::new().with_workspace(Arc::new(Workspace)))
+        .with_base_services(BaseServices::new().with_workspace(Arc::new(Workspace::default())))
+    }
+
+    async fn assert_workspace_switch_conflict(state: AppState, expected_active: usize) {
+        let error = workspace_switch(
+            State(state),
+            Json(SwitchWorkspaceRequest {
+                path: "other".to_string(),
+            }),
+        )
+        .await
+        .expect_err("active work must block switching");
+
+        assert_eq!(error.0.code, ark_common::ArkErrorCode::Conflict);
+        assert!(error.0.message.contains(&expected_active.to_string()));
+        assert_eq!(error.into_response().status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn active_parent_turn_makes_workspace_switch_return_409() {
+        let data_dir = std::env::temp_dir().join(format!("ark-workspace-parent-{}", TurnId::new()));
+        let state = state(&data_dir);
+        state
+            .turns
+            .try_register(ThreadId::new(), TurnId::new(), CancelToken::new())
+            .expect("register active parent");
+
+        assert_workspace_switch_conflict(state, 1).await;
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn active_child_run_makes_workspace_switch_return_409() {
+        let data_dir = std::env::temp_dir().join(format!("ark-workspace-child-{}", TurnId::new()));
+        let mut state = state(&data_dir);
+        state.subagents.registry = Some(Arc::new(ActiveChildRegistry));
+
+        assert_workspace_switch_conflict(state, 1).await;
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn idle_workspace_switch_returns_incremented_generation() {
+        let data_dir = std::env::temp_dir().join(format!("ark-workspace-idle-{}", TurnId::new()));
+        let state = state(&data_dir);
+
+        for expected in [1, 2] {
+            let response = workspace_switch(
+                State(state.clone()),
+                Json(SwitchWorkspaceRequest {
+                    path: "other".to_string(),
+                }),
+            )
+            .await
+            .expect("idle switch");
+            assert_eq!(response.0.generation, expected);
+        }
+        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]
