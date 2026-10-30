@@ -88,7 +88,11 @@ export async function subscribeThreadEvents(options: ThreadStreamOptions): Promi
       armWatchdog()
       const frames = stream(`/v1/threads/${options.threadId}/events`, {
         query: { since_seq: lastSeq },
-        signal: controller.signal
+        signal: controller.signal,
+        // Liveness is measured in bytes, not frames: a quiet thread only sees
+        // `: keep-alive` comments, which parse into no frame and would
+        // otherwise let the watchdog abort a perfectly healthy connection.
+        onActivity: armWatchdog
       })
 
       for await (const frame of frames) {
