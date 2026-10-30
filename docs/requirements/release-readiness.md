@@ -1,6 +1,12 @@
 # 发布收尾与真实环境验收
 
-> 状态：**待执行**。自动化构建和定向测试已通过；本需求只承接尚未闭环的真实交互、桌面冷启动与全仓质量问题，不重复已经完成的功能开发。
+> 状态：**部分完成**。真实浏览器交互、全仓 Clippy 与统一验证已闭环（见「验收记录」）；
+> 桌面 sidecar 的「合法复用」与「复用模式退出收敛」已有真实证据；
+> 「空闲端口冷启动」与「未知服务占用端口的冲突边界」因用户自有 `arkd` 长期占用
+> `127.0.0.1:18791` 而阻塞，按第 2 节不得停掉用户进程制造条件，故不宣称完成。
+> 尚需真实模型行为才能触发的交互（steer/中断、审批与输入闸门、子代理全生命周期、
+> 自动续跑批次、四个右侧面板、会话级覆盖）如实标注为未覆盖，见「验收记录 D」。
+> 本需求只承接真实交互、桌面冷启动与全仓质量问题，不重复已经完成的功能开发。
 
 ## 目标
 
@@ -48,6 +54,77 @@
 每轮 DSH 修复完成后，必须使用 Claude CLI 对完整未提交 diff 和相关代码做只读检视，并明确按 P0、P1、P2 分类。若仍有任何 P0 或 P1，主执行会话必须把原始意见交回 DSH 修复，再验证、再调用 Claude；循环直到 Claude 明确确认 **P0=0、P1=0**。P2 可在不影响验收正确性时记录为后续项，但不得把真实正确性或安全问题降级规避。
 
 DSH 和 Claude 都不是验证真源。最终结论必须同时具备实际命令退出码、真实交互证据和主执行会话对 diff 的复核。
+
+## 验收记录
+
+本节只记录已实际执行的证据，每条均按所列命令或步骤可复现。临时日志与截图位于 `.tmp/`，不入库。
+
+### A. 全仓质量收尾
+
+| 项目 | 结果 | 证据 |
+| --- | --- | --- |
+| `scripts/verify.ps1 -Scope all` | 通过（exit 0） | `.tmp/final-verify2.log`：`VERIFY_ALL_EXIT=0` |
+| `cargo clippy --workspace --all-targets --exclude ark-desktop -- -D warnings` | 通过（exit 0） | 同上：`CLIPPY_EXIT=0` |
+| 架构与规范检查 | 通过 | 同上：`Architecture checks passed.` |
+
+全仓 Clippy 整改由 DSH 在 `.worktrees/release-clippy-fix`（分支 `fix/release-clippy`）分轮完成，
+覆盖 `ark-obs`、`ark-config`、`ark-ports`、`ark-agent`、`ark-http`、`ark-llm`、`ark-mcp`、`ark-store`、
+`ark-tool`、`ark-delegation`、`ark-skills`、`ark-provider` 与 `apps/arkd`；
+修复提交 `b9ec1aa`，合入 `a06ba4e`。未以“既有问题”豁免任何告警。
+
+### B. Code 与设置的真实浏览器验收
+
+统一以独立实例执行：独立 `arkd` + 独立数据目录，端口不占用用户进程；
+Playwright Chromium 驱动真实页面，结论取自真实 HTTP 状态码与真实 UI 文本。
+
+| 场景 | 结果 | 证据文件（`.tmp/`） |
+| --- | --- | --- |
+| 线程新建/重命名/fork/归档/恢复/rewind/刷新恢复 | 通过（200/201） | `release-browser-run4/EVIDENCE-thread-management.md` |
+| 普通回合发送与助手回复收敛 | 通过 | `release-browser-run3/EVIDENCE-turn-send.md` |
+| SSE 空 backlog 首帧 | 通过（修复后首帧 2.4ms；修复前 75s 零字节） | `release-browser-run3/EVIDENCE-sse-first-frame.md` |
+| 空闲线程不再周期性误重连 | 通过（修复后 95s 内订阅数恒为 1） | `release-browser-run3/EVIDENCE-idle-reconnect-fixed.md` |
+| 设置页 runtime tuning 与子 agent 投影 | 通过 | `release-browser-run3/EVIDENCE-settings-runtime.md` |
+| `subagents.auto_continue` 默认关闭与开关往返 | 通过（含服务端热更新） | `release-browser-run3/EVIDENCE-auto-continue-toggle.md` |
+| provider / Skills / MCP 真实数据与空态 | 通过 | `release-browser-run3/EVIDENCE-settings-{providers-empty,skills,mcp}.md` |
+
+期间发现并修复的两个产品缺陷（均经 DSH 修复、回归测试与 Claude 只读检视闭环）：
+
+1. **SSE 空 backlog 不发送首帧**：新线程订阅后 75 秒零字节，UI 永久停在“连接中”、发送按钮禁用。
+   修复提交 `3ce6919`，合入 `9365394`；新增 `web/src/shared/api/client.test.ts` 与
+   `web/src/features/code-session/api/events-api.test.ts` 共 318 行回归用例。
+2. **SSE 空闲看门狗误判重连**：keep-alive 注释帧不产生 `frame`，无法重置 75s 看门狗，空闲线程被周期性
+   abort 重连。修复提交 `5553eae`，合入 `eb4cb2f`，改为按字节判活。
+
+### C. Windows 桌面 sidecar
+
+| 场景 | 结果 | 证据文件（`.tmp/`） |
+| --- | --- | --- |
+| 真实 WebView2 窗口打开 `ark · Code` | 通过 | `release-browser-run3/EVIDENCE-desktop-blocker.md` 第 1 节 |
+| 已有合法 `arkd` 的安全复用 | 通过 | `release-browser-run3/EVIDENCE-desktop-reuse-and-exit.md` 第 2、3 节 |
+| 复用模式下宿主退出收敛 | 通过 | 同上第 4 节 |
+| 空闲 18791 上自起专属 sidecar 冷启动 | **外部阻塞** | `release-browser-run3/EVIDENCE-desktop-blocker.md` 第 2 节 |
+| 未知服务占用端口的冲突边界 | **外部阻塞** | 同上第 2 节 |
+
+复用验收的关键断言（三者相互独立，缺一不可）：宿主 `ark-desktop.exe` 下**没有** `arkd` 子进程；
+18791 的 LISTENING owner 仍是用户既有 PID；全程 `arkd` 实例总数不变。
+退出收敛断言：关闭窗口后宿主退出，用户 `arkd` 的 `/health` uptime 继续增长（未被误杀、未重启）。
+
+阻塞的可复现条件：`netstat -ano` 显示 `127.0.0.1:18791` 由用户真实桌面会话的 `arkd` 持有，
+其 `--data-dir` 为 `%APPDATA%/com.ark.desktop/runtime`，启动时间早于本会话。
+解除阻塞后的复现步骤见 `EVIDENCE-desktop-blocker.md` 第 2 节。
+
+### D. 仍未覆盖的真实交互（不宣称通过）
+
+- 回合进行中的 steer 与 interrupt 的用户可见时序；
+- 审批与用户输入 gate 的成功、重复、过期、取消四条路径；
+- 子代理前台/后台启动、排队、完成、失败、abort、steer、resume、摘要跳转与用量展示；
+- `subagents.auto_continue` 开启后多完成通知合并、每批上限 8 条、确认后继续排空的端到端行为；
+- Plan、Changes、File、Terminal 四个面板的真实数据、错误态与刷新恢复；
+- 会话级 workspace/provider/model/权限覆盖与语言/字号/主题的保存与失败提示。
+
+原因：本次运行的模型为本地回显模型（`ark-local`），不具备真实多子代理完成风暴、审批触发与长工具链
+行为，无法在浏览器侧自然产生上述状态。对应服务端逻辑由 `ark-server`、`ark-delegation`、`ark-store`
+单测覆盖并随统一验证通过，但单测不等价于真实交互证据，故不在此宣称通过。
 
 ## 完成条件
 
