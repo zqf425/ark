@@ -110,6 +110,31 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     let mcp = Arc::new(ark_mcp::McpServerRegistry::new(args.data_dir.clone()));
     let memory = Arc::new(ark_store::MemoryFileStore::open(&args.data_dir)?);
 
+    // ---- UI catalog (design §7.5.3) ----
+    //
+    // The Code screen is registered through the same bus any plugin uses, so
+    // `GET /v1/runtime/capabilities` and the renderer navigation have exactly
+    // one source. Capabilities are granted for what this build actually
+    // provides; a page whose requirements are unmet is hidden, never broken.
+    let ui_bus = Arc::new(ark_ui::UiBus::new());
+    for capability in [
+        ark_contract::Capability::Tool,
+        ark_contract::Capability::ModelProvider,
+        ark_contract::Capability::UiPage,
+        ark_contract::Capability::UiPanel,
+    ] {
+        ui_bus.grant_capability(capability);
+    }
+    let code_page_id = ui_bus.register_page(ark_ui::CODE_UI_PLUGIN_ID, ark_ui::code_page())?;
+    // The handle must outlive assembly: dropping it would unregister the page.
+    code_page_id.forget();
+    for (slot, panel) in ark_ui::code_panels() {
+        ui_bus
+            .register_panel(ark_ui::CODE_UI_PLUGIN_ID, slot, panel)?
+            .forget();
+    }
+    tracing::info!(pages = 1, "registered built-in UI catalog");
+
     // The provider table is the source of truth for the model client, so a
     // provider added through the GUI takes effect on the next turn instead of
     // requiring a restart. `model_providers` in config.json stays honoured as a
@@ -202,7 +227,8 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
             Arc::clone(&mcp),
             Arc::clone(&tools),
         )))
-        .with_memory(Arc::new(MemoryAdapter::new(Arc::clone(&memory))));
+        .with_memory(Arc::new(MemoryAdapter::new(Arc::clone(&memory))))
+        .with_ui(Arc::clone(&ui_bus) as Arc<dyn ark_ports::UiCapability>);
 
     let state = AppState::new(
         store_port,

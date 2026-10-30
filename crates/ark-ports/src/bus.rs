@@ -4,7 +4,7 @@
 //! window. That is what keeps proxy/TLS/retry/credential policy in one place.
 
 use ark_common::Result;
-use ark_contract::{PageSpec, PanelSlot, PanelSpec};
+use ark_contract::{Capability, PageSpec, PanelSlot, PanelSpec};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -92,6 +92,9 @@ pub struct PanelHandle {
 }
 
 /// Owns routing, theme, auth and the event bridge for every page.
+///
+/// The catalog served by `GET /v1/runtime/capabilities` comes from here, so the
+/// HTTP layer never keeps a second navigation list of its own.
 #[async_trait]
 pub trait UiCapability: Send + Sync {
     fn register_page(&self, page: PageSpec) -> Result<PageHandle>;
@@ -99,4 +102,11 @@ pub trait UiCapability: Send + Sync {
     fn register_panel(&self, slot: PanelSlot, panel: PanelSpec) -> Result<PanelHandle>;
 
     fn pages(&self) -> Vec<PageSpec>;
+
+    /// Capabilities the host actually provides right now. A page whose
+    /// `required_caps` are not all present is hidden, never shown broken.
+    fn capabilities(&self) -> Vec<Capability>;
+
+    /// Serialized page/panel catalog, ready to be embedded in a response.
+    fn catalog_json(&self) -> serde_json::Value;
 }

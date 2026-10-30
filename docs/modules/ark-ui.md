@@ -12,5 +12,19 @@
 - 页面不直接访问运行时裸 HTTP，而使用由契约生成的 typed client；主题、鉴权、错误边界和事件桥由
   宿主提供。
 
+## 当前实现
+
+`arkd` 在装配阶段创建一个 `UiBus`，授予本构建实际具备的能力
+（`Tool`、`ModelProvider`、`UiPage`、`UiPanel`），再以 `ark.builtin.code-ui` 注册 Code 页和四个面板，
+最后以 `BaseServices::with_ui` 注入 `ark-server`。注册返回的句柄在装配处 `forget()`：句柄一旦 drop
+就会撤销注册，因此它必须活到进程结束。
+
+`GET /v1/runtime/capabilities` 的 `capabilities` 与 `catalog` 两个字段都从该总线读取，
+`ark-server` 不再保留任何硬编码能力清单。未装配总线时该路由报告空能力与空 catalog，不宣称
+`ui_page`——否则渲染层会期待一份无人能产出的导航。
+
+`UiCapability` 因此包含 `capabilities()` 与 `catalog_json()` 两个方法；后者是
+`UiCatalog::to_json` 的端口投影，保证 HTTP 响应与渲染导航来自同一次序列化。
+
 Code UI 当前以内置注册项存在于本 crate；独立 `plugin-code-ui` 是计划目标，实施前不得把该目录
 当成现有代码结构。
