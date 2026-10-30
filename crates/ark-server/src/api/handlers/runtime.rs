@@ -133,11 +133,33 @@ mod tests {
         }
     }
 
-    fn state_with_ui(ui: Option<Arc<dyn ark_ports::UiCapability>>) -> AppState {
-        let dir = std::env::temp_dir().join(format!("ark-caps-{}", uuid_like()));
-        std::fs::create_dir_all(&dir).expect("temp dir");
+    /// Removes its directory on drop, so a failing assertion cannot leak the
+    /// store the state opened.
+    struct TempDir(std::path::PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "ark-caps-test-{}-{}",
+                std::process::id(),
+                chrono::Utc::now()
+                    .timestamp_nanos_opt()
+                    .expect("system clock")
+            ));
+            std::fs::create_dir_all(&path).expect("create test directory");
+            Self(path)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn state_with_ui(dir: &TempDir, ui: Option<Arc<dyn ark_ports::UiCapability>>) -> AppState {
         let store = Arc::new(
-            ark_store::FileSessionStore::open(ark_store::StoreConfig::new(&dir))
+            ark_store::FileSessionStore::open(ark_store::StoreConfig::new(&dir.0))
                 .expect("open store"),
         );
         let base = match ui {
@@ -152,17 +174,10 @@ mod tests {
             )),
             Arc::new(ark_obs::UsageRecorder::new()),
             Arc::new(PendingRunner),
-            dir,
+            dir.0.clone(),
             "test",
         )
         .with_base_services(base)
-    }
-
-    fn uuid_like() -> u128 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default()
     }
 
     struct EmptyTools;
@@ -195,12 +210,16 @@ mod tests {
 
     #[tokio::test]
     async fn capabilities_come_from_the_injected_bus() {
-        let state = state_with_ui(Some(Arc::new(StubUi {
-            caps: vec![
-                ark_contract::Capability::Tool,
-                ark_contract::Capability::UiPage,
-            ],
-        })));
+        let dir = TempDir::new();
+        let state = state_with_ui(
+            &dir,
+            Some(Arc::new(StubUi {
+                caps: vec![
+                    ark_contract::Capability::Tool,
+                    ark_contract::Capability::UiPage,
+                ],
+            })),
+        );
         let Json(body) = capabilities(State(state)).await;
         let caps = body["capabilities"].as_array().expect("capabilities array");
         assert_eq!(caps.len(), 2);
@@ -213,7 +232,8 @@ mod tests {
     async fn capabilities_do_not_claim_a_ui_without_a_bus() {
         // A build that wires no bus must not advertise `ui_page`: the renderer
         // would then expect navigation that nothing can produce.
-        let state = state_with_ui(None);
+        let dir = TempDir::new();
+        let state = state_with_ui(&dir, None);
         let Json(body) = capabilities(State(state)).await;
         let caps = body["capabilities"].as_array().expect("capabilities array");
         assert!(caps.is_empty());
