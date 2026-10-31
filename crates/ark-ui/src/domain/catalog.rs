@@ -5,7 +5,7 @@
 //! so the catalog is byte-stable between polls.
 
 use ark_common::{ArkError, Result};
-use ark_contract::{Capability, PageSpec, PanelSlot, PanelSpec};
+use ark_contract::{Capability, PageSpec, PanelEntry, PanelSlot, PanelSpec, UiCatalog};
 use std::collections::{BTreeMap, HashSet};
 
 /// Panel slot ordering for rendering: left, right, bottom.
@@ -161,22 +161,17 @@ impl PanelIndex {
     }
 }
 
-/// One serializable projection served to `GET /v1/runtime/capabilities` and to
-/// the renderer nav table.
-#[derive(Debug, Clone, Default)]
-pub struct UiCatalog {
-    pub pages: Vec<PageSpec>,
-    pub panels: Vec<(PanelSlot, PanelSpec)>,
-}
-
-impl UiCatalog {
-    pub fn to_json(&self) -> serde_json::Value {
-        let panels: Vec<serde_json::Value> = self
-            .panels
-            .iter()
-            .map(|(slot, panel)| serde_json::json!({ "slot": slot, "panel": panel }))
-            .collect();
-        serde_json::json!({ "pages": self.pages, "panels": panels })
+/// Builds the wire catalog from the sorted page/panel snapshots.
+///
+/// The shape lives in `ark-contract` (`UiCatalog`/`PanelEntry`), so the HTTP
+/// response and the renderer's generated types cannot drift from each other.
+pub fn to_contract_catalog(pages: Vec<PageSpec>, panels: Vec<(PanelSlot, PanelSpec)>) -> UiCatalog {
+    UiCatalog {
+        pages,
+        panels: panels
+            .into_iter()
+            .map(|(slot, panel)| PanelEntry { slot, panel })
+            .collect(),
     }
 }
 
@@ -322,14 +317,14 @@ mod tests {
     }
 
     #[test]
-    fn catalog_json_carries_pages_and_panels() {
-        let catalog = UiCatalog {
-            pages: vec![page("ark.a", "/a")],
-            panels: vec![(PanelSlot::Right, panel("ark.p", PanelSlot::Right))],
-        };
-        let json = catalog.to_json();
-        assert_eq!(json["pages"].as_array().unwrap().len(), 1);
-        assert_eq!(json["panels"][0]["slot"], "right");
-        assert_eq!(json["panels"][0]["panel"]["id"], "ark.p");
+    fn contract_catalog_carries_pages_and_panels() {
+        let catalog = to_contract_catalog(
+            vec![page("ark.a", "/a")],
+            vec![(PanelSlot::Right, panel("ark.p", PanelSlot::Right))],
+        );
+        assert_eq!(catalog.pages.len(), 1);
+        assert_eq!(catalog.panels.len(), 1);
+        assert_eq!(catalog.panels[0].slot, PanelSlot::Right);
+        assert_eq!(catalog.panels[0].panel.id.0, "ark.p");
     }
 }

@@ -114,17 +114,10 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     //
     // The Code screen is registered through the same bus any plugin uses, so
     // `GET /v1/runtime/capabilities` and the renderer navigation have exactly
-    // one source. Capabilities are granted for what this build actually
-    // provides; a page whose requirements are unmet is hidden, never broken.
+    // one source. The bus derives `ui_page`/`ui_panel` from these registrations
+    // and the route composes `tool`/`model_provider` from their own ports, so
+    // the composition root keeps no parallel capability list.
     let ui_bus = Arc::new(ark_ui::UiBus::new());
-    for capability in [
-        ark_contract::Capability::Tool,
-        ark_contract::Capability::ModelProvider,
-        ark_contract::Capability::UiPage,
-        ark_contract::Capability::UiPanel,
-    ] {
-        ui_bus.grant_capability(capability);
-    }
     let code_page_id = ui_bus.register_page(ark_ui::CODE_UI_PLUGIN_ID, ark_ui::code_page())?;
     // The handle must outlive assembly: dropping it would unregister the page.
     code_page_id.forget();
@@ -133,7 +126,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
             .register_panel(ark_ui::CODE_UI_PLUGIN_ID, slot, panel)?
             .forget();
     }
-    tracing::info!(pages = 1, "registered built-in UI catalog");
+    tracing::info!("registered built-in UI catalog");
 
     // The provider table is the source of truth for the model client, so a
     // provider added through the GUI takes effect on the next turn instead of

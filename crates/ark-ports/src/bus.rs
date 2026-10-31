@@ -4,7 +4,7 @@
 //! window. That is what keeps proxy/TLS/retry/credential policy in one place.
 
 use ark_common::Result;
-use ark_contract::{Capability, PageSpec, PanelSlot, PanelSpec};
+use ark_contract::{Capability, PageSpec, PanelSlot, PanelSpec, UiCatalog};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -80,12 +80,17 @@ pub trait McpCapability: Send + Sync {
     fn catalog(&self) -> McpCatalog;
 }
 
-/// Handle returned by a page registration; dropping it unregisters the page.
+/// Opaque page id returned by a port-level registration.
+///
+/// It carries no lifetime behaviour: the port trait has no `Drop`, so a caller
+/// that needs deregistration must use the implementation's scoped guard
+/// (`UiBus::register_page`) instead.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PageHandle {
     pub id: String,
 }
 
+/// Opaque panel id; see [`PageHandle`] for the ownership caveat.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PanelHandle {
     pub id: String,
@@ -103,10 +108,17 @@ pub trait UiCapability: Send + Sync {
 
     fn pages(&self) -> Vec<PageSpec>;
 
-    /// Capabilities the host actually provides right now. A page whose
-    /// `required_caps` are not all present is hidden, never shown broken.
+    /// Capabilities the UI bus itself provides.
+    ///
+    /// `ui_page`/`ui_panel` follow the registrations, so the host does not have
+    /// to keep a parallel grant list. Capabilities owned by other ports (tools,
+    /// model providers) are composed by the HTTP layer from their own services.
     fn capabilities(&self) -> Vec<Capability>;
 
-    /// Serialized page/panel catalog, ready to be embedded in a response.
-    fn catalog_json(&self) -> serde_json::Value;
+    /// The page/panel catalog, filtered by the caller's full capability set.
+    ///
+    /// Takes the complete set because a page may require a capability this bus
+    /// does not own (for example `tool`); filtering against only the bus's own
+    /// grants would hide pages the runtime can actually serve.
+    fn catalog(&self, available: &[Capability]) -> UiCatalog;
 }

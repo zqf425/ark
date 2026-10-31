@@ -5,9 +5,9 @@
 //! returned by [`UiBus::register_page`] unregisters on `Drop`, so unloading a
 //! plugin cannot leave a dead route behind.
 
-use crate::domain::catalog::{require_caps, PageIndex, PanelIndex, UiCatalog};
+use crate::domain::catalog::{require_caps, to_contract_catalog, PageIndex, PanelIndex};
 use ark_common::{ArkError, Result};
-use ark_contract::{Capability, PageSpec, PanelSlot, PanelSpec};
+use ark_contract::{Capability, PageSpec, PanelSlot, PanelSpec, UiCatalog};
 use ark_ports::{PageHandle, PanelHandle, UiCapability};
 use async_trait::async_trait;
 use std::collections::{BTreeMap, HashSet};
@@ -29,41 +29,35 @@ struct Pages {
 #[derive(Debug)]
 pub struct UiBus {
     state: Shared,
-    available: Mutex<HashSet<Capability>>,
 }
 
 impl UiBus {
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(Pages::default())),
-            available: Mutex::new(HashSet::new()),
         }
     }
 
-    /// Host declares which capabilities currently exist. A page whose
-    /// `required_caps` are not all present is hidden, never shown broken.
-    pub fn grant_capability(&self, capability: Capability) {
-        if let Ok(mut available) = self.available.lock() {
-            available.insert(capability);
-        }
-    }
-
-    pub fn revoke_capability(&self, capability: Capability) {
-        if let Ok(mut available) = self.available.lock() {
-            available.remove(&capability);
-        }
-    }
-
-    pub fn available_capabilities(&self) -> HashSet<Capability> {
-        self.available
+    /// Capabilities this bus provides, derived from what is registered.
+    ///
+    /// Derived rather than declared: a parallel grant list would be a second
+    /// source of truth that could silently disagree with the catalog. The bus
+    /// only ever owns `ui_page`/`ui_panel`; capabilities backed by other ports
+    /// (tools, model providers) are composed by the HTTP layer.
+    pub fn capabilities(&self) -> Vec<Capability> {
+        let counts = self
+            .state
             .lock()
-            .map(|set| set.clone())
-            .unwrap_or_default()
-    }
-
-    /// Capability gate used by the shell before routing to a page.
-    pub fn require(&self, caps: &[Capability]) -> Result<()> {
-        require_caps(caps, &self.available_capabilities())
+            .map(|state| (state.pages.len(), state.panels.len()))
+            .unwrap_or((0, 0));
+        let mut caps = Vec::new();
+        if counts.0 > 0 {
+            caps.push(Capability::UiPage);
+        }
+        if counts.1 > 0 {
+            caps.push(Capability::UiPanel);
+        }
+        caps
     }
 
     /// Register a page owned by `plugin_id`; the returned guard deregisters on
@@ -109,16 +103,24 @@ impl UiBus {
     }
 
     /// The whole catalog: pages plus panels, sorted and stable.
-    pub fn catalog(&self) -> UiCatalog {
-        UiCatalog {
-            pages: self.pages(),
-            panels: self.panels(),
-        }
-    }
-
-    /// Serialized catalog for `GET /v1/runtime/capabilities`.
-    pub fn catalog_json(&self) -> serde_json::Value {
-        self.catalog().to_json()
+    ///
+    /// Entries whose `required_caps` are not all in `available` are filtered out
+    /// rather than served as broken navigation. The caller passes its complete
+    /// capability set because a page may require a capability this bus does not
+    /// own (for example `tool`).
+    pub fn catalog(&self, available: &[Capability]) -> UiCatalog {
+        let available: HashSet<Capability> = available.iter().copied().collect();
+        let pages = self
+            .pages()
+            .into_iter()
+            .filter(|page| require_caps(&page.required_caps, &available).is_ok())
+            .collect();
+        let panels = self
+            .panels()
+            .into_iter()
+            .filter(|(_, panel)| require_caps(&panel.required_caps, &available).is_ok())
+            .collect();
+        to_contract_catalog(pages, panels)
     }
 
     /// Drop every page and panel contributed by one plugin (unload path).
@@ -290,14 +292,10 @@ impl UiCapability for UiBus {
     }
 
     fn capabilities(&self) -> Vec<Capability> {
-        // Sorted so the response is byte-stable across restarts; iterating the
-        // `HashSet` directly would make the same runtime answer differently.
-        let mut caps: Vec<Capability> = self.available_capabilities().into_iter().collect();
-        caps.sort_by_key(|cap| format!("{cap:?}"));
-        caps
+        UiBus::capabilities(self)
     }
 
-    fn catalog_json(&self) -> serde_json::Value {
-        UiBus::catalog_json(self)
+    fn catalog(&self, available: &[Capability]) -> UiCatalog {
+        UiBus::catalog(self, available)
     }
 }
