@@ -24,6 +24,20 @@ pub struct ModelMessage {
     pub tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Tool calls issued by this assistant message. Only the assistant side
+    /// carries them; adapters serialise them so replayed history keeps the
+    /// calls visible to the provider. Old JSON without the field deserialises
+    /// as empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCallRef>,
+}
+
+/// One replayed assistant tool call: id, tool name and parsed arguments.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolCallRef {
+    pub call_id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
 }
 
 impl ModelMessage {
@@ -33,6 +47,7 @@ impl ModelMessage {
             content: content.into(),
             tool_call_id: None,
             name: None,
+            tool_calls: Vec::new(),
         }
     }
 
@@ -42,6 +57,7 @@ impl ModelMessage {
             content: content.into(),
             tool_call_id: None,
             name: None,
+            tool_calls: Vec::new(),
         }
     }
 
@@ -51,7 +67,49 @@ impl ModelMessage {
             content: content.into(),
             tool_call_id: None,
             name: None,
+            tool_calls: Vec::new(),
         }
+    }
+
+    pub fn assistant_with_tool_calls(content: impl Into<String>, calls: Vec<ToolCallRef>) -> Self {
+        Self {
+            role: ModelRole::Assistant,
+            content: content.into(),
+            tool_call_id: None,
+            name: None,
+            tool_calls: calls,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn assistant_with_tool_calls_survives_a_serde_roundtrip() {
+        let message = ModelMessage::assistant_with_tool_calls(
+            "running tools",
+            vec![ToolCallRef {
+                call_id: "c1".into(),
+                name: "read".into(),
+                arguments: serde_json::json!({"path": "a.txt"}),
+            }],
+        );
+        let json = serde_json::to_string(&message).unwrap();
+        assert!(json.contains("tool_calls"));
+        let back: ModelMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, message);
+    }
+
+    #[test]
+    fn old_json_without_tool_calls_deserialises_as_empty() {
+        let legacy = r#"{"role":"assistant","content":"hi"}"#;
+        let message: ModelMessage = serde_json::from_str(legacy).unwrap();
+        assert_eq!(message, ModelMessage::assistant("hi"));
+        // An empty list must be omitted so old consumers see no field at all.
+        let json = serde_json::to_value(ModelMessage::assistant("hi")).unwrap();
+        assert!(json.get("tool_calls").is_none());
     }
 }
 

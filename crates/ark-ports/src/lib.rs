@@ -30,7 +30,9 @@ pub use bus::{
     OutboundRequest, OutboundResponse, PageHandle, PanelHandle, UiCapability,
 };
 pub use event::{EventSink, Subscription};
-pub use model::{ModelChunk, ModelClient, ModelMessage, ModelRequest, ModelResponse, ModelRole};
+pub use model::{
+    ModelChunk, ModelClient, ModelMessage, ModelRequest, ModelResponse, ModelRole, ToolCallRef,
+};
 pub use services::{
     ConfigView, CredentialService, FileService, KvService, LogService, MetricService,
     NotifyService, TraceService,

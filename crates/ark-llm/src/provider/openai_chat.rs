@@ -59,6 +59,27 @@ fn message_json(message: &ModelMessage) -> Value {
         ModelRole::Tool => "tool",
     };
     let mut value = json!({ "role": role, "content": message.content });
+    if !message.tool_calls.is_empty() {
+        // Chat-completions wire shape: arguments travel as a JSON string, so
+        // the parsed Value must be re-serialised before sending.
+        value["tool_calls"] = Value::Array(
+            message
+                .tool_calls
+                .iter()
+                .map(|call| {
+                    json!({
+                        "id": call.call_id,
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            "arguments": serde_json::to_string(&call.arguments)
+                                .unwrap_or_default(),
+                        },
+                    })
+                })
+                .collect(),
+        );
+    }
     if let Some(call_id) = &message.tool_call_id {
         value["tool_call_id"] = json!(call_id);
     }
@@ -336,10 +357,29 @@ mod tests {
             content: "ok".into(),
             tool_call_id: Some("c1".into()),
             name: Some("read".into()),
+            tool_calls: Vec::new(),
         };
         let json = message_json(&message);
         assert_eq!(json["role"], "tool");
         assert_eq!(json["tool_call_id"], "c1");
         assert_eq!(json["name"], "read");
+    }
+
+    #[test]
+    fn assistant_tool_calls_serialise_as_function_entries() {
+        let message = ModelMessage::assistant_with_tool_calls(
+            "calling",
+            vec![ark_ports::ToolCallRef {
+                call_id: "c1".into(),
+                name: "read".into(),
+                arguments: serde_json::json!({"path": "a.txt"}),
+            }],
+        );
+        let json = message_json(&message);
+        let calls = &json["tool_calls"];
+        assert_eq!(calls[0]["id"], "c1");
+        assert_eq!(calls[0]["type"], "function");
+        assert_eq!(calls[0]["function"]["name"], "read");
+        assert_eq!(calls[0]["function"]["arguments"], r#"{"path":"a.txt"}"#);
     }
 }

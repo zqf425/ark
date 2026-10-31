@@ -89,10 +89,20 @@ fn message_json(message: &ModelMessage) -> Value {
                 "content": message.content,
             }],
         }),
-        ModelRole::Assistant => json!({
-            "role": "assistant",
-            "content": [{ "type": "text", "text": message.content }],
-        }),
+        ModelRole::Assistant => {
+            // Replayed calls ride along as tool_use blocks; the paired
+            // tool_result block arrives in the following user message.
+            let mut content = vec![json!({ "type": "text", "text": message.content })];
+            content.extend(message.tool_calls.iter().map(|call| {
+                json!({
+                    "type": "tool_use",
+                    "id": call.call_id,
+                    "name": call.name,
+                    "input": call.arguments,
+                })
+            }));
+            json!({ "role": "assistant", "content": content })
+        }
         _ => json!({
             "role": "user",
             "content": [{ "type": "text", "text": message.content }],
@@ -297,6 +307,7 @@ mod tests {
                 content: "body".into(),
                 tool_call_id: Some("toolu_1".into()),
                 name: None,
+                tool_calls: Vec::new(),
             }],
             ..Default::default()
         };
@@ -304,6 +315,28 @@ mod tests {
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(body["messages"][0]["content"][0]["type"], "tool_result");
         assert_eq!(body["messages"][0]["content"][0]["tool_use_id"], "toolu_1");
+    }
+
+    #[test]
+    fn assistant_tool_calls_serialise_as_tool_use_blocks() {
+        let request = ModelRequest {
+            messages: vec![ModelMessage::assistant_with_tool_calls(
+                "calling",
+                vec![ark_ports::ToolCallRef {
+                    call_id: "toolu_1".into(),
+                    name: "read".into(),
+                    arguments: serde_json::json!({"path": "a.txt"}),
+                }],
+            )],
+            ..Default::default()
+        };
+        let body = build_body(&config(), &request).unwrap();
+        let blocks = &body["messages"][0]["content"];
+        assert_eq!(blocks[0]["type"], "text");
+        assert_eq!(blocks[1]["type"], "tool_use");
+        assert_eq!(blocks[1]["id"], "toolu_1");
+        assert_eq!(blocks[1]["name"], "read");
+        assert_eq!(blocks[1]["input"], serde_json::json!({"path": "a.txt"}));
     }
 
     #[test]

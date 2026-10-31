@@ -60,6 +60,11 @@ UI catalog 由组合根创建唯一 `UiBus`：授予本构建实际具备的能�
 分组，因此下一父回合读取的是最新 schema，而不需要重启。组合根还注册 `load_skill`：它读取 `SkillRuntime`
 的已扫描正文快照，避免 `ark-tool` 反向依赖 skills 实现。
 
+回合种子中的 `conversation_history` 将已完成的 ToolCall/ToolResult 行投影回模型上下文：同一 call_id 配对时，
+调用折叠进上一条 assistant 消息的 `tool_calls`（无文本时新建空内容 assistant 行），后接一条截断到 16 KiB
+UTF-8 字节的 `ModelRole::Tool` 结果消息（失败结果同样回放）；无配对结果的调用与无调用的结果不回放，
+投影顺序保持 durable items 的时间顺序。
+
 ## 验证
 
 装配变更至少执行 `cargo check -p arkd`；涉及运行时、存储或并发时执行 workspace 测试，并验证启动/停机

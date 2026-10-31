@@ -18,8 +18,8 @@ use ark_common::{Result, ThreadId, TurnId};
 use ark_config::{ConfigStore, RuntimeConfig};
 use ark_obs::UsageRecorder;
 use ark_ports::{
-    BaseServices, EventSink, ModelClient, ModelMessage, SandboxPolicy, SessionStore, ToolOutput,
-    ToolRegistryPort,
+    BaseServices, EventSink, ModelClient, ModelMessage, ModelRole, SandboxPolicy, SessionStore,
+    ToolCallRef, ToolOutput, ToolRegistryPort,
 };
 use ark_store::{AttachmentStore, FileSessionStore, StoreConfig, DEFAULT_MAX_ATTACHMENT_BYTES};
 use ark_tool::{Autonomy, BuiltinSandboxPolicy, RegistryToolRunner, ToolRegistry};
@@ -661,30 +661,108 @@ mod autonomy_tests {
 /// Rebuild the durable conversational prefix for the next model turn.
 ///
 /// Reasoning is deliberately excluded: it is renderer-only and must never be
-/// replayed as user-visible assistant text. Tool rows likewise are not replayed
-/// because the current model port has no structured tool-call history shape.
+/// replayed as user-visible assistant text. Completed tool calls are folded
+/// into the assistant history as `tool_calls` when a same-call `ToolResult`
+/// follows, each followed by a `ToolRole` result message; unpaired rows are
+/// dropped because providers reject requests whose tool calls have no result.
 fn conversation_history(items: &[ark_contract::ThreadItem]) -> Vec<ModelMessage> {
-    items
-        .iter()
-        .filter_map(|item| match item.kind {
-            ark_contract::item::ItemKind::UserMessage => item
-                .text
-                .as_deref()
-                .filter(|text| !text.trim().is_empty())
-                .map(ModelMessage::user),
-            ark_contract::item::ItemKind::AssistantMessage => item
-                .text
-                .as_deref()
-                .filter(|text| !text.trim().is_empty())
-                .map(ModelMessage::assistant),
-            ark_contract::item::ItemKind::Notice => item
-                .text
-                .as_deref()
-                .filter(|text| text.starts_with("[context checkpoint]"))
-                .map(ModelMessage::system),
-            _ => None,
-        })
-        .collect()
+    let mut history: Vec<ModelMessage> = Vec::new();
+    // Pending tool calls waiting for their result. Keyed by call_id so result
+    // rows can attach regardless of intermediate non-tool items.
+    let mut pending: std::collections::HashMap<String, ToolCallRef> =
+        std::collections::HashMap::new();
+    for item in items {
+        match item.kind {
+            ark_contract::item::ItemKind::UserMessage => {
+                if let Some(text) = nonempty(item.text.as_deref()) {
+                    history.push(ModelMessage::user(text));
+                }
+            }
+            ark_contract::item::ItemKind::AssistantMessage => {
+                if let Some(text) = nonempty(item.text.as_deref()) {
+                    history.push(ModelMessage::assistant(text));
+                }
+            }
+            ark_contract::item::ItemKind::Notice => {
+                if let Some(text) = item
+                    .text
+                    .as_deref()
+                    .filter(|text| text.starts_with("[context checkpoint]"))
+                {
+                    history.push(ModelMessage::system(text));
+                }
+            }
+            ark_contract::item::ItemKind::ToolCall => {
+                if item.status == ark_contract::item::ItemStatus::Completed {
+                    if let Some(payload) = tool_payload(item) {
+                        pending.insert(
+                            payload.call_id.clone(),
+                            ToolCallRef {
+                                call_id: payload.call_id.clone(),
+                                name: payload.tool.clone(),
+                                arguments: payload.arguments.clone().unwrap_or_default(),
+                            },
+                        );
+                    }
+                }
+            }
+            ark_contract::item::ItemKind::ToolResult => {
+                let Some(payload) = tool_payload(item) else {
+                    continue;
+                };
+                let Some(call) = pending.remove(&payload.call_id) else {
+                    continue;
+                };
+                attach_tool_call(&mut history, call);
+                let call_id = payload.call_id.clone();
+                let tool = payload.tool.clone();
+                history.push(ModelMessage {
+                    role: ModelRole::Tool,
+                    content: truncate_utf8(payload.output.as_deref().unwrap_or("")),
+                    tool_call_id: Some(call_id),
+                    name: Some(tool),
+                    tool_calls: Vec::new(),
+                });
+            }
+            _ => {}
+        }
+    }
+    history
+}
+
+fn nonempty(text: Option<&str>) -> Option<&str> {
+    text.filter(|text| !text.trim().is_empty())
+}
+
+fn tool_payload(item: &ark_contract::ThreadItem) -> Option<&ark_contract::item::ToolPayload> {
+    item.tool.as_ref()
+}
+
+/// Fold a replayed call into the last assistant row, or open a new one.
+/// Ordering of user/assistant rows is never rearranged.
+fn attach_tool_call(history: &mut Vec<ModelMessage>, call: ToolCallRef) {
+    match history.last_mut() {
+        Some(ModelMessage {
+            role: ModelRole::Assistant,
+            tool_calls,
+            ..
+        }) => tool_calls.push(call),
+        _ => history.push(ModelMessage::assistant_with_tool_calls("", vec![call])),
+    }
+}
+
+/// Tool outputs are context, not identity: cap them at 16 KiB on a UTF-8
+/// boundary so a mid-codepoint cut cannot produce invalid text.
+fn truncate_utf8(text: &str) -> String {
+    const MAX: usize = 16 * 1024;
+    if text.len() <= MAX {
+        return text.to_string();
+    }
+    let mut end = MAX;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_string()
 }
 
 /// Adapter from `ark-tool`'s runner to `ark-agent`'s `ToolRunner` trait.
@@ -747,6 +825,156 @@ mod tests {
                 "[context checkpoint]\nGoal: preserve state"
             )]
         );
+    }
+
+    fn tool_item(
+        kind: ark_contract::item::ItemKind,
+        call_id: &str,
+        tool: &str,
+    ) -> ark_contract::ThreadItem {
+        let mut item = ark_contract::ThreadItem::new(TurnId::new(), kind).completed();
+        item.tool = Some(ark_contract::item::ToolPayload {
+            call_id: call_id.into(),
+            tool: tool.into(),
+            arguments: Some(serde_json::json!({"path": "a.txt"})),
+            output: None,
+            ok: None,
+            duration_ms: None,
+        });
+        item
+    }
+
+    fn result_item(call_id: &str, tool: &str, output: &str) -> ark_contract::ThreadItem {
+        let mut item =
+            ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::ToolResult)
+                .completed();
+        item.tool = Some(ark_contract::item::ToolPayload {
+            call_id: call_id.into(),
+            tool: tool.into(),
+            arguments: None,
+            output: Some(output.into()),
+            ok: Some(true),
+            duration_ms: None,
+        });
+        item
+    }
+
+    #[test]
+    fn paired_tool_rows_fold_into_the_assistant_history() {
+        let items = vec![
+            ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::UserMessage)
+                .with_text("hi")
+                .completed(),
+            ark_contract::ThreadItem::new(
+                TurnId::new(),
+                ark_contract::item::ItemKind::AssistantMessage,
+            )
+            .with_text("calling")
+            .completed(),
+            tool_item(ark_contract::item::ItemKind::ToolCall, "c1", "read"),
+            result_item("c1", "read", "file body"),
+        ];
+        assert_eq!(
+            conversation_history(&items),
+            vec![
+                ModelMessage::user("hi"),
+                ModelMessage::assistant_with_tool_calls(
+                    "calling",
+                    vec![ark_ports::ToolCallRef {
+                        call_id: "c1".into(),
+                        name: "read".into(),
+                        arguments: serde_json::json!({"path": "a.txt"}),
+                    }],
+                ),
+                ModelMessage {
+                    role: ModelRole::Tool,
+                    content: "file body".into(),
+                    tool_call_id: Some("c1".into()),
+                    name: Some("read".into()),
+                    tool_calls: Vec::new(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn unpaired_tool_rows_are_not_replayed() {
+        let orphan_call = tool_item(ark_contract::item::ItemKind::ToolCall, "c1", "read");
+        let orphan_result =
+            tool_item(ark_contract::item::ItemKind::ToolResult, "c9", "read").with_text("body");
+        assert_eq!(conversation_history(&[orphan_call]), Vec::new());
+        assert_eq!(conversation_history(&[orphan_result]), Vec::new());
+    }
+
+    #[test]
+    fn failed_tool_results_are_replayed_with_empty_output_fallback() {
+        let mut failed =
+            ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::ToolResult)
+                .completed();
+        failed.tool = Some(ark_contract::item::ToolPayload {
+            call_id: "c1".into(),
+            tool: "bash".into(),
+            arguments: None,
+            output: None,
+            ok: Some(false),
+            duration_ms: None,
+        });
+        let items = vec![
+            tool_item(ark_contract::item::ItemKind::ToolCall, "c1", "bash"),
+            failed,
+        ];
+        let history = conversation_history(&items);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[1].content, "");
+        assert_eq!(history[1].tool_call_id.as_deref(), Some("c1"));
+    }
+
+    #[test]
+    fn oversized_tool_output_is_truncated_at_16kib_bytes() {
+        let big = "x".repeat(20 * 1024);
+        let items = vec![
+            tool_item(ark_contract::item::ItemKind::ToolCall, "c1", "read"),
+            result_item("c1", "read", &big),
+        ];
+        let history = conversation_history(&items);
+        assert_eq!(history[1].content.len(), 16 * 1024);
+    }
+
+    #[test]
+    fn tool_history_keeps_the_time_order_of_items() {
+        let items = vec![
+            ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::UserMessage)
+                .with_text("q1")
+                .completed(),
+            tool_item(ark_contract::item::ItemKind::ToolCall, "c1", "read"),
+            result_item("c1", "read", "r1"),
+            ark_contract::ThreadItem::new(
+                TurnId::new(),
+                ark_contract::item::ItemKind::AssistantMessage,
+            )
+            .with_text("answer")
+            .completed(),
+            ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::UserMessage)
+                .with_text("q2")
+                .completed(),
+        ];
+        let history = conversation_history(&items);
+        let roles: Vec<ModelRole> = history.iter().map(|m| m.role).collect();
+        assert_eq!(
+            roles,
+            vec![
+                ModelRole::User,
+                ModelRole::Assistant,
+                ModelRole::Tool,
+                ModelRole::Assistant,
+                ModelRole::User
+            ]
+        );
+        // The tool call has no leading assistant text, so it lands on a
+        // synthetic empty-content assistant row before its result.
+        assert_eq!(history[1].content, "");
+        assert_eq!(history[2].content, "r1");
+        assert_eq!(history[3].content, "answer");
     }
 
     use ark_common::ChildId;
