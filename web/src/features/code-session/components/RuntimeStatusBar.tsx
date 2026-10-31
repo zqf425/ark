@@ -1,30 +1,37 @@
+import { useI18n, type MessageKey } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../state/store'
 import { useRuntimeStatus } from '../hooks/use-runtime-status'
 import { ViewSwitch } from '../../workbench/components/ViewSwitch'
 
-const ONLINE_LABEL = {
-  unknown: '检测中',
-  online: '在线',
-  offline: '离线'
-} as const
+const ONLINE_LABEL_KEYS: Record<'unknown' | 'online' | 'offline', MessageKey> = {
+  unknown: 'status.online.unknown',
+  online: 'status.online.online',
+  offline: 'status.online.offline'
+}
 
-const STREAM_LABEL: Record<string, string> = {
-  connecting: '连接中',
-  open: '已同步',
-  reconnecting: '重连中',
-  closed: '事件流已断开'
+const STREAM_LABEL_KEYS: Record<string, MessageKey> = {
+  connecting: 'status.stream.connecting',
+  open: 'status.stream.open',
+  reconnecting: 'status.stream.reconnecting',
+  closed: 'status.stream.closed'
 }
 
 /**
  * Top status bar. Liveness and version come from the runtime
  * (`GET /health` + `GET /v1/runtime/info`), never from a build constant.
+ * Every visible string is a catalog key so the bar follows the display language.
  */
 export function RuntimeStatusBar(): JSX.Element {
+  const { t } = useI18n()
   const online = useCodeSessionStore((s) => s.online)
   const healthError = useCodeSessionStore((s) => s.healthError)
   const streamStatus = useCodeSessionStore((s) => s.streamStatus)
   const { refresh } = useRuntimeStatus()
-  const refreshLabel = healthError ? `重新检查运行时。上次失败：${healthError}` : '重新检查运行时'
+
+  const onlineLabel = t(ONLINE_LABEL_KEYS[online])
+  const streamKey = STREAM_LABEL_KEYS[streamStatus]
+  const streamLabel = streamKey ? t(streamKey) : streamStatus
+  const refreshLabel = healthError ? t('status.refreshFailed', { error: healthError }) : t('status.refresh')
 
   return (
     <header className="ark-statusbar">
@@ -38,12 +45,12 @@ export function RuntimeStatusBar(): JSX.Element {
         className="ark-statusbar__group"
         role="status"
         aria-live="polite"
-        aria-label={[ONLINE_LABEL[online], STREAM_LABEL[streamStatus] ?? streamStatus, healthError].filter(Boolean).join('，')}
+        aria-label={[onlineLabel, streamLabel, healthError].filter(Boolean).join(t('status.ariaSeparator'))}
       >
         <span className={`ark-dot ark-dot--${online === 'online' ? 'ok' : online === 'offline' ? 'bad' : 'idle'}`} aria-hidden="true" />
-        <span className="ark-statusbar__label">{ONLINE_LABEL[online]}</span>
+        <span className="ark-statusbar__label">{onlineLabel}</span>
         <span className={`ark-statusbar__label${streamStatus === 'open' ? '' : ' is-warning'}`}>
-          {STREAM_LABEL[streamStatus] ?? streamStatus}
+          {streamLabel}
         </span>
         {healthError ? <span className="ark-statusbar__error">{healthError}</span> : null}
       </div>

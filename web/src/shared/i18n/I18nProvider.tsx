@@ -1,12 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { translate, type MessageKey } from './messages'
+import { translate, type MessageKey, type MessageParams } from './messages'
 import { DEFAULT_UI_PREFERENCES, readUiPreferences, resolveTheme, type UiFontSize, type UiLocale, type UiPreferences, type UiTheme, UI_PREFERENCES_STORAGE_KEY } from './preferences'
 
 type I18nContextValue = UiPreferences & {
   setLocale: (locale: UiLocale) => void
   setFontSize: (fontSize: UiFontSize) => void
   setTheme: (theme: UiTheme) => void
-  t: (key: MessageKey) => string
+  t: (key: MessageKey, params?: MessageParams) => string
 }
 
 const I18nContext = createContext<I18nContextValue | null>(null)
@@ -43,7 +43,7 @@ export function I18nProvider({ children }: { children: ReactNode }): JSX.Element
     setLocale: (locale) => setPreferences((current) => ({ ...current, locale })),
     setFontSize: (fontSize) => setPreferences((current) => ({ ...current, fontSize })),
     setTheme: (theme) => setPreferences((current) => ({ ...current, theme })),
-    t: (key) => translate(preferences.locale, key)
+    t: (key, params) => translate(preferences.locale, key, params)
   }), [preferences])
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>

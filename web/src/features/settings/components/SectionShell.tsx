@@ -6,6 +6,7 @@
  * here (buttons/toasts stay in shared/ui).
  */
 import type { ReactNode } from 'react'
+import { useI18n } from '../../../shared/i18n'
 
 export type SettingsSectionProps = {
   title: string
@@ -84,11 +85,12 @@ export function KeyValue({ rows }: { rows: KeyValueRow[] }): JSX.Element {
 
 /** Non-blocking load failure with a retry affordance. */
 export function LoadError({ message, onRetry }: { message: string; onRetry: () => void }): JSX.Element {
+  const { t } = useI18n()
   return (
     <div className="ark-settings__row">
       <span className="ark-settings__hint ark-settings__hint--error">{message}</span>
       <button type="button" className="ark-linkbtn" onClick={onRetry}>
-        重试
+        {t('common.retry')}
       </button>
     </div>
   )
