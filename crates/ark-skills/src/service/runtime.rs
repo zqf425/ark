@@ -2,10 +2,13 @@
 //! needs (diagnostics, server list, thread view, per-turn resolution).
 //!
 //! The runtime is `Send + Sync` and is meant to be held in an `Arc` by the
-//! server: [`SkillRuntime::new`] scans once, [`SkillRuntime::reload`] replaces
-//! the snapshot, and every other method is a pure read of the current snapshot.
-//! `resolve_for_turn` therefore never takes a write lock and cannot block a turn
-//! behind a rescan.
+//! server: [`SkillRuntime::new`] scans once and [`SkillRuntime::reload`]
+//! replaces the snapshot. The two `GET`-facing views ([`SkillRuntime::list`] and
+//! [`SkillRuntime::thread_view`]) rescan first, so a skill directory created
+//! while the process runs is visible without an explicit refresh; roots are
+//! small, so a scan per read costs less than tracking filesystem changes.
+//! `resolve_for_turn` stays a pure read: it never takes a write lock, so it
+//! cannot block a turn behind a rescan.
 
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
@@ -69,7 +72,10 @@ impl SkillRuntime {
         self.diagnostics()
     }
 
-    /// Current diagnostics without rescanning.
+    /// Current diagnostics of the stored snapshot, without rescanning.
+    ///
+    /// The `GET` views go through [`SkillRuntime::list`] or
+    /// [`SkillRuntime::thread_view`] to observe the current disk state instead.
     pub fn diagnostics(&self) -> SkillDiagnostics {
         let snapshot = self.read();
         SkillDiagnostics {
@@ -81,7 +87,11 @@ impl SkillRuntime {
     }
 
     /// Server-level view: base skills only, never a thread's extras.
+    ///
+    /// Rescans first so `GET /v1/skills` reports the current disk state instead
+    /// of whatever existed when the process started.
     pub fn list(&self) -> SkillDiagnostics {
+        self.rescan();
         self.diagnostics()
     }
 
@@ -98,6 +108,9 @@ impl SkillRuntime {
                 ..ThreadSkillsResponse::default()
             };
         }
+        // Base skills are reported from a fresh scan for the same reason as
+        // `list`; extra roots are scanned per call already.
+        self.rescan();
         let snapshot = self.read();
         let mut extra_skills: Vec<LoadedSkill> = Vec::new();
         let mut warnings: Vec<SkillLoadWarning> = Vec::new();
@@ -221,6 +234,13 @@ impl SkillRuntime {
     }
 
     // -- internals ---------------------------------------------------------
+
+    /// Replace the snapshot with a fresh scan, so a directory created at
+    /// runtime shows up without `POST /v1/threads/{id}/skills/refresh`.
+    fn rescan(&self) {
+        let outcome = self.scan();
+        *self.write() = outcome;
+    }
 
     fn scan(&self) -> Snapshot {
         if !self.config.enabled {
@@ -532,6 +552,59 @@ mod tests {
         let diagnostics = runtime.reload();
         assert_eq!(diagnostics.skills.len(), 1);
         assert_eq!(diagnostics.skills[0].id, "late");
+    }
+
+    #[test]
+    fn read_views_see_packages_created_after_startup() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = runtime_with(dir.path(), |_| {});
+        assert!(runtime.list().skills.is_empty());
+        write(
+            &dir.path().join("fresh/skill.json"),
+            &manifest("Fresh", "fresh", 0, "fresh"),
+        );
+        write(&dir.path().join("fresh/SKILL.md"), "body\n");
+
+        // No `reload`/refresh in between: both GET-facing views rescan.
+        let diagnostics = runtime.list();
+        assert_eq!(diagnostics.skills.len(), 1);
+        assert_eq!(diagnostics.skills[0].id, "fresh");
+        assert!(diagnostics.validation_errors.is_empty());
+        let view = runtime.thread_view(&[]);
+        assert_eq!(view.base_skills.len(), 1);
+        assert_eq!(view.base_skills[0].id, "fresh");
+        assert!(view.base_validation_errors.is_empty());
+    }
+
+    #[test]
+    fn root_created_after_startup_is_not_reported_as_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("runtime-created");
+        let config = SkillsConfig {
+            roots: vec![root.clone()],
+            workspace_dirs: Vec::new(),
+            ..SkillsConfig::default()
+        };
+        let runtime = SkillRuntime::new(config, dir.path().to_path_buf());
+        // The root does not exist yet, so the startup scan reports it.
+        assert!(runtime
+            .list()
+            .validation_errors
+            .iter()
+            .any(|warning| warning.message.contains("does not exist")));
+
+        write(
+            &root.join("late/skill.json"),
+            &manifest("Late", "late", 0, "late"),
+        );
+        write(&root.join("late/SKILL.md"), "body\n");
+        let diagnostics = runtime.list();
+        assert_eq!(diagnostics.skills.len(), 1);
+        assert!(
+            diagnostics.validation_errors.is_empty(),
+            "stale scan must not survive: {:?}",
+            diagnostics.validation_errors
+        );
     }
 
     #[test]
