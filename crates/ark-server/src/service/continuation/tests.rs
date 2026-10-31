@@ -654,3 +654,137 @@ async fn user_turn_resets_attempts_and_consumes_capped_notification() {
         "an unacknowledged notification remains available to user turns"
     );
 }
+
+// ---- lifecycle completeness through the real continuation supervisor ----
+
+/// Stands in for the gateway-outage path: the model request fails before the
+/// reactor journals `turn_started`.
+struct ModelFailureRunner(AtomicUsize);
+
+#[async_trait::async_trait]
+impl TurnRunner for ModelFailureRunner {
+    async fn run_turn(&self, job: TurnJob) -> Result<TurnEnd> {
+        assert!(matches!(job.source, TurnSource::AutoContinuation));
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Err(ark_common::ArkError::model(
+            "gateway 503 no healthy account",
+        ))
+    }
+}
+
+/// `(turn_started count, terminal count)` for one turn.
+fn lifecycle_of(events: &[RuntimeEvent], turn: TurnId) -> (usize, usize) {
+    let mut started = 0;
+    let mut closed = 0;
+    for event in events {
+        match event {
+            RuntimeEvent::TurnStarted { turn_id, .. } if *turn_id == turn => started += 1,
+            RuntimeEvent::TurnCompleted { turn_id, .. }
+            | RuntimeEvent::TurnFailed { turn_id, .. }
+            | RuntimeEvent::TurnAborted { turn_id, .. }
+                if *turn_id == turn =>
+            {
+                closed += 1
+            }
+            _ => {}
+        }
+    }
+    (started, closed)
+}
+
+/// Wait until the supervisor has produced `expected` continuation turns.
+async fn wait_for_turns(runner: &ModelFailureRunner, expected: usize) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while runner.0.load(Ordering::SeqCst) < expected {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the continuation supervisor starts the expected turns");
+}
+
+#[tokio::test]
+async fn failed_continuations_keep_a_complete_lifecycle_until_the_breaker_holds() {
+    let root = std::env::temp_dir().join(format!("ark-cont-lifecycle-{}", TurnId::new()));
+    let store = Arc::new(FileSessionStore::open(StoreConfig::new(&root)).unwrap());
+    let config = RuntimeConfig {
+        subagents: ark_contract::SubagentSettings {
+            auto_continue: true,
+            ..ark_contract::SubagentSettings::default()
+        },
+        ..RuntimeConfig::default()
+    };
+    let runner = Arc::new(ModelFailureRunner(AtomicUsize::new(0)));
+    let state = AppState::new(
+        store.clone() as Arc<dyn SessionStore>,
+        Arc::new(EmptyTools),
+        Arc::new(ConfigStore::new(config)),
+        Arc::new(UsageRecorder::new()),
+        runner.clone(),
+        root.clone(),
+        "test",
+    );
+    let thread = store.create_thread("parent").await.unwrap().thread_id;
+    store
+        .append_event(
+            thread,
+            RuntimeEvent::ChildCompleted {
+                seq: 0,
+                thread_id: thread,
+                timestamp: Utc::now(),
+                notification_id: "child:0:resume:0".into(),
+                child_id: ChildId::new(),
+                label: "worker".into(),
+                status: "completed".into(),
+                summary: Some("done".into()),
+                error: None,
+                usage: Some(Usage::default()),
+                tool_invocations: Some(0),
+            },
+        )
+        .await
+        .unwrap();
+
+    // Child completion wakes the supervisor twice; each continuation fails on the
+    // model request. The breaker then holds, so a third wakeup starts nothing.
+    for expected in 1..=2 {
+        schedule_with_delay(state.clone(), thread, Duration::from_millis(5)).await;
+        wait_for_turns(&runner, expected).await;
+    }
+    schedule_with_delay(state.clone(), thread, Duration::from_millis(5)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(
+        runner.0.load(Ordering::SeqCst),
+        2,
+        "the circuit breaker must stop scheduling after two model failures"
+    );
+
+    let events = store.replay_interaction_events(thread).await.unwrap();
+    let turns: Vec<TurnId> = events
+        .iter()
+        .filter_map(|event| match event {
+            RuntimeEvent::TurnStarted {
+                turn_id,
+                auto_continuation: true,
+                ..
+            } => Some(*turn_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(turns.len(), 2, "each started continuation is recorded once");
+    for turn in turns {
+        assert_eq!(
+            lifecycle_of(&events, turn),
+            (1, 1),
+            "a failed continuation turn still has one start and one terminal record"
+        );
+    }
+    assert_eq!(
+        ark_agent::consecutive_auto_model_request_failures(&events),
+        2,
+        "the breaker reads the same durable records the audit trail shows"
+    );
+
+    state.begin_shutdown();
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -461,62 +461,57 @@ impl AppState {
         self.usage.record(usage);
     }
 
-    /// Make sure a turn that died outside the reactor still has a terminal event.
+    /// Make sure a turn the supervisor closed still has a complete lifecycle.
     ///
-    /// The reactor writes its own terminal events on every path it controls. The
-    /// one it cannot cover is a panic or a dropped task, which would otherwise
-    /// leave the log ending at `turn_started`: a reconnecting client would replay
-    /// a turn that can never finish (design §7.1 / §7.9).
+    /// The reactor writes `turn_started` before its first model round and its own
+    /// terminal event on every path it controls. The supervisor closes the paths
+    /// the reactor never reaches: a panic, a dropped task, or a runner error
+    /// before `prepare()`. Left alone those turns would either end the log at
+    /// `turn_started` (a reconnect replays a turn that can never finish) or emit
+    /// a terminal record for a turn the log never shows starting — an audit trail
+    /// that rewind, fork and replay cannot reconcile (design §7.1 / §7.9).
     ///
-    /// Replay-then-append keeps this idempotent — if the reactor already closed
-    /// the turn, nothing is written.
-    pub async fn record_turn_terminal(&self, thread_id: ThreadId, turn_id: TurnId, end: &TurnEnd) {
-        let already_closed = self
-            .store
-            .replay_events(thread_id, 0)
-            .await
-            .map(|events| {
-                events.iter().any(|event| match event {
-                    RuntimeEvent::TurnCompleted { turn_id: id, .. }
-                    | RuntimeEvent::TurnFailed { turn_id: id, .. }
-                    | RuntimeEvent::TurnAborted { turn_id: id, .. } => *id == turn_id,
-                    _ => false,
-                })
-            })
-            // An unreadable log must not be "fixed" by inventing a second
-            // terminal record; the warning in the supervisor already reports it.
-            .unwrap_or(true);
-        if already_closed {
+    /// Replay-then-append keeps this idempotent: a turn the reactor already
+    /// closed, or one that already has a start record, is never duplicated.
+    pub async fn record_turn_terminal(
+        &self,
+        thread_id: ThreadId,
+        turn_id: TurnId,
+        auto_continuation: bool,
+        end: &TurnEnd,
+    ) {
+        // Narrow query: only turn and gate lifecycle entries are needed, so a
+        // long transcript is never cloned just to close one turn.
+        let events = match self.store.replay_interaction_events(thread_id).await {
+            Ok(events) => events,
+            // An unreadable log must not be "fixed" by inventing records; the
+            // warning in the supervisor already reports it.
+            Err(_) => return,
+        };
+        if events.iter().any(|event| closes_turn(event, turn_id)) {
             return;
         }
-        let event = match end {
-            TurnEnd::Completed | TurnEnd::CompletedWithPendingCompletions => {
-                RuntimeEvent::TurnCompleted {
-                    seq: 0,
-                    thread_id,
-                    turn_id,
-                    timestamp: Utc::now(),
-                }
+        if !events.iter().any(|event| starts_turn(event, turn_id)) {
+            // The runner failed before the reactor journaled its start. Record it
+            // now, so the terminal record below always has a counterpart and the
+            // automatic delivery accounting still sees this attempt.
+            let started = RuntimeEvent::TurnStarted {
+                seq: 0,
+                thread_id,
+                turn_id,
+                timestamp: Utc::now(),
+                auto_continuation,
+            };
+            if let Err(err) = self.store.append_event(thread_id, started).await {
+                tracing::warn!(
+                    turn = %turn_id,
+                    error = %err.message,
+                    "could not persist the synthesized turn start"
+                );
+                return;
             }
-            TurnEnd::Failed {
-                message,
-                model_request_failed,
-            } => RuntimeEvent::TurnFailed {
-                seq: 0,
-                thread_id,
-                turn_id,
-                timestamp: Utc::now(),
-                message: message.clone(),
-                model_request_failed: *model_request_failed,
-            },
-            TurnEnd::Aborted(reason) => RuntimeEvent::TurnAborted {
-                seq: 0,
-                thread_id,
-                turn_id,
-                timestamp: Utc::now(),
-                reason: reason.clone(),
-            },
-        };
+        }
+        let event = terminal_event(thread_id, turn_id, end);
         if let Err(err) = self.store.append_event(thread_id, event).await {
             tracing::warn!(
                 turn = %turn_id,
@@ -557,6 +552,53 @@ impl AppState {
                     .count()
             })
             .unwrap_or(0)
+    }
+}
+
+/// Whether `event` opens the lifecycle of `turn_id`.
+fn starts_turn(event: &RuntimeEvent, turn_id: TurnId) -> bool {
+    matches!(event, RuntimeEvent::TurnStarted { turn_id: id, .. } if *id == turn_id)
+}
+
+/// Whether `event` is the terminal record of `turn_id`.
+fn closes_turn(event: &RuntimeEvent, turn_id: TurnId) -> bool {
+    match event {
+        RuntimeEvent::TurnCompleted { turn_id: id, .. }
+        | RuntimeEvent::TurnFailed { turn_id: id, .. }
+        | RuntimeEvent::TurnAborted { turn_id: id, .. } => *id == turn_id,
+        _ => false,
+    }
+}
+
+/// The terminal event a supervisor-synthesized close records.
+fn terminal_event(thread_id: ThreadId, turn_id: TurnId, end: &TurnEnd) -> RuntimeEvent {
+    match end {
+        TurnEnd::Completed | TurnEnd::CompletedWithPendingCompletions => {
+            RuntimeEvent::TurnCompleted {
+                seq: 0,
+                thread_id,
+                turn_id,
+                timestamp: Utc::now(),
+            }
+        }
+        TurnEnd::Failed {
+            message,
+            model_request_failed,
+        } => RuntimeEvent::TurnFailed {
+            seq: 0,
+            thread_id,
+            turn_id,
+            timestamp: Utc::now(),
+            message: message.clone(),
+            model_request_failed: *model_request_failed,
+        },
+        TurnEnd::Aborted(reason) => RuntimeEvent::TurnAborted {
+            seq: 0,
+            thread_id,
+            turn_id,
+            timestamp: Utc::now(),
+            reason: reason.clone(),
+        },
     }
 }
 

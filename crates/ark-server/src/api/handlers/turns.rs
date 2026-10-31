@@ -119,11 +119,12 @@ pub(crate) fn spawn_turn(state: AppState, job: TurnJob) {
         };
         turns.finish(turn_id, &end);
         if let TurnEnd::Failed { message, .. } = &end {
-            // A turn that dies outside the reactor still needs a terminal event,
-            // otherwise the log stops at `turn_started` and a reconnect replays
-            // a turn that will never finish.
+            // A turn that dies outside the reactor still needs a complete
+            // lifecycle record: either the log stops at `turn_started` and a
+            // reconnect replays a turn that will never finish, or a terminal
+            // record appears for a turn the log never shows starting.
             supervisor_state
-                .record_turn_terminal(thread_id, turn_id, &end)
+                .record_turn_terminal(thread_id, turn_id, is_auto_continuation, &end)
                 .await;
             tracing::warn!(turn = %turn_id, %message, "turn ended without a terminal event");
         }
@@ -445,6 +446,207 @@ mod tests {
 
         assert_eq!(error.0.code, ark_common::ArkErrorCode::NotFound);
         assert!(state.continuations.try_schedule(thread.thread_id).is_some());
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    // ---- continuation lifecycle completeness (D1: a started turn always closes) ----
+
+    /// How the fake worker behaves, i.e. which reactor path it stands in for.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Worker {
+        /// The runner fails before the reactor journals `turn_started` — the
+        /// model-client or provider-resolution failure path.
+        FailBeforeStart,
+        /// The reactor journals `turn_started`, then completes normally.
+        ReactorCompleted,
+    }
+
+    struct LifecycleRunner {
+        store: Arc<FileSessionStore>,
+        worker: Worker,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::TurnRunner for LifecycleRunner {
+        async fn run_turn(&self, job: crate::TurnJob) -> ark_common::Result<crate::TurnEnd> {
+            if self.worker == Worker::FailBeforeStart {
+                return Err(ark_common::ArkError::model(
+                    "gateway 503 no healthy account",
+                ));
+            }
+            let events = ark_agent::TurnEvents::new(job.thread_id, job.turn_id);
+            self.store
+                .append_event(job.thread_id, events.turn_started())
+                .await?;
+            self.store
+                .append_event(job.thread_id, events.turn_completed())
+                .await?;
+            Ok(crate::TurnEnd::Completed)
+        }
+    }
+
+    /// Count the `turn_started` and terminal records for one turn.
+    fn lifecycle_counts(events: &[RuntimeEvent], turn: TurnId) -> (usize, usize) {
+        let mut started = 0;
+        let mut closed = 0;
+        for event in events {
+            match event {
+                RuntimeEvent::TurnStarted { turn_id, .. } if *turn_id == turn => started += 1,
+                RuntimeEvent::TurnCompleted { turn_id, .. }
+                | RuntimeEvent::TurnFailed { turn_id, .. }
+                | RuntimeEvent::TurnAborted { turn_id, .. }
+                    if *turn_id == turn =>
+                {
+                    closed += 1
+                }
+                _ => {}
+            }
+        }
+        (started, closed)
+    }
+
+    /// Start one auto-continuation turn and wait for its supervisor to settle it.
+    async fn run_auto_turn(state: &AppState, thread: ThreadId) -> TurnId {
+        let turn = TurnId::new();
+        let cancel = CancelToken::new();
+        let registration = state
+            .turns
+            .try_register(thread, turn, cancel.clone())
+            .expect("idle thread accepts the continuation");
+        spawn_turn(
+            state.clone(),
+            TurnJob {
+                thread_id: thread,
+                turn_id: turn,
+                source: TurnSource::AutoContinuation,
+                cancel,
+                steering: registration.steering,
+            },
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while state
+                .turns
+                .get(turn)
+                .is_none_or(|summary| summary.ended_at.is_none())
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the supervisor settles the turn");
+        turn
+    }
+
+    async fn lifecycle_state(data_dir: &std::path::Path, worker: Worker) -> (AppState, ThreadId) {
+        let sessions =
+            Arc::new(FileSessionStore::open(StoreConfig::new(data_dir)).expect("session store"));
+        let store: Arc<dyn SessionStore> = sessions.clone();
+        let state = AppState::new(
+            store,
+            Arc::new(EmptyTools),
+            Arc::new(ConfigStore::new(RuntimeConfig::default())),
+            Arc::new(UsageRecorder::new()),
+            Arc::new(LifecycleRunner {
+                store: sessions,
+                worker,
+            }),
+            data_dir.to_path_buf(),
+            "test",
+        );
+        let thread = state.store.create_thread("parent").await.expect("thread");
+        (state, thread.thread_id)
+    }
+
+    #[tokio::test]
+    async fn model_failed_continuation_still_records_started_and_failed() {
+        let temp = std::env::temp_dir().join(format!("ark-cont-fail-{}", TurnId::new()));
+        let (state, thread) = lifecycle_state(&temp, Worker::FailBeforeStart).await;
+
+        // Two consecutive model failures: the circuit breaker's input, and two
+        // continuation turns that must each be auditable in the parent log.
+        let first = run_auto_turn(&state, thread).await;
+        let second = run_auto_turn(&state, thread).await;
+
+        let events = state
+            .store
+            .replay_interaction_events(thread)
+            .await
+            .expect("interaction log");
+        for turn in [first, second] {
+            assert_eq!(
+                lifecycle_counts(&events, turn),
+                (1, 1),
+                "every started continuation turn needs exactly one start and one terminal record"
+            );
+        }
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                RuntimeEvent::TurnStarted {
+                    turn_id,
+                    auto_continuation: true,
+                    ..
+                } if *turn_id == first
+            )),
+            "the synthesized start must keep the automatic-continuation marker"
+        );
+        let failure = events
+            .iter()
+            .find_map(|event| match event {
+                RuntimeEvent::TurnFailed {
+                    turn_id,
+                    message,
+                    model_request_failed,
+                    ..
+                } if *turn_id == first => Some((message.clone(), *model_request_failed)),
+                _ => None,
+            })
+            .expect("the failed continuation has a terminal record");
+        assert!(
+            failure.0.contains("gateway 503"),
+            "turn_failed keeps a readable reason: {}",
+            failure.0
+        );
+        assert!(failure.1, "the breaker needs model_request_failed");
+        assert_eq!(
+            ark_agent::consecutive_auto_model_request_failures(&events),
+            2,
+            "the breaker counts both failures from the durable log"
+        );
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[tokio::test]
+    async fn completed_continuation_records_started_and_completed_once() {
+        let temp = std::env::temp_dir().join(format!("ark-cont-done-{}", TurnId::new()));
+        let (state, thread) = lifecycle_state(&temp, Worker::ReactorCompleted).await;
+
+        let turn = run_auto_turn(&state, thread).await;
+
+        // A late supervisor close must not append a second terminal record for a
+        // turn the reactor already closed.
+        state
+            .record_turn_terminal(
+                thread,
+                turn,
+                true,
+                &TurnEnd::Failed {
+                    message: "late duplicate".into(),
+                    model_request_failed: false,
+                },
+            )
+            .await;
+
+        let events = state
+            .store
+            .replay_interaction_events(thread)
+            .await
+            .expect("interaction log");
+        assert_eq!(
+            lifecycle_counts(&events, turn),
+            (1, 1),
+            "the supervisor must not duplicate a lifecycle the reactor already wrote"
+        );
         let _ = std::fs::remove_dir_all(temp);
     }
 }

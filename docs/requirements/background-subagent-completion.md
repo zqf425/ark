@@ -57,6 +57,12 @@ completion，直到下一次显式用户回合（或取消归档）开启新的�
 自动 continuation 使用普通父 `TurnRunner` 和同一个 `Reactor`，只把 completion inbox 作为 system
 source 注入，不创建伪用户消息；模型预算、provider、workspace、工具沙箱、审批/用户输入 gate 与正常父
 回合完全相同。仅正常完成后确认本次注入的 notification；失败、中断或确认写入失败仍保留至少一次投递。
+
+每个实际启动的 continuation 回合都必须在父线程事件日志中留下完整的生命周期：一条 `turn_started`
+（保留 `auto_continuation` 标记）和一条终态记录（`turn_completed`/`turn_failed`/`turn_aborted`）。
+supervisor 负责关闭 reactor 覆盖不到的路径（panic、任务被丢弃、`prepare()` 之前的 runner 错误）：
+若日志中缺少该回合的起始记录则先补写再写终态，若已有终态则不再重复写入。`turn_failed` 始终带可读
+reason，供熔断与审计共用。
 若本批最多 8 条全部确认成功且仍有未确认通知，调度下一批；确认失败不自行链式重试——该句约束的是
 **确认写入失败的补偿**（不靠 supervisor 链式重试写确认），而非续跑调度上限。自动续跑另有两条有界
 终止条件（当前实现）：
