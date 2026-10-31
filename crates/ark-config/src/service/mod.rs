@@ -7,4 +7,4 @@ pub mod config_store;
 pub mod file_config;
 
 pub use config_store::{classes_of, ConfigSnapshot, ConfigStore};
-pub use file_config::{config_path, load_or_default, save};
+pub use file_config::{config_path, load_or_default, load_report, save, LoadedConfig};

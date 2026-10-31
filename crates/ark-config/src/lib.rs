@@ -17,7 +17,10 @@ pub mod domain;
 pub mod service;
 
 pub use domain::{
-    relisten_fields, reload_class, restart_fields, tuning_diff, RuntimeConfig, TuningConfig,
-    DEFAULT_PORT, FIELD_CLASSES, LOG_LEVELS, TUNING_FIELDS,
+    diagnose, relisten_fields, reload_class, restart_fields, tuning_diff, ConfigDiagnostics,
+    RuntimeConfig, TuningConfig, DEFAULT_PORT, FIELD_CLASSES, LOG_LEVELS, TUNING_FIELDS,
 };
-pub use service::{classes_of, config_path, load_or_default, save, ConfigSnapshot, ConfigStore};
+pub use service::{
+    classes_of, config_path, load_or_default, load_report, save, ConfigSnapshot, ConfigStore,
+    LoadedConfig,
+};
