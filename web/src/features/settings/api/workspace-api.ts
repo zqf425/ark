@@ -4,7 +4,7 @@
  * The probe is read-only; `validate` is the runtime's own path check so the UI
  * never re-implements filesystem rules in the browser.
  */
-import type { SwitchWorkspaceRequest, WorkspaceDiff, WorkspaceStatus, WorkspaceValidateResult, WorkspaceView } from '../../../shared/contracts'
+import type { SwitchWorkspaceRequest, WorkspaceDiff, WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView } from '../../../shared/contracts'
 import { get, post } from '../../../shared/api/client'
 
 /** `GET /v1/workspace/status?path=`. */
@@ -16,8 +16,8 @@ export function getWorkspaceStatus(path: string, signal?: AbortSignal): Promise<
 }
 
 /** `POST /v1/workspace/validate`. */
-export function validateWorkspace(path: string): Promise<WorkspaceValidateResult> {
-  return post<WorkspaceValidateResult>('/v1/workspace/validate', { path })
+export function validateWorkspace(path: string): Promise<WorkspaceValidateResponse> {
+  return post<WorkspaceValidateResponse>('/v1/workspace/validate', { path })
 }
 
 /** `GET /v1/workspace` — host-owned active workspace and process-local history. */

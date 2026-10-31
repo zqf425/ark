@@ -10,9 +10,7 @@ use crate::domain::jsonrpc::{
     CallToolResult, JsonRpcId, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
     ListToolsResult, ToolDescriptor, METHOD_INITIALIZE, METHOD_TOOLS_CALL, METHOD_TOOLS_LIST,
 };
-use crate::service::transport::{
-    HttpTransportConfig, McpTransport, SseTransport, StdioTransport, StreamableHttpTransport,
-};
+use crate::service::transport::{McpTransport, StdioTransport, StreamableHttpTransport};
 use ark_common::{ArkError, ArkErrorCode, Result};
 use ark_contract::{McpServerEntry, McpTransportKind};
 use ark_http::HttpBus;
@@ -73,26 +71,23 @@ pub(crate) async fn connect(entry: &McpServerEntry, bus: &BusSlot) -> Result<Con
 async fn build_transport(entry: &McpServerEntry, bus: &BusSlot) -> Result<Arc<dyn McpTransport>> {
     match entry.transport {
         McpTransportKind::Stdio => spawn_stdio(entry).await,
-        McpTransportKind::StreamableHttp | McpTransportKind::Sse => {
+        // SSE is contract-complete but not implemented: reject before any
+        // network I/O instead of letting connect fail later with a generic
+        // transport error, so callers can switch to streamable_http.
+        McpTransportKind::Sse => Err(ArkError::validation(format!(
+            "mcp server {} uses the sse transport, which is not implemented yet; use streamable_http",
+            entry.id
+        ))
+        .with_detail("mcp_sse_unsupported")),
+        McpTransportKind::StreamableHttp => {
             let bus = bus.as_ref().map_err(|message| {
                 ArkError::new(ArkErrorCode::RuntimeUnavailable, message.clone())
                     .with_detail("mcp_egress_unavailable")
             })?;
             let egress = ServerEgress::new(bus.clone(), entry)?;
             let config = ServerEgress::config(entry, egress.plugin_id())?;
-            build_http_transport(entry.transport, egress, config)
+            Ok(Arc::new(StreamableHttpTransport::new(egress, config)?))
         }
-    }
-}
-
-fn build_http_transport(
-    kind: McpTransportKind,
-    egress: Arc<ServerEgress>,
-    config: HttpTransportConfig,
-) -> Result<Arc<dyn McpTransport>> {
-    match kind {
-        McpTransportKind::Sse => Ok(Arc::new(SseTransport::new(egress, config)?)),
-        _ => Ok(Arc::new(StreamableHttpTransport::new(egress, config)?)),
     }
 }
 
@@ -231,6 +226,7 @@ fn decode_tool_result(value: serde_json::Value) -> CallToolResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::future::Future;
 
     #[test]
     fn non_standard_tool_result_keeps_its_text() {
@@ -254,6 +250,38 @@ mod tests {
             .with_detail("mcp_remote_error");
         assert_eq!(err.detail.as_deref(), Some("mcp_remote_error"));
         assert!(err.message.contains("boom"));
+    }
+
+    #[test]
+    fn sse_transport_is_rejected_before_connect() {
+        let entry = McpServerEntry {
+            id: "legacy".into(),
+            transport: McpTransportKind::Sse,
+            enabled: true,
+            command: None,
+            args: vec![],
+            url: Some("https://mcp.example.com/sse".into()),
+            allow_tools: vec![],
+            env: Default::default(),
+            headers: Default::default(),
+        };
+        let Err(err) = tokio_test_block_on(build_transport(&entry, &Err("no egress".into())))
+        else {
+            panic!("sse transport must be rejected before connect");
+        };
+        assert_eq!(err.code, ArkErrorCode::ValidationError);
+        assert_eq!(err.detail.as_deref(), Some("mcp_sse_unsupported"));
+        assert!(err.message.contains("streamable_http"));
+    }
+
+    /// The Sse arm of `build_transport` returns before its first await point,
+    /// so a minimal current-thread runtime is enough to drive it in a unit
+    /// test without pulling extra dev-dependencies.
+    fn tokio_test_block_on<F: Future>(future: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("test runtime")
+            .block_on(future)
     }
 
     #[test]

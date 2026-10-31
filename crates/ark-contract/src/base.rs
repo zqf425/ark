@@ -406,6 +406,15 @@ pub struct WorkspaceStatus {
     pub checked_at: DateTime<Utc>,
 }
 
+/// `POST /v1/workspace/validate` response: the directory exists and is the
+/// normalized absolute path the caller should switch to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct WorkspaceValidateResponse {
+    pub ok: bool,
+    pub path: String,
+}
+
 // ---------------------------------------------------------------------------
 // External MCP servers
 // ---------------------------------------------------------------------------

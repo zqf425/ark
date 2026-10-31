@@ -6,7 +6,7 @@
  * result (not an error) so the sections can show `restart_required` verbatim.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ApplyResult, ConfigPatch, RuntimeConfigView, WorkspaceStatus, WorkspaceValidateResult } from '../../../shared/contracts'
+import type { ApplyResult, ConfigPatch, RuntimeConfigView, WorkspaceStatus, WorkspaceValidateResponse } from '../../../shared/contracts'
 import { getRuntimeConfig, patchRuntimeConfig } from '../api/settings-api'
 import { getWorkspaceStatus, validateWorkspace } from '../api/workspace-api'
 import { attempt, describeApiError, type Outcome } from '../api/outcome'
@@ -80,7 +80,7 @@ export type WorkspaceProbeApi = {
   error: string | null
   loading: boolean
   probe: (path: string) => Promise<void>
-  validate: (path: string) => Promise<Outcome<WorkspaceValidateResult>>
+  validate: (path: string) => Promise<Outcome<WorkspaceValidateResponse>>
 }
 
 /**

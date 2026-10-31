@@ -12,9 +12,6 @@ export type ProviderUpsertRequest = ProviderEntry & { make_default?: boolean }
 /** `POST /v1/mcp/servers` uses the generated server shape unchanged. */
 export type McpServerUpsertRequest = McpServerEntry
 
-/** `POST /v1/workspace/validate` currently returns an untyped JSON object. */
-export type WorkspaceValidateResult = { ok: true; path: string }
-
 /** `TurnSummary.state` is a Rust `String`; these values come from SessionStatus plus aborting. */
 export type TurnState = 'idle' | 'running' | 'completed' | 'failed' | 'aborted' | 'aborting'
 
@@ -38,7 +35,6 @@ export type LogLevel = (typeof LOG_LEVELS)[number]
 export const ENDPOINT_FORMATS = ['openai_chat', 'openai_responses', 'anthropic_messages'] as const
 export type EndpointFormat = (typeof ENDPOINT_FORMATS)[number]
 
-export const MCP_TRANSPORTS = ['stdio', 'sse', 'streamable_http'] as const
 export const SUBAGENT_MIN_CONCURRENCY = 1
 export const SUBAGENT_MAX_CONCURRENCY = 8
 

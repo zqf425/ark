@@ -12,12 +12,16 @@
   会重新发现并替换该组，重复名称以明确冲突返回，连接失败不阻断其他 server 或进程启动。
 - cross-plugin 调用必须由 caller 的 `mcp.consume` 显式声明；调用链携带 trace，限制深度为 3，
   并拒绝循环和等待图死锁。
-- stdio、SSE 与 streamable HTTP 是 transport adapter；领域服务不因协议不同而复制实现。
+- stdio 与 streamable HTTP 是已实现的 transport adapter；领域服务不因协议不同而复制实现。SSE
+  仅在契约中保留类型（`McpTransportKind::Sse` 与 `SseTransport` skeleton）：服务端在建立会话前
+  以 validation 错误（detail `mcp_sse_unsupported`）拒绝并提示改用 `streamable_http`，SSE 客户端
+  协议实现待独立需求设计，不得宣称已交付。
 - 外部写/敏感调用须执行 scope、grant 和宿主审批，调用方传入的 `confirm` 不能自证。
 
 ## 双向适配
 
-客户端方向的 stdio、SSE、streamable HTTP transport 统一由 registry 管理连接、重连和关闭；HTTP 传输
+客户端方向的 stdio 与 streamable HTTP transport 统一由 registry 管理连接、重连和关闭；SSE 选择
+在建连前即被拒绝（见上）。HTTP 传输
 复用 `ark-http`，不能另建客户端。服务端方向只做 JSON-RPC、鉴权和作用域适配；应用能力的领域实现
 必须与 HTTP handler 共用 service/port，而不是再直接访问 store。
 

@@ -89,6 +89,7 @@ export type { ProviderModelCatalogResponse } from "./ProviderModelCatalogRespons
 export type { ProviderTestRequest } from "./ProviderTestRequest";
 export type { ProviderTestResponse } from "./ProviderTestResponse";
 export type { WorkspaceStatus } from "./WorkspaceStatus";
+export type { WorkspaceValidateResponse } from "./WorkspaceValidateResponse";
 export type { McpTransportKind } from "./McpTransportKind";
 export type { McpServerEntry } from "./McpServerEntry";
 export type { McpServerView } from "./McpServerView";

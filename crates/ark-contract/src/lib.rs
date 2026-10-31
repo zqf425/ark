@@ -30,7 +30,7 @@ pub use base::{
     ProviderModelCatalogRequest, ProviderModelCatalogResponse, ProviderModelSummary,
     ProviderTestRequest, ProviderTestResponse, ProviderView, SkillActivation, SkillDiagnostics,
     SkillLoadWarning, SkillManifest, SkillSource, SkillSummary, SkillTriggers, SkillTurnResolution,
-    ThreadSkillsResponse, UpdateMemoryRequest, WorkspaceStatus,
+    ThreadSkillsResponse, UpdateMemoryRequest, WorkspaceStatus, WorkspaceValidateResponse,
 };
 pub use capability::{
     CapabilitiesResponse, Capability, PageId, PageSpec, PanelEntry, PanelSlot, PanelSpec,
