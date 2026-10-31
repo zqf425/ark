@@ -24,7 +24,7 @@
   `ModelMessage::tool_calls` 结构化字段进入历史，不再渲染进正文文本。
 - 预算、工具风暴、并发安全和历史裁剪属于独立 policy/context 模块，不得回流为巨型 reactor。
 - 工具风暴按工具名与规范化参数组成的签名计数；跨轮已执行次数与同一 `DispatchPlan` 内先前出现次数共同计入上限。被抑制调用必须以合成结果配对 `ToolCallStarted`/`ToolCallFinished`，并写入 `ToolStormSuppressed` 事件。
-- 每轮模型可见历史必须已经落盘；每个工具调用必须与终态结果配对。
+- 每轮模型可见历史必须已经落盘；每个工具调用必须与终态结果配对。历史修复只按配对合法性裁剪：携带 `tool_calls` 的 assistant 行即使 `content` 为空也必须保留（chat-completions 的标准形态），只有既无文本又无 `tool_calls` 的空行才删除。
 - 压缩保留 system 前缀和 `keep_recent_messages` 条末尾消息的原始内容；被折叠消息生成的 checkpoint
   优先列出短标识符（大写加数字、`KEY=VALUE` 或引号内短串），并受 `context_limit_tokens` 约束。
   后续压缩会替换已有 checkpoint，不会把它当作稳定 system 前缀累积。预算不足时 checkpoint 明示已裁剪，且只在 UTF-8 字符边界裁剪；`compaction_completed` 复用
