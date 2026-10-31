@@ -9,7 +9,7 @@
 //!
 //! ## One catalog, three consumers
 //!
-//! [`UiBus::catalog_json`] is what `GET /v1/runtime/capabilities` serves, what
+//! [`UiBus::catalog`] is what `GET /v1/runtime/capabilities` serves, what
 //! the renderer builds its navigation table from, and what the shell router
 //! resolves. There is no second list of pages anywhere in the runtime.
 //!
@@ -25,7 +25,7 @@
 pub mod domain;
 pub mod service;
 
-pub use domain::{require_caps, PageIndex, PanelIndex, UiCatalog, SYSTEM_OWNER};
+pub use domain::{require_caps, to_contract_catalog, PageIndex, PanelIndex, SYSTEM_OWNER};
 pub use service::{
     code_page, code_panels, PageRegistration, PanelRegistration, UiBus, CHANGES_PANEL_ID,
     CODE_BUNDLE, CODE_PAGE_ID, CODE_ROUTE, CODE_UI_PLUGIN_ID, FILE_PANEL_ID, PLAN_PANEL_ID,

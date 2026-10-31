@@ -32,7 +32,10 @@ pub use base::{
     SkillLoadWarning, SkillManifest, SkillSource, SkillSummary, SkillTriggers, SkillTurnResolution,
     ThreadSkillsResponse, UpdateMemoryRequest, WorkspaceStatus,
 };
-pub use capability::{Capability, PageId, PageSpec, PanelSlot, PanelSpec, Placement};
+pub use capability::{
+    CapabilitiesResponse, Capability, PageId, PageSpec, PanelEntry, PanelSlot, PanelSpec,
+    Placement, UiCatalog,
+};
 pub use config::{
     ApplyResult, ConfigPatch, FieldPath, ReloadClass, RuntimeConfigView, SubagentSettings,
     TuningSettings, SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,

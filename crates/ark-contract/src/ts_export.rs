@@ -23,12 +23,12 @@ use ts_rs::TS;
 use crate::item::{ItemKind, ToolPayload};
 use crate::{
     ApplyResult, AttachmentDiagnostics, AttachmentEntry, AttachmentUploadRequest,
-    AttachmentUploadResponse, ChildCompletionNotice, ChildRunActionResult, ChildRunAggregates,
-    ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
+    AttachmentUploadResponse, CapabilitiesResponse, ChildCompletionNotice, ChildRunActionResult,
+    ChildRunAggregates, ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
     CreateMemoryRequest, CreateThreadRequest, EventKind, FieldPath, FilePreview, GoalRequest,
     HealthResponse, ItemStatus, LlmRound, LlmRoundError, LlmRoundsResponse, McpServerEntry,
     McpServerListResponse, McpServerTestResponse, McpServerView, McpTransportKind,
-    MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, PendingApprovalView,
+    MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, PanelEntry, PendingApprovalView,
     PendingUserInputView, PlanView, ProviderEntry, ProviderListResponse,
     ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderModelSummary, ProviderTestRequest, ProviderTestResponse, ProviderView,
@@ -38,9 +38,10 @@ use crate::{
     SteerChildRequest, SubagentSettings, SwitchWorkspaceRequest, TerminalEntriesResponse,
     TerminalEntry, ThreadDetail, ThreadExport, ThreadItem, ThreadListQuery, ThreadRuntimeSettings,
     ThreadRuntimeSnapshot, ThreadSkillsResponse, ThreadSummary, ThreadUsageResponse, TodoEntry,
-    TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary, UpdateMemoryRequest,
-    UpdateThreadRequest, UsageResponse, WorkspaceChange, WorkspaceChangesResponse,
-    WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile, WorkspaceStatus, WorkspaceView,
+    TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary, UiCatalog,
+    UpdateMemoryRequest, UpdateThreadRequest, UsageResponse, WorkspaceChange,
+    WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile,
+    WorkspaceStatus, WorkspaceView,
 };
 use ark_common::{
     ArkErrorCode, ArkErrorPayload, AttachmentId, ChildId, ItemId, ThreadId, TurnId, Usage,
@@ -106,6 +107,9 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     ThreadExport::export_all_to(dir)?;
     HealthResponse::export_all_to(dir)?;
     RuntimeInfo::export_all_to(dir)?;
+    CapabilitiesResponse::export_all_to(dir)?;
+    UiCatalog::export_all_to(dir)?;
+    PanelEntry::export_all_to(dir)?;
     AttachmentEntry::export_all_to(dir)?;
     AttachmentUploadRequest::export_all_to(dir)?;
     AttachmentUploadResponse::export_all_to(dir)?;
@@ -245,6 +249,9 @@ const ROOT_NAMES: &[&str] = &[
     "UsageResponse",
     "HealthResponse",
     "RuntimeInfo",
+    "CapabilitiesResponse",
+    "UiCatalog",
+    "PanelEntry",
     "MemoryEntry",
     "CreateMemoryRequest",
     "UpdateMemoryRequest",

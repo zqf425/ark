@@ -39,9 +39,11 @@
   调用该纯函数；File 不直接访问磁盘，而是返回已持久化的 `read` 工具输出。
 - provider model catalog 路由只转发 `ProviderService::models`，不读取、记录或回显 api key/header；具体
   限时、限体积和元数据规范化留在 `ark-llm` / `ark-provider`。
-- `GET /v1/runtime/capabilities` 的 `capabilities` 与 `catalog` 都从注入的 `BaseServices::ui` 读取，
-  handler 不得保留硬编码能力清单或第二份导航表。未装配 UI 总线时返回空能力与空 catalog，
-  不能宣称 `ui_page`。
+- `GET /v1/runtime/capabilities` 返回 `ark-contract` 的 `CapabilitiesResponse`。能力按宿主归属分别派生：
+  `tool` 来自工具注册表、`model_provider` 来自 provider 表（handler 合成），`ui_page`/`ui_panel` 来自
+  `BaseServices::ui` 的注册结果。handler 与组合根都不得保留平行能力清单或第二份导航表。未装配
+  UI 总线时返回空能力与空 catalog，不能宣称 `ui_page`。catalog 按 `required_caps` 过滤，
+  不满足条件的页/面板不进入响应。
 - loopback API 默认不对浏览器开放跨域访问。为 Tauri 桌面壳，仅精确允许 Windows 的
   `http://tauri.localhost` 与 macOS/Linux 的 `tauri://localhost` origin，且只允许 GET/POST/PATCH/DELETE
   和 `accept`、`authorization`、`content-type` headers；禁止将其放宽为 `*`。

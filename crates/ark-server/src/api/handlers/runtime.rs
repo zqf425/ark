@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde_json::json;
 
-use ark_contract::{RuntimeInfo, UsageResponse};
+use ark_contract::{CapabilitiesResponse, Capability, RuntimeInfo, UiCatalog, UsageResponse};
 
 use crate::api::error::ApiError;
 use crate::state::AppState;
@@ -47,19 +47,44 @@ pub async fn tools(State(state): State<AppState>) -> Json<serde_json::Value> {
 
 /// `GET /v1/runtime/capabilities`.
 ///
-/// Capabilities and the page/panel catalog both come from the injected UI bus,
-/// so this route cannot drift from the navigation the renderer actually gets.
-/// A build without a bus reports no pages instead of claiming `ui_page`.
-pub async fn capabilities(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let (capabilities, catalog) = match state.base.ui.as_ref() {
-        Some(ui) => (ui.capabilities(), ui.catalog_json()),
-        None => (Vec::new(), json!({ "pages": [], "panels": [] })),
+/// Each capability is reported by the port that actually owns it: `tool` by the
+/// tool registry, `model_provider` by the provider table, and `ui_page`/
+/// `ui_panel` by the UI bus's own registrations. Composing here keeps the
+/// composition root from maintaining a parallel grant list that could drift from
+/// reality.
+///
+/// A build without a UI bus reports no pages and no `ui_page` instead of
+/// claiming navigation nothing can produce.
+pub async fn capabilities(State(state): State<AppState>) -> Json<CapabilitiesResponse> {
+    let mut capabilities = Vec::new();
+
+    if !state.tools.names().is_empty() {
+        capabilities.push(Capability::Tool);
+    }
+    if state
+        .base
+        .providers
+        .as_ref()
+        .is_some_and(|providers| !providers.list().providers.is_empty())
+    {
+        capabilities.push(Capability::ModelProvider);
+    }
+
+    let catalog = match state.base.ui.as_ref() {
+        Some(ui) => {
+            capabilities.extend(ui.capabilities());
+            ui.catalog(&capabilities)
+        }
+        None => UiCatalog::default(),
     };
-    Json(json!({
-        "version": state.config.version(),
-        "capabilities": capabilities,
-        "catalog": catalog,
-    }))
+    capabilities.sort();
+    capabilities.dedup();
+
+    Json(CapabilitiesResponse {
+        version: state.config.version(),
+        capabilities,
+        catalog,
+    })
 }
 
 /// `GET /v1/usage`.
@@ -128,8 +153,8 @@ mod tests {
             self.caps.clone()
         }
 
-        fn catalog_json(&self) -> serde_json::Value {
-            json!({ "pages": [], "panels": [] })
+        fn catalog(&self, _available: &[ark_contract::Capability]) -> ark_contract::UiCatalog {
+            ark_contract::UiCatalog::default()
         }
     }
 
@@ -209,23 +234,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn capabilities_come_from_the_injected_bus() {
+    async fn capabilities_report_ui_capabilities_from_the_bus() {
         let dir = TempDir::new();
         let state = state_with_ui(
             &dir,
             Some(Arc::new(StubUi {
                 caps: vec![
-                    ark_contract::Capability::Tool,
                     ark_contract::Capability::UiPage,
+                    ark_contract::Capability::UiPanel,
                 ],
             })),
         );
         let Json(body) = capabilities(State(state)).await;
-        let caps = body["capabilities"].as_array().expect("capabilities array");
-        assert_eq!(caps.len(), 2);
-        assert!(caps.iter().any(|cap| cap == "tool"));
-        assert!(caps.iter().any(|cap| cap == "ui_page"));
-        assert!(body["catalog"]["pages"].is_array());
+        assert!(body.capabilities.contains(&Capability::UiPage));
+        assert!(body.capabilities.contains(&Capability::UiPanel));
+        // The test state has no tools and no providers, so those capabilities
+        // must not be claimed just because a bus is present.
+        assert!(!body.capabilities.contains(&Capability::Tool));
+        assert!(!body.capabilities.contains(&Capability::ModelProvider));
+        assert!(body.catalog.pages.is_empty());
     }
 
     #[tokio::test]
@@ -235,8 +262,8 @@ mod tests {
         let dir = TempDir::new();
         let state = state_with_ui(&dir, None);
         let Json(body) = capabilities(State(state)).await;
-        let caps = body["capabilities"].as_array().expect("capabilities array");
-        assert!(caps.is_empty());
-        assert_eq!(body["catalog"]["pages"].as_array().map(Vec::len), Some(0));
+        assert!(body.capabilities.is_empty());
+        assert!(body.catalog.pages.is_empty());
+        assert!(body.catalog.panels.is_empty());
     }
 }
