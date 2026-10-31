@@ -97,6 +97,9 @@ docs/
   任务互相排队，先完成的也会被后到的锁拖慢。
 - 同一个 target 目录不要同时跑 `cargo check`、`cargo test`、`cargo clippy`：它们争同一把锁。
 - 隔离的代价是冷编译，因此只编译受影响包，不要每次 `--workspace`。
+- 用 `RUSTC_WRAPPER=sccache` 弥补隔离的冷编译代价：sccache 按编译单元缓存，跨 worktree 复用且不
+  共享 target 目录，与上面的隔离规则兼容。注意缓存按 rustc 版本与编译参数命中，工具链升级后
+  第一遍仍会全量 miss。临时 target 目录（`.tmp/cargo-target*`）验证完即删，不要长期堆积。
 
 ### 7.2 不要对着正在运行的二进制构建
 
