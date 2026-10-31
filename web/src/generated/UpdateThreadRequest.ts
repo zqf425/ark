@@ -3,5 +3,23 @@ import type { ThreadRuntimeSettings } from "./ThreadRuntimeSettings";
 
 /**
  * `PATCH /v1/threads/{id}`.
+ *
+ * Every field is optional, and an absent field (or an explicit `null`) means
+ * "keep the current value": this is a merge, never a replacement. This route
+ * cannot clear an override that is already stored, so a client confirms what
+ * is actually in effect by reading `GET /v1/threads/{id}` rather than
+ * assuming its request was applied verbatim.
  */
-export type UpdateThreadRequest = { title?: string, archived?: boolean, runtime?: ThreadRuntimeSettings, };
+export type UpdateThreadRequest = { 
+/**
+ * New title; an empty or whitespace-only value is rejected with 400.
+ */
+title?: string, 
+/**
+ * Archive flag. Archiving suppresses auto-continuation, unarchiving resumes it.
+ */
+archived?: boolean, 
+/**
+ * Per-thread overrides to merge into the stored ones; absent keeps them all.
+ */
+runtime?: ThreadRuntimeSettings, };

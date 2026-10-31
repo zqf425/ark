@@ -9,7 +9,14 @@ import type { ThreadSummary } from "./ThreadSummary";
 /**
  * `GET /v1/threads/{id}` — metadata, items and durable child terminal summaries.
  */
-export type ThreadDetail = { summary: ThreadSummary, items: Array<ThreadItem>, child_ids: Array<ChildId>, child_completions: Array<ChildCompletionNotice>, runtime: ThreadRuntimeSettings, 
+export type ThreadDetail = { summary: ThreadSummary, items: Array<ThreadItem>, child_ids: Array<ChildId>, child_completions: Array<ChildCompletionNotice>, 
+/**
+ * Stored per-thread overrides, exactly as `PATCH` merged them last time.
+ *
+ * Omitted fields mean no override is stored for that field, so the next
+ * turn falls back to the runtime defaults.
+ */
+runtime: ThreadRuntimeSettings, 
 /**
  * Process-local state that is not persisted with the session settings.
  */

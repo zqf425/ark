@@ -5,5 +5,10 @@
  *
  * Empty fields fall back to the runtime defaults. The values are metadata, not
  * secrets: model credentials remain exclusively in the provider table.
+ *
+ * The same shape is echoed back by `GET /v1/threads/{id}` and by
+ * `POST /v1/sessions/{id}/resume-thread`, so a client can confirm the stored
+ * overrides without reading `thread.json`. A field omitted from the response
+ * means "no override stored", never "the global default is stored here".
  */
 export type ThreadRuntimeSettings = { workspace?: string, provider_id?: string, model?: string, autonomy?: string, };

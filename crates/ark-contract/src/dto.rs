@@ -90,13 +90,22 @@ pub struct CreateThreadRequest {
 }
 
 /// `PATCH /v1/threads/{id}`.
+///
+/// Every field is optional, and an absent field (or an explicit `null`) means
+/// "keep the current value": this is a merge, never a replacement. This route
+/// cannot clear an override that is already stored, so a client confirms what
+/// is actually in effect by reading `GET /v1/threads/{id}` rather than
+/// assuming its request was applied verbatim.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct UpdateThreadRequest {
+    /// New title; an empty or whitespace-only value is rejected with 400.
     #[serde(default)]
     pub title: Option<String>,
+    /// Archive flag. Archiving suppresses auto-continuation, unarchiving resumes it.
     #[serde(default)]
     pub archived: Option<bool>,
+    /// Per-thread overrides to merge into the stored ones; absent keeps them all.
     #[serde(default)]
     pub runtime: Option<ThreadRuntimeSettings>,
 }
@@ -105,6 +114,11 @@ pub struct UpdateThreadRequest {
 ///
 /// Empty fields fall back to the runtime defaults. The values are metadata, not
 /// secrets: model credentials remain exclusively in the provider table.
+///
+/// The same shape is echoed back by `GET /v1/threads/{id}` and by
+/// `POST /v1/sessions/{id}/resume-thread`, so a client can confirm the stored
+/// overrides without reading `thread.json`. A field omitted from the response
+/// means "no override stored", never "the global default is stored here".
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct ThreadRuntimeSettings {
@@ -129,6 +143,10 @@ pub struct ThreadDetail {
     pub child_ids: Vec<ark_common::ChildId>,
     #[serde(default)]
     pub child_completions: Vec<ChildCompletionNotice>,
+    /// Stored per-thread overrides, exactly as `PATCH` merged them last time.
+    ///
+    /// Omitted fields mean no override is stored for that field, so the next
+    /// turn falls back to the runtime defaults.
     #[serde(default)]
     pub runtime: ThreadRuntimeSettings,
     /// Process-local state that is not persisted with the session settings.
