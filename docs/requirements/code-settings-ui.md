@@ -83,6 +83,8 @@ Reactor 在安全轮次边界 drain 后写 `turn_steered` 并把文本作为用�
 增加 wire 请求/响应 DTO、`GateBroker` 的交互式实现和 `/v1/approvals/{id}`、`/v1/user-inputs/{id}` handler。
 决议后由 reactor 写 `approval_resolved`/`user_input_resolved`；HTTP handler 不直接伪造终态事件。一个 request
 只能决议一次，父线程被取消、gate 超时或服务关闭后请求进入明确终态。
+用户输入由模型通过 `request_user_input` 工具发起（参数契约 `{"prompt": string}`）：agent 在工具派发前
+拦截该调用并进入 `AwaitingUserInput`，答案作为该调用的 tool result 回给模型；工具本身不可独立执行。
 
 ### B.3 Goal 与 Todo
 

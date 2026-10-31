@@ -59,6 +59,8 @@ UI catalog 由组合根创建唯一 `UiBus`：授予本构建实际具备的能�
 连接失败只反映到 MCP server 状态，不中止 arkd。MCP server 的 upsert/delete 在请求内重新发现并替换该动态
 分组，因此下一父回合读取的是最新 schema，而不需要重启。组合根还注册 `load_skill`：它读取 `SkillRuntime`
 的已扫描正文快照，避免 `ark-tool` 反向依赖 skills 实现。
+`request_user_input` 属于内置工具集，随 `ark_tool::builtins()` 在父/子两个注册表中可用；
+其执行由 `ark-agent` 的用户输入 gate 拦截，组合根不为它写任何特例。
 
 回合种子中的 `conversation_history` 将已完成的 ToolCall/ToolResult 行投影回模型上下文：同一 call_id 配对时，
 调用折叠进上一条 assistant 消息的 `tool_calls`（无文本时新建空内容 assistant 行），后接一条截断到 16 KiB

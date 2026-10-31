@@ -182,7 +182,10 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     let hydrated = delegation.hydrate().await?;
     tracing::info!(children = hydrated, "loaded child-run records");
 
-    let tools = Arc::new(build_tools(Arc::clone(&delegation), Arc::clone(&skills))?);
+    let tools = Arc::new(build_tools(
+        Arc::clone(&delegation) as Arc<dyn ark_ports::SubagentRunner>,
+        Arc::clone(&skills),
+    )?);
     tools.replace_group("mcp", mcp.connect_all().await)?;
     let tool_runner = Arc::new(RegistryToolRunner::new(
         Arc::clone(&tools),
@@ -282,7 +285,7 @@ fn spawn_completion_listener(
 ///
 /// A conflict here is a programming error.
 fn build_tools(
-    runner: Arc<ark_delegation::DelegationRuntime>,
+    runner: Arc<dyn ark_ports::SubagentRunner>,
     skills: Arc<ark_skills::SkillRuntime>,
 ) -> Result<ToolRegistry> {
     let registry = build_child_tools(skills)?;
@@ -1238,5 +1241,80 @@ mod tests {
         assert_eq!(history.len(), 2);
         assert_eq!(history[0], ModelMessage::user("first question"));
         assert_eq!(history[1], ModelMessage::assistant("first answer"));
+    }
+
+    #[test]
+    fn request_user_input_is_registered_for_both_agent_tool_sets() {
+        let skills = Arc::new(ark_skills::SkillRuntime::new(
+            ark_skills::SkillsConfig::default(),
+            std::env::temp_dir(),
+        ));
+        let child_tools = build_child_tools(Arc::clone(&skills)).expect("child tools build");
+        assert!(child_tools
+            .names()
+            .contains(&"request_user_input".to_string()));
+
+        // The parent set adds `delegate_task` on top of the child set.
+        let parent_tools =
+            build_tools(Arc::new(TestSubagentRunner), Arc::clone(&skills)).expect("tools build");
+        let names = parent_tools.names();
+        assert!(names.contains(&"request_user_input".to_string()));
+        assert!(names.contains(&"bash".to_string()));
+        assert!(names.contains(&"delegate_task".to_string()));
+
+        // The wire schema fixes the prompt contract: {prompt: string, required}.
+        let schema = parent_tools
+            .schemas()
+            .into_iter()
+            .find(|schema| schema["name"] == "request_user_input")
+            .expect("request_user_input schema present");
+        assert_eq!(schema["parameters"]["required"][0], "prompt");
+        assert_eq!(
+            schema["parameters"]["properties"]["prompt"]["type"],
+            "string"
+        );
+    }
+
+    /// Registry-shape stub: `build_tools` only needs the runner for the
+    /// `delegate_task` tool; this test never runs a child.
+    struct TestSubagentRunner;
+
+    #[async_trait::async_trait]
+    impl ark_ports::SubagentRunner for TestSubagentRunner {
+        fn is_enabled(&self) -> bool {
+            true
+        }
+
+        fn active_count(&self) -> u32 {
+            0
+        }
+
+        async fn delegate(
+            &self,
+            _request: ark_ports::SubagentRequest,
+        ) -> ark_common::Result<ark_ports::SubagentOutcome> {
+            Err(ark_common::ArkError::internal("not used by this test"))
+        }
+
+        async fn delegate_background(
+            &self,
+            _request: ark_ports::SubagentRequest,
+        ) -> ark_common::Result<ark_common::ChildId> {
+            Err(ark_common::ArkError::internal("not used by this test"))
+        }
+
+        async fn prepare_child(
+            &self,
+            _request: ark_ports::SubagentRequest,
+        ) -> ark_common::Result<ark_common::ChildId> {
+            Err(ark_common::ArkError::internal("not used by this test"))
+        }
+
+        async fn run_child(
+            &self,
+            _child: ark_common::ChildId,
+        ) -> ark_common::Result<ark_ports::SubagentOutcome> {
+            Err(ark_common::ArkError::internal("not used by this test"))
+        }
     }
 }

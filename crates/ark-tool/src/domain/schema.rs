@@ -150,6 +150,15 @@ fn delegate_task_schema() -> serde_json::Value {
     )
 }
 
+fn request_user_input_schema() -> serde_json::Value {
+    object(
+        serde_json::json!({
+            "prompt": { "type": "string", "description": "The question shown to the user" },
+        }),
+        &["prompt"],
+    )
+}
+
 macro_rules! static_schema {
     ($fn_name:ident, $builder:ident) => {
         pub fn $fn_name() -> &'static serde_json::Value {
@@ -167,6 +176,7 @@ static_schema!(find, find_schema);
 static_schema!(grep, grep_schema);
 static_schema!(bash, bash_schema);
 static_schema!(delegate_task, delegate_task_schema);
+static_schema!(request_user_input, request_user_input_schema);
 
 /// Schema for `name`, or `None` when it is not a builtin.
 pub fn schema_of(name: &str) -> Option<&'static serde_json::Value> {
@@ -178,6 +188,7 @@ pub fn schema_of(name: &str) -> Option<&'static serde_json::Value> {
         "grep" => Some(grep()),
         "ls" => Some(ls()),
         "read" => Some(read()),
+        "request_user_input" => Some(request_user_input()),
         "write" => Some(write()),
         _ => None,
     }
