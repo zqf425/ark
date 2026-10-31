@@ -158,11 +158,35 @@ run2 发现的 P2/P3（未修复，记录为后续项）：
 3. P3（体验项）`GET /v1/threads/{id}` 不回显会话级 autonomy/workspace 覆盖；PATCH 传 `null`
    无法清除已设覆盖（需接口语义明示）。
 
+> macOS 真实模型交互补充验收 run3（2026-11-01，arkd @ master 02954cb，独立端口 18797 与独立
+> 数据目录，真实网关 `global:deepseek-v4.1-flash`，Playwright Chromium 驱动真实页面，
+> 证据为真实 DOM 快照与 HTTP 状态码，不入库）：
+>
+> 已通过：web rewind 入口全链路（确认弹窗三段文案、回退后画布重建、seq 水位 121→122、
+> 成功 toast、SSE 保持连接、服务端 items=0 与 last_seq 一致、工作区文件未动）；失败回合的
+> 错误展示（错误码+原文）；运行中回合 rewind 入口正确禁用；子代理面板（完成卡片、用量
+> "5 次工具调用"、活跃计数、补充指令入口、父回合审批卡）；语言切换即时生效
+> （`html lang` en-US↔zh-CN）；英文模式设置页（工作区/供应商/集成/通用）目视零中文残留；
+> 503 错误经 UI 如实呈现且可重试。
+>
+> 过程中发现并已闭环的缺陷（均经 DSH 修复、独立复验后合入 master）：
+> 1. P1 `HistoryHygiene::repair` 误删携带 `tool_calls` 的空 assistant 行（deepseek 类模型
+>    必现，工具结果对模型不可见并触发自我更正）。修复 c459a31，抓包复验通过。
+> 2. P2 设置页"通用"区块与顶部状态栏硬编码中文。修复 6d93091。
+> 3. P2 全 web 用户可见文案 i18n 债务（57 文件、532 键、非注释中文清零，含双语完备静态测试）。
+>    修复 a2d92f3。
+> 4. P2 `ThreadDetail.child_ids` 同一子代理重复出现（runs.jsonl 一行=一次状态转换，投影未
+>    折叠）。修复 02954cb，统一 `ark_ports::latest_child_runs` 折叠语义。
+> 5. P2 部分自动续跑回合缺失 turn_started/turn_completed 生命周期记录。修复 4e7db53
+>    （supervisor 收敛时补写缺失的 start 记录），run2 缺陷 D1 关闭。
+> 6. P3 PATCH/GET 覆盖语义未明示。run2 的"GET 不回显"前提在当前代码上不成立（实测已回显）；
+>    修复 ebadf21 以契约注释+测试固化 PATCH 合并语义与 GET 回显行为，run2 缺陷 D3 关闭。
+
 仍未覆盖（延续原清单，不宣称通过）：
 
-- 子代理 abort、steer、resume、摘要跳转与用量展示的 UI 侧时序（run2 已覆盖 HTTP 层）；
-- 语言/字号/主题的保存与失败提示（会话级 workspace/权限覆盖 run2 已验）；
-- 真实浏览器（web UI）驱动下复现上述全部场景，含 44d87e5 新增的 web rewind 入口点击链路。
+- 每批 8 条通知上限的运行时实测（run2 P2 证据局限，延续）；
+- 语言/字号/主题的"保存失败提示"路径（保存成功路径 run3 已验）；
+- Windows 桌面端整体复验（保持既有外部阻塞：端口 18791 被用户进程占用）。
 
 ## 完成条件
 
