@@ -182,9 +182,25 @@ run2 发现的 P2/P3（未修复，记录为后续项）：
 > 6. P3 PATCH/GET 覆盖语义未明示。run2 的"GET 不回显"前提在当前代码上不成立（实测已回显）；
 >    修复 ebadf21 以契约注释+测试固化 PATCH 合并语义与 GET 回显行为，run2 缺陷 D3 关闭。
 
+> macOS 补充验收 run4（2026-11-01，arkd @ master 1ca6625，独立端口 18801，真实网关
+> `global:deepseek-v4.1-flash`，证据索引 `.tmp/accept-batch8/`，不入库）：
+>
+> **每批 8 条通知上限的运行时实测通过**：单回合委派 10 个后台子代理，首批起始时 9 条就绪
+> 实际只消费 8 条（模型回显明确收到 10 个中的 8 个），批次序列 `[0, 8, 2]`，10/10 确认、
+> 无丢失无重复；并发闸门实测峰值与 `max_concurrency` 一致。run2 的"8 条上限证据局限"P2 关闭。
+>
+> run4 新发现的观察项（未修复，记录为后续项）：
+> 1. P2 `subagents.max_concurrency` 硬上限 8（`SUBAGENT_CONCURRENCY_MAX`，"ceiling is
+>    enforced rather than advisory"），简报假设可配 ≥10 不可达；属设计约束，如需更高并发
+>    另行立项。
+> 2. P3 GUI 写出的 `config.json` 与 arkd `RuntimeConfig` 结构不兼容时**静默回落默认值**
+>    （`#[serde(default)]` 且无 `deny_unknown_fields`、无告警），`auto_continue` 等关键开关
+>    可能无声失效。建议加载时对未知键/回落行为打 warn 日志。
+> 3. P3（环境）上游网关在多任务并发时间歇 503，子代理可能大面积以 `ModelRequestFailed`
+>    结束；熔断按设计暂停续跑、通知不丢（run1/观察项 O1 佐证）。
+
 仍未覆盖（延续原清单，不宣称通过）：
 
-- 每批 8 条通知上限的运行时实测（run2 P2 证据局限，延续）；
 - 语言/字号/主题的"保存失败提示"路径（保存成功路径 run3 已验）；
 - Windows 桌面端整体复验（保持既有外部阻塞：端口 18791 被用户进程占用）。
 
