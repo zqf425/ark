@@ -214,14 +214,19 @@ impl ToolRegistryPort for ToolRegistry {
                     .entries
                     .values()
                     .map(|entry| {
-                        // The schema already carries `name`/`description` only where the
-                        // tool declared them; expose a uniform function shape so a
-                        // provider adapter needs no per-tool branch.
-                        let mut value = entry.schema.clone();
-                        if let Some(object) = value.as_object_mut() {
-                            object
-                                .entry("name")
-                                .or_insert_with(|| entry.tool.name().into());
+                        // Uniform function shape `{name, description?,
+                        // parameters}`: OpenAI chat wraps this under
+                        // `function` verbatim, while the Responses and
+                        // Anthropic adapters pick `name`/`description`/
+                        // `parameters` out of it, so no adapter needs a
+                        // per-tool branch. `description` is only emitted
+                        // when the tool schema declares one.
+                        let mut value = serde_json::json!({
+                            "name": entry.tool.name(),
+                            "parameters": entry.schema,
+                        });
+                        if let Some(description) = entry.schema.get("description") {
+                            value["description"] = description.clone();
                         }
                         value
                     })
@@ -357,6 +362,29 @@ mod tests {
             .collect();
         assert_eq!(names.len(), 7);
         assert!(names.contains(&"read".to_string()));
+    }
+
+    #[test]
+    fn schemas_use_the_uniform_function_shape() {
+        let registry = registry();
+        let bash = registry
+            .schemas()
+            .into_iter()
+            .find(|schema| schema["name"] == "bash")
+            .expect("bash schema");
+        // Function shape: the raw JSON Schema lives under `parameters`, never
+        // bare at the top level.
+        assert_eq!(bash["parameters"]["type"], "object");
+        assert!(bash["parameters"]["properties"]["command"].is_object());
+        assert!(bash["parameters"]["required"].is_array());
+        assert!(
+            bash.get("type").is_none(),
+            "schema must not leak to top level"
+        );
+        assert!(bash.get("properties").is_none());
+        // `description` is only emitted when the tool schema declares one;
+        // bash declares none, so the key must be absent rather than faked.
+        assert!(bash.get("description").is_none());
     }
 
     #[test]

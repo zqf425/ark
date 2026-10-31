@@ -290,6 +290,10 @@ mod tests {
             messages: vec![ModelMessage::user("hi")],
             tools: vec![
                 json!({"name": "read", "description": "read a file", "parameters": {"type": "object"}}),
+                // Function shape as produced by the tool registry: the JSON
+                // Schema travels under `parameters`, `description` only when
+                // the tool declares one.
+                json!({"name": "bash", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}}}),
             ],
             ..Default::default()
         };
@@ -297,6 +301,10 @@ mod tests {
         assert_eq!(body["tools"][0]["name"], "read");
         assert_eq!(body["tools"][0]["input_schema"]["type"], "object");
         assert!(body["tools"][0].get("function").is_none());
+        assert_eq!(
+            body["tools"][1]["input_schema"]["properties"]["command"]["type"],
+            "string"
+        );
     }
 
     #[test]
