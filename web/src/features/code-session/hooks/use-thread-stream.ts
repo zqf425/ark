@@ -30,6 +30,7 @@ export function useThreadStream(threadId: ThreadId | null): void {
   // A rewind physically truncates history; bumping this token re-runs the whole
   // load + subscribe sequence from the fresh detail watermark.
   const reloadToken = useCodeSessionStore((s) => s.reloadToken)
+  const requestStreamReload = useCodeSessionStore((s) => s.requestStreamReload)
   const { push: pushToast } = useToast()
 
   useEffect(() => {
@@ -41,6 +42,9 @@ export function useThreadStream(threadId: ThreadId | null): void {
 
     const controller = new AbortController()
     let cancelled = false
+    // One rebuild per subscription: the token bump tears this subscription down
+    // anyway, so a second notification in the same backlog must not queue one.
+    let rebuildScheduled = false
     const displayedCompletions = new Set<string>()
     setDetailStatus('loading')
 
@@ -58,6 +62,18 @@ export function useThreadStream(threadId: ThreadId | null): void {
           onEvent: (event) => {
             if (cancelled) return
             ingestEvent(event)
+            // `thread_rewound` says the durable log was truncated and this seq
+            // is a fresh, never-reused notification (docs/modules/ark-store.md).
+            // Folding it is not enough: rows from the discarded suffix are gone
+            // on the server, so re-seed from a new detail watermark instead of
+            // trusting the local projection.
+            if (event.kind === 'thread_rewound') {
+              if (!rebuildScheduled) {
+                rebuildScheduled = true
+                requestStreamReload()
+              }
+              return
+            }
             if (event.kind === 'child_completed' && !displayedCompletions.has(event.notification_id)) {
               displayedCompletions.add(event.notification_id)
               const detail = event.summary ?? event.error ?? '子代理未提供摘要。'
@@ -85,5 +101,5 @@ export function useThreadStream(threadId: ThreadId | null): void {
       controller.abort()
       setStreamStatus('closed')
     }
-  }, [threadId, reloadToken, ingestEvent, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
+  }, [threadId, reloadToken, ingestEvent, requestStreamReload, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
 }

@@ -1,9 +1,12 @@
 /**
  * Per-turn rewind entry.
  *
- * Visible only on terminal turns of a quiescent thread. The confirm step states
- * the destructive scope before anything is sent; success re-seeds the stream
- * from a fresh detail (via the reload token) so deleted turns and their
+ * Rendered on every turn that still has rows. A quiescent thread shows an
+ * actionable control; a thread with a live turn shows the same control disabled,
+ * because the server answers 409 for it (docs/modules/web.md: the entry must not
+ * claim an operation the runtime will refuse). The confirm step states the
+ * destructive scope before anything is sent. Success re-seeds the stream from a
+ * fresh detail watermark through the reload token, so deleted turns and their
  * derived gates/errors disappear with the truncated history.
  */
 import { useState } from 'react'
@@ -13,34 +16,48 @@ import { Button, useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import { rewindThread } from '../api/rewind-api'
 import { useCodeSessionStore } from '../state/store'
-import { canRewindTurn, executeRewind } from './rewind-flow'
+import { executeRewind, type RewindAvailability } from './rewind-flow'
 
+/**
+ * The server's own message is the only accurate explanation for a refusal
+ * (409 running turn, 404 missing target), so it is shown verbatim after the
+ * localized hint. Nothing here invents a client-side reason.
+ */
 function describe(error: unknown): string {
   if (error instanceof ApiError) return `${error.hint}：${error.message}`
   if (error instanceof Error) return error.message
   return String(error)
 }
 
-export function RewindControl({ threadId, turnId }: { threadId: ThreadId; turnId: TurnId }): JSX.Element | null {
+/**
+ * `availability` is computed once per snapshot by the canvas: deriving it here
+ * would rescan the item list for every turn on the thread.
+ */
+export function RewindControl({
+  threadId,
+  turnId,
+  availability
+}: {
+  threadId: ThreadId
+  turnId: TurnId
+  availability: RewindAvailability
+}): JSX.Element | null {
   const { t } = useI18n()
   const { push } = useToast()
   const [confirming, setConfirming] = useState(false)
   const [pending, setPending] = useState(false)
 
-  const state = useCodeSessionStore((s) => s.turnState[turnId])
-  const activeTurnId = useCodeSessionStore((s) => s.activeTurnId)
   const requestStreamReload = useCodeSessionStore((s) => s.requestStreamReload)
   const setCommandError = useCodeSessionStore((s) => s.setCommandError)
 
-  // Terminal turns only, and never while any turn is running: the server would
-  // answer 409 anyway, but the entry stays out of the layout entirely.
-  if (!canRewindTurn(state) || activeTurnId) return null
+  if (availability === 'hidden') return null
 
+  const busy = availability !== 'ready'
   const run = async (): Promise<void> => {
     setPending(true)
     setCommandError(null)
     const ok = await executeRewind(
-      { threadId, turnId, activeTurnId, running: false },
+      { threadId, turnId, availability },
       {
         rewind: rewindThread,
         onRewound: () => {
@@ -61,7 +78,13 @@ export function RewindControl({ threadId, turnId }: { threadId: ThreadId; turnId
   if (!confirming) {
     return (
       <div className="ark-rewind">
-        <Button variant="ghost" size="sm" onClick={() => setConfirming(true)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={busy}
+          title={busy ? t('session.rewind.busyHint') : t('session.rewind.confirmBody')}
+          onClick={() => setConfirming(true)}
+        >
           {t('session.rewind.entry')}
         </Button>
       </div>
@@ -72,8 +95,9 @@ export function RewindControl({ threadId, turnId }: { threadId: ThreadId; turnId
     <div className="ark-rewind ark-rewind--confirm" role="alertdialog" aria-label={t('session.rewind.confirmTitle')}>
       <p className="ark-rewind__title">{t('session.rewind.confirmTitle')}</p>
       <p className="ark-rewind__body">{t('session.rewind.confirmBody')}</p>
+      <p className="ark-rewind__body">{t('session.rewind.confirmWorkspace')}</p>
       <div className="ark-rewind__actions">
-        <Button variant="primary" size="sm" disabled={pending} onClick={() => void run()}>
+        <Button variant="primary" size="sm" disabled={pending || busy} onClick={() => void run()}>
           {pending ? t('session.rewind.rewinding') : t('session.rewind.confirmAction')}
         </Button>
         <Button variant="ghost" size="sm" disabled={pending} onClick={() => setConfirming(false)}>

@@ -57,6 +57,14 @@ export type ItemsSnapshot = {
   childCompletions: Record<string, ChildCompletionNotice>
   /** Advances only for child lifecycle events, not every streamed token. */
   childRunRevision: number
+  /**
+   * Advances for every `thread_rewound` notification. The writer truncated the
+   * durable log and never reuses sequence numbers, so the local projection is
+   * stale by construction and must be rebuilt from the detail watermark.
+   */
+  rewindRevision: number
+  /** `rewind_from_seq` of the newest notification; diagnostics only. */
+  rewoundFromSeq: number | null
 }
 
 export type ThreadListSnapshot = {

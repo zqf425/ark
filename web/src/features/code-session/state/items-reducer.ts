@@ -19,7 +19,9 @@ export function emptyItemsState(): ItemsSnapshot {
     approvals: {},
     userInputs: {},
     childCompletions: {},
-    childRunRevision: 0
+    childRunRevision: 0,
+    rewindRevision: 0,
+    rewoundFromSeq: null
   }
 }
 
@@ -43,7 +45,9 @@ function clone(state: ItemsSnapshot): ItemsSnapshot {
     approvals: { ...state.approvals },
     userInputs: { ...state.userInputs },
     childCompletions: { ...state.childCompletions },
-    childRunRevision: state.childRunRevision
+    childRunRevision: state.childRunRevision,
+    rewindRevision: state.rewindRevision,
+    rewoundFromSeq: state.rewoundFromSeq
   }
 }
 
@@ -185,6 +189,23 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
         message: event.message
       })
       return next
+
+    case 'thread_rewound': {
+      // The writer physically truncated `events.jsonl` and appended this
+      // notification at a fresh, never-reused seq (docs/modules/ark-store.md).
+      // Every row, turn state and gate projected from the discarded suffix is
+      // gone, so drop the projection rather than leave deleted turns on screen;
+      // `rewindRevision` tells the stream layer to rebuild from the detail
+      // watermark. `lastSeq` is kept: it is the notification's own seq, which is
+      // already ahead of anything the discarded suffix ever carried.
+      const rebuilt = emptyItemsState()
+      rebuilt.lastSeq = next.lastSeq
+      rebuilt.rewindRevision = next.rewindRevision + 1
+      rebuilt.rewoundFromSeq = event.rewind_from_seq
+      // Child runs may have been discarded with the suffix; let the panel refetch.
+      rebuilt.childRunRevision = next.childRunRevision + 1
+      return rebuilt
+    }
 
     case 'turn_aborted':
       setTurn(next, event.turn_id, 'aborted')

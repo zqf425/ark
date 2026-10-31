@@ -93,3 +93,105 @@ describe('items reducer runtime snapshot', () => {
     expect(state.userInputs['input-1']?.status).toBe('pending')
   })
 })
+
+describe('items reducer thread_rewound', () => {
+  const THREAD_ID = '00000000-0000-0000-0000-000000000001'
+  const TURN_ID = '00000000-0000-0000-0000-000000000003'
+  const ITEM_ID = '00000000-0000-0000-0000-000000000004'
+
+  function seeded(): ReturnType<typeof seedFromItems> {
+    return seedFromItems(
+      [
+        {
+          item_id: ITEM_ID,
+          turn_id: TURN_ID,
+          kind: 'assistant_message',
+          status: 'completed',
+          created_at: '2026-10-28T00:00:00Z',
+          text: 'discarded'
+        }
+      ],
+      6,
+      [{
+        notification_id: 'child:1',
+        child_id: '00000000-0000-0000-0000-000000000002',
+        thread_id: THREAD_ID,
+        label: 'inspect runtime',
+        status: 'completed',
+        summary: 'healthy',
+        completed_at: '2026-10-28T00:00:01Z',
+        seq: 5
+      }],
+      {
+        pending_approvals: [{
+          approval_id: 'approval-1',
+          turn_id: TURN_ID,
+          tool: 'bash',
+          summary: 'run command',
+          requested_at: '2026-10-28T00:00:01Z'
+        }],
+        pending_user_inputs: []
+      }
+    )
+  }
+
+  function rewound(seq: number, fromSeq: number): RuntimeEvent {
+    return {
+      kind: 'thread_rewound',
+      seq,
+      thread_id: THREAD_ID,
+      timestamp: '2026-10-28T00:01:00Z',
+      rewind_from_seq: fromSeq,
+      target_turn_id: TURN_ID
+    }
+  }
+
+  it('丢弃被截断后缀的投影、回合状态与 gate', () => {
+    const state = applyEvent(seeded(), rewound(9, 3))
+
+    expect(state.itemOrder).toEqual([])
+    expect(state.itemsById[ITEM_ID]).toBeUndefined()
+    expect(state.turnState[TURN_ID]).toBeUndefined()
+    expect(state.approvals['approval-1']).toBeUndefined()
+    expect(state.childCompletions['child:1']).toBeUndefined()
+  })
+
+  it('保留通知自身的不复用 seq 作为新水位，并标记待重建', () => {
+    const state = applyEvent(seeded(), rewound(9, 3))
+
+    // 序号不复用：通知 seq 已经高于被丢弃后缀曾用过的一切序号。
+    expect(state.lastSeq).toBe(9)
+    expect(state.rewindRevision).toBe(1)
+    expect(state.rewoundFromSeq).toBe(3)
+    // 子代理列表可能随后缀一起被丢弃，需要重拉。
+    expect(state.childRunRevision).toBe(1)
+  })
+
+  it('旧 seq 的迟到事件不会把水位退回去', () => {
+    const afterRewind = applyEvent(seeded(), rewound(9, 3))
+    const late = applyEvent(afterRewind, {
+      kind: 'assistant_text_delta',
+      seq: 4,
+      thread_id: THREAD_ID,
+      turn_id: TURN_ID,
+      item_id: ITEM_ID,
+      timestamp: '2026-10-28T00:00:02Z',
+      delta: 'late'
+    })
+
+    expect(late.lastSeq).toBe(9)
+    expect(late.rewindRevision).toBe(1)
+  })
+
+  it('重建后 seedFromItems 从 detail 水位恢复干净投影', () => {
+    const afterRewind = applyEvent(seeded(), rewound(9, 3))
+    const rebuilt = seedFromItems([], afterRewind.lastSeq, [], {
+      pending_approvals: [],
+      pending_user_inputs: []
+    })
+
+    expect(rebuilt.lastSeq).toBe(9)
+    expect(rebuilt.itemOrder).toEqual([])
+    expect(rebuilt.turnState).toEqual({})
+  })
+})

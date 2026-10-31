@@ -12,6 +12,7 @@ import { Composer } from './Composer'
 import { StreamFooter } from './StreamFooter'
 import { ChildRunsPanel } from './ChildRunsPanel'
 import { RewindControl } from './RewindControl'
+import { rewindAvailabilityByTurn } from './rewind-flow'
 import { SessionRuntimeControls } from './SessionRuntimeControls'
 
 /**
@@ -83,6 +84,7 @@ export function ThreadStream({
   const activeThread = useCodeSessionStore((s) => s.threads.find((thread) => thread.thread_id === threadId) ?? null)
 
   const groups = useMemo(() => groupByTurn(snapshot), [snapshot])
+  const rewindByTurn = useMemo(() => rewindAvailabilityByTurn(snapshot), [snapshot])
   const approvals = useMemo(() => approvalCards(snapshot), [snapshot])
   const userInputs = useMemo(() => userInputCards(snapshot), [snapshot])
   const errors = useMemo(() => recentErrors(snapshot), [snapshot])
@@ -135,7 +137,11 @@ export function ThreadStream({
               </ErrorBoundary>
             ))}
             <ErrorBoundary label="回退入口渲染失败">
-              <RewindControl threadId={threadId} turnId={group.turnId} />
+              <RewindControl
+                threadId={threadId}
+                turnId={group.turnId}
+                availability={rewindByTurn.get(group.turnId) ?? 'hidden'}
+              />
             </ErrorBoundary>
           </div>
         ))}

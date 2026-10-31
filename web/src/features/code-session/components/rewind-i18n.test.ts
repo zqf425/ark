@@ -20,4 +20,17 @@ describe('rewind i18n keys', () => {
     expect(REWIND_KEYS).toContain('session.rewind.cancel')
     expect(REWIND_KEYS).toContain('session.rewind.failed')
   })
+
+  it('确认弹窗说明工作区不受影响，运行中禁用有解释文案', () => {
+    expect(translate('zh-CN', 'session.rewind.confirmWorkspace')).toContain('工作区')
+    expect(translate('en-US', 'session.rewind.confirmWorkspace')).toContain('workspace')
+    expect(translate('zh-CN', 'session.rewind.busyHint')).not.toBe('')
+    expect(translate('en-US', 'session.rewind.busyHint')).not.toBe('')
+  })
+
+  it('中英文文案不相同，避免漏翻', () => {
+    for (const key of REWIND_KEYS) {
+      expect(translate('zh-CN', key as never), key).not.toBe(translate('en-US', key as never))
+    }
+  })
 })
