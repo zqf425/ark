@@ -19,7 +19,7 @@ use ark_common::{ArkError, ItemId, Result, Usage};
 use ark_contract::{item::ItemKind, ThreadItem};
 use ark_ports::{
     ModelChunk, ModelClient, ModelMessage, ModelRequest, ModelResponse, ModelRole, SandboxDecision,
-    SandboxPolicy, ToolArgs, ToolOutput,
+    SandboxPolicy, ToolArgs, ToolCallRef, ToolOutput,
 };
 use tokio::sync::mpsc;
 
@@ -479,8 +479,9 @@ impl Reactor {
             .with_approvals(approvals))
     }
 
-    /// Record what the model said. `ModelMessage` has no `tool_calls` field, so
-    /// the calls are rendered into the assistant text (contract gap, reported).
+    /// Record what the model said. Tool calls are attached to the assistant
+    /// row via `tool_calls` so the following `ToolRole` rows stay paired;
+    /// providers reject orphan tool messages.
     fn record_assistant_turn(&mut self, text: &str, calls: &[ToolCallRequest]) {
         if calls.is_empty() {
             if !text.is_empty() {
@@ -488,14 +489,16 @@ impl Reactor {
             }
             return;
         }
-        let rendered: Vec<String> = calls
+        let calls: Vec<ToolCallRef> = calls
             .iter()
-            .map(|call| format!("[{}({})]", call.tool, call.arguments))
+            .map(|call| ToolCallRef {
+                call_id: call.call_id.clone(),
+                name: call.tool.clone(),
+                arguments: call.arguments.clone(),
+            })
             .collect();
-        self.history.push(ModelMessage::assistant(format!(
-            "{text}\n{}",
-            rendered.join(" ")
-        )));
+        self.history
+            .push(ModelMessage::assistant_with_tool_calls(text, calls));
     }
 
     /// Calls that need a human decision.
@@ -1189,6 +1192,29 @@ mod tests {
         assert_eq!(
             reactor.history[3],
             ModelMessage::assistant("second recent answer")
+        );
+    }
+
+    #[test]
+    fn assistant_tool_call_history_is_legal_hygiene() {
+        let mut reactor = reactor(Arc::new(MemoryWriter::new()));
+        let calls = vec![ToolCallRequest::new(
+            "c1",
+            "read",
+            serde_json::json!({"path": "a.txt"}),
+        )];
+        reactor.record_assistant_turn("calling tool", &calls);
+        reactor.record_assistant_turn("done", &[]);
+
+        let history = reactor.history();
+        assert_eq!(history[0].role, ModelRole::Assistant);
+        assert_eq!(history[0].content, "calling tool");
+        assert_eq!(history[0].tool_calls.len(), 1);
+        assert_eq!(history[0].tool_calls[0].call_id, "c1");
+        assert_eq!(history[0].tool_calls[0].name, "read");
+        assert!(
+            HistoryHygiene::new().is_legal(history),
+            "recorded assistant turn must satisfy history hygiene"
         );
     }
 }

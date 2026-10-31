@@ -662,15 +662,14 @@ mod autonomy_tests {
 ///
 /// Reasoning is deliberately excluded: it is renderer-only and must never be
 /// replayed as user-visible assistant text. Completed tool calls are folded
-/// into the assistant history as `tool_calls` when a same-call `ToolResult`
-/// follows, each followed by a `ToolRole` result message; unpaired rows are
-/// dropped because providers reject requests whose tool calls have no result.
+/// into the assistant history as `tool_calls`, each followed by a `ToolRole`
+/// result message. The store folds `ToolCallStarted` + `ToolCallFinished` into
+/// one `ToolCall` item whose payload carries `call_id`/`tool`/`arguments` and
+/// the embedded `output`; terminal items replay the full call+result pair.
+/// Non-terminal items are dropped because providers reject requests whose
+/// tool calls have no result.
 fn conversation_history(items: &[ark_contract::ThreadItem]) -> Vec<ModelMessage> {
     let mut history: Vec<ModelMessage> = Vec::new();
-    // Pending tool calls waiting for their result. Keyed by call_id so result
-    // rows can attach regardless of intermediate non-tool items.
-    let mut pending: std::collections::HashMap<String, ToolCallRef> =
-        std::collections::HashMap::new();
     for item in items {
         match item.kind {
             ark_contract::item::ItemKind::UserMessage => {
@@ -693,27 +692,25 @@ fn conversation_history(items: &[ark_contract::ThreadItem]) -> Vec<ModelMessage>
                 }
             }
             ark_contract::item::ItemKind::ToolCall => {
-                if item.status == ark_contract::item::ItemStatus::Completed {
-                    if let Some(payload) = tool_payload(item) {
-                        pending.insert(
-                            payload.call_id.clone(),
-                            ToolCallRef {
-                                call_id: payload.call_id.clone(),
-                                name: payload.tool.clone(),
-                                arguments: payload.arguments.clone().unwrap_or_default(),
-                            },
-                        );
-                    }
+                let terminal = matches!(
+                    item.status,
+                    ark_contract::item::ItemStatus::Completed
+                        | ark_contract::item::ItemStatus::Failed
+                );
+                if !terminal {
+                    continue;
                 }
-            }
-            ark_contract::item::ItemKind::ToolResult => {
                 let Some(payload) = tool_payload(item) else {
                     continue;
                 };
-                let Some(call) = pending.remove(&payload.call_id) else {
-                    continue;
-                };
-                attach_tool_call(&mut history, call);
+                attach_tool_call(
+                    &mut history,
+                    ToolCallRef {
+                        call_id: payload.call_id.clone(),
+                        name: payload.tool.clone(),
+                        arguments: payload.arguments.clone().unwrap_or_default(),
+                    },
+                );
                 let call_id = payload.call_id.clone();
                 let tool = payload.tool.clone();
                 history.push(ModelMessage {
@@ -827,33 +824,23 @@ mod tests {
         );
     }
 
+    /// A folded tool item as the store projects it: one `ToolCall` entry whose
+    /// payload embeds the result (see `apply_tool_finished`).
     fn tool_item(
-        kind: ark_contract::item::ItemKind,
         call_id: &str,
         tool: &str,
+        output: Option<&str>,
+        status: ark_contract::item::ItemStatus,
     ) -> ark_contract::ThreadItem {
-        let mut item = ark_contract::ThreadItem::new(TurnId::new(), kind).completed();
+        let mut item =
+            ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::ToolCall);
+        item.status = status;
         item.tool = Some(ark_contract::item::ToolPayload {
             call_id: call_id.into(),
             tool: tool.into(),
             arguments: Some(serde_json::json!({"path": "a.txt"})),
-            output: None,
-            ok: None,
-            duration_ms: None,
-        });
-        item
-    }
-
-    fn result_item(call_id: &str, tool: &str, output: &str) -> ark_contract::ThreadItem {
-        let mut item =
-            ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::ToolResult)
-                .completed();
-        item.tool = Some(ark_contract::item::ToolPayload {
-            call_id: call_id.into(),
-            tool: tool.into(),
-            arguments: None,
-            output: Some(output.into()),
-            ok: Some(true),
+            output: output.map(Into::into),
+            ok: Some(status == ark_contract::item::ItemStatus::Completed),
             duration_ms: None,
         });
         item
@@ -871,8 +858,12 @@ mod tests {
             )
             .with_text("calling")
             .completed(),
-            tool_item(ark_contract::item::ItemKind::ToolCall, "c1", "read"),
-            result_item("c1", "read", "file body"),
+            tool_item(
+                "c1",
+                "read",
+                Some("file body"),
+                ark_contract::item::ItemStatus::Completed,
+            ),
         ];
         assert_eq!(
             conversation_history(&items),
@@ -898,32 +889,20 @@ mod tests {
     }
 
     #[test]
-    fn unpaired_tool_rows_are_not_replayed() {
-        let orphan_call = tool_item(ark_contract::item::ItemKind::ToolCall, "c1", "read");
-        let orphan_result =
-            tool_item(ark_contract::item::ItemKind::ToolResult, "c9", "read").with_text("body");
-        assert_eq!(conversation_history(&[orphan_call]), Vec::new());
-        assert_eq!(conversation_history(&[orphan_result]), Vec::new());
+    fn non_terminal_tool_items_are_not_replayed() {
+        let streaming = tool_item(
+            "c1",
+            "read",
+            None,
+            ark_contract::item::ItemStatus::Streaming,
+        );
+        assert_eq!(conversation_history(&[streaming]), Vec::new());
     }
 
     #[test]
     fn failed_tool_results_are_replayed_with_empty_output_fallback() {
-        let mut failed =
-            ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::ToolResult)
-                .completed();
-        failed.tool = Some(ark_contract::item::ToolPayload {
-            call_id: "c1".into(),
-            tool: "bash".into(),
-            arguments: None,
-            output: None,
-            ok: Some(false),
-            duration_ms: None,
-        });
-        let items = vec![
-            tool_item(ark_contract::item::ItemKind::ToolCall, "c1", "bash"),
-            failed,
-        ];
-        let history = conversation_history(&items);
+        let failed = tool_item("c1", "bash", None, ark_contract::item::ItemStatus::Failed);
+        let history = conversation_history(&[failed]);
         assert_eq!(history.len(), 2);
         assert_eq!(history[1].content, "");
         assert_eq!(history[1].tool_call_id.as_deref(), Some("c1"));
@@ -932,10 +911,12 @@ mod tests {
     #[test]
     fn oversized_tool_output_is_truncated_at_16kib_bytes() {
         let big = "x".repeat(20 * 1024);
-        let items = vec![
-            tool_item(ark_contract::item::ItemKind::ToolCall, "c1", "read"),
-            result_item("c1", "read", &big),
-        ];
+        let items = vec![tool_item(
+            "c1",
+            "read",
+            Some(&big),
+            ark_contract::item::ItemStatus::Completed,
+        )];
         let history = conversation_history(&items);
         assert_eq!(history[1].content.len(), 16 * 1024);
     }
@@ -946,8 +927,12 @@ mod tests {
             ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::UserMessage)
                 .with_text("q1")
                 .completed(),
-            tool_item(ark_contract::item::ItemKind::ToolCall, "c1", "read"),
-            result_item("c1", "read", "r1"),
+            tool_item(
+                "c1",
+                "read",
+                Some("r1"),
+                ark_contract::item::ItemStatus::Completed,
+            ),
             ark_contract::ThreadItem::new(
                 TurnId::new(),
                 ark_contract::item::ItemKind::AssistantMessage,
