@@ -147,6 +147,7 @@ mod tests {
                     thread_id: created.thread_id,
                     turn_id: ark_common::TurnId::new(),
                     timestamp: Utc::now(),
+                    auto_continuation: false,
                 },
             )
             .await

@@ -13,11 +13,28 @@ use chrono::Utc;
 pub struct TurnEvents {
     pub thread_id: ThreadId,
     pub turn_id: TurnId,
+    /// Marks the `turn_started` event as supervisor-scheduled, so the
+    /// auto-continuation delivery-attempt accounting survives restarts.
+    auto_continuation: bool,
 }
 
 impl TurnEvents {
     pub fn new(thread_id: ThreadId, turn_id: TurnId) -> Self {
-        Self { thread_id, turn_id }
+        Self {
+            thread_id,
+            turn_id,
+            auto_continuation: false,
+        }
+    }
+
+    /// Constructors for an auto-continuation turn. The flag is additive on the
+    /// durable `turn_started` event; user turns stay unmarked.
+    pub fn auto_continuation(thread_id: ThreadId, turn_id: TurnId) -> Self {
+        Self {
+            thread_id,
+            turn_id,
+            auto_continuation: true,
+        }
     }
 
     /// Sequence numbers are assigned by the session writer, never by producers.
@@ -29,6 +46,7 @@ impl TurnEvents {
             thread_id: self.thread_id,
             turn_id: self.turn_id,
             timestamp: Utc::now(),
+            auto_continuation: self.auto_continuation,
         }
     }
 
@@ -42,12 +60,28 @@ impl TurnEvents {
     }
 
     pub fn turn_failed(&self, message: impl Into<String>) -> RuntimeEvent {
+        self.turn_failed_with_kind(message, false)
+    }
+
+    /// `turn_failed` for a model-request failure (gateway outage, timeout),
+    /// distinguishable from tool or policy failures so the continuation
+    /// circuit breaker can stop after repeated provider errors.
+    pub fn turn_failed_model(&self, message: impl Into<String>) -> RuntimeEvent {
+        self.turn_failed_with_kind(message, true)
+    }
+
+    fn turn_failed_with_kind(
+        &self,
+        message: impl Into<String>,
+        model_request_failed: bool,
+    ) -> RuntimeEvent {
         RuntimeEvent::TurnFailed {
             seq: Self::UNASSIGNED,
             thread_id: self.thread_id,
             turn_id: self.turn_id,
             timestamp: Utc::now(),
             message: message.into(),
+            model_request_failed,
         }
     }
 

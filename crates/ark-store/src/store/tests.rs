@@ -55,6 +55,7 @@ pub(crate) fn turn_started(thread: ThreadId, turn: TurnId, seq: u64) -> RuntimeE
         thread_id: thread,
         turn_id: turn,
         timestamp: chrono::Utc::now(),
+        auto_continuation: false,
     }
 }
 

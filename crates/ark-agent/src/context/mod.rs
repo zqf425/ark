@@ -6,7 +6,10 @@ pub mod hygiene;
 pub mod token;
 
 pub use checkpoint::ContextCheckpoint;
-pub use completion::CompletionInbox;
+pub use completion::{
+    auto_delivery_attempts, consecutive_auto_model_request_failures, CompletionInbox,
+    MAX_AUTO_DELIVERY_ATTEMPTS,
+};
 pub use hygiene::{HistoryHygiene, HygieneReport};
 pub use token::TokenEstimator;
 

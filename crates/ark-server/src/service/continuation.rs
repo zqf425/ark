@@ -188,7 +188,9 @@ async fn sync_auto_continue_policy_inner(state: AppState, before_suppress: impl 
                 schedule_auto_continuation(state.clone(), thread_id).await;
             }
             PendingCompletionState::Pending => {
-                if interrupted_user_lifecycle(&state, thread_id).await {
+                if interrupted_user_lifecycle(&state, thread_id).await
+                    || auto_continue_paused_by_model_failures(&state, thread_id).await
+                {
                     before_suppress(thread_id);
                     suppress_if_epoch_is_idle(&state, thread_id, observed_epoch).await;
                 } else {
@@ -243,6 +245,38 @@ async fn interrupted_user_lifecycle(state: &AppState, thread_id: ThreadId) -> bo
 fn policy_allows_auto_continue(state: &AppState) -> bool {
     let settings = state.config.snapshot().subagents;
     settings.enabled && settings.auto_continue
+}
+
+/// Circuit breaker: consecutive automatic continuations that failed on the
+/// model request itself (gateway outages) pause this thread's automatic work.
+/// Without it, a failing provider loops: the notification stays unacknowledged
+/// because the parent turn failed, and every retry re-delivers it. A user turn
+/// or any other terminal event resets the streak; nothing is scheduled while
+/// the breaker holds, so no model calls are produced by the supervisor.
+const MAX_CONSECUTIVE_AUTO_MODEL_FAILURES: usize = 2;
+
+async fn auto_continue_paused_by_model_failures(state: &AppState, thread_id: ThreadId) -> bool {
+    match state.store.replay_interaction_events(thread_id).await {
+        Ok(events) => {
+            let streak = ark_agent::consecutive_auto_model_request_failures(&events);
+            if streak >= MAX_CONSECUTIVE_AUTO_MODEL_FAILURES {
+                tracing::warn!(
+                    thread = %thread_id,
+                    streak,
+                    "auto-continuation paused after consecutive model request failures; requires a user turn or a non-model terminal event to reset"
+                );
+                true
+            } else {
+                false
+            }
+        }
+        Err(error) => {
+            // Fail closed: an unreadable lifecycle log must not risk an
+            // unattended model turn (same policy as interrupt suppression).
+            tracing::warn!(thread = %thread_id, %error, "could not inspect model-failure streak; failing closed");
+            true
+        }
+    }
 }
 
 async fn schedule_with_delay(state: AppState, thread_id: ThreadId, delay: Duration) {
@@ -331,6 +365,9 @@ async fn start_if_eligible(
         suppress_if_epoch_is_idle(state, thread_id, observed_epoch).await;
         return false;
     }
+    if auto_continue_paused_by_model_failures(state, thread_id).await {
+        return false;
+    }
 
     let _workspace_guard = state.workspace_gate.lock().await;
     if cancel.is_cancelled()
@@ -371,16 +408,26 @@ async fn pending_completion_state(state: &AppState, thread_id: ThreadId) -> Pend
         return PendingCompletionState::Retry;
     }
 
-    match state.store.replay_child_completion_events(thread_id).await {
-        Ok(events)
-            if CompletionInbox::from_events(&events)
+    let completion = state.store.replay_child_completion_events(thread_id).await;
+    let interaction = state.store.replay_interaction_events(thread_id).await;
+    match (completion, interaction) {
+        // The delivery-attempt accounting needs the `turn_started` markers from
+        // the interaction stream, so both narrow queries merge by `seq` before
+        // projecting with the per-notification bound. The notification stays
+        // unacknowledged, so user turns still consume it.
+        (Ok(mut events), Ok(lifecycle)) => {
+            events.extend(lifecycle);
+            events.sort_by_key(|event| event.seq());
+            if CompletionInbox::from_events_for_auto_continuation(&events)
                 .notification_ids()
-                .is_empty() =>
-        {
-            PendingCompletionState::Empty
+                .is_empty()
+            {
+                PendingCompletionState::Empty
+            } else {
+                PendingCompletionState::Pending
+            }
         }
-        Ok(_) => PendingCompletionState::Pending,
-        Err(error) => {
+        (Err(error), _) | (_, Err(error)) => {
             tracing::warn!(thread = %thread_id, %error, "could not inspect child completion inbox; retaining scheduled retry");
             PendingCompletionState::Retry
         }

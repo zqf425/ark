@@ -560,6 +560,7 @@ mod tests {
                 thread_id: thread,
                 turn_id: turn,
                 timestamp: now,
+                auto_continuation: false,
             },
             RuntimeEvent::Error {
                 seq: 2,

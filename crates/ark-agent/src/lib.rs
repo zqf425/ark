@@ -37,7 +37,8 @@ pub mod policy;
 pub mod service;
 
 pub use context::{
-    CompletionInbox, ContextCheckpoint, HistoryHygiene, HygieneReport, TokenEstimator,
+    auto_delivery_attempts, consecutive_auto_model_request_failures, CompletionInbox,
+    ContextCheckpoint, HistoryHygiene, HygieneReport, TokenEstimator, MAX_AUTO_DELIVERY_ATTEMPTS,
 };
 pub use domain::{
     Action, ApprovalAsk, DispatchPlan, InputKind, Progress, StormNote, SyntheticResult,

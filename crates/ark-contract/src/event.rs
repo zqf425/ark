@@ -9,6 +9,12 @@ use ark_common::{ThreadId, Usage};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// `skip_serializing_if` helper for the additive boolean event fields: default
+/// `false` keeps old logs byte-compatible and stays parseable by ts-rs.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// The full event vocabulary from appendix B.
 ///
 /// The list is exhaustive on purpose: a renderer or a test can assert that it
@@ -186,6 +192,11 @@ pub enum RuntimeEvent {
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
         timestamp: DateTime<Utc>,
+        /// `true` when the turn was scheduled by the auto-continuation
+        /// supervisor. Additive with a serde default so pre-existing logs stay
+        /// readable; delivery-attempt accounting depends on it surviving.
+        #[serde(default, skip_serializing_if = "is_false")]
+        auto_continuation: bool,
     },
     TurnCompleted {
         #[ts(as = "f64")]
@@ -201,6 +212,11 @@ pub enum RuntimeEvent {
         turn_id: ark_common::TurnId,
         timestamp: DateTime<Utc>,
         message: String,
+        /// `true` when the failure was caused by the model request itself
+        /// (for example a gateway 5xx). Additive with a serde default; the
+        /// auto-continuation circuit breaker counts these, not every failure.
+        #[serde(default, skip_serializing_if = "is_false")]
+        model_request_failed: bool,
     },
     TurnAborted {
         #[ts(as = "f64")]
@@ -683,12 +699,14 @@ impl RuntimeEvent {
                 thread_id,
                 turn_id,
                 timestamp,
+                auto_continuation,
                 ..
             } => RuntimeEvent::TurnStarted {
                 seq,
                 thread_id,
                 turn_id,
                 timestamp,
+                auto_continuation,
             },
             RuntimeEvent::TurnCompleted {
                 thread_id,
@@ -706,6 +724,7 @@ impl RuntimeEvent {
                 turn_id,
                 timestamp,
                 message,
+                model_request_failed,
                 ..
             } => RuntimeEvent::TurnFailed {
                 seq,
@@ -713,6 +732,7 @@ impl RuntimeEvent {
                 turn_id,
                 timestamp,
                 message,
+                model_request_failed,
             },
             RuntimeEvent::TurnAborted {
                 thread_id,
@@ -1181,6 +1201,7 @@ mod tests {
             thread_id: ThreadId::new(),
             turn_id: ark_common::TurnId::new(),
             timestamp: Utc::now(),
+            auto_continuation: false,
         };
         assert_eq!(event.with_seq(42).seq(), 42);
     }

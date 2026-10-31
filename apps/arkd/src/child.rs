@@ -356,7 +356,7 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
                 usage,
                 tool_invocations,
             },
-            Ok(TurnOutcome::Failed { message }) => ChildTurnReport {
+            Ok(TurnOutcome::Failed { message, .. }) => ChildTurnReport {
                 status: ChildTurnStatus::Failed { message },
                 summary: String::new(),
                 usage,

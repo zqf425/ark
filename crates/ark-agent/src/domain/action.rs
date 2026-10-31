@@ -15,14 +15,31 @@ use crate::domain::tool::ToolCallRequest;
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum TurnOutcome {
     Completed,
-    Failed { message: String },
-    Aborted { reason: String },
+    Failed {
+        message: String,
+        /// `true` when the failure came from the model request itself (for
+        /// example a gateway 5xx). The auto-continuation circuit breaker in
+        /// ark-server counts only these, so provider outages cannot loop.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        model_request_failed: bool,
+    },
+    Aborted {
+        reason: String,
+    },
 }
 
 impl TurnOutcome {
     pub fn failed(message: impl Into<String>) -> Self {
         TurnOutcome::Failed {
             message: message.into(),
+            model_request_failed: false,
+        }
+    }
+
+    pub fn model_failed(message: impl Into<String>) -> Self {
+        TurnOutcome::Failed {
+            message: message.into(),
+            model_request_failed: true,
         }
     }
 

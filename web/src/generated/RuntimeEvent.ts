@@ -15,7 +15,19 @@ import type { JsonValue } from "./serde_json/JsonValue";
  * `#[serde(tag = "kind")]` keeps the wire shape flat, which is what the
  * existing renderer expects and what the JSONL log stores verbatim.
  */
-export type RuntimeEvent = { "kind": "thread_created", seq: number, thread_id: ThreadId, timestamp: string, title: string, } | { "kind": "thread_updated", seq: number, thread_id: ThreadId, timestamp: string, title: string, } | { "kind": "thread_rewound", seq: number, thread_id: ThreadId, timestamp: string, rewind_from_seq: number, target_turn_id?: TurnId, } | { "kind": "turn_started", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, } | { "kind": "turn_completed", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, } | { "kind": "turn_failed", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, message: string, } | { "kind": "turn_aborted", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, reason: string, } | { "kind": "turn_steered", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, text: string, } | { "kind": "assistant_text_delta", seq: number, thread_id: ThreadId, turn_id: TurnId, item_id: ItemId, timestamp: string, delta: string, } | { "kind": "assistant_reasoning_delta", seq: number, thread_id: ThreadId, turn_id: TurnId, item_id: ItemId, timestamp: string, delta: string, } | { "kind": "item_created", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, item: ThreadItem, } | { "kind": "item_updated", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, item: ThreadItem, } | { "kind": "item_completed", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, item: ThreadItem, } | { "kind": "tool_call_started", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, call_id: string, tool: string, 
+export type RuntimeEvent = { "kind": "thread_created", seq: number, thread_id: ThreadId, timestamp: string, title: string, } | { "kind": "thread_updated", seq: number, thread_id: ThreadId, timestamp: string, title: string, } | { "kind": "thread_rewound", seq: number, thread_id: ThreadId, timestamp: string, rewind_from_seq: number, target_turn_id?: TurnId, } | { "kind": "turn_started", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, 
+/**
+ * `true` when the turn was scheduled by the auto-continuation
+ * supervisor. Additive with a serde default so pre-existing logs stay
+ * readable; delivery-attempt accounting depends on it surviving.
+ */
+auto_continuation: boolean, } | { "kind": "turn_completed", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, } | { "kind": "turn_failed", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, message: string, 
+/**
+ * `true` when the failure was caused by the model request itself
+ * (for example a gateway 5xx). Additive with a serde default; the
+ * auto-continuation circuit breaker counts these, not every failure.
+ */
+model_request_failed: boolean, } | { "kind": "turn_aborted", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, reason: string, } | { "kind": "turn_steered", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, text: string, } | { "kind": "assistant_text_delta", seq: number, thread_id: ThreadId, turn_id: TurnId, item_id: ItemId, timestamp: string, delta: string, } | { "kind": "assistant_reasoning_delta", seq: number, thread_id: ThreadId, turn_id: TurnId, item_id: ItemId, timestamp: string, delta: string, } | { "kind": "item_created", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, item: ThreadItem, } | { "kind": "item_updated", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, item: ThreadItem, } | { "kind": "item_completed", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, item: ThreadItem, } | { "kind": "tool_call_started", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, call_id: string, tool: string, 
 /**
  * The validated tool arguments, retained for Code projections.
  */

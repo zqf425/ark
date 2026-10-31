@@ -149,6 +149,7 @@ mod tests {
             thread_id: thread(),
             turn_id: turn,
             timestamp: now,
+            auto_continuation: false,
         }));
         assert_eq!(state.status, SessionStatus::Running);
         assert!(state.status.is_active());
@@ -172,6 +173,7 @@ mod tests {
             turn_id: TurnId::new(),
             timestamp: Utc::now(),
             message: "boom".into(),
+            model_request_failed: false,
         });
         assert_eq!(state.status, SessionStatus::Failed);
         assert_eq!(state.error.as_deref(), Some("boom"));
@@ -202,6 +204,7 @@ mod tests {
                 thread_id: thread(),
                 turn_id: turn,
                 timestamp: now,
+                auto_continuation: false,
             },
             RuntimeEvent::TurnAborted {
                 seq: 2,
