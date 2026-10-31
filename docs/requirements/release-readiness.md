@@ -143,13 +143,26 @@ Playwright Chromium 驱动真实页面，结论取自真实 HTTP 状态码与真
    1 续跑收敛。
 4. P1（并行会话修复，53f3e7f）tool-call 历史回放配对断裂。
 
+> macOS 真实模型交互补充验收 run2（2026-10-31，arkd @ master 44d87e5，独立端口 18800 与独立
+> 数据目录，真实网关 `cn:glm-5.3-flash`，证据索引 `.tmp/accept-run2/REPORT.md`，不入库）：
+> auto_continue 多通知排空、子代理生命周期时序、会话级覆盖均**通过**（HTTP 状态码与
+> events.jsonl 双重证据）；审批 gate 结论为**无 TTL/过期语义**（仅 pending/approved/denied，
+> 无 expires_at 与超时扫描），"过期路径"从清单移除，如需 TTL 另行立项。P0=0、P1=0。
+
+run2 发现的 P2/P3（未修复，记录为后续项）：
+
+1. P2 部分自动续跑回合在父线程 events.jsonl 缺失 `turn_started/turn_completed` 生命周期记录
+   （疑似与 503 失败回合的记录路径有关），影响审计回放完整性，不影响续跑功能。
+2. P2（证据局限）每批 8 条通知上限未获运行时实测（单批峰值 6，受 `max_concurrency=2` 限制），
+   现有证据为 `MAX_COMPLETIONS_PER_TURN=8` 代码与单测。
+3. P3（体验项）`GET /v1/threads/{id}` 不回显会话级 autonomy/workspace 覆盖；PATCH 传 `null`
+   无法清除已设覆盖（需接口语义明示）。
+
 仍未覆盖（延续原清单，不宣称通过）：
 
-- 审批 gate 的"过期"路径（无 TTL 触发手段）；
-- 子代理 abort、steer、resume、摘要跳转与用量展示的 UI 侧时序；
-- `auto_continue` 多通知合并与每批 8 条上限的端到端排空（本次仅单子代理场景）；
-- 会话级 workspace/权限覆盖与语言/字号/主题的保存与失败提示（provider/model 会话级覆盖已验）；
-- 真实浏览器（web UI）驱动下复现上述全部场景。
+- 子代理 abort、steer、resume、摘要跳转与用量展示的 UI 侧时序（run2 已覆盖 HTTP 层）；
+- 语言/字号/主题的保存与失败提示（会话级 workspace/权限覆盖 run2 已验）；
+- 真实浏览器（web UI）驱动下复现上述全部场景，含 44d87e5 新增的 web rewind 入口点击链路。
 
 ## 完成条件
 
