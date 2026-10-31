@@ -257,13 +257,23 @@ mod tests {
     fn body_uses_input_items_and_flat_tools() {
         let request = ModelRequest {
             messages: vec![ModelMessage::user("hi")],
-            tools: vec![json!({"name": "read", "parameters": {"type": "object"}})],
+            tools: vec![
+                json!({"name": "read", "parameters": {"type": "object"}}),
+                // Function shape as produced by the tool registry: the JSON
+                // Schema travels under `parameters`, no top-level `description`.
+                json!({"name": "bash", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}}}),
+            ],
             ..Default::default()
         };
         let body = build_body(&config(), &request).unwrap();
         assert!(body["input"].is_array());
         assert_eq!(body["tools"][0]["name"], "read");
         assert_eq!(body["tools"][0]["type"], "function");
+        assert_eq!(body["tools"][0]["parameters"]["type"], "object");
+        assert_eq!(
+            body["tools"][1]["parameters"]["properties"]["command"]["type"],
+            "string"
+        );
         assert_eq!(body["stream"], true);
     }
 

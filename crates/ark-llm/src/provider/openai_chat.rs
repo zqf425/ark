@@ -243,10 +243,25 @@ mod tests {
     #[test]
     fn tools_are_wrapped_and_enable_usage_chunks() {
         let mut request = request();
-        request.tools = vec![json!({ "name": "read", "description": "read a file" })];
+        request.tools = vec![
+            json!({ "name": "read", "description": "read a file", "parameters": { "type": "object" } }),
+            json!({ "name": "bash", "parameters": { "type": "object", "properties": { "command": { "type": "string" } } } }),
+        ];
         let body = build_body(&config(), &request).unwrap();
         assert_eq!(body["tools"][0]["type"], "function");
+        // Wire shape validated against a real gateway: `function` must carry
+        // `name` + `parameters` (the JSON Schema lives inside `parameters`,
+        // never bare at the `function` top level).
         assert_eq!(body["tools"][0]["function"]["name"], "read");
+        assert_eq!(body["tools"][0]["function"]["description"], "read a file");
+        assert_eq!(body["tools"][0]["function"]["parameters"]["type"], "object");
+        assert!(body["tools"][0]["function"].get("properties").is_none());
+        // `description` is only forwarded when the tool declares one.
+        assert!(body["tools"][1]["function"].get("description").is_none());
+        assert_eq!(
+            body["tools"][1]["function"]["parameters"]["properties"]["command"]["type"],
+            "string"
+        );
         assert_eq!(body["stream_options"]["include_usage"], true);
     }
 

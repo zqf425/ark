@@ -9,6 +9,7 @@
 
 - 参数先经 schema 解析为强类型，禁止在工具内重复手写字符串解析。
 - catalog 的 canonical schema、版本与指纹在变更时计算一次；工具集变化必须显式失效前缀。
+- `ToolRegistryPort::schemas()` 输出统一的 function 形状 `{name, description?, parameters}`：JSON Schema 本体放在 `parameters` 内，`description` 仅在工具 schema 声明时输出。openai_chat 适配器将其原样包在 `function` 键下，openai_responses 与 anthropic 各自读取 `name`/`description`/`parameters` 组装 wire 形状，任一适配器都不得假设 schema 裸露在顶层。
 - registry 可由组合根按命名分组原子替换动态工具；远程发现不持有 registry 锁，名称与 schema 集合变化才递增 version，重复名称仍返回冲突。
 - `SandboxDecision` 在派发前计算一次并写入 `ToolContext`，工具不得重新决策。
 - `Strict` 与 `WorkspaceWrite` 的路径先经 `ark_common::path::normalize`，再按真实路径和工作区边界校验；必须拒绝 symlink/junction 逃逸。`Unattended` 派发不可变的 `Unrestricted` 决策，保留畸形路径校验但有意跳过该次调用的工作区包含性检查。
