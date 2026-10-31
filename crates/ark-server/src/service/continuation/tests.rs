@@ -415,3 +415,242 @@ async fn startup_scan_does_not_treat_shutdown_as_user_interrupt() {
     harness.settle().await;
     assert_eq!(harness.runner.0.load(Ordering::SeqCst), 1);
 }
+
+// ---- auto-continuation bounds (notification attempt cap + model-failure breaker) ----
+
+impl Harness {
+    async fn append_completion_with_id(&self, thread: ThreadId, notification_id: &str) {
+        self.store
+            .append_event(
+                thread,
+                RuntimeEvent::ChildCompleted {
+                    seq: 0,
+                    thread_id: thread,
+                    timestamp: Utc::now(),
+                    notification_id: notification_id.to_string(),
+                    child_id: ChildId::new(),
+                    label: "worker".into(),
+                    status: "failed".into(),
+                    summary: None,
+                    error: Some("gateway 503".into()),
+                    usage: None,
+                    tool_invocations: None,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn append_auto_turn_started(&self, thread: ThreadId) {
+        self.store
+            .append_event(
+                thread,
+                RuntimeEvent::TurnStarted {
+                    seq: 0,
+                    thread_id: thread,
+                    turn_id: TurnId::new(),
+                    timestamp: Utc::now(),
+                    auto_continuation: true,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn append_user_turn_started(&self, thread: ThreadId) {
+        self.store
+            .append_event(
+                thread,
+                RuntimeEvent::TurnStarted {
+                    seq: 0,
+                    thread_id: thread,
+                    turn_id: TurnId::new(),
+                    timestamp: Utc::now(),
+                    auto_continuation: false,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn append_turn_failed(&self, thread: ThreadId, model_request_failed: bool) {
+        self.store
+            .append_event(
+                thread,
+                RuntimeEvent::TurnFailed {
+                    seq: 0,
+                    thread_id: thread,
+                    turn_id: TurnId::new(),
+                    timestamp: Utc::now(),
+                    message: "model request failed".into(),
+                    model_request_failed,
+                },
+            )
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn poison_notification_stops_scheduling_after_the_attempt_cap() {
+    let harness = Harness::new(true);
+    let thread = harness.thread_with_completion().await;
+    // Two automatic continuations already delivered this notification.
+    harness.append_auto_turn_started(thread).await;
+    harness.append_auto_turn_started(thread).await;
+
+    schedule_with_delay(harness.state.clone(), thread, Duration::from_millis(5)).await;
+    harness.settle().await;
+    assert_eq!(
+        harness.runner.0.load(Ordering::SeqCst),
+        0,
+        "notification at the attempt cap must not schedule another model turn"
+    );
+}
+
+#[tokio::test]
+async fn consecutive_model_request_failures_pause_auto_continue() {
+    let harness = Harness::new(true);
+    let thread = harness.thread_with_completion().await;
+    harness.append_auto_turn_started(thread).await;
+    harness.append_turn_failed(thread, true).await;
+    harness.append_auto_turn_started(thread).await;
+    harness.append_turn_failed(thread, true).await;
+
+    schedule_with_delay(harness.state.clone(), thread, Duration::from_millis(5)).await;
+    harness.settle().await;
+    assert_eq!(
+        harness.runner.0.load(Ordering::SeqCst),
+        0,
+        "the circuit breaker must stop scheduling after repeated model failures"
+    );
+}
+
+#[tokio::test]
+async fn non_model_failure_does_not_trip_the_breaker() {
+    let harness = Harness::new(true);
+    let thread = harness.thread_with_completion().await;
+    // One automatic delivery (below the per-notification cap) that failed on
+    // something other than the model request.
+    harness.append_auto_turn_started(thread).await;
+    harness.append_turn_failed(thread, false).await;
+    harness.append_turn_failed(thread, false).await;
+
+    schedule_with_delay(harness.state.clone(), thread, Duration::from_millis(5)).await;
+    harness.settle().await;
+    assert_eq!(
+        harness.runner.0.load(Ordering::SeqCst),
+        1,
+        "tool/policy failures are not model outages and keep the bounded drain"
+    );
+}
+
+#[tokio::test]
+async fn fresh_notification_after_capped_one_still_schedules() {
+    let harness = Harness::new(true);
+    let thread = harness.thread_with_completion().await;
+    // The old notification reached the cap, then a new child finished.
+    harness.append_auto_turn_started(thread).await;
+    harness.append_auto_turn_started(thread).await;
+    harness
+        .append_completion_with_id(thread, "child:new:resume:0")
+        .await;
+
+    schedule_with_delay(harness.state.clone(), thread, Duration::from_millis(5)).await;
+    harness.settle().await;
+    assert_eq!(
+        harness.runner.0.load(Ordering::SeqCst),
+        1,
+        "the cap is per notification, not per thread"
+    );
+}
+
+#[tokio::test]
+async fn acknowledged_success_still_drains_remaining_notifications() {
+    let harness = Harness::new(true);
+    let thread = harness.thread_with_completion().await;
+    // A completed automatic turn acknowledged the first notification.
+    harness.append_auto_turn_started(thread).await;
+    harness
+        .store
+        .append_event(
+            thread,
+            RuntimeEvent::ChildCompletionAcknowledged {
+                seq: 0,
+                thread_id: thread,
+                turn_id: TurnId::new(),
+                timestamp: Utc::now(),
+                notification_id: "child:0:resume:0".into(),
+            },
+        )
+        .await
+        .unwrap();
+    // A second notification is still unacknowledged.
+    harness
+        .append_completion_with_id(thread, "child:1:resume:0")
+        .await;
+
+    schedule_with_delay(harness.state.clone(), thread, Duration::from_millis(5)).await;
+    harness.settle().await;
+    assert_eq!(
+        harness.runner.0.load(Ordering::SeqCst),
+        1,
+        "successful acknowledgement keeps the bounded drain going"
+    );
+}
+
+#[tokio::test]
+async fn user_turn_resets_attempts_and_consumes_capped_notification() {
+    let harness = Harness::new(true);
+    let thread = harness.thread_with_completion().await;
+    harness.append_auto_turn_started(thread).await;
+    harness.append_auto_turn_started(thread).await;
+    // A user turn opens a new lifecycle epoch and consumes the notification.
+    harness.append_user_turn_started(thread).await;
+    harness
+        .store
+        .append_event(
+            thread,
+            RuntimeEvent::TurnCompleted {
+                seq: 0,
+                thread_id: thread,
+                turn_id: TurnId::new(),
+                timestamp: Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+
+    // The user epoch resets the attempt accounting, so the notification is
+    // deliverable again on both paths until it is actually acknowledged.
+    let events = harness
+        .store
+        .replay_child_completion_events(thread)
+        .await
+        .unwrap();
+    let merged = {
+        let mut merged = events.clone();
+        let lifecycle = harness
+            .store
+            .replay_interaction_events(thread)
+            .await
+            .unwrap();
+        merged.extend(lifecycle);
+        merged.sort_by_key(|event| event.seq());
+        merged
+    };
+    assert_eq!(
+        CompletionInbox::from_events_for_auto_continuation(&merged)
+            .notification_ids()
+            .len(),
+        1,
+        "a user turn resets the per-notification attempt cap"
+    );
+    assert_eq!(
+        CompletionInbox::from_events(&events)
+            .notification_ids()
+            .len(),
+        1,
+        "an unacknowledged notification remains available to user turns"
+    );
+}

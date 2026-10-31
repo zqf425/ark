@@ -233,6 +233,7 @@ mod tests {
                 thread_id: thread,
                 turn_id: retained_turn,
                 timestamp: Utc::now(),
+                auto_continuation: false,
             },
             RuntimeEvent::ItemCreated {
                 seq: 0,
@@ -254,6 +255,7 @@ mod tests {
                 thread_id: thread,
                 turn_id: discarded_turn,
                 timestamp: Utc::now(),
+                auto_continuation: false,
             },
             RuntimeEvent::ItemCreated {
                 seq: 0,

@@ -55,7 +55,16 @@ impl SessionWriter for EventSinkWriter {
     async fn finish(&self, outcome: &TurnOutcome) -> Result<RuntimeEvent> {
         let event = match outcome {
             TurnOutcome::Completed => self.events.turn_completed(),
-            TurnOutcome::Failed { message } => self.events.turn_failed(message.clone()),
+            TurnOutcome::Failed {
+                message,
+                model_request_failed,
+            } => {
+                if *model_request_failed {
+                    self.events.turn_failed_model(message.clone())
+                } else {
+                    self.events.turn_failed(message.clone())
+                }
+            }
             TurnOutcome::Aborted { reason } => self.events.turn_aborted(reason.clone()),
         };
         self.append(event).await
@@ -118,7 +127,16 @@ impl SessionWriter for MemoryWriter {
             .expect("MemoryWriter::for_turn is required to write terminals");
         let event = match outcome {
             TurnOutcome::Completed => events.turn_completed(),
-            TurnOutcome::Failed { message } => events.turn_failed(message.clone()),
+            TurnOutcome::Failed {
+                message,
+                model_request_failed,
+            } => {
+                if *model_request_failed {
+                    events.turn_failed_model(message.clone())
+                } else {
+                    events.turn_failed(message.clone())
+                }
+            }
             TurnOutcome::Aborted { reason } => events.turn_aborted(reason.clone()),
         };
         self.append(event).await

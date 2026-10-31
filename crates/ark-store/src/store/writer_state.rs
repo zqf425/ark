@@ -543,6 +543,7 @@ mod tests {
                 thread_id: thread,
                 turn_id: turn,
                 timestamp: Utc::now(),
+                auto_continuation: false,
             })
             .unwrap();
         state
@@ -623,6 +624,7 @@ mod tests {
                 thread_id: thread,
                 turn_id: turn,
                 timestamp: Utc::now(),
+                auto_continuation: false,
             })
             .unwrap();
 

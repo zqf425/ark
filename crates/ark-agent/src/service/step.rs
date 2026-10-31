@@ -25,7 +25,7 @@ pub fn step(state: TurnState, input: &TurnInput) -> Action {
         (TurnState::Preparing, InputKind::Start) => begin(input),
         (TurnState::AwaitingModel, InputKind::ModelSettled { .. }) => settle_model(input),
         (TurnState::AwaitingModel, InputKind::ModelFailed { message }) => {
-            finish(TurnOutcome::failed(message.clone()))
+            finish(TurnOutcome::model_failed(message.clone()))
         }
         (TurnState::DispatchingTools, InputKind::ToolsSettled { .. }) => after_tools(input),
         (TurnState::AwaitingApproval, InputKind::GateResolved { .. }) => gate_resolved(input),

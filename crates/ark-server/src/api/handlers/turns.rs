@@ -101,18 +101,24 @@ pub(crate) fn spawn_turn(state: AppState, job: TurnJob) {
         let worker = tokio::spawn(async move { runner.run_turn(job).await });
         let end = match worker.await {
             Ok(Ok(end)) => end,
-            Ok(Err(err)) => TurnEnd::Failed(err.message.clone()),
+            Ok(Err(err)) => TurnEnd::Failed {
+                message: err.message.clone(),
+                model_request_failed: err.code == ark_common::ArkErrorCode::ModelRequestFailed,
+            },
             Err(join) => {
                 let message = if join.is_panic() {
                     "turn executor panicked"
                 } else {
                     "turn was cancelled before it finished"
                 };
-                TurnEnd::Failed(message.to_string())
+                TurnEnd::Failed {
+                    message: message.to_string(),
+                    model_request_failed: false,
+                }
             }
         };
         turns.finish(turn_id, &end);
-        if let TurnEnd::Failed(message) = &end {
+        if let TurnEnd::Failed { message, .. } = &end {
             // A turn that dies outside the reactor still needs a terminal event,
             // otherwise the log stops at `turn_started` and a reconnect replays
             // a turn that will never finish.
@@ -138,13 +144,13 @@ pub(crate) fn spawn_turn(state: AppState, job: TurnJob) {
                     crate::service::schedule_auto_continuation(supervisor_state, thread_id).await;
                 }
             }
-            TurnEnd::Failed(_) | TurnEnd::Aborted(_) if is_auto_continuation => {
+            TurnEnd::Failed { .. } | TurnEnd::Aborted(_) if is_auto_continuation => {
                 tracing::warn!(
                     turn = %turn_id,
                     "automatic continuation failed or was aborted; awaiting explicit input or a new child completion"
                 );
             }
-            TurnEnd::Failed(_) | TurnEnd::Aborted(_) => {}
+            TurnEnd::Failed { .. } | TurnEnd::Aborted(_) => {}
         }
     });
 }

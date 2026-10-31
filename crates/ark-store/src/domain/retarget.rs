@@ -42,6 +42,7 @@ mod tests {
             thread_id: original_thread,
             turn_id: turn,
             timestamp: now,
+            auto_continuation: false,
         };
         let retargeted = retarget_event(&event, target);
         assert_eq!(retargeted.thread_id(), target);

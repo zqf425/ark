@@ -389,6 +389,18 @@ async fn completion_inbox(
     Ok(CompletionInbox::from_events(&events))
 }
 
+/// Auto-continuations project the inbox with the per-notification delivery
+/// bound: notifications already auto-delivered MAX_AUTO_DELIVERY_ATTEMPTS
+/// times are withheld, so a poison notification cannot loop the supervisor.
+/// They remain unacknowledged, so explicit user turns still receive them.
+async fn auto_continuation_inbox(
+    store: &dyn SessionStore,
+    thread_id: ThreadId,
+) -> Result<CompletionInbox> {
+    let events = store.replay_child_completion_events(thread_id).await?;
+    Ok(CompletionInbox::from_events_for_auto_continuation(&events))
+}
+
 /// Terminates parent turns whose process-owned reactor vanished on restart.
 ///
 /// The event log is the sole durable source. A reactor, its cancellation token,
@@ -496,7 +508,13 @@ async fn finish_parent_turn(
                 TurnEnd::Completed
             }
         }
-        TurnOutcome::Failed { message } => TurnEnd::Failed(message),
+        TurnOutcome::Failed {
+            message,
+            model_request_failed,
+        } => TurnEnd::Failed {
+            message,
+            model_request_failed,
+        },
         TurnOutcome::Aborted { reason } => TurnEnd::Aborted(reason),
     }
 }
@@ -504,7 +522,12 @@ async fn finish_parent_turn(
 #[async_trait::async_trait]
 impl TurnRunner for AgentTurnRunner {
     async fn run_turn(&self, job: TurnJob) -> Result<TurnEnd> {
-        let inbox = completion_inbox(self.store.as_ref(), job.thread_id).await?;
+        let is_auto = matches!(&job.source, TurnSource::AutoContinuation);
+        let inbox = if is_auto {
+            auto_continuation_inbox(self.store.as_ref(), job.thread_id).await?
+        } else {
+            completion_inbox(self.store.as_ref(), job.thread_id).await?
+        };
         let history = conversation_history(&self.store.read_items(job.thread_id).await?);
         let thread = self.store.get_thread(job.thread_id).await?;
         let (source_text, user_text) = match job.source {
@@ -542,7 +565,13 @@ impl TurnRunner for AgentTurnRunner {
         let policy: Arc<dyn SandboxPolicy> = Arc::new(BuiltinSandboxPolicy::new(
             autonomy_from_override_or_default(thread.runtime.autonomy.as_deref(), &snapshot)?,
         ));
-        let events = TurnEvents::new(job.thread_id, job.turn_id);
+        // Auto-continuations are marked on the durable `turn_started` event so
+        // the per-notification delivery-attempt accounting survives restarts.
+        let events = if is_auto {
+            TurnEvents::auto_continuation(job.thread_id, job.turn_id)
+        } else {
+            TurnEvents::new(job.thread_id, job.turn_id)
+        };
         let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events));
         let tools: Arc<dyn AgentToolRunner> = Arc::new(ToolRunnerAdapter {
             inner: Arc::clone(&self.tools),
@@ -1157,6 +1186,7 @@ mod tests {
         let end = finish_parent_turn(
             TurnOutcome::Failed {
                 message: "model failed".to_string(),
+                model_request_failed: false,
             },
             &store,
             &store,
@@ -1166,7 +1196,7 @@ mod tests {
         )
         .await;
 
-        assert!(matches!(end, TurnEnd::Failed(message) if message == "model failed"));
+        assert!(matches!(end, TurnEnd::Failed { message, .. } if message == "model failed"));
         assert_eq!(
             completion_inbox(&store, thread)
                 .await
@@ -1208,6 +1238,7 @@ mod tests {
                     thread_id: thread,
                     turn_id: turn,
                     timestamp: Utc::now(),
+                    auto_continuation: false,
                 },
             )
             .await

@@ -34,7 +34,13 @@ pub enum TurnEnd {
     /// Completed normally and acknowledged the delivered inbox, but more durable
     /// completions remain for another bounded continuation batch.
     CompletedWithPendingCompletions,
-    Failed(String),
+    Failed {
+        message: String,
+        /// `true` when the failure came from the model request itself. The
+        /// auto-continuation circuit breaker counts consecutive occurrences;
+        /// other failures (tool, policy, panic) do not trip it.
+        model_request_failed: bool,
+    },
     Aborted(String),
 }
 
@@ -243,7 +249,10 @@ impl TurnRegistry {
         };
         let (state, error) = match end {
             TurnEnd::Completed | TurnEnd::CompletedWithPendingCompletions => ("completed", None),
-            TurnEnd::Failed(message) => ("failed", Some(message.clone())),
+            TurnEnd::Failed {
+                message,
+                model_request_failed: _,
+            } => ("failed", Some(message.clone())),
             TurnEnd::Aborted(reason) => ("aborted", Some(reason.clone())),
         };
         slot.summary.state = state.to_string();
@@ -489,12 +498,16 @@ impl AppState {
                     timestamp: Utc::now(),
                 }
             }
-            TurnEnd::Failed(message) => RuntimeEvent::TurnFailed {
+            TurnEnd::Failed {
+                message,
+                model_request_failed,
+            } => RuntimeEvent::TurnFailed {
                 seq: 0,
                 thread_id,
                 turn_id,
                 timestamp: Utc::now(),
                 message: message.clone(),
+                model_request_failed: *model_request_failed,
             },
             TurnEnd::Aborted(reason) => RuntimeEvent::TurnAborted {
                 seq: 0,
@@ -657,7 +670,13 @@ mod tests {
         let registry = TurnRegistry::new();
         let turn = TurnId::new();
         registry.try_register(ThreadId::new(), turn, CancelToken::new());
-        registry.finish(turn, &TurnEnd::Failed("boom".into()));
+        registry.finish(
+            turn,
+            &TurnEnd::Failed {
+                message: "boom".into(),
+                model_request_failed: false,
+            },
+        );
         let summary = registry.get(turn).unwrap();
         assert_eq!(summary.state, "failed");
         assert_eq!(summary.error.as_deref(), Some("boom"));
