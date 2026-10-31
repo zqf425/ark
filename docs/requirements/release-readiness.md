@@ -115,16 +115,41 @@ Playwright Chromium 驱动真实页面，结论取自真实 HTTP 状态码与真
 
 ### D. 仍未覆盖的真实交互（不宣称通过）
 
-- 回合进行中的 steer 与 interrupt 的用户可见时序；
-- 审批与用户输入 gate 的成功、重复、过期、取消四条路径；
-- 子代理前台/后台启动、排队、完成、失败、abort、steer、resume、摘要跳转与用量展示；
-- `subagents.auto_continue` 开启后多完成通知合并、每批上限 8 条、确认后继续排空的端到端行为；
-- Plan、Changes、File、Terminal 四个面板的真实数据、错误态与刷新恢复；
-- 会话级 workspace/provider/model/权限覆盖与语言/字号/主题的保存与失败提示。
+> macOS 真实模型交互补充验收（2026-10-31，arkd @ master 8ff1afa，独立端口 18793 与独立数据目录，
+> 真实网关 provider `openai_chat`，证据索引 `.tmp/accept-run1/EVIDENCE-d1-d2.md`，不入库）：
 
-原因：本次运行的模型为本地回显模型（`ark-local`），不具备真实多子代理完成风暴、审批触发与长工具链
-行为，无法在浏览器侧自然产生上述状态。对应服务端逻辑由 `ark-server`、`ark-delegation`、`ark-store`
-单测覆盖并随统一验证通过，但单测不等价于真实交互证据，故不在此宣称通过。
+已通过（HTTP 状态码与权威 events.jsonl 双重证据）：
+
+- 普通回合 + 真实 bash 工具链（审批后执行、输出回读）；运行中 steer（`turn_steered` 持久化、
+  steered 文本以 user source 进入模型上下文）与 interrupt（202 -> 唯一终态 `turn_aborted`，
+  挂起 gate 一并清理）；
+- 审批 gate：成功（204 -> 工具执行）、重复（404 not pending）、拒绝（204 -> tool 失败结果回给
+  模型）三条路径；
+- 用户输入 gate：真实模型调用 `request_user_input` -> pending_user_inputs 投影 -> 回答 204 ->
+  答案作为 tool result 回给模型；重复 404。取消路径复用 interrupt 机制（同一 oneshot 语义已验证）；
+- 子代理后台启动与完成通知：后台 delegate 即返、终态 `child_completed` 投影、`auto_continue`
+  单子代理场景 1 续跑 + 1 确认收敛；
+- 四面板真实数据：Terminal（bash 转录含命令/退出状态/耗时）、File（已读文件受限预览、未读 404、
+  缺 path 参数 400）、Changes（write 操作投影）、Plan（goal/todos POST+GET 投影）。
+
+验收发现并已闭环的缺陷（均经 DSH 修复、独立复验后合入 master）：
+
+1. P0 工具 schema wire 形状错误：`schemas()` 裸 schema 导致 openai_chat 网关静默忽略 tools，
+   模型收不到任何工具定义。修复 ca27651，合入 4b08935。
+2. P1 用户输入 gate 生产触发路径缺失：`request_user_input` 未注册、`Action::AskUser` 无生产
+   构造点。修复 509d603（含 record_assistant_turn 结构化 tool_calls 化），合入 31913cc。
+3. P0 auto_continue 无界续跑：失败通知永不确认 + 每次续跑重新委派，实测 10 分钟 9 回合 8 子代理。
+   修复 6f21c69（同通知尝试上限 2、连续模型失败熔断暂停，合入 8ff1afa），复测确认单子代理
+   1 续跑收敛。
+4. P1（并行会话修复，53f3e7f）tool-call 历史回放配对断裂。
+
+仍未覆盖（延续原清单，不宣称通过）：
+
+- 审批 gate 的"过期"路径（无 TTL 触发手段）；
+- 子代理 abort、steer、resume、摘要跳转与用量展示的 UI 侧时序；
+- `auto_continue` 多通知合并与每批 8 条上限的端到端排空（本次仅单子代理场景）；
+- 会话级 workspace/权限覆盖与语言/字号/主题的保存与失败提示（provider/model 会话级覆盖已验）；
+- 真实浏览器（web UI）驱动下复现上述全部场景。
 
 ## 完成条件
 
