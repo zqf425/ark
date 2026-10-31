@@ -2,15 +2,21 @@
 //!
 //! The legacy MCP "SSE" transport is two channels: a long-lived `GET` stream
 //! carrying server messages and a separate `POST` endpoint for client messages.
-//! This type is deliberately **type-complete but not wired** in v1: the design
-//! keeps stdio + streamable-http as the supported pair (7.6.3), and adding a
-//! half-working third channel would be worse than an explicit error.
+//! This type is deliberately **type-complete but not wired**: stdio and
+//! streamable-http are the implemented pair (7.6.3), and SSE client protocol
+//! support waits on a dedicated requirement design; adding a half-working
+//! third channel would be worse than an explicit error.
 //!
 //! It exists so:
 //!
 //! * the [`McpTransport`] surface is proven to cover all three kinds;
-//! * a caller selecting `sse` fails closed with a stable code instead of a
-//!   panic or a silent fallback to another transport.
+//! * the wire contract keeps the `sse` variant instead of a silent enum
+//!   divergence with existing persisted configs.
+//!
+//! Nothing constructs this transport today: the session layer rejects
+//! `McpTransportKind::Sse` with a validation error (detail
+//! `mcp_sse_unsupported`) before any connection attempt, pointing callers at
+//! `streamable_http`.
 
 use crate::domain::jsonrpc::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use crate::service::transport::http_shared::HttpTransportConfig;

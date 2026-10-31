@@ -14,7 +14,7 @@ import { LoadError, Notice, SettingsSection, Skeleton } from './SectionShell'
 
 const TRANSPORT_LABELS: Record<McpTransportKind, string> = {
   stdio: 'stdio（本地进程）',
-  sse: 'sse（HTTP 事件流）',
+  sse: 'sse（未实现，服务端拒绝）',
   streamable_http: 'streamable_http'
 }
 
@@ -157,7 +157,7 @@ export function McpSection(): JSX.Element {
       return
     }
     if (!isStdio && !url) {
-      setFormError('http / sse 需要填写 url')
+      setFormError('streamable_http 需要填写 url')
       return
     }
     const env = parseMap(draft.envText, 'env')
@@ -277,7 +277,7 @@ export function McpSection(): JSX.Element {
               id="mcp-transport"
               label="transport"
               value={draft.transport}
-              options={['stdio', 'sse', 'streamable_http']}
+              options={['stdio', 'streamable_http']}
               labels={TRANSPORT_LABELS}
               disabled={api.busy !== null}
               onChange={(value) => setDraft({ ...draft, transport: value })}

@@ -13,7 +13,7 @@ use ark_contract::{
     McpServerEntry, McpServerListResponse, McpServerTestResponse, ProviderEntry,
     ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SwitchWorkspaceRequest,
-    ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
+    ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
 };
 
 use crate::api::error::ApiError;
@@ -194,17 +194,17 @@ pub struct ValidateWorkspaceBody {
 pub async fn workspace_validate(
     State(state): State<AppState>,
     Json(body): Json<ValidateWorkspaceBody>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Json<WorkspaceValidateResponse>, ApiError> {
     let service = state
         .base
         .workspace
         .as_ref()
         .ok_or_else(|| missing("workspace"))?;
     let resolved = service.validate(&body.path)?;
-    Ok(Json(serde_json::json!({
-        "ok": true,
-        "path": ark_common::path::normalize(&resolved.to_string_lossy()),
-    })))
+    Ok(Json(WorkspaceValidateResponse {
+        ok: true,
+        path: ark_common::path::normalize(&resolved.to_string_lossy()),
+    }))
 }
 
 /// `GET /v1/workspace`.
@@ -525,7 +525,8 @@ mod tests {
         .await
         .expect("validated workspace");
 
-        assert_eq!(response.0["path"], "C:/");
+        assert!(response.0.ok);
+        assert_eq!(response.0.path, "C:/");
         let _ = std::fs::remove_dir_all(data_dir);
     }
 

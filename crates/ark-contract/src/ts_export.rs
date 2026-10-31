@@ -41,7 +41,7 @@ use crate::{
     TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary, UiCatalog,
     UpdateMemoryRequest, UpdateThreadRequest, UsageResponse, WorkspaceChange,
     WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile,
-    WorkspaceStatus, WorkspaceView,
+    WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
 };
 use ark_common::{
     ArkErrorCode, ArkErrorPayload, AttachmentId, ChildId, ItemId, ThreadId, TurnId, Usage,
@@ -156,6 +156,7 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     ProviderTestRequest::export_all_to(dir)?;
     ProviderTestResponse::export_all_to(dir)?;
     WorkspaceStatus::export_all_to(dir)?;
+    WorkspaceValidateResponse::export_all_to(dir)?;
     McpTransportKind::export_all_to(dir)?;
     McpServerEntry::export_all_to(dir)?;
     McpServerView::export_all_to(dir)?;
@@ -290,6 +291,7 @@ const ROOT_NAMES: &[&str] = &[
     "ProviderTestRequest",
     "ProviderTestResponse",
     "WorkspaceStatus",
+    "WorkspaceValidateResponse",
     "McpTransportKind",
     "McpServerEntry",
     "McpServerView",

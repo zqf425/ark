@@ -69,21 +69,20 @@ export type {
   SwitchWorkspaceRequest,
   WorkspaceDiffFile,
   WorkspaceDiff,
-  WorkspaceStatus
+  WorkspaceStatus,
+  WorkspaceValidateResponse
 } from '../../generated'
 export type {
   EndpointFormat,
   LogLevel,
   McpServerUpsertRequest,
   ProviderUpsertRequest,
-  TurnState,
-  WorkspaceValidateResult
+  TurnState
 } from './web-only'
 export {
   ENDPOINT_FORMATS,
   ERROR_HINTS,
   LOG_LEVELS,
-  MCP_TRANSPORTS,
   SUBAGENT_MAX_CONCURRENCY,
   SUBAGENT_MIN_CONCURRENCY
 } from './web-only'
