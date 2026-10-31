@@ -104,6 +104,7 @@ mod tests {
             content: "result".into(),
             tool_call_id: call_id.map(str::to_string),
             name: None,
+            tool_calls: Vec::new(),
         }
     }
 
@@ -179,6 +180,27 @@ mod tests {
             ModelMessage::user("hi"),
         ];
         assert_eq!(repair_messages(messages).len(), 2);
+    }
+
+    #[test]
+    fn repair_keeps_tool_results_after_an_assistant_carrying_tool_calls() {
+        // An assistant row with replayed tool_calls continues the assistant
+        // run even without visible text, so its results survive the repair.
+        let messages = vec![
+            ModelMessage::user("hi"),
+            ModelMessage::assistant_with_tool_calls(
+                "",
+                vec![ark_ports::ToolCallRef {
+                    call_id: "c1".into(),
+                    name: "read".into(),
+                    arguments: serde_json::json!({}),
+                }],
+            ),
+            tool_result(Some("c1")),
+        ];
+        let repaired = repair_messages(messages);
+        assert_eq!(repaired.len(), 3);
+        assert_eq!(repaired[2].tool_call_id.as_deref(), Some("c1"));
     }
 
     #[test]

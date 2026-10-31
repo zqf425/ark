@@ -158,6 +158,7 @@ mod tests {
             content: content.to_string(),
             tool_call_id: call_id.map(str::to_string),
             name: None,
+            tool_calls: Vec::new(),
         }
     }
 

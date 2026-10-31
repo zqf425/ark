@@ -23,7 +23,7 @@ pub fn build_body(config: &ProviderConfig, request: &ModelRequest) -> Result<Val
     let input = request
         .messages
         .iter()
-        .map(input_json)
+        .flat_map(input_json)
         .collect::<Vec<Value>>();
     let mut body = json!({
         "model": config.model,
@@ -63,20 +63,38 @@ pub fn build_body(config: &ProviderConfig, request: &ModelRequest) -> Result<Val
     Ok(body)
 }
 
-fn input_json(message: &ModelMessage) -> Value {
+fn input_json(message: &ModelMessage) -> Vec<Value> {
     match message.role {
-        ModelRole::Tool => json!({
+        ModelRole::Tool => vec![json!({
             "type": "function_call_output",
             "call_id": message.tool_call_id.clone().unwrap_or_default(),
             "output": message.content,
-        }),
+        })],
+        ModelRole::Assistant if !message.tool_calls.is_empty() => {
+            // Responses wire shape: a call becomes its own function_call item
+            // after the assistant message, mirroring how the stream emitted it.
+            let mut items = vec![json!({
+                "role": "assistant",
+                "content": message.content,
+            })];
+            items.extend(message.tool_calls.iter().map(|call| {
+                json!({
+                    "type": "function_call",
+                    "call_id": call.call_id,
+                    "name": call.name,
+                    "arguments": serde_json::to_string(&call.arguments)
+                        .unwrap_or_default(),
+                })
+            }));
+            items
+        }
         other => {
             let role = match other {
                 ModelRole::System => "system",
                 ModelRole::User => "user",
                 _ => "assistant",
             };
-            json!({ "role": role, "content": message.content })
+            vec![json!({ "role": role, "content": message.content })]
         }
     }
 }
@@ -256,6 +274,7 @@ mod tests {
             content: "body".into(),
             tool_call_id: Some("call_1".into()),
             name: None,
+            tool_calls: Vec::new(),
         };
         result.name = None;
         let request = ModelRequest {
@@ -372,5 +391,27 @@ mod tests {
             data: "not json".into(),
         });
         assert_eq!(events, vec![StreamEvent::Ignored]);
+    }
+    #[test]
+    fn assistant_tool_calls_serialise_as_function_call_items() {
+        let request = ModelRequest {
+            messages: vec![ModelMessage::assistant_with_tool_calls(
+                "calling",
+                vec![ark_ports::ToolCallRef {
+                    call_id: "call_1".into(),
+                    name: "read".into(),
+                    arguments: serde_json::json!({"path": "a.txt"}),
+                }],
+            )],
+            ..Default::default()
+        };
+        let body = build_body(&config(), &request).unwrap();
+        let input = body["input"].as_array().unwrap();
+        assert_eq!(input[0]["role"], "assistant");
+        assert_eq!(input[0]["content"], "calling");
+        assert_eq!(input[1]["type"], "function_call");
+        assert_eq!(input[1]["call_id"], "call_1");
+        assert_eq!(input[1]["name"], "read");
+        assert_eq!(input[1]["arguments"], r#"{"path":"a.txt"}"#);
     }
 }
