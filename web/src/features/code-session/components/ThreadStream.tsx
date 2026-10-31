@@ -11,6 +11,7 @@ import { UserInputCard } from './UserInputCard'
 import { Composer } from './Composer'
 import { StreamFooter } from './StreamFooter'
 import { ChildRunsPanel } from './ChildRunsPanel'
+import { RewindControl } from './RewindControl'
 import { SessionRuntimeControls } from './SessionRuntimeControls'
 
 /**
@@ -133,6 +134,9 @@ export function ThreadStream({
                 <StreamRow item={item} />
               </ErrorBoundary>
             ))}
+            <ErrorBoundary label="回退入口渲染失败">
+              <RewindControl threadId={threadId} turnId={group.turnId} />
+            </ErrorBoundary>
           </div>
         ))}
 

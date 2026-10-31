@@ -27,6 +27,9 @@ export function useThreadStream(threadId: ThreadId | null): void {
   const ingestEvent = useCodeSessionStore((s) => s.ingestEvent)
   const setDetailStatus = useCodeSessionStore((s) => s.setDetailStatus)
   const setStreamStatus = useCodeSessionStore((s) => s.setStreamStatus)
+  // A rewind physically truncates history; bumping this token re-runs the whole
+  // load + subscribe sequence from the fresh detail watermark.
+  const reloadToken = useCodeSessionStore((s) => s.reloadToken)
   const { push: pushToast } = useToast()
 
   useEffect(() => {
@@ -82,5 +85,5 @@ export function useThreadStream(threadId: ThreadId | null): void {
       controller.abort()
       setStreamStatus('closed')
     }
-  }, [threadId, ingestEvent, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
+  }, [threadId, reloadToken, ingestEvent, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
 }

@@ -37,3 +37,9 @@
 .ark-session-runtime__fields { display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; }
 .ark-session-runtime__fields label { display: grid; gap: 3px; }
 .ark-session-runtime__fields input, .ark-session-runtime__fields select { min-width: 0; }
+
+.ark-rewind { margin-top: 6px; }
+.ark-rewind--confirm { border: 1px solid var(--ark-border, rgba(128,128,128,.35)); border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px; max-width: 480px; }
+.ark-rewind__title { margin: 0; font-weight: 600; }
+.ark-rewind__body { margin: 0; color: var(--ark-text-muted, #888); font-size: 12px; }
+.ark-rewind__actions { display: flex; gap: 8px; margin-top: 4px; }
