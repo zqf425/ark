@@ -186,28 +186,31 @@ fn canonical_directory(path: &Path) -> Result<PathBuf> {
 mod tests {
     use super::*;
 
-    struct TestDir(PathBuf);
+    /// A fresh random workspace root, removed when the guard drops.
+    ///
+    /// `tempfile` names it uniquely, so two tests running in parallel can never
+    /// share one workspace root.
+    struct TestDir {
+        dir: tempfile::TempDir,
+    }
 
     impl TestDir {
         fn new(label: &str) -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "arkd-workspace-{label}-{}",
-                ark_common::TurnId::new()
-            ));
-            std::fs::create_dir_all(&path).expect("create test directory");
-            Self(path)
+            let dir = tempfile::Builder::new()
+                .prefix(&format!("arkd-workspace-{label}-"))
+                .tempdir()
+                .expect("create test directory");
+            Self { dir }
+        }
+
+        fn path(&self) -> &Path {
+            self.dir.path()
         }
 
         fn child(&self, name: &str) -> PathBuf {
-            let path = self.0.join(name);
+            let path = self.dir.path().join(name);
             std::fs::create_dir_all(&path).expect("create workspace directory");
             path
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
         }
     }
 
@@ -216,7 +219,7 @@ mod tests {
         let test = TestDir::new("lease");
         let first = test.child("first");
         let second = test.child("second");
-        let roots = WorkspaceRoots::new(first, &test.0).expect("initial root");
+        let roots = WorkspaceRoots::new(first, test.path()).expect("initial root");
         let lease = roots.lease();
         roots
             .switch(&second.display().to_string(), 0)
@@ -231,7 +234,7 @@ mod tests {
         let test = TestDir::new("busy");
         let first = test.child("first");
         let second = test.child("second");
-        let roots = WorkspaceRoots::new(first.clone(), &test.0).expect("initial root");
+        let roots = WorkspaceRoots::new(first.clone(), test.path()).expect("initial root");
         let error = roots
             .switch(&second.display().to_string(), 2)
             .expect_err("busy");
@@ -241,7 +244,7 @@ mod tests {
             canonical_directory(&first).expect("canonical")
         );
         assert_eq!(roots.lease().generation, 0);
-        assert!(!test.0.join(RECENT_FILE).exists());
+        assert!(!test.path().join(RECENT_FILE).exists());
     }
 
     #[test]
@@ -250,7 +253,7 @@ mod tests {
         let first = test.child("first");
         let second = test.child("second");
         let third = test.child("third");
-        let roots = WorkspaceRoots::new(first.clone(), &test.0).expect("initial root");
+        let roots = WorkspaceRoots::new(first.clone(), test.path()).expect("initial root");
 
         roots
             .switch(&second.display().to_string(), 0)
@@ -260,12 +263,12 @@ mod tests {
             .expect("second switch");
         assert_eq!(view.generation, 2);
 
-        let path = test.0.join(RECENT_FILE);
+        let path = test.path().join(RECENT_FILE);
         let bytes = std::fs::read(&path).expect("read recent file");
         assert!(!bytes.starts_with(&ark_common::UTF8_BOM_BYTES));
         std::str::from_utf8(&bytes).expect("recent file is UTF-8");
 
-        let restarted = WorkspaceRoots::new(third, &test.0).expect("restart");
+        let restarted = WorkspaceRoots::new(third, test.path()).expect("restart");
         let recent: Vec<_> = restarted
             .view()
             .recent
@@ -285,9 +288,9 @@ mod tests {
     fn damaged_recent_file_degrades_to_empty() {
         let test = TestDir::new("damaged");
         let active = test.child("active");
-        std::fs::write(test.0.join(RECENT_FILE), b"{not json").expect("damage cache");
+        std::fs::write(test.path().join(RECENT_FILE), b"{not json").expect("damage cache");
 
-        let roots = WorkspaceRoots::new(active, &test.0).expect("startup must continue");
+        let roots = WorkspaceRoots::new(active, test.path()).expect("startup must continue");
         assert!(roots.view().recent.is_empty());
     }
 
@@ -297,18 +300,18 @@ mod tests {
         let active = test.child("active");
         let valid = test.child("valid");
         let missing = test.child("missing");
-        let file = test.0.join("not-a-directory.txt");
+        let file = test.path().join("not-a-directory.txt");
         std::fs::remove_dir(&missing).expect("remove stale workspace");
         std::fs::write(&file, b"not a workspace").expect("create file entry");
         write_json_file(
-            &test.0.join(RECENT_FILE),
+            &test.path().join(RECENT_FILE),
             &RecentDocument {
                 recent: vec![missing, file, valid.clone(), valid.clone(), active.clone()],
             },
         )
         .expect("seed cache");
 
-        let roots = WorkspaceRoots::new(active, &test.0).expect("startup");
+        let roots = WorkspaceRoots::new(active, test.path()).expect("startup");
         let recent = roots.view().recent;
         assert_eq!(recent.len(), 1);
         assert_eq!(
@@ -322,8 +325,8 @@ mod tests {
         let test = TestDir::new("persist-failure");
         let first = test.child("first");
         let second = test.child("second");
-        std::fs::create_dir(test.0.join(RECENT_FILE)).expect("block recent file rename");
-        let roots = WorkspaceRoots::new(first.clone(), &test.0).expect("initial root");
+        std::fs::create_dir(test.path().join(RECENT_FILE)).expect("block recent file rename");
+        let roots = WorkspaceRoots::new(first.clone(), test.path()).expect("initial root");
 
         let view = roots
             .switch(&second.display().to_string(), 0)
@@ -343,7 +346,7 @@ mod tests {
     #[test]
     fn exposed_workspace_root_is_not_windows_verbatim() {
         let test = TestDir::new("display");
-        let roots = WorkspaceRoots::new(test.child("active"), &test.0).expect("root");
+        let roots = WorkspaceRoots::new(test.child("active"), test.path()).expect("root");
         assert!(
             !roots.current().to_string_lossy().starts_with(r"\\?\"),
             "workspace root must be suitable for prompts and tool inputs"

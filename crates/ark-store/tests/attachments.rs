@@ -1,20 +1,18 @@
 use ark_common::ArkErrorCode;
 use ark_store::{AttachmentStore, AttachmentUpload};
 
-fn temp_dir(name: &str) -> std::path::PathBuf {
-    let path = std::env::temp_dir().join(format!(
-        "ark-attachment-{name}-{}-{}",
-        std::process::id(),
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::create_dir_all(&path).expect("temporary directory is creatable");
-    path
+fn temp_dir(name: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("ark-attachment-{name}-"))
+        .tempdir()
+        .expect("temporary directory is creatable")
 }
 
 #[test]
 fn uploads_reads_and_deletes_binary_content() {
-    let data_dir = temp_dir("roundtrip");
-    let store = AttachmentStore::open(&data_dir, 1024).expect("store opens");
+    let dir = temp_dir("roundtrip");
+    let data_dir = dir.path();
+    let store = AttachmentStore::open(data_dir, 1024).expect("store opens");
     let content = vec![0, 255, 16, 128];
     let entry = store
         .upload(AttachmentUpload {
@@ -46,13 +44,13 @@ fn uploads_reads_and_deletes_binary_content() {
         store.read(entry.id).unwrap_err().code,
         ArkErrorCode::NotFound
     );
-    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 #[test]
 fn rejects_content_larger_than_configured_limit_before_writing() {
-    let data_dir = temp_dir("limit");
-    let store = AttachmentStore::open(&data_dir, 3).expect("store opens");
+    let dir = temp_dir("limit");
+    let data_dir = dir.path();
+    let store = AttachmentStore::open(data_dir, 3).expect("store opens");
     let error = store
         .upload(AttachmentUpload {
             original_filename: "too-large.bin".to_string(),
@@ -68,5 +66,4 @@ fn rejects_content_larger_than_configured_limit_before_writing() {
         .expect("attachment directory exists")
         .next()
         .is_none());
-    let _ = std::fs::remove_dir_all(data_dir);
 }

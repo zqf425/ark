@@ -177,7 +177,8 @@ mod tests {
 
     #[test]
     fn missing_file_reads_as_none() {
-        let paths = ThreadPaths::new(std::env::temp_dir().join("ark-store-missing-thread"));
+        let dir = tempfile::tempdir().expect("temp dir is creatable");
+        let paths = ThreadPaths::new(dir.path().join("ark-store-missing-thread"));
         assert!(read(&paths).is_none());
     }
 }

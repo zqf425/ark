@@ -211,16 +211,21 @@ mod tests {
         .with_attachments(attachments)
     }
 
-    fn test_dir() -> std::path::PathBuf {
-        let path =
-            std::env::temp_dir().join(format!("ark-server-attachment-{}", AttachmentId::new()));
-        std::fs::create_dir_all(&path).expect("temporary directory is creatable");
-        path
+    /// A fresh random data directory, removed when the guard drops.
+    ///
+    /// `tempfile` names it uniquely, so parallel tests never share a store
+    /// directory (and never contend for the same data lock).
+    fn test_dir() -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix("ark-server-attachment-")
+            .tempdir()
+            .expect("temporary directory is creatable")
     }
 
     #[tokio::test]
     async fn attachment_routes_preserve_binary_content_and_return_not_found_for_invalid_id() {
-        let data_dir = test_dir();
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
         let app = router(test_state(&data_dir));
         let body = serde_json::json!({
             "original_filename": "pixel.bin",
@@ -305,12 +310,12 @@ mod tests {
             .await
             .expect("route responds");
         assert_eq!(invalid.status(), StatusCode::NOT_FOUND);
-        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]
     async fn attachment_uploads_larger_than_axums_default_body_limit() {
-        let data_dir = test_dir();
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
         let app = router(test_state_with_attachment_limit(&data_dir, 4 * 1024 * 1024));
         let body = serde_json::json!({
             "original_filename": "large.bin",
@@ -332,12 +337,12 @@ mod tests {
             .expect("route responds");
 
         assert_eq!(response.status(), StatusCode::CREATED);
-        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]
     async fn oversized_attachment_upload_returns_a_structured_error() {
-        let data_dir = test_dir();
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
         let app = router(test_state_with_attachment_limit(&data_dir, 32));
         let body = serde_json::json!({
             "original_filename": "too-large.bin",
@@ -368,12 +373,12 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("32"));
-        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]
     async fn upload_body_limit_returns_a_structured_error() {
-        let data_dir = test_dir();
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
         let app = router(test_state_with_attachment_limit(&data_dir, 32));
         let body = serde_json::json!({
             "original_filename": "large-metadata.bin",
@@ -405,12 +410,12 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("32"));
-        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]
     async fn attachment_content_is_downloaded_with_nosniff_protection() {
-        let data_dir = test_dir();
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
         let app = router(test_state(&data_dir));
         let body = serde_json::json!({
             "original_filename": "unsafe\".html",
@@ -454,6 +459,5 @@ mod tests {
             content.headers()["content-disposition"],
             "attachment; filename=\"unsafe_.html\""
         );
-        let _ = std::fs::remove_dir_all(data_dir);
     }
 }

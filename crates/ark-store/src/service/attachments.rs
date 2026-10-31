@@ -199,15 +199,13 @@ mod tests {
 
     #[test]
     fn ignores_temp_file_without_metadata_after_interrupted_upload() {
-        let path =
-            std::env::temp_dir().join(format!("ark-attachment-temp-{}", AttachmentId::new()));
-        let store = AttachmentStore::open(&path, 16).expect("store opens");
+        let dir = tempfile::tempdir().expect("temp dir is creatable");
+        let store = AttachmentStore::open(dir.path(), 16).expect("store opens");
         std::fs::write(store.attachments_dir.join(".partial.tmp"), b"partial")
             .expect("temp writes");
         assert_eq!(
             store.diagnostics().expect("diagnostics work").entry_count,
             0
         );
-        let _ = std::fs::remove_dir_all(path);
     }
 }

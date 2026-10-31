@@ -160,31 +160,28 @@ mod tests {
 
     /// Removes its directory on drop, so a failing assertion cannot leak the
     /// store the state opened.
-    struct TempDir(std::path::PathBuf);
+    ///
+    /// Backed by `tempfile`, whose random name keeps two parallel tests from
+    /// picking the same path.
+    struct TempDir(tempfile::TempDir);
 
     impl TempDir {
         fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "ark-caps-test-{}-{}",
-                std::process::id(),
-                chrono::Utc::now()
-                    .timestamp_nanos_opt()
-                    .expect("system clock")
-            ));
-            std::fs::create_dir_all(&path).expect("create test directory");
-            Self(path)
+            let dir = tempfile::Builder::new()
+                .prefix("ark-caps-test-")
+                .tempdir()
+                .expect("create test directory");
+            Self(dir)
         }
-    }
 
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+        fn path(&self) -> &std::path::Path {
+            self.0.path()
         }
     }
 
     fn state_with_ui(dir: &TempDir, ui: Option<Arc<dyn ark_ports::UiCapability>>) -> AppState {
         let store = Arc::new(
-            ark_store::FileSessionStore::open(ark_store::StoreConfig::new(&dir.0))
+            ark_store::FileSessionStore::open(ark_store::StoreConfig::new(dir.path()))
                 .expect("open store"),
         );
         let base = match ui {
@@ -199,7 +196,7 @@ mod tests {
             )),
             Arc::new(ark_obs::UsageRecorder::new()),
             Arc::new(PendingRunner),
-            dir.0.clone(),
+            dir.path().to_path_buf(),
             "test",
         )
         .with_base_services(base)

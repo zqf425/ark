@@ -1009,30 +1009,30 @@ mod tests {
     use ark_llm::ProviderConfig;
     use chrono::Utc;
 
-    struct TestDataDir(std::path::PathBuf);
+    /// A fresh random data directory, removed when the guard drops.
+    ///
+    /// `tempfile` names it uniquely, so the completion-inbox tests running in
+    /// parallel can never pick the same store directory or data lock.
+    struct TestDataDir(tempfile::TempDir);
 
     impl TestDataDir {
         fn new() -> Self {
-            let nonce = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system time is after the Unix epoch")
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!("ark-completion-inbox-{nonce}"));
-            std::fs::create_dir_all(&path).unwrap();
-            Self(path)
+            let dir = tempfile::Builder::new()
+                .prefix("ark-completion-inbox-")
+                .tempdir()
+                .expect("temp dir is creatable");
+            Self(dir)
         }
-    }
 
-    impl Drop for TestDataDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+        fn path(&self) -> &std::path::Path {
+            self.0.path()
         }
     }
 
     #[tokio::test]
     async fn child_completion_events_are_loaded_as_the_next_turn_system_source() {
         let data_dir = TestDataDir::new();
-        let store = FileSessionStore::open(StoreConfig::new(&data_dir.0)).unwrap();
+        let store = FileSessionStore::open(StoreConfig::new(data_dir.path())).unwrap();
         let thread = store.create_thread("parent").await.unwrap().thread_id;
         store
             .append_event(
@@ -1065,7 +1065,7 @@ mod tests {
     #[tokio::test]
     async fn completed_parent_turn_acknowledges_the_injected_completion_and_skips_it_next_time() {
         let data_dir = TestDataDir::new();
-        let store = FileSessionStore::open(StoreConfig::new(&data_dir.0)).unwrap();
+        let store = FileSessionStore::open(StoreConfig::new(data_dir.path())).unwrap();
         let thread = store.create_thread("parent").await.unwrap().thread_id;
         let turn = TurnId::new();
 
@@ -1108,7 +1108,7 @@ mod tests {
     #[tokio::test]
     async fn completed_parent_turn_reports_another_bounded_inbox_page() {
         let data_dir = TestDataDir::new();
-        let store = FileSessionStore::open(StoreConfig::new(&data_dir.0)).unwrap();
+        let store = FileSessionStore::open(StoreConfig::new(data_dir.path())).unwrap();
         let thread = store.create_thread("parent").await.unwrap().thread_id;
         for index in 0..9 {
             store
@@ -1170,7 +1170,7 @@ mod tests {
     #[tokio::test]
     async fn failed_parent_turn_leaves_the_completion_for_redelivery() {
         let data_dir = TestDataDir::new();
-        let store = FileSessionStore::open(StoreConfig::new(&data_dir.0)).unwrap();
+        let store = FileSessionStore::open(StoreConfig::new(data_dir.path())).unwrap();
         let thread = store.create_thread("parent").await.unwrap().thread_id;
         store
             .append_event(
@@ -1237,7 +1237,7 @@ mod tests {
     #[tokio::test]
     async fn startup_aborts_a_parent_turn_left_open_by_a_previous_process() {
         let data_dir = TestDataDir::new();
-        let store = FileSessionStore::open(StoreConfig::new(&data_dir.0)).unwrap();
+        let store = FileSessionStore::open(StoreConfig::new(data_dir.path())).unwrap();
         let thread = store.create_thread("parent").await.unwrap().thread_id;
         let turn = TurnId::new();
         store
@@ -1286,9 +1286,10 @@ mod tests {
 
     #[test]
     fn request_user_input_is_registered_for_both_agent_tool_sets() {
+        let workspace = tempfile::tempdir().expect("temp dir is creatable");
         let skills = Arc::new(ark_skills::SkillRuntime::new(
             ark_skills::SkillsConfig::default(),
-            std::env::temp_dir(),
+            workspace.path().to_path_buf(),
         ));
         let child_tools = build_child_tools(Arc::clone(&skills)).expect("child tools build");
         assert!(child_tools

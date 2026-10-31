@@ -1,41 +1,29 @@
 //! Shared test helpers for the store crate.
 //!
-//! `TempDir` is a hand-rolled equivalent of the `tempfile` crate: the crate
-//! must not grow a C-compiling dependency, and a unique directory name plus a
-//! `Drop` cleanup covers everything the tests need.
+//! `TempDir` wraps [`tempfile::TempDir`] so parallel tests in the same process
+//! can never pick the same directory: the crate generates a random unique name
+//! and removes the tree on drop, which is exactly what these tests need.
 
 use ark_common::{ItemId, ThreadId, TurnId};
 use ark_contract::RuntimeEvent;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-
-static COUNTER: AtomicU64 = AtomicU64::new(0);
+use std::path::Path;
 
 /// A unique temporary directory removed on drop.
 pub(crate) struct TempDir {
-    path: PathBuf,
+    inner: tempfile::TempDir,
 }
 
 impl TempDir {
     pub fn new(tag: &str) -> Self {
-        let unique = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let path =
-            std::env::temp_dir().join(format!("ark-store-{tag}-{}-{unique}", std::process::id()));
-        if path.exists() {
-            let _ = std::fs::remove_dir_all(&path);
-        }
-        std::fs::create_dir_all(&path).expect("temp dir is creatable");
-        Self { path }
+        let inner = tempfile::Builder::new()
+            .prefix(&format!("ark-store-{tag}-"))
+            .tempdir()
+            .expect("temp dir is creatable");
+        Self { inner }
     }
 
     pub fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.path);
+        self.inner.path()
     }
 }
 

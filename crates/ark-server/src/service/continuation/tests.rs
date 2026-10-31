@@ -60,12 +60,15 @@ struct Harness {
     state: AppState,
     store: Arc<FileSessionStore>,
     runner: Arc<CountingRunner>,
-    root: std::path::PathBuf,
+    /// Keeps the random data directory alive for the whole test and removes it
+    /// on drop, so two tests can never share one store directory.
+    _dir: tempfile::TempDir,
 }
 
 impl Harness {
     fn new(enabled: bool) -> Self {
-        let root = std::env::temp_dir().join(format!("ark-auto-continue-{}", TurnId::new()));
+        let dir = tempfile::tempdir().expect("temp dir is creatable");
+        let root = dir.path().to_path_buf();
         let store = Arc::new(FileSessionStore::open(StoreConfig::new(&root)).unwrap());
         let config = RuntimeConfig {
             subagents: ark_contract::SubagentSettings {
@@ -88,7 +91,7 @@ impl Harness {
             state,
             store,
             runner,
-            root,
+            _dir: dir,
         }
     }
 
@@ -128,7 +131,6 @@ impl Harness {
 impl Drop for Harness {
     fn drop(&mut self) {
         self.state.begin_shutdown();
-        let _ = std::fs::remove_dir_all(&self.root);
     }
 }
 
@@ -705,7 +707,8 @@ async fn wait_for_turns(runner: &ModelFailureRunner, expected: usize) {
 
 #[tokio::test]
 async fn failed_continuations_keep_a_complete_lifecycle_until_the_breaker_holds() {
-    let root = std::env::temp_dir().join(format!("ark-cont-lifecycle-{}", TurnId::new()));
+    let dir = tempfile::tempdir().expect("temp dir is creatable");
+    let root = dir.path().to_path_buf();
     let store = Arc::new(FileSessionStore::open(StoreConfig::new(&root)).unwrap());
     let config = RuntimeConfig {
         subagents: ark_contract::SubagentSettings {
@@ -786,5 +789,4 @@ async fn failed_continuations_keep_a_complete_lifecycle_until_the_breaker_holds(
     );
 
     state.begin_shutdown();
-    let _ = std::fs::remove_dir_all(&root);
 }

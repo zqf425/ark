@@ -338,6 +338,17 @@ mod tests {
         }
     }
 
+    /// A fresh random data directory, removed when the guard drops.
+    ///
+    /// `tempfile` names it uniquely, so parallel tests never share a store
+    /// directory (and never contend for the same data lock).
+    fn test_dir() -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix("ark-turn-")
+            .tempdir()
+            .expect("temp dir is creatable")
+    }
+
     fn state(data_dir: &std::path::Path, runner: Arc<CountingRunner>) -> AppState {
         let sessions =
             Arc::new(FileSessionStore::open(StoreConfig::new(data_dir)).expect("session store"));
@@ -369,7 +380,8 @@ mod tests {
 
     #[tokio::test]
     async fn oversized_turn_text_is_rejected_without_starting_a_turn() {
-        let temp = std::env::temp_dir().join(format!("ark-turn-limit-{}", TurnId::new()));
+        let dir = test_dir();
+        let temp = dir.path().to_path_buf();
         let runner = Arc::new(CountingRunner(AtomicUsize::new(0)));
         let state = state(&temp, Arc::clone(&runner));
         let thread = state.store.create_thread("limit").await.expect("thread");
@@ -386,12 +398,12 @@ mod tests {
         assert_eq!(error.0.code, ark_common::ArkErrorCode::ValidationError);
         assert_eq!(error.0.code.http_status(), StatusCode::BAD_REQUEST.as_u16());
         assert_eq!(runner.0.load(Ordering::SeqCst), 0);
-        let _ = std::fs::remove_dir_all(temp);
     }
 
     #[tokio::test]
     async fn late_interrupt_suppresses_a_pending_continuation() {
-        let temp = std::env::temp_dir().join(format!("ark-late-interrupt-{}", TurnId::new()));
+        let dir = test_dir();
+        let temp = dir.path().to_path_buf();
         let runner = Arc::new(CountingRunner(AtomicUsize::new(0)));
         let state = state(&temp, runner);
         let thread = state.store.create_thread("parent").await.expect("thread");
@@ -415,12 +427,12 @@ mod tests {
 
         assert_eq!(error.0.code, ark_common::ArkErrorCode::NotFound);
         assert!(state.continuations.try_schedule(thread.thread_id).is_none());
-        let _ = std::fs::remove_dir_all(temp);
     }
 
     #[tokio::test]
     async fn stale_interrupt_does_not_suppress_a_newer_turn_epoch() {
-        let temp = std::env::temp_dir().join(format!("ark-stale-interrupt-{}", TurnId::new()));
+        let dir = test_dir();
+        let temp = dir.path().to_path_buf();
         let runner = Arc::new(CountingRunner(AtomicUsize::new(0)));
         let state = state(&temp, runner);
         let thread = state.store.create_thread("parent").await.expect("thread");
@@ -446,7 +458,6 @@ mod tests {
 
         assert_eq!(error.0.code, ark_common::ArkErrorCode::NotFound);
         assert!(state.continuations.try_schedule(thread.thread_id).is_some());
-        let _ = std::fs::remove_dir_all(temp);
     }
 
     // ---- continuation lifecycle completeness (D1: a started turn always closes) ----
@@ -559,7 +570,8 @@ mod tests {
 
     #[tokio::test]
     async fn model_failed_continuation_still_records_started_and_failed() {
-        let temp = std::env::temp_dir().join(format!("ark-cont-fail-{}", TurnId::new()));
+        let dir = test_dir();
+        let temp = dir.path().to_path_buf();
         let (state, thread) = lifecycle_state(&temp, Worker::FailBeforeStart).await;
 
         // Two consecutive model failures: the circuit breaker's input, and two
@@ -613,12 +625,12 @@ mod tests {
             2,
             "the breaker counts both failures from the durable log"
         );
-        let _ = std::fs::remove_dir_all(temp);
     }
 
     #[tokio::test]
     async fn completed_continuation_records_started_and_completed_once() {
-        let temp = std::env::temp_dir().join(format!("ark-cont-done-{}", TurnId::new()));
+        let dir = test_dir();
+        let temp = dir.path().to_path_buf();
         let (state, thread) = lifecycle_state(&temp, Worker::ReactorCompleted).await;
 
         let turn = run_auto_turn(&state, thread).await;
@@ -647,6 +659,5 @@ mod tests {
             (1, 1),
             "the supervisor must not duplicate a lifecycle the reactor already wrote"
         );
-        let _ = std::fs::remove_dir_all(temp);
     }
 }

@@ -95,12 +95,15 @@ mod tests {
         }
     }
 
-    fn data_dir() -> std::path::PathBuf {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock after epoch")
-            .as_nanos();
-        std::env::temp_dir().join(format!("ark-memory-http-{stamp}"))
+    /// A fresh random data directory, removed when the guard drops.
+    ///
+    /// `tempfile` names it uniquely, so parallel tests never share a store
+    /// directory (and never contend for the same data lock).
+    fn data_dir() -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix("ark-memory-http-")
+            .tempdir()
+            .expect("temp dir is creatable")
     }
 
     fn state(data_dir: &std::path::Path, memory: Option<Arc<dyn MemoryService>>) -> AppState {
@@ -125,7 +128,8 @@ mod tests {
 
     #[tokio::test]
     async fn all_memory_handlers_support_the_happy_path() {
-        let data_dir = data_dir();
+        let dir = data_dir();
+        let data_dir = dir.path().to_path_buf();
         let memory: Arc<dyn MemoryService> =
             Arc::new(MemoryFileStore::open(&data_dir).expect("memory store"));
         let state = state(&data_dir, Some(memory));
@@ -175,13 +179,12 @@ mod tests {
                 .expect("delete"),
             StatusCode::NO_CONTENT
         );
-
-        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]
     async fn validation_missing_service_and_unknown_ids_are_structured_errors() {
-        let data_dir = data_dir();
+        let dir = data_dir();
+        let data_dir = dir.path().to_path_buf();
         let unavailable = list(State(state(&data_dir, None)))
             .await
             .expect_err("unavailable");
@@ -216,7 +219,5 @@ mod tests {
             .await
             .expect_err("unknown id");
         assert_eq!(missing.0.code, ark_common::ArkErrorCode::NotFound);
-
-        let _ = std::fs::remove_dir_all(data_dir);
     }
 }

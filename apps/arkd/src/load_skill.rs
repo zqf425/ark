@@ -82,31 +82,32 @@ mod tests {
     use ark_ports::{SandboxDecision, Tool, ToolArgs, ToolContext};
     use std::collections::BTreeMap;
     use std::fs;
-    use std::path::PathBuf;
     use std::sync::Arc;
 
     use super::LoadSkillTool;
 
-    struct TestDir(PathBuf);
+    /// A fresh random skills root, removed when the guard drops.
+    ///
+    /// `tempfile` names it uniquely, so parallel tests never share a skill tree.
+    struct TestDir(tempfile::TempDir);
 
     impl TestDir {
         fn new() -> Self {
-            let path =
-                std::env::temp_dir().join(format!("arkd-load-skill-{}", ark_common::TurnId::new()));
-            fs::create_dir_all(&path).unwrap();
-            Self(path)
+            let dir = tempfile::Builder::new()
+                .prefix("arkd-load-skill-")
+                .tempdir()
+                .expect("create test directory");
+            Self(dir)
         }
-    }
 
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
+        fn path(&self) -> &std::path::Path {
+            self.0.path()
         }
     }
 
     fn runtime_with_skill() -> Arc<ark_skills::SkillRuntime> {
         let dir = TestDir::new();
-        let skill = dir.0.join("inspect");
+        let skill = dir.path().join("inspect");
         fs::create_dir_all(&skill).unwrap();
         fs::write(
             skill.join("skill.json"),
@@ -115,18 +116,23 @@ mod tests {
         .unwrap();
         fs::write(skill.join("SKILL.md"), "Read the repository first.").unwrap();
         let config = ark_skills::SkillsConfig {
-            roots: vec![dir.0.clone()],
+            roots: vec![dir.path().to_path_buf()],
             workspace_dirs: Vec::new(),
             ..ark_skills::SkillsConfig::default()
         };
-        Arc::new(ark_skills::SkillRuntime::new(config, dir.0.clone()))
+        Arc::new(ark_skills::SkillRuntime::new(
+            config,
+            dir.path().to_path_buf(),
+        ))
     }
 
-    fn context() -> ToolContext {
+    /// A tool context whose workspace is `workspace`, so a test never points
+    /// the tool at a directory another test is using.
+    fn context(workspace: &std::path::Path) -> ToolContext {
         ToolContext {
             thread_id: ark_common::ThreadId::new(),
             turn_id: ark_common::TurnId::new(),
-            workspace: std::env::temp_dir(),
+            workspace: workspace.to_path_buf(),
             sandbox: SandboxDecision::ReadOnly,
             env: BTreeMap::new(),
         }
@@ -134,11 +140,12 @@ mod tests {
 
     #[tokio::test]
     async fn load_skill_returns_the_instruction_body_for_a_known_id() {
+        let workspace = tempfile::tempdir().expect("temp dir is creatable");
         let tool = LoadSkillTool::new(runtime_with_skill());
 
         let output = tool
             .execute(
-                &context(),
+                &context(workspace.path()),
                 ToolArgs(serde_json::json!({ "skill_id": "inspect" })),
             )
             .await
@@ -150,11 +157,12 @@ mod tests {
 
     #[tokio::test]
     async fn load_skill_lists_available_ids_when_the_requested_id_is_missing() {
+        let workspace = tempfile::tempdir().expect("temp dir is creatable");
         let tool = LoadSkillTool::new(runtime_with_skill());
 
         let output = tool
             .execute(
-                &context(),
+                &context(workspace.path()),
                 ToolArgs(serde_json::json!({ "skill_id": "missing" })),
             )
             .await

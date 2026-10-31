@@ -321,7 +321,8 @@ mod tests {
     /// no frame at all, so the client stayed in `connecting` until keep-alive.
     #[tokio::test]
     async fn empty_backlog_opens_the_stream_without_waiting_for_keep_alive() {
-        let data_dir = std::env::temp_dir().join(format!("ark-sse-quiet-{}", ThreadId::new()));
+        let dir = tempfile::tempdir().expect("temp dir is creatable");
+        let data_dir = dir.path().to_path_buf();
         let state = quiet_state(&data_dir);
         let thread = state.store.create_thread("quiet").await.expect("thread");
         let thread_id = thread.thread_id;
@@ -398,7 +399,6 @@ mod tests {
         assert_eq!(payload["thread_id"], thread_id.to_string());
 
         drop(stream);
-        let _ = std::fs::remove_dir_all(&data_dir);
     }
 
     /// A replay already yields bytes, so no synthetic frame may be inserted —

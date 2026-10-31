@@ -285,7 +285,7 @@ fn derive_rounds(events: &[RuntimeEvent], turn_filter: Option<TurnId>) -> Vec<Ll
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::sync::Arc;
 
     use ark_common::{Result, Usage};
@@ -302,27 +302,21 @@ mod tests {
     use crate::api::routes::router;
     use crate::state::{AppState, TurnEnd, TurnJob, TurnRunner};
 
-    struct TempDir(PathBuf);
+    /// Backed by `tempfile`, whose random name keeps two parallel tests from
+    /// picking the same path.
+    struct TempDir(tempfile::TempDir);
 
     impl TempDir {
         fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "ark-diagnostics-test-{}-{}",
-                std::process::id(),
-                Utc::now().timestamp_nanos_opt().expect("system clock")
-            ));
-            std::fs::create_dir_all(&path).expect("create test directory");
-            Self(path)
+            let dir = tempfile::Builder::new()
+                .prefix("ark-diagnostics-test-")
+                .tempdir()
+                .expect("create test directory");
+            Self(dir)
         }
 
         fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+            self.0.path()
         }
     }
 

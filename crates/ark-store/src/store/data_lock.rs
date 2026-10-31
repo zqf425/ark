@@ -85,23 +85,19 @@ impl DataLock {
 mod tests {
     use super::*;
 
-    fn temp_lock(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "ark-data-lock-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("temp dir is creatable");
-        dir.join(crate::domain::layout::names::LOCK_FILE)
+    /// One lock file inside a fresh random temporary directory.
+    ///
+    /// The directory is returned alongside the path so it outlives the lock and
+    /// is removed on drop; two tests can never share it.
+    fn temp_lock() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("temp dir is creatable");
+        let path = dir.path().join(crate::domain::layout::names::LOCK_FILE);
+        (dir, path)
     }
 
     #[test]
     fn a_second_acquire_on_the_same_directory_is_refused() {
-        let path = temp_lock("exclusive");
+        let (_dir, path) = temp_lock();
         let first = DataLock::acquire(&path).expect("the first holder wins");
         let err = DataLock::acquire(&path).expect_err("a second writer must be refused");
         assert_eq!(err.code, ArkErrorCode::Conflict);
@@ -115,7 +111,7 @@ mod tests {
 
     #[test]
     fn dropping_the_lock_frees_the_directory() {
-        let path = temp_lock("release");
+        let (_dir, path) = temp_lock();
         let first = DataLock::acquire(&path).expect("the first holder wins");
         drop(first);
         // The OS lock went with the handle, so the next open succeeds.

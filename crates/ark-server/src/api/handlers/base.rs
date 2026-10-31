@@ -440,6 +440,17 @@ mod tests {
         }
     }
 
+    /// A fresh random data directory, removed when the guard drops.
+    ///
+    /// `tempfile` names it uniquely, so parallel tests never share a store
+    /// directory (and never contend for the same data lock).
+    fn test_dir() -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix("ark-workspace-")
+            .tempdir()
+            .expect("temp dir is creatable")
+    }
+
     fn state(data_dir: &Path) -> AppState {
         let sessions =
             Arc::new(FileSessionStore::open(StoreConfig::new(data_dir)).expect("session store"));
@@ -473,7 +484,8 @@ mod tests {
 
     #[tokio::test]
     async fn active_parent_turn_makes_workspace_switch_return_409() {
-        let data_dir = std::env::temp_dir().join(format!("ark-workspace-parent-{}", TurnId::new()));
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
         let state = state(&data_dir);
         state
             .turns
@@ -481,22 +493,22 @@ mod tests {
             .expect("register active parent");
 
         assert_workspace_switch_conflict(state, 1).await;
-        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]
     async fn active_child_run_makes_workspace_switch_return_409() {
-        let data_dir = std::env::temp_dir().join(format!("ark-workspace-child-{}", TurnId::new()));
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
         let mut state = state(&data_dir);
         state.subagents.registry = Some(Arc::new(ActiveChildRegistry));
 
         assert_workspace_switch_conflict(state, 1).await;
-        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]
     async fn idle_workspace_switch_returns_incremented_generation() {
-        let data_dir = std::env::temp_dir().join(format!("ark-workspace-idle-{}", TurnId::new()));
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
         let state = state(&data_dir);
 
         for expected in [1, 2] {
@@ -510,12 +522,12 @@ mod tests {
             .expect("idle switch");
             assert_eq!(response.0.generation, expected);
         }
-        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]
     async fn workspace_validation_returns_a_normalized_path() {
-        let data_dir = std::env::temp_dir().join("ark-workspace-validate-normalized");
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
         let response = workspace_validate(
             State(state(&data_dir)),
             Json(ValidateWorkspaceBody {
@@ -527,12 +539,12 @@ mod tests {
 
         assert!(response.0.ok);
         assert_eq!(response.0.path, "C:/");
-        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]
     async fn workspace_validation_rejects_a_missing_path() {
-        let data_dir = std::env::temp_dir().join("ark-workspace-validate-missing");
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
         let error = workspace_validate(
             State(state(&data_dir)),
             Json(ValidateWorkspaceBody {
@@ -544,6 +556,5 @@ mod tests {
 
         assert_eq!(error.0.code, ark_common::ArkErrorCode::ValidationError);
         assert!(error.0.message.contains("does not exist"));
-        let _ = std::fs::remove_dir_all(data_dir);
     }
 }

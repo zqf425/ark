@@ -134,7 +134,7 @@ async fn target(
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::sync::Arc;
 
     use ark_agent::CancelToken;
@@ -153,27 +153,21 @@ mod tests {
     use crate::api::routes::router;
     use crate::state::{TurnEnd, TurnJob, TurnRunner};
 
-    struct TempDir(PathBuf);
+    /// Backed by `tempfile`, whose random name keeps two parallel tests from
+    /// picking the same path.
+    struct TempDir(tempfile::TempDir);
 
     impl TempDir {
         fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "ark-rewind-test-{}-{}",
-                std::process::id(),
-                Utc::now().timestamp_nanos_opt().expect("system clock")
-            ));
-            std::fs::create_dir_all(&path).expect("create test directory");
-            Self(path)
+            let dir = tempfile::Builder::new()
+                .prefix("ark-rewind-test-")
+                .tempdir()
+                .expect("create test directory");
+            Self(dir)
         }
 
         fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+            self.0.path()
         }
     }
 

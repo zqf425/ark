@@ -5,14 +5,18 @@ use ark_ports::MemoryService;
 
 use crate::MemoryFileStore;
 
-fn temp_data_dir(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("ark-memory-{label}-{}", uuid::Uuid::new_v4()))
+fn temp_data_dir(label: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("ark-memory-{label}-"))
+        .tempdir()
+        .expect("data directory created")
 }
 
 #[test]
 fn creates_updates_deletes_and_lists_memory_entries() {
-    let data_dir = temp_data_dir("crud");
-    let store = MemoryFileStore::open(&data_dir).expect("store opens");
+    let dir = temp_data_dir("crud");
+    let data_dir = dir.path();
+    let store = MemoryFileStore::open(data_dir).expect("store opens");
 
     let created = store
         .create(CreateMemoryRequest {
@@ -36,17 +40,15 @@ fn creates_updates_deletes_and_lists_memory_entries() {
     assert_eq!(store.list().expect("list succeeds").entries.len(), 1);
     store.delete(&created.id).expect("delete succeeds");
     assert!(store.list().expect("list succeeds").entries.is_empty());
-
-    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 #[test]
 fn empty_file_starts_empty_without_blocking_future_writes() {
-    let data_dir = temp_data_dir("empty");
-    std::fs::create_dir_all(&data_dir).expect("data directory created");
+    let dir = temp_data_dir("empty");
+    let data_dir = dir.path();
     std::fs::write(data_dir.join("memory.json"), b"").expect("empty file written");
 
-    let store = MemoryFileStore::open(&data_dir).expect("empty file is recoverable");
+    let store = MemoryFileStore::open(data_dir).expect("empty file is recoverable");
     assert!(store.list().expect("list succeeds").entries.is_empty());
     store
         .create(CreateMemoryRequest {
@@ -56,17 +58,15 @@ fn empty_file_starts_empty_without_blocking_future_writes() {
         })
         .expect("write after recovery succeeds");
     assert_eq!(store.list().expect("list succeeds").entries.len(), 1);
-
-    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 #[test]
 fn damaged_file_starts_empty_without_blocking_future_writes() {
-    let data_dir = temp_data_dir("recovery");
-    std::fs::create_dir_all(&data_dir).expect("data directory created");
+    let dir = temp_data_dir("recovery");
+    let data_dir = dir.path();
     std::fs::write(data_dir.join("memory.json"), b"not json").expect("damaged file written");
 
-    let store = MemoryFileStore::open(&data_dir).expect("damaged file is recoverable");
+    let store = MemoryFileStore::open(data_dir).expect("damaged file is recoverable");
     assert!(store.list().expect("list succeeds").entries.is_empty());
     store
         .create(CreateMemoryRequest {
@@ -76,14 +76,12 @@ fn damaged_file_starts_empty_without_blocking_future_writes() {
         })
         .expect("write after recovery succeeds");
     assert_eq!(store.list().expect("list succeeds").entries.len(), 1);
-
-    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 #[test]
 fn concurrent_writes_keep_every_entry() {
-    let data_dir = temp_data_dir("concurrent");
-    let store = Arc::new(MemoryFileStore::open(&data_dir).expect("store opens"));
+    let dir = temp_data_dir("concurrent");
+    let store = Arc::new(MemoryFileStore::open(dir.path()).expect("store opens"));
     let mut writers = Vec::new();
     for index in 0..16 {
         let store = Arc::clone(&store);
@@ -102,13 +100,12 @@ fn concurrent_writes_keep_every_entry() {
     }
 
     assert_eq!(store.list().expect("list succeeds").entries.len(), 16);
-    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 #[test]
 fn rejects_an_oversized_text_without_changing_existing_entries() {
-    let data_dir = temp_data_dir("limit");
-    let store = MemoryFileStore::open(&data_dir).expect("store opens");
+    let dir = temp_data_dir("limit");
+    let store = MemoryFileStore::open(dir.path()).expect("store opens");
     store
         .create(CreateMemoryRequest {
             text: "保留的条目".to_string(),
@@ -126,8 +123,6 @@ fn rejects_an_oversized_text_without_changing_existing_entries() {
         .expect_err("oversized text is rejected");
     assert!(error.message.contains("16384"));
     assert_eq!(store.list().expect("list succeeds").entries.len(), 1);
-
-    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 #[test]

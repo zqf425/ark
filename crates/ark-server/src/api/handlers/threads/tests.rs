@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::*;
@@ -100,6 +99,17 @@ fn state(data_dir: &std::path::Path) -> AppState {
         "test",
     )
     .with_base_services(BaseServices::new().with_providers(Arc::new(Providers)))
+}
+
+/// A fresh random data directory, removed when the guard drops.
+///
+/// `tempfile` names it uniquely, so two tests running in parallel can never
+/// share one store directory or its lock file.
+fn test_dir(tag: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("ark-thread-{tag}-"))
+        .tempdir()
+        .expect("temp dir is creatable")
 }
 
 #[test]
@@ -244,7 +254,8 @@ async fn list_response(state: AppState, query: ThreadListQuery) -> Vec<ThreadSum
 
 #[tokio::test]
 async fn list_without_query_stays_compatible() {
-    let data_dir = std::env::temp_dir().join(format!("ark-thread-compat-{}", TurnId::new()));
+    let dir = test_dir("compat");
+    let data_dir = dir.path().to_path_buf();
     let state = state(&data_dir);
     seed_threads(&state, 5).await;
 
@@ -254,12 +265,12 @@ async fn list_without_query_stays_compatible() {
     // Deterministic order: active first, then most recently updated, so
     // the newest active thread (seeded last, even index) leads.
     assert_eq!(summaries[0].title, "thread-04");
-    let _ = std::fs::remove_dir_all(PathBuf::from(&data_dir));
 }
 
 #[tokio::test]
 async fn limit_one_returns_exactly_one_page() {
-    let data_dir = std::env::temp_dir().join(format!("ark-thread-limit-{}", TurnId::new()));
+    let dir = test_dir("limit");
+    let data_dir = dir.path().to_path_buf();
     let state = state(&data_dir);
     seed_threads(&state, 4).await;
 
@@ -274,12 +285,12 @@ async fn limit_one_returns_exactly_one_page() {
 
     assert_eq!(page.len(), 1);
     assert_eq!(page[0].title, "thread-02");
-    let _ = std::fs::remove_dir_all(PathBuf::from(&data_dir));
 }
 
 #[tokio::test]
 async fn offset_walks_pages_without_repetition_or_gap() {
-    let data_dir = std::env::temp_dir().join(format!("ark-thread-offset-{}", TurnId::new()));
+    let dir = test_dir("offset");
+    let data_dir = dir.path().to_path_buf();
     let state = state(&data_dir);
     seed_threads(&state, 5).await;
 
@@ -326,12 +337,12 @@ async fn offset_walks_pages_without_repetition_or_gap() {
             "thread-01"
         ]
     );
-    let _ = std::fs::remove_dir_all(PathBuf::from(&data_dir));
 }
 
 #[tokio::test]
 async fn limit_clamps_zero_and_oversized_values() {
-    let data_dir = std::env::temp_dir().join(format!("ark-thread-clamp-{}", TurnId::new()));
+    let dir = test_dir("clamp");
+    let data_dir = dir.path().to_path_buf();
     let state = state(&data_dir);
     seed_threads(&state, 3).await;
 
@@ -355,12 +366,12 @@ async fn limit_clamps_zero_and_oversized_values() {
     )
     .await;
     assert_eq!(huge.len(), 3);
-    let _ = std::fs::remove_dir_all(PathBuf::from(&data_dir));
 }
 
 #[tokio::test]
 async fn archived_filter_composes_with_pagination() {
-    let data_dir = std::env::temp_dir().join(format!("ark-thread-archived-{}", TurnId::new()));
+    let dir = test_dir("archived");
+    let data_dir = dir.path().to_path_buf();
     let state = state(&data_dir);
     seed_threads(&state, 4).await;
 
@@ -386,12 +397,12 @@ async fn archived_filter_composes_with_pagination() {
     .await;
     assert_eq!(active_paged.len(), 1);
     assert!(!active_paged[0].archived);
-    let _ = std::fs::remove_dir_all(PathBuf::from(&data_dir));
 }
 
 #[tokio::test]
 async fn title_search_composes_with_pagination() {
-    let data_dir = std::env::temp_dir().join(format!("ark-thread-search-{}", TurnId::new()));
+    let dir = test_dir("search");
+    let data_dir = dir.path().to_path_buf();
     let state = state(&data_dir);
     for title in ["rust review", "rust design", "other"] {
         state.store.create_thread(title).await.expect("thread");
@@ -408,12 +419,12 @@ async fn title_search_composes_with_pagination() {
     .await;
     assert_eq!(hits.len(), 1);
     assert!(hits[0].title.starts_with("rust"));
-    let _ = std::fs::remove_dir_all(PathBuf::from(&data_dir));
 }
 
 #[tokio::test]
 async fn unknown_provider_patch_is_rejected_without_changing_runtime() {
-    let data_dir = std::env::temp_dir().join(format!("ark-thread-provider-{}", TurnId::new()));
+    let dir = test_dir("provider");
+    let data_dir = dir.path().to_path_buf();
     let state = state(&data_dir);
     let thread = state.store.create_thread("provider").await.expect("thread");
 
@@ -444,14 +455,14 @@ async fn unknown_provider_patch_is_rejected_without_changing_runtime() {
             .provider_id,
         None
     );
-    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 /// PATCH 写入的会话级覆盖必须能被 GET 详情原样读回，否则客户端只能去读
 /// `thread.json` 才能确认当前覆盖（验收 D3）。
 #[tokio::test]
 async fn patch_runtime_overrides_are_echoed_by_the_detail_response() {
-    let data_dir = std::env::temp_dir().join(format!("ark-thread-echo-{}", TurnId::new()));
+    let dir = test_dir("echo");
+    let data_dir = dir.path().to_path_buf();
     let state = state(&data_dir);
     let thread = state.store.create_thread("echo").await.expect("thread");
 
@@ -483,13 +494,13 @@ async fn patch_runtime_overrides_are_echoed_by_the_detail_response() {
         detail.runtime.workspace.as_deref(),
         Some("/tmp/echo-workspace")
     );
-    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 /// 没有覆盖的线程必须回显空覆盖，而不是把全局默认值伪装成会话级设置。
 #[tokio::test]
 async fn detail_reports_no_overrides_when_the_thread_has_none() {
-    let data_dir = std::env::temp_dir().join(format!("ark-thread-noecho-{}", TurnId::new()));
+    let dir = test_dir("noecho");
+    let data_dir = dir.path().to_path_buf();
     let state = state(&data_dir);
     let thread = state.store.create_thread("plain").await.expect("thread");
 
@@ -502,13 +513,13 @@ async fn detail_reports_no_overrides_when_the_thread_has_none() {
     assert_eq!(detail.runtime.workspace, None);
     assert_eq!(detail.runtime.provider_id, None);
     assert_eq!(detail.runtime.model, None);
-    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 /// PATCH 未提交的字段保留现状：语义在契约注释中明示，这里锁住行为。
 #[tokio::test]
 async fn patch_without_a_field_keeps_the_existing_override() {
-    let data_dir = std::env::temp_dir().join(format!("ark-thread-keep-{}", TurnId::new()));
+    let dir = test_dir("keep");
+    let data_dir = dir.path().to_path_buf();
     let state = state(&data_dir);
     let thread = state.store.create_thread("keep").await.expect("thread");
 
@@ -552,7 +563,6 @@ async fn patch_without_a_field_keeps_the_existing_override() {
     assert_eq!(detail.runtime.autonomy.as_deref(), Some("strict"));
     assert_eq!(detail.runtime.workspace.as_deref(), Some("/tmp/keep-me"));
     assert_eq!(detail.summary.title, "renamed");
-    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 /// 线级回归：真实路由 + 序列化之后，PATCH 写入的覆盖仍然出现在 GET 响应里。
@@ -565,7 +575,8 @@ async fn the_wire_detail_exposes_patched_runtime_overrides() {
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
-    let data_dir = std::env::temp_dir().join(format!("ark-thread-wire-{}", TurnId::new()));
+    let dir = test_dir("wire");
+    let data_dir = dir.path().to_path_buf();
     let app = crate::api::routes::router(state(&data_dir));
 
     let created = app
@@ -623,7 +634,6 @@ async fn the_wire_detail_exposes_patched_runtime_overrides() {
 
     assert_eq!(detail["runtime"]["autonomy"], "strict");
     assert_eq!(detail["runtime"]["workspace"], "/tmp/wire-ws");
-    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 /// 回归：一个子代理只应产生一个 `child_ids` 条目。
@@ -633,7 +643,8 @@ async fn the_wire_detail_exposes_patched_runtime_overrides() {
 /// child 在 `child_ids` 里出现三次。这里走真实 store 的完整写入路径。
 #[tokio::test]
 async fn detail_lists_one_child_id_per_delegated_child() {
-    let data_dir = std::env::temp_dir().join(format!("ark-thread-child-ids-{}", TurnId::new()));
+    let dir = test_dir("child-ids");
+    let data_dir = dir.path().to_path_buf();
     let state = state(&data_dir);
     let parent = state.store.create_thread("parent").await.expect("thread");
     let child = ChildId::new();
@@ -670,5 +681,4 @@ async fn detail_lists_one_child_id_per_delegated_child() {
         vec![child],
         "the projection must fold the log to one id per child"
     );
-    let _ = std::fs::remove_dir_all(data_dir);
 }
