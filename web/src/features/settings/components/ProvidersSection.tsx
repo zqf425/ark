@@ -7,6 +7,7 @@
  */
 import { useState } from 'react'
 import { Button, EmptyState, useToast } from '../../../shared/ui'
+import { useI18n } from '../../../shared/i18n'
 import type {
   ProviderEntry,
   ProviderModelCatalogRequest,
@@ -35,20 +36,21 @@ function ProviderRow({
   onTest: () => void
   testState: TestState | null
 }): JSX.Element {
+  const { t } = useI18n()
   const toast = useToast()
   const active = api.activeProviderId === provider.id
   const isDefault = api.defaultProviderId === provider.id || provider.is_default
 
   const remove = async (): Promise<void> => {
     const outcome = await api.remove(provider.id)
-    if (outcome.ok) toast.push('success', `已删除供应商 ${provider.id}`)
-    else toast.push('error', '删除失败', describeOutcome(outcome))
+    if (outcome.ok) toast.push('success', t('settings.providers.deleted', { id: provider.id }))
+    else toast.push('error', t('settings.providers.deleteFailed'), describeOutcome(outcome))
   }
 
   const makeDefault = async (): Promise<void> => {
     const outcome = await api.setDefault(provider.id)
-    if (outcome.ok) toast.push('success', `${provider.id} 已设为默认`)
-    else toast.push('error', '设为默认失败', describeOutcome(outcome))
+    if (outcome.ok) toast.push('success', t('settings.providers.setDefaultDone', { id: provider.id }))
+    else toast.push('error', t('settings.providers.setDefaultFailed'), describeOutcome(outcome))
   }
 
   const shown = testState && testState.key === `test:${provider.id}` ? testState : null
@@ -58,21 +60,21 @@ function ProviderRow({
       <div className="ark-card__head">
         <span className="ark-card__name">{provider.id}</span>
         {provider.label ? <span className="ark-settings__hint">{provider.label}</span> : null}
-        {isDefault ? <span className="ark-chip ark-chip--ok">默认</span> : null}
+        {isDefault ? <span className="ark-chip ark-chip--ok">{t('settings.providers.isDefault')}</span> : null}
         {active ? <span className="ark-chip ark-chip--live">active</span> : null}
-        {provider.enabled ? null : <span className="ark-chip ark-chip--muted">已禁用</span>}
+        {provider.enabled ? null : <span className="ark-chip ark-chip--muted">{t('settings.providers.disabled')}</span>}
         <div className="ark-card__actions">
           <Button size="sm" disabled={api.busy !== null || isDefault} onClick={() => void makeDefault()}>
-            {isDefault ? '已是默认' : '设为默认'}
+            {isDefault ? t('settings.providers.alreadyDefault') : t('settings.providers.makeDefault')}
           </Button>
           <Button size="sm" disabled={api.busy !== null} onClick={onTest}>
-            测试连接
+            {t('common.test')}
           </Button>
           <Button size="sm" disabled={api.busy !== null} onClick={onEdit}>
-            编辑
+            {t('common.edit')}
           </Button>
           <Button variant="danger" size="sm" disabled={api.busy !== null} onClick={() => void remove()}>
-            删除
+            {t('common.delete')}
           </Button>
         </div>
       </div>
@@ -82,15 +84,28 @@ function ProviderRow({
         <span>format: {provider.endpoint_format}</span>
         <span>base_url: {provider.base_url}</span>
         <span>
-          api_key: {provider.has_api_key ? (provider.api_key_hint ? `已配置（${provider.api_key_hint}）` : '已配置') : '未配置'}
+          api_key:{' '}
+          {provider.has_api_key
+            ? provider.api_key_hint
+              ? t('settings.providers.apiKeyConfigured', { hint: provider.api_key_hint })
+              : t('settings.providers.apiKeyConfiguredPlain')
+            : t('settings.providers.apiKeyMissing')}
         </span>
         {provider.context_window_tokens ? <span>context: {provider.context_window_tokens}</span> : null}
-        {provider.supports_vision !== undefined ? <span>识图: {provider.supports_vision ? '支持' : '不支持'}</span> : null}
+        {provider.supports_vision !== undefined ? (
+          <span>
+            {t('settings.providers.visionLabel')}:{' '}
+            {provider.supports_vision ? t('settings.providers.visionSupported') : t('settings.providers.visionUnsupported')}
+          </span>
+        ) : null}
       </div>
 
-      {shown?.error ? <Notice tone="error" title="测试请求失败">{shown.error}</Notice> : null}
+      {shown?.error ? <Notice tone="error" title={t('settings.providers.testRequestFailed')}>{shown.error}</Notice> : null}
       {shown?.result ? (
-        <Notice tone={shown.result.ok ? 'warn' : 'error'} title={shown.result.ok ? '测试通过' : '测试未通过'}>
+        <Notice
+          tone={shown.result.ok ? 'warn' : 'error'}
+          title={shown.result.ok ? t('settings.providers.testPassed') : t('settings.providers.testNotPassed')}
+        >
           <span className="ark-card__meta">
             <span>ok: {String(shown.result.ok)}</span>
             <span>status: {shown.result.status ?? '—'}</span>
@@ -107,6 +122,7 @@ function ProviderRow({
 export type ProvidersSectionProps = { providers: ProvidersApi }
 
 export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX.Element {
+  const { t } = useI18n()
   const toast = useToast()
   const [draft, setDraft] = useState<ProviderDraft | null>(null)
   const [editing, setEditing] = useState(false)
@@ -120,11 +136,15 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
   const submit = async (entry: ProviderEntry, makeDefault: boolean): Promise<void> => {
     const outcome = await api.upsert({ ...entry, make_default: makeDefault })
     if (outcome.ok) {
-      toast.push('success', `供应商 ${entry.id} 已保存`, makeDefault ? '并已设为默认' : undefined)
+      toast.push(
+        'success',
+        t('settings.providers.saved', { id: entry.id }),
+        makeDefault ? t('settings.providers.savedAsDefault') : undefined
+      )
       close()
       return
     }
-    toast.push('error', '保存供应商失败', describeOutcome(outcome))
+    toast.push('error', t('settings.providers.saveFailed'), describeOutcome(outcome))
   }
 
   const runTest = async (request: { provider_id?: string; entry?: ProviderEntry }, key: string): Promise<void> => {
@@ -132,30 +152,36 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
     const outcome = await api.test(request)
     if (outcome.ok) {
       setTestState({ key, result: outcome.value })
-      if (!outcome.value.ok) toast.push('error', '连接测试未通过', outcome.value.message)
-      else toast.push('success', '连接测试通过', `${outcome.value.latency_ms} ms`)
+      if (!outcome.value.ok) toast.push('error', t('settings.providers.testFailedToast'), outcome.value.message)
+      else toast.push('success', t('settings.providers.testPassedToast'), `${outcome.value.latency_ms} ms`)
       return
     }
     setTestState({ key, error: describeOutcome(outcome) })
-    toast.push('error', '测试请求失败', describeOutcome(outcome))
+    toast.push('error', t('settings.providers.testRequestFailed'), describeOutcome(outcome))
   }
 
   const discover = async (request: ProviderModelCatalogRequest): Promise<ProviderModelCatalogResponse> => {
     const outcome = await api.models(request)
     if (outcome.ok) {
-      toast.push('success', '模型列表已更新', `共 ${outcome.value.models.length} 个模型`)
+      toast.push(
+        'success',
+        t('settings.providers.catalogUpdated'),
+        t('settings.providers.catalogCount', { count: outcome.value.models.length })
+      )
       return outcome.value
     }
     const message = describeOutcome(outcome)
-    toast.push('error', '查询模型列表失败', message)
+    toast.push('error', t('settings.providers.catalogQueryFailed'), message)
     throw new Error(message)
   }
 
   const body = ((): JSX.Element => {
     if ((api.status === 'loading' || api.status === 'idle') && api.providers.length === 0) return <Skeleton rows={3} />
-    if (api.status === 'error') return <LoadError message={api.error ?? '加载供应商失败'} onRetry={() => void api.refresh()} />
+    if (api.status === 'error') {
+      return <LoadError message={api.error ?? t('settings.providers.loadFailed')} onRetry={() => void api.refresh()} />
+    }
     if (api.providers.length === 0) {
-      return <EmptyState title="还没有供应商" hint="至少需要一个 provider 才能发起模型请求。" />
+      return <EmptyState title={t('settings.providers.emptyTitle')} hint={t('settings.providers.emptyHint')} />
     }
     return (
       <div className="ark-settings__list">
@@ -178,8 +204,8 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
 
   return (
     <SettingsSection
-      title="供应商 / 模型"
-      desc="provider 配置与连接测试；api_key 只写不回显。"
+      title={t('settings.providers.title')}
+      desc={t('settings.providers.desc')}
       actions={
         draft ? null : (
           <Button
@@ -191,15 +217,17 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
               setDraft(emptyDraft())
             }}
           >
-            新增供应商
+            {t('settings.providers.add')}
           </Button>
         )
       }
     >
       {api.defaultProviderId !== api.activeProviderId && api.activeProviderId ? (
         <p className="ark-settings__hint ark-settings__hint--warn">
-          default_provider_id（{api.defaultProviderId ?? '未设置'}）与 active_provider_id（{api.activeProviderId}）不同：
-          active 才是当前真正在用的供应商。
+          {t('settings.providers.defaultActiveMismatch', {
+            defaultId: api.defaultProviderId ?? t('common.notSet'),
+            activeId: api.activeProviderId
+          })}
         </p>
       ) : null}
 

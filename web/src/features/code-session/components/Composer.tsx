@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import { Button } from '../../../shared/ui'
+import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../state/store'
 import { useTurn } from '../hooks/use-turn'
 import { canEditComposer, canSendToThread } from './composer-availability'
@@ -12,6 +13,7 @@ const MAX_ROWS = 8
  * state, and the user's own message returns as a `ThreadItem`.
  */
 export function Composer({ threadId }: { threadId: string | null }): JSX.Element {
+  const { t } = useI18n()
   const draft = useCodeSessionStore((s) => s.sending)
   const set = useCodeSessionStore((s) => s.setSending)
   const streamStatus = useCodeSessionStore((s) => s.streamStatus)
@@ -52,15 +54,23 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
 
       <div className="ark-composer__box">
         <div className="ark-composer__lead">
-          <span>{canInterrupt ? '补充给正在执行的会话' : '描述本次会话要完成的工作'}</span>
-          <span className="ark-composer__keys"><kbd>Enter</kbd> 发送 <kbd>Shift + Enter</kbd> 换行</span>
+          <span>{canInterrupt ? t('canvas.composer.steerLead') : t('canvas.composer.describeLead')}</span>
+          <span className="ark-composer__keys">
+            <kbd>Enter</kbd> {t('canvas.composer.keys')} <kbd>Shift + Enter</kbd> {t('canvas.composer.newline')}
+          </span>
         </div>
         <textarea
           ref={inputRef}
           className="ark-composer__input"
           rows={3}
-          placeholder={threadId ? (canInterrupt ? '向运行中的回合补充指令（Enter steer）' : '发送消息（Enter 发送，Shift+Enter 换行）') : '先新建或选择一个会话'}
-          aria-label={canInterrupt ? '向运行中的回合补充指令' : '发送消息'}
+          placeholder={
+            threadId
+              ? canInterrupt
+                ? t('canvas.composer.steerPlaceholder')
+                : t('canvas.composer.sendPlaceholder')
+              : t('canvas.composer.noThreadPlaceholder')
+          }
+          aria-label={canInterrupt ? t('canvas.composer.steerAria') : t('canvas.composer.sendAria')}
           disabled={inputDisabled}
           onChange={(event) => {
             const node = event.currentTarget
@@ -76,15 +86,15 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
         />
         <div className="ark-composer__actions">
           <span className={`ark-composer__status${notOpen ? ' is-warn' : ''}`}>
-            {notOpen ? '事件流未连接' : '事件流已连接'}
+            {notOpen ? t('canvas.composer.streamDown') : t('canvas.composer.streamUp')}
           </span>
           {canInterrupt ? (
             <Button variant="default" size="sm" onClick={() => void interrupt()}>
-              中断
+              {t('canvas.composer.interrupt')}
             </Button>
           ) : null}
           <Button variant="primary" size="sm" disabled={sendDisabled} onClick={() => void submit()}>
-            {draft ? '提交中…' : canInterrupt ? 'Steer' : '发送'}
+            {draft ? t('common.submitting') : canInterrupt ? t('canvas.composer.steer') : t('canvas.composer.send')}
           </Button>
         </div>
       </div>

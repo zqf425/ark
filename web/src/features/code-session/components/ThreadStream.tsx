@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { Button, EmptyState, ErrorBoundary } from '../../../shared/ui'
 import type { ThreadItem } from '../../../shared/contracts'
+import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../state/store'
 import { approvalCards, childCompletionNotices, groupByTurn, hasLiveItems, recentErrors, userInputCards } from '../state/selectors'
 import { UserBubble, AssistantBubble, ReasoningBlock } from './MessageBubble'
@@ -76,6 +77,7 @@ export function ThreadStream({
   threadId: string | null
   onCreateThread?: () => Promise<unknown>
 }): JSX.Element {
+  const { t } = useI18n()
   const items = useCodeSessionStore((s) => s.itemOrder)
   const itemsById = useCodeSessionStore((s) => s.itemsById)
   const detailStatus = useCodeSessionStore((s) => s.detailStatus)
@@ -99,10 +101,10 @@ export function ThreadStream({
     return (
       <section className="ark-stream ark-stream--empty">
         <div className="ark-stream__emptycall">
-          <EmptyState title="开始一个会话" hint="新建或选择一个会话，再描述希望 ark 完成的工作。" />
+          <EmptyState title={t('canvas.empty.title')} hint={t('canvas.empty.hint')} />
           {onCreateThread ? (
             <Button variant="primary" size="sm" onClick={() => void onCreateThread()}>
-              新建会话
+              {t('canvas.empty.create')}
             </Button>
           ) : null}
         </div>
@@ -114,29 +116,33 @@ export function ThreadStream({
     <section className="ark-stream">
       <header className="ark-threadfocus">
         <div className="ark-threadfocus__identity">
-          <h1 title={activeThread?.title ?? ''}>{activeThread?.title || '未命名会话'}</h1>
-          <p aria-live="polite">{live ? '正在执行' : groups.length > 0 ? `${groups.length} 个回合` : '准备开始'}</p>
+          <h1 title={activeThread?.title ?? ''}>{activeThread?.title || t('canvas.untitled')}</h1>
+          <p aria-live="polite">
+            {live ? t('canvas.live') : groups.length > 0 ? t('canvas.turnCount', { count: groups.length }) : t('canvas.ready')}
+          </p>
         </div>
         <SessionRuntimeControls threadId={threadId} />
       </header>
       <div className="ark-stream__scroll" ref={ref}>
-        {detailStatus === 'loading' ? <p className="ark-stream__hint">正在载入会话…</p> : null}
+        {detailStatus === 'loading' ? <p className="ark-stream__hint">{t('canvas.detailLoading')}</p> : null}
         {detailStatus === 'error' ? (
-          <div className="ark-stream__hint is-error">载入失败：{detailError ?? '未知错误'}</div>
+          <div className="ark-stream__hint is-error">
+            {t('canvas.detailFailed', { error: detailError ?? t('common.unknownError') })}
+          </div>
         ) : null}
 
         {groups.length === 0 && detailStatus === 'ready' ? (
-          <EmptyState title="会话为空" hint="在下方输入框发送第一条消息。" />
+          <EmptyState title={t('canvas.emptyThreadTitle')} hint={t('canvas.emptyThreadHint')} />
         ) : null}
 
         {groups.map((group) => (
           <div className="ark-turn" key={group.turnId}>
             {group.items.map((item) => (
-              <ErrorBoundary key={item.item_id} label="该条消息渲染失败">
+              <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
                 <StreamRow item={item} />
               </ErrorBoundary>
             ))}
-            <ErrorBoundary label="回退入口渲染失败">
+            <ErrorBoundary label={t('thread.canvas.boundaryRewind')}>
               <RewindControl
                 threadId={threadId}
                 turnId={group.turnId}
@@ -172,7 +178,7 @@ export function ThreadStream({
 
       {!atBottom ? (
         <button type="button" className="ark-stream__jump" onClick={scrollToBottom}>
-          跳到最新
+          {t('canvas.jumpToLatest')}
         </button>
       ) : null}
 

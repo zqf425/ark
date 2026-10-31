@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { setActiveLocale } from './current'
 import { translate, type MessageKey, type MessageParams } from './messages'
 import { DEFAULT_UI_PREFERENCES, readUiPreferences, resolveTheme, type UiFontSize, type UiLocale, type UiPreferences, type UiTheme, UI_PREFERENCES_STORAGE_KEY } from './preferences'
 
@@ -32,6 +33,7 @@ export function I18nProvider({ children }: { children: ReactNode }): JSX.Element
   }, [])
 
   useEffect(() => {
+    setActiveLocale(preferences.locale)
     document.documentElement.lang = preferences.locale
     document.documentElement.dataset.arkFontSize = preferences.fontSize
     document.documentElement.dataset.arkTheme = resolveTheme(preferences.theme, systemPrefersDark)
@@ -51,6 +53,7 @@ export function I18nProvider({ children }: { children: ReactNode }): JSX.Element
 
 export function useI18n(): I18nContextValue {
   const context = useContext(I18nContext)
-  if (!context) throw new Error('useI18n 必须在 I18nProvider 内使用')
+  // Developer diagnostic, not user copy: it can only fire on a wiring bug.
+  if (!context) throw new Error('useI18n must be used inside I18nProvider')
   return context
 }

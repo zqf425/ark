@@ -1,5 +1,6 @@
 import type { KeyboardEvent, ReactNode } from 'react'
 import { Button } from '../../../shared/ui'
+import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../../code-session/state/store'
 import { resizerKeyDelta, usePanelResizer } from './use-panel-resizer'
 import '../workbench.css'
@@ -14,6 +15,7 @@ function Resizer({
   width: number
   setWidth: (width: number) => void
 }): JSX.Element {
+  const { t } = useI18n()
   const { onPointerDown } = usePanelResizer(side, width, setWidth)
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     const delta = resizerKeyDelta(event.key, side)
@@ -27,7 +29,7 @@ function Resizer({
       className="ark-resizer"
       role="separator"
       aria-orientation="vertical"
-      aria-label={side === 'left' ? '调整会话列表宽度' : '调整右侧面板宽度'}
+      aria-label={side === 'left' ? t('workbench.layout.resizeLeft') : t('workbench.layout.resizeRight')}
       tabIndex={0}
       onPointerDown={onPointerDown}
       onKeyDown={onKeyDown}
@@ -48,6 +50,7 @@ export type WorkbenchLayoutProps = {
  * layout slice and never alter thread or runtime state.
  */
 export function WorkbenchLayout({ left, center, right, top }: WorkbenchLayoutProps): JSX.Element {
+  const { t } = useI18n()
   const leftWidth = useCodeSessionStore((s) => s.leftWidth)
   const rightWidth = useCodeSessionStore((s) => s.rightWidth)
   const leftCollapsed = useCodeSessionStore((s) => s.leftCollapsed)
@@ -69,12 +72,24 @@ export function WorkbenchLayout({ left, center, right, top }: WorkbenchLayoutPro
         )}
 
         <div className="ark-col ark-col--center">
-          <div className="ark-workbench-tools" aria-label="布局控制">
-            <Button variant="ghost" size="sm" aria-pressed={!leftCollapsed} title={leftCollapsed ? '显示会话' : '隐藏会话'} onClick={toggleLeft}>
-              {leftCollapsed ? '会话' : '收起'}
+          <div className="ark-workbench-tools" aria-label={t('workbench.layout.aria')}>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-pressed={!leftCollapsed}
+              title={leftCollapsed ? t('workbench.layout.showThreads') : t('workbench.layout.hideThreads')}
+              onClick={toggleLeft}
+            >
+              {leftCollapsed ? t('workbench.layout.threads') : t('workbench.layout.collapse')}
             </Button>
-            <Button variant="ghost" size="sm" aria-pressed={!rightCollapsed} title={rightCollapsed ? '打开上下文' : '关闭上下文'} onClick={toggleRight}>
-              {rightCollapsed ? '上下文' : '关闭'}
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-pressed={!rightCollapsed}
+              title={rightCollapsed ? t('workbench.layout.openContext') : t('workbench.layout.closeContext')}
+              onClick={toggleRight}
+            >
+              {rightCollapsed ? t('workbench.layout.context') : t('workbench.layout.close')}
             </Button>
           </div>
           {center}

@@ -8,6 +8,8 @@
  */
 import { useState } from 'react'
 import { Button } from '../../../shared/ui'
+import { useI18n } from '../../../shared/i18n'
+import { translateNow } from '../../../shared/i18n/current'
 import {
   ENDPOINT_FORMATS,
   type EndpointFormat,
@@ -21,10 +23,14 @@ import { CheckField, Field, SelectField, TextField } from './Field'
 import { applyCatalogModel, buildCatalogRequest, catalogLabel, parseProviderHeaders } from './ProviderCatalog'
 import { Notice } from './SectionShell'
 
+/**
+ * Endpoint ids are wire values, so only the parenthesised path hint is prose;
+ * the path itself is the literal URL the runtime appends.
+ */
 const FORMAT_LABELS: Record<EndpointFormat, string> = {
-  openai_chat: 'openai_chat（/chat/completions）',
-  openai_responses: 'openai_responses（/responses）',
-  anthropic_messages: 'anthropic_messages（/v1/messages）'
+  openai_chat: 'openai_chat (/chat/completions)',
+  openai_responses: 'openai_responses (/responses)',
+  anthropic_messages: 'anthropic_messages (/v1/messages)'
 }
 
 export type ProviderDraft = {
@@ -87,9 +93,9 @@ export function buildEntry(draft: ProviderDraft, editing: boolean): BuiltEntry {
   const id = draft.id.trim()
   const baseUrl = draft.base_url.trim()
   const model = draft.model.trim()
-  if (!id) return { ok: false, error: 'id 不能为空' }
-  if (!baseUrl) return { ok: false, error: 'base_url 不能为空' }
-  if (!model) return { ok: false, error: 'model 不能为空' }
+  if (!id) return { ok: false, error: translateNow('settings.providerForm.error.idRequired') }
+  if (!baseUrl) return { ok: false, error: translateNow('settings.providerForm.error.baseUrlRequired') }
+  if (!model) return { ok: false, error: translateNow('settings.providerForm.error.modelRequired') }
 
   const entry: ProviderEntry = {
     id,
@@ -104,7 +110,7 @@ export function buildEntry(draft: ProviderDraft, editing: boolean): BuiltEntry {
 
   const apiKey = draft.api_key.trim()
   if (apiKey) entry.api_key = apiKey
-  else if (!editing) return { ok: false, error: '新建供应商需要填写 api_key' }
+  else if (!editing) return { ok: false, error: translateNow('settings.providerForm.error.apiKeyRequired') }
 
   const headers = parseProviderHeaders(draft.headers_text)
   if (!headers.ok) return headers
@@ -113,7 +119,7 @@ export function buildEntry(draft: ProviderDraft, editing: boolean): BuiltEntry {
   if (draft.max_tokens.trim()) {
     const parsed = Number(draft.max_tokens.trim())
     if (!Number.isFinite(parsed) || parsed <= 0 || !Number.isInteger(parsed)) {
-      return { ok: false, error: 'max_tokens 必须是正整数' }
+      return { ok: false, error: translateNow('settings.providerForm.error.maxTokensPositive') }
     }
     entry.max_tokens = parsed
   }
@@ -121,7 +127,7 @@ export function buildEntry(draft: ProviderDraft, editing: boolean): BuiltEntry {
   if (draft.temperature.trim()) {
     const parsed = Number(draft.temperature.trim())
     if (!Number.isFinite(parsed) || parsed < 0 || parsed > 2) {
-      return { ok: false, error: 'temperature 需在 0–2 之间' }
+      return { ok: false, error: translateNow('settings.providerForm.error.temperatureRange') }
     }
     entry.temperature = parsed
   }
@@ -129,7 +135,7 @@ export function buildEntry(draft: ProviderDraft, editing: boolean): BuiltEntry {
   if (draft.context_window_tokens.trim()) {
     const parsed = Number(draft.context_window_tokens.trim())
     if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-      return { ok: false, error: 'context_window_tokens 必须是正整数' }
+      return { ok: false, error: translateNow('settings.providerForm.error.contextWindowPositive') }
     }
     entry.context_window_tokens = parsed
   }
@@ -149,6 +155,7 @@ export type ProviderFormProps = {
 }
 
 export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTest, onDiscover }: ProviderFormProps): JSX.Element {
+  const { t } = useI18n()
   const [draft, setDraft] = useState<ProviderDraft>(initial)
   const [advanced, setAdvanced] = useState(false)
   const [makeDefault, setMakeDefault] = useState(!editing)
@@ -180,10 +187,10 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
     try {
       const response = await onDiscover(built.request)
       setCatalog(response.models)
-      if (response.models.length === 0) setCatalogError('供应商没有返回可选择的模型。')
+      if (response.models.length === 0) setCatalogError(t('settings.providers.catalogEmpty'))
     } catch (thrown) {
       setCatalog([])
-      setCatalogError(thrown instanceof Error ? thrown.message : '查询模型失败')
+      setCatalogError(thrown instanceof Error ? thrown.message : t('settings.providers.catalogQueryFailedShort'))
     }
   }
 
@@ -192,26 +199,26 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
   return (
     <div className="ark-card ark-card--editing">
       <div className="ark-card__meta">
-        <strong>{editing ? `编辑供应商 ${initial.id}` : '新增供应商'}</strong>
+        <strong>{editing ? t('settings.providerForm.editTitle', { id: initial.id }) : t('settings.providerForm.createTitle')}</strong>
       </div>
 
       <div className="ark-settings__grid">
         <TextField
           id="provider-id"
-          label="id"
+          label={t('settings.providerForm.idLabel')}
           value={draft.id}
           mono
           disabled={editing || busy}
-          placeholder="deepseek"
-          hint={editing ? 'id 是主键，编辑时不可修改。' : '唯一标识，保存后用于 default provider。'}
+          placeholder={t('settings.providerForm.idPlaceholder')}
+          hint={editing ? t('settings.providerForm.idHintEditing') : t('settings.providerForm.idHintCreating')}
           onChange={(value) => patch('id', value)}
         />
         <TextField
           id="provider-label"
-          label="label（可选）"
+          label={t('settings.providerForm.labelLabel')}
           value={draft.label}
           disabled={busy}
-          placeholder="DeepSeek 官方"
+          placeholder={t('settings.providerForm.labelPlaceholder')}
           onChange={(value) => patch('label', value)}
         />
         <TextField
@@ -234,18 +241,18 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
         />
         <TextField
           id="provider-model"
-          label="model"
+          label={t('settings.providerForm.modelLabel')}
           value={draft.model}
           mono
           disabled={busy}
-          placeholder="deepseek-chat"
+          placeholder={t('settings.providerForm.modelPlaceholder')}
           onChange={(value) => patch('model', value)}
         />
         {catalog.length > 0 ? (
           <Field
-            label="供应商模型目录"
+            label={t('settings.providerForm.catalogLabel')}
             htmlFor="provider-catalog-model"
-            hint="选择后自动填入目录明确声明的上下文窗口和识图能力；未声明的能力保持未知。"
+            hint={t('settings.providerForm.catalogHint')}
           >
             <select
               id="provider-catalog-model"
@@ -257,7 +264,7 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
                 if (model) setDraft((current) => applyCatalogModel(current, model))
               }}
             >
-              <option value="">选择模型后再写入草稿</option>
+              <option value="">{t('settings.providerForm.catalogPlaceholder')}</option>
               {catalog.map((model) => <option key={model.id} value={model.id}>{catalogLabels[model.id] ?? model.id}</option>)}
             </select>
           </Field>
@@ -268,31 +275,43 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
           type="password"
           value={draft.api_key}
           disabled={busy}
-          placeholder={editing ? '留空 = 保留原 key' : 'sk-…'}
-          hint={editing ? '编辑时留空表示保留已存的 key，不会覆盖。' : '仅写入运行时，列表只回显 has_api_key 与 hint。'}
+          placeholder={
+            editing ? t('settings.providerForm.apiKeyPlaceholderKeep') : t('settings.providerForm.apiKeyPlaceholderNew')
+          }
+          hint={editing ? t('settings.providerForm.apiKeyHintEditing') : t('settings.providerForm.apiKeyHintCreating')}
           onChange={(value) => patch('api_key', value)}
         />
       </div>
 
       <div className="ark-card__foot">
-        <CheckField label="启用（enabled）" checked={draft.enabled} disabled={busy} onChange={(value) => patch('enabled', value)} />
+        <CheckField
+          label={t('settings.providerForm.enabledLabel')}
+          checked={draft.enabled}
+          disabled={busy}
+          onChange={(value) => patch('enabled', value)}
+        />
         {!editing ? (
-          <CheckField label="保存后设为默认" checked={makeDefault} disabled={busy} onChange={setMakeDefault} />
+          <CheckField
+            label={t('settings.providerForm.makeDefaultLabel')}
+            checked={makeDefault}
+            disabled={busy}
+            onChange={setMakeDefault}
+          />
         ) : null}
         <button type="button" className="ark-linkbtn" onClick={() => setAdvanced((value) => !value)}>
-          {advanced ? '收起高级选项' : '展开高级选项（headers / max_tokens / temperature）'}
+          {advanced ? t('settings.providerForm.advancedHide') : t('settings.providerForm.advancedShow')}
         </button>
         <Button size="sm" disabled={busy} onClick={() => void discover()}>
-          {busy ? '查询中…' : '查询模型列表'}
+          {busy ? t('settings.providerForm.querying') : t('settings.providerForm.queryModels')}
         </Button>
       </div>
 
       {advanced ? (
         <div className="ark-settings__grid">
           <Field
-            label="headers（JSON 对象，可选）"
+            label={t('settings.providerForm.headersLabel')}
             htmlFor="provider-headers"
-            hint='例如 {"X-Request-Source":"ark"}；留空则不发送额外头。'
+            hint={t('settings.providerForm.headersHint')}
           >
             <textarea
               id="provider-headers"
@@ -306,36 +325,36 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
           </Field>
           <TextField
             id="provider-max-tokens"
-            label="max_tokens（可选）"
+            label={t('settings.providerForm.maxTokensLabel')}
             value={draft.max_tokens}
             disabled={busy}
             placeholder="4096"
             type="number"
-            hint="留空则使用运行时默认值。"
+            hint={t('settings.providerForm.maxTokensHint')}
             onChange={(value) => patch('max_tokens', value)}
           />
           <TextField
             id="provider-temperature"
-            label="temperature（可选，0–2）"
+            label={t('settings.providerForm.temperatureLabel')}
             value={draft.temperature}
             disabled={busy}
             placeholder="0.3"
             type="number"
-            hint="留空则使用运行时默认值。"
+            hint={t('settings.providerForm.maxTokensHint')}
             onChange={(value) => patch('temperature', value)}
           />
           <TextField
             id="provider-context-window"
-            label="context_window_tokens（可选）"
+            label={t('settings.providerForm.contextWindowLabel')}
             value={draft.context_window_tokens}
             disabled={busy}
             placeholder="128000"
             type="number"
-            hint="模型目录有明确数据时会自动填写；运行时会用它限制上下文压缩阈值。"
+            hint={t('settings.providerForm.contextWindowHint')}
             onChange={(value) => patch('context_window_tokens', value)}
           />
           <CheckField
-            label="支持识图"
+            label={t('settings.providerForm.visionLabel')}
             checked={draft.supports_vision === true}
             disabled={busy}
             onChange={(value) => patch('supports_vision', value)}
@@ -343,8 +362,8 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
         </div>
       ) : null}
 
-      {error ? <Notice tone="error" title="表单校验失败">{error}</Notice> : null}
-      {catalogError ? <Notice tone="error" title="模型目录查询失败">{catalogError}</Notice> : null}
+      {error ? <Notice tone="error" title={t('settings.providerForm.validationFailed')}>{error}</Notice> : null}
+      {catalogError ? <Notice tone="error" title={t('settings.providerForm.catalogFailed')}>{catalogError}</Notice> : null}
 
       <div className="ark-settings__actions">
         <Button
@@ -356,7 +375,7 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
             if (entry) void onSubmit(entry, makeDefault)
           }}
         >
-          {busy ? '保存中…' : '保存'}
+          {busy ? t('common.saving') : t('common.save')}
         </Button>
         <Button
           size="sm"
@@ -366,10 +385,10 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
             if (entry) void onTest(entry)
           }}
         >
-          测试连接
+          {t('common.test')}
         </Button>
         <Button variant="ghost" size="sm" disabled={busy} onClick={onCancel}>
-          取消
+          {t('common.cancel')}
         </Button>
       </div>
     </div>

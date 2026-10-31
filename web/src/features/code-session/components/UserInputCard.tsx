@@ -1,13 +1,13 @@
 import { useState } from 'react'
-import { ApiError } from '../../../shared/api/client'
+import { describeError } from '../../../shared/api/error-describe'
+import { translateNow } from '../../../shared/i18n/current'
 import { Button, useToast } from '../../../shared/ui'
+import { useI18n } from '../../../shared/i18n'
 import { answerUserInput } from '../api/user-inputs-api'
 import type { PendingUserInput } from '../state/types'
 
 function describe(error: unknown): string {
-  if (error instanceof ApiError) return `${error.hint}：${error.message}`
-  if (error instanceof Error) return error.message
-  return String(error)
+  return describeError(error, translateNow)
 }
 
 /**
@@ -21,6 +21,7 @@ export function UserInputCard({
   request: PendingUserInput
   onAnswered: (requestId: string, answer: string) => void
 }): JSX.Element {
+  const { t } = useI18n()
   const toast = useToast()
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
@@ -35,7 +36,7 @@ export function UserInputCard({
       onAnswered(request.request_id, text)
       setValue('')
     } catch (error) {
-      toast.push('error', '回复提交失败', describe(error))
+      toast.push('error', t('canvas.userInput.failed'), describe(error))
     } finally {
       setBusy(false)
     }
@@ -44,8 +45,8 @@ export function UserInputCard({
   return (
     <section className="ark-gate ark-gate--input">
       <header className="ark-gate__head">
-        <span className="ark-gate__title">需要你的输入</span>
-        {answered ? <span className="ark-chip ark-chip--ok">已回答</span> : null}
+        <span className="ark-gate__title">{t('canvas.userInput.title')}</span>
+        {answered ? <span className="ark-chip ark-chip--ok">{t('canvas.userInput.answered')}</span> : null}
       </header>
       <p className="ark-gate__body">{request.prompt}</p>
       {answered ? (
@@ -56,7 +57,7 @@ export function UserInputCard({
             className="ark-textarea"
             rows={2}
             value={value}
-            placeholder="输入回复后提交"
+            placeholder={t('canvas.userInput.placeholder')}
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
@@ -66,7 +67,7 @@ export function UserInputCard({
             }}
           />
           <Button variant="primary" size="sm" disabled={!value.trim() || busy} onClick={() => void submit()}>
-            {busy ? '提交中…' : '提交'}
+            {busy ? t('common.submitting') : t('common.submit')}
           </Button>
         </div>
       )}

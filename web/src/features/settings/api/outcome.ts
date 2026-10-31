@@ -6,6 +6,8 @@
  * Keeping it here means no component has to know about `ApiError`.
  */
 import { ApiError } from '../../../shared/api/client'
+import { translateNow } from '../../../shared/i18n/current'
+import { errorHintKey } from '../../../shared/api/error-describe'
 
 /** A write attempt: either the typed payload, or the backend's own message. */
 export type Outcome<T> = { ok: true; value: T } | { ok: false; message: string; hint?: string }
@@ -13,7 +15,9 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; message: string; 
 /** `ApiError.message` is authoritative; `hint` only adds route-level context. */
 export function describeApiError(error: unknown): { message: string; hint?: string } {
   if (error instanceof ApiError) {
-    return { message: error.message, hint: error.hint }
+    const key = errorHintKey(error.code)
+    // `unknown` has no taxonomy entry, so the raw status is the only honest hint.
+    return { message: error.message, hint: key ? translateNow(key) : `HTTP ${error.status}` }
   }
   if (error instanceof Error) return { message: error.message }
   return { message: String(error) }
@@ -32,5 +36,5 @@ export async function attempt<T>(run: () => Promise<T>): Promise<Outcome<T>> {
 /** One-line label for an `Outcome` failure, used in inline descriptions. */
 export function describeOutcome(outcome: Outcome<unknown>): string {
   if (outcome.ok) return ''
-  return outcome.hint ? `${outcome.hint}：${outcome.message}` : outcome.message
+  return outcome.hint ? `${outcome.hint}${translateNow('common.hintSeparator')}${outcome.message}` : outcome.message
 }

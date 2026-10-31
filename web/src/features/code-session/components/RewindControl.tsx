@@ -11,7 +11,8 @@
  */
 import { useState } from 'react'
 import type { ThreadId, TurnId } from '../../../shared/contracts'
-import { ApiError } from '../../../shared/api/client'
+import { describeError } from '../../../shared/api/error-describe'
+import { translateNow } from '../../../shared/i18n/current'
 import { Button, useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import { rewindThread } from '../api/rewind-api'
@@ -24,9 +25,7 @@ import { executeRewind, type RewindAvailability } from './rewind-flow'
  * localized hint. Nothing here invents a client-side reason.
  */
 function describe(error: unknown): string {
-  if (error instanceof ApiError) return `${error.hint}：${error.message}`
-  if (error instanceof Error) return error.message
-  return String(error)
+  return describeError(error, translateNow)
 }
 
 /**

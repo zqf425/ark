@@ -7,18 +7,17 @@
  * needed and this hook must not add one.
  */
 import { useEffect } from 'react'
-import { ApiError } from '../../../shared/api/client'
+import { describeError } from '../../../shared/api/error-describe'
+import { translateNow } from '../../../shared/i18n/current'
 import type { ThreadId } from '../../../shared/contracts'
 import { useToast } from '../../../shared/ui'
 import { subscribeThreadEvents } from '../api/events-api'
 import { getThread } from '../api/threads-api'
-import { childCompletionStatus } from '../child-completion-status'
+import { childCompletionStatusKey } from '../child-completion-status'
 import { useCodeSessionStore } from '../state/store'
 
 function describe(error: unknown): string {
-  if (error instanceof ApiError) return `${error.hint}：${error.message}`
-  if (error instanceof Error) return error.message
-  return String(error)
+  return describeError(error, translateNow)
 }
 
 export function useThreadStream(threadId: ThreadId | null): void {
@@ -76,9 +75,16 @@ export function useThreadStream(threadId: ThreadId | null): void {
             }
             if (event.kind === 'child_completed' && !displayedCompletions.has(event.notification_id)) {
               displayedCompletions.add(event.notification_id)
-              const detail = event.summary ?? event.error ?? '子代理未提供摘要。'
+              const detail = event.summary ?? event.error ?? translateNow('canvas.child.noSummary')
               const tone = event.status === 'completed' ? 'success' : 'error'
-              pushToast(tone, `子代理「${event.label}」${childCompletionStatus(event.status)}`, detail)
+              pushToast(
+                tone,
+                translateNow('canvas.childRuns.completedToast', {
+                  label: event.label,
+                  status: translateNow(childCompletionStatusKey(event.status))
+                }),
+                detail
+              )
             }
           },
           onStatus: (status) => {

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { ApiError } from '../../../shared/api/client'
+import { describeError } from '../../../shared/api/error-describe'
+import { translateNow } from '../../../shared/i18n/current'
 import type { WorkspaceChangesResponse, WorkspaceDiff, WorkspaceView } from '../../../shared/contracts'
 import { EmptyState } from '../../../shared/ui'
+import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../../code-session/state/store'
 import { getChanges } from '../api/workbench-api'
 import { changesSummary } from './changes-summary'
@@ -10,11 +12,11 @@ import { workspaceDiffSummary } from './workspace-diff-summary'
 import './workspace-status.css'
 
 function describe(error: unknown): string {
-  if (error instanceof ApiError) return `${error.hint}：${error.message}`
-  return error instanceof Error ? error.message : String(error)
+  return describeError(error, translateNow)
 }
 
 export function ChangesPanel(): JSX.Element {
+  const { t } = useI18n()
   const threadId = useCodeSessionStore((state) => state.activeThreadId)
   const lastSeq = useCodeSessionStore((state) => state.lastSeq)
   const selectFile = useCodeSessionStore((state) => state.selectFile)
@@ -76,50 +78,73 @@ export function ChangesPanel(): JSX.Element {
     }
   }
 
-  if (!threadId) return <EmptyState title="未选择会话" hint="选择会话后显示该会话成功写入的文件。" />
+  if (!threadId) {
+    return <EmptyState title={t('workbench.noThreadTitle')} hint={t('workbench.noThreadChangesHint')} />
+  }
   if (error) return <p className="ark-panel__error">{error}</p>
-  if (!data) return <p className="ark-panel__hint">正在加载改动…</p>
+  if (!data) return <p className="ark-panel__hint">{t('workbench.changes.loading')}</p>
   const gitSummary = workspaceDiff ? workspaceDiffSummary(workspaceDiff) : null
   return (
     <section className="ark-panel">
       <header className="ark-panel__head">
-        <h2>改动</h2>
-        <span>{changesSummary(data.changes)}</span>
+        <h2>{t('workbench.changes.title')}</h2>
+        <span>{changesSummary(data.changes).map((part) => t(part.key, part.params)).join(' · ')}</span>
       </header>
-      {data.changes.length === 0 ? <EmptyState title="暂无会话写入记录" hint="Git 差异仍会显示活动工作区中的现有改动。" /> : null}
-      <p className="ark-panel__hint ark-panel__hint--flush">
-        仅包含本会话成功执行的 write 或 edit；Git 差异以工作区状态为准。
-      </p>
+      {data.changes.length === 0 ? (
+        <EmptyState title={t('workbench.changes.emptyTitle')} hint={t('workbench.changes.emptyHint')} />
+      ) : null}
+      <p className="ark-panel__hint ark-panel__hint--flush">{t('workbench.changes.scopeHint')}</p>
       <div className="ark-workspace-switch">
-        <label htmlFor="changes-workspace">本次运行工作区</label>
+        <label htmlFor="changes-workspace">{t('workbench.changes.workspaceLabel')}</label>
         <div className="ark-workspace-switch__controls">
           <input
             id="changes-workspace"
             value={workspaceDraft}
             spellCheck={false}
             autoComplete="off"
-            placeholder="输入已有工作区路径"
+            placeholder={t('workbench.changes.workspacePlaceholder')}
             onChange={(event) => setWorkspaceDraft(event.target.value)}
           />
           <button type="button" className="ark-linkbtn" disabled={switching || !workspaceDraft.trim()} onClick={() => void changeWorkspace()}>
-            {switching ? '切换中…' : '切换'}
+            {switching ? t('workbench.changes.switching') : t('workbench.changes.switch')}
           </button>
-          <button type="button" className="ark-linkbtn" disabled={switching} onClick={refreshWorkspace}>刷新差异</button>
+          <button type="button" className="ark-linkbtn" disabled={switching} onClick={refreshWorkspace}>
+            {t('workbench.changes.refreshDiff')}
+          </button>
         </div>
-        {workspaceView?.active ? <p className="ark-panel__hint ark-panel__hint--flush">活动路径：{workspaceView.active.path}</p> : null}
-        <p className="ark-panel__hint ark-panel__hint--flush">运行中存在父任务或子代理时不能切换；不会自动中止任务。</p>
+        {workspaceView?.active ? (
+          <p className="ark-panel__hint ark-panel__hint--flush">
+            {t('workbench.changes.activePath', { path: workspaceView.active.path })}
+          </p>
+        ) : null}
+        <p className="ark-panel__hint ark-panel__hint--flush">{t('workbench.changes.switchBlocked')}</p>
         {workspaceError ? <p className="ark-panel__error">{workspaceError}</p> : null}
       </div>
       {gitSummary ? (
         <div className="ark-workspace-diff">
-          <p className="ark-workspace-diff__summary">{gitSummary.staged} · {gitSummary.unstaged} · {gitSummary.untracked}</p>
-          {gitSummary.truncated ? <p className="ark-panel__hint ark-panel__hint--flush">差异超出安全上限，当前仅显示可用部分。</p> : null}
-          {([['已暂存', workspaceDiff?.staged ?? []], ['未暂存', workspaceDiff?.unstaged ?? []], ['未跟踪', workspaceDiff?.untracked ?? []]] as const)
+          <p className="ark-workspace-diff__summary">
+            {t(gitSummary.staged.key, gitSummary.staged.params)} · {t(gitSummary.unstaged.key, gitSummary.unstaged.params)} ·{' '}
+            {t(gitSummary.untracked.key, gitSummary.untracked.params)}
+          </p>
+          {gitSummary.truncated ? (
+            <p className="ark-panel__hint ark-panel__hint--flush">{t('workbench.changes.truncated')}</p>
+          ) : null}
+          {([
+            [t('workbench.changes.staged'), workspaceDiff?.staged ?? []],
+            [t('workbench.changes.unstaged'), workspaceDiff?.unstaged ?? []],
+            [t('workbench.changes.untracked'), workspaceDiff?.untracked ?? []]
+          ] as const)
             .filter(([, files]) => files.length > 0)
             .map(([label, files]) => (
               <section key={label} className="ark-workspace-diff__group">
                 <h3>{label}</h3>
-                {files.map((file) => <code key={`${file.status}:${file.path}`}>{file.status} {file.path}{file.truncated ? '（已截断）' : ''}{file.binary ? '（二进制）' : ''}</code>)}
+                {files.map((file) => (
+                  <code key={`${file.status}:${file.path}`}>
+                    {file.status} {file.path}
+                    {file.truncated ? t('workbench.changes.truncatedFile') : ''}
+                    {file.binary ? t('workbench.changes.binaryFile') : ''}
+                  </code>
+                ))}
               </section>
             ))}
         </div>

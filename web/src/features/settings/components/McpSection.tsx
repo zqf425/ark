@@ -7,15 +7,17 @@
 import { useState } from 'react'
 import { Button, EmptyState, useToast } from '../../../shared/ui'
 import type { McpServerUpsertRequest, McpServerView, McpServerTestResponse, McpTransportKind } from '../../../shared/contracts'
+import { useI18n, type MessageKey } from '../../../shared/i18n'
+import { translateNow } from '../../../shared/i18n/current'
 import { useMcpServers } from '../hooks/use-mcp'
 import { describeOutcome } from '../api/outcome'
 import { CheckField, Field, SelectField, TextField } from './Field'
 import { LoadError, Notice, SettingsSection, Skeleton } from './SectionShell'
 
-const TRANSPORT_LABELS: Record<McpTransportKind, string> = {
-  stdio: 'stdio（本地进程）',
-  sse: 'sse（未实现，服务端拒绝）',
-  streamable_http: 'streamable_http'
+const TRANSPORT_LABEL_KEYS: Record<McpTransportKind, MessageKey> = {
+  stdio: 'settings.mcp.transport.stdio',
+  sse: 'settings.mcp.transport.sse',
+  streamable_http: 'settings.mcp.transport.streamableHttp'
 }
 
 type TestState = { serverId: string; result?: McpServerTestResponse; error?: string }
@@ -35,37 +37,45 @@ function ServerRow({
   onEdit: () => void
   onDelete: () => void
 }): JSX.Element {
+  const { t } = useI18n()
   const shown = testState && testState.serverId === server.id ? testState : null
   return (
     <div className="ark-card">
       <div className="ark-card__head">
         <span className="ark-card__name">{server.id}</span>
         <span className="ark-chip">{server.transport}</span>
-        {server.connected ? <span className="ark-chip ark-chip--ok">已连接</span> : <span className="ark-chip ark-chip--muted">未连接</span>}
-        {server.enabled ? null : <span className="ark-chip ark-chip--muted">已禁用</span>}
+        {server.connected ? (
+          <span className="ark-chip ark-chip--ok">{t('settings.mcp.connected')}</span>
+        ) : (
+          <span className="ark-chip ark-chip--muted">{t('settings.mcp.disconnected')}</span>
+        )}
+        {server.enabled ? null : <span className="ark-chip ark-chip--muted">{t('settings.mcp.disabled')}</span>}
         <div className="ark-card__actions">
           <Button size="sm" disabled={busy} onClick={onTest}>
-            测试连接
+            {t('common.test')}
           </Button>
           <Button size="sm" disabled={busy} onClick={onEdit}>
-            编辑
+            {t('common.edit')}
           </Button>
           <Button variant="danger" size="sm" disabled={busy} onClick={onDelete}>
-            删除
+            {t('common.delete')}
           </Button>
         </div>
       </div>
 
       <div className="ark-card__meta">
         <span>tool_count: {server.tool_count}</span>
-        {server.has_env ? <span>env: 已配置（编辑留空会保留）</span> : null}
-        {server.has_headers ? <span>headers: 已配置（编辑留空会保留）</span> : null}
+        {server.has_env ? <span>{t('settings.mcp.envConfigured')}</span> : null}
+        {server.has_headers ? <span>{t('settings.mcp.headersConfigured')}</span> : null}
         {server.last_error ? <span className="ark-settings__hint--error">last_error: {server.last_error}</span> : null}
       </div>
 
-      {shown?.error ? <Notice tone="error" title="测试请求失败">{shown.error}</Notice> : null}
+      {shown?.error ? <Notice tone="error" title={t('settings.mcp.testRequestFailed')}>{shown.error}</Notice> : null}
       {shown?.result ? (
-        <Notice tone={shown.result.ok ? 'warn' : 'error'} title={shown.result.ok ? '测试通过' : '测试未通过'}>
+        <Notice
+          tone={shown.result.ok ? 'warn' : 'error'}
+          title={shown.result.ok ? t('settings.mcp.testPassed') : t('settings.mcp.testNotPassed')}
+        >
           <span className="ark-card__meta">
             <span>ok: {String(shown.result.ok)}</span>
             <span>latency: {shown.result.latency_ms} ms</span>
@@ -127,14 +137,17 @@ function parseMap(text: string, label: string): { value?: Record<string, string>
   if (!text.trim()) return { value: {} }
   try {
     const value: unknown = JSON.parse(text)
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return { error: `${label} 必须是 JSON 对象` }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return { error: translateNow('settings.mcp.error.mapNotObject', { label }) }
+    }
     return { value: Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, String(item)])) }
   } catch {
-    return { error: `${label} 不是合法 JSON` }
+    return { error: translateNow('settings.mcp.error.mapNotJson', { label }) }
   }
 }
 
 export function McpSection(): JSX.Element {
+  const { t } = useI18n()
   const toast = useToast()
   const api = useMcpServers()
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -146,24 +159,24 @@ export function McpSection(): JSX.Element {
     if (!draft) return
     const id = draft.id.trim()
     if (!id) {
-      setFormError('id 不能为空')
+      setFormError(t('settings.mcp.error.idRequired'))
       return
     }
     const isStdio = draft.transport === 'stdio'
     const command = draft.command.trim()
     const url = draft.url.trim()
     if (isStdio && !command) {
-      setFormError('stdio 需要填写 command')
+      setFormError(t('settings.mcp.error.stdioNeedsCommand'))
       return
     }
     if (!isStdio && !url) {
-      setFormError('streamable_http 需要填写 url')
+      setFormError(t('settings.mcp.error.httpNeedsUrl'))
       return
     }
     const env = parseMap(draft.envText, 'env')
     const headers = parseMap(draft.headersText, 'headers')
     if (env.error || headers.error) {
-      setFormError(env.error ?? headers.error ?? '高级配置无效')
+      setFormError(env.error ?? headers.error ?? t('settings.mcp.error.advancedInvalid'))
       return
     }
 
@@ -187,20 +200,20 @@ export function McpSection(): JSX.Element {
     setFormError(null)
     const outcome = await api.add(request)
     if (outcome.ok) {
-      toast.push('success', `MCP server ${id} 已保存`)
+      toast.push('success', t('settings.mcp.saved', { id }))
       setDraft(null)
       setEditing(false)
       return
     }
     const message = describeOutcome(outcome)
     setFormError(message)
-    toast.push('error', '保存 MCP server 失败', message)
+    toast.push('error', t('settings.mcp.saveFailed'), message)
   }
 
   const remove = async (serverId: string): Promise<void> => {
     const outcome = await api.remove(serverId)
-    if (outcome.ok) toast.push('success', `已删除 MCP server ${serverId}`)
-    else toast.push('error', '删除失败', describeOutcome(outcome))
+    if (outcome.ok) toast.push('success', t('settings.mcp.deleted', { id: serverId }))
+    else toast.push('error', t('settings.mcp.deleteFailed'), describeOutcome(outcome))
   }
 
   const test = async (serverId: string): Promise<void> => {
@@ -208,20 +221,29 @@ export function McpSection(): JSX.Element {
     const outcome = await api.test(serverId)
     if (outcome.ok) {
       setTestState({ serverId, result: outcome.value })
-      if (outcome.value.ok) toast.push('success', 'MCP 测试通过', `${outcome.value.tools.length} 个工具 · ${outcome.value.latency_ms} ms`)
-      else toast.push('error', 'MCP 测试未通过', outcome.value.message)
+      if (outcome.value.ok) {
+        toast.push(
+          'success',
+          t('settings.mcp.testPassedToast'),
+          t('settings.mcp.testSummary', { count: outcome.value.tools.length, latency: outcome.value.latency_ms })
+        )
+      } else toast.push('error', t('settings.mcp.testFailedToast'), outcome.value.message)
       void api.refresh()
       return
     }
     const message = describeOutcome(outcome)
     setTestState({ serverId, error: message })
-    toast.push('error', 'MCP 测试请求失败', message)
+    toast.push('error', t('settings.mcp.testRequestFailedToast'), message)
   }
 
   const body = ((): JSX.Element => {
     if ((api.status === 'loading' || api.status === 'idle') && api.servers.length === 0) return <Skeleton rows={2} />
-    if (api.status === 'error') return <LoadError message={api.error ?? '加载 MCP server 失败'} onRetry={() => void api.refresh()} />
-    if (api.servers.length === 0) return <EmptyState title="还没有 MCP server" hint="新增一个 stdio 或 http server 后可在此测试连接。" />
+    if (api.status === 'error') {
+      return <LoadError message={api.error ?? t('settings.mcp.loadFailed')} onRetry={() => void api.refresh()} />
+    }
+    if (api.servers.length === 0) {
+      return <EmptyState title={t('settings.mcp.emptyTitle')} hint={t('settings.mcp.emptyHint')} />
+    }
     return (
       <div className="ark-settings__list">
         {api.servers.map((server) => (
@@ -245,8 +267,8 @@ export function McpSection(): JSX.Element {
 
   return (
     <SettingsSection
-      title="MCP servers"
-      desc="外部工具服务；测试会返回工具清单与耗时。"
+      title={t('settings.mcp.title')}
+      desc={t('settings.mcp.desc')}
       actions={
         draft ? null : (
           <Button
@@ -259,7 +281,7 @@ export function McpSection(): JSX.Element {
               setDraft(EMPTY_DRAFT)
             }}
           >
-            新增 server
+            {t('settings.mcp.add')}
           </Button>
         )
       }
@@ -269,7 +291,9 @@ export function McpSection(): JSX.Element {
       {draft ? (
         <div className="ark-card ark-card--editing">
           <div className="ark-card__meta">
-            <strong>{editing ? `编辑 MCP server ${draft.id}` : '新增 MCP server'}</strong>
+            <strong>
+              {editing ? t('settings.mcp.editTitle', { id: draft.id }) : t('settings.mcp.createTitle')}
+            </strong>
           </div>
           <div className="ark-settings__grid">
             <TextField id="mcp-id" label="id" value={draft.id} mono disabled={editing || api.busy !== null} placeholder="filesystem" onChange={(value) => setDraft({ ...draft, id: value })} />
@@ -278,7 +302,11 @@ export function McpSection(): JSX.Element {
               label="transport"
               value={draft.transport}
               options={['stdio', 'streamable_http']}
-              labels={TRANSPORT_LABELS}
+              labels={{
+                stdio: t(TRANSPORT_LABEL_KEYS.stdio),
+                sse: t(TRANSPORT_LABEL_KEYS.sse),
+                streamable_http: t(TRANSPORT_LABEL_KEYS.streamable_http)
+              }}
               disabled={api.busy !== null}
               onChange={(value) => setDraft({ ...draft, transport: value })}
             />
@@ -293,7 +321,7 @@ export function McpSection(): JSX.Element {
                   placeholder="npx"
                   onChange={(value) => setDraft({ ...draft, command: value })}
                 />
-                <Field label="args（每行一个参数）" htmlFor="mcp-args" hint="空行会被忽略。">
+                <Field label={t('settings.mcp.argsLabel')} htmlFor="mcp-args" hint={t('settings.mcp.argsHint')}>
                   <textarea
                     id="mcp-args"
                     className="ark-field__area"
@@ -319,29 +347,42 @@ export function McpSection(): JSX.Element {
           </div>
 
           <div className="ark-card__foot">
-            <CheckField label="启用（enabled）" checked={draft.enabled} disabled={api.busy !== null} onChange={(value) => setDraft({ ...draft, enabled: value })} />
+            <CheckField
+              label={t('settings.mcp.enabledLabel')}
+              checked={draft.enabled}
+              disabled={api.busy !== null}
+              onChange={(value) => setDraft({ ...draft, enabled: value })}
+            />
           </div>
 
           <div className="ark-settings__grid">
-            <Field label="allow_tools（每行一个；留空 = 全部）" htmlFor="mcp-allow-tools">
+            <Field label={t('settings.mcp.allowToolsLabel')} htmlFor="mcp-allow-tools">
               <textarea id="mcp-allow-tools" className="ark-field__area" value={draft.allowTools} disabled={api.busy !== null} spellCheck={false} onChange={(event) => setDraft({ ...draft, allowTools: event.target.value })} />
             </Field>
-            <Field label="env（JSON 对象，可选）" htmlFor="mcp-env" hint={editing ? '留空会保留已配置的环境变量值。' : '只写入运行时，不会在列表回显。'}>
+            <Field
+              label={t('settings.mcp.envLabel')}
+              htmlFor="mcp-env"
+              hint={editing ? t('settings.mcp.envHintEditing') : t('settings.mcp.envHintCreating')}
+            >
               <textarea id="mcp-env" className="ark-field__area" value={draft.envText} disabled={api.busy !== null} spellCheck={false} placeholder={'{\n  "TOKEN": "…"\n}'} onChange={(event) => setDraft({ ...draft, envText: event.target.value })} />
             </Field>
-            <Field label="headers（JSON 对象，可选）" htmlFor="mcp-headers" hint={editing ? '留空会保留已配置的 header 值。' : '只写入运行时，不会在列表回显。'}>
+            <Field
+              label={t('settings.mcp.headersLabel')}
+              htmlFor="mcp-headers"
+              hint={editing ? t('settings.mcp.headersHintEditing') : t('settings.mcp.headersHintCreating')}
+            >
               <textarea id="mcp-headers" className="ark-field__area" value={draft.headersText} disabled={api.busy !== null} spellCheck={false} placeholder={'{\n  "Authorization": "Bearer …"\n}'} onChange={(event) => setDraft({ ...draft, headersText: event.target.value })} />
             </Field>
           </div>
 
-          {formError ? <Notice tone="error" title="无法保存">{formError}</Notice> : null}
+          {formError ? <Notice tone="error" title={t('settings.mcp.cannotSave')}>{formError}</Notice> : null}
 
           <div className="ark-settings__actions">
             <Button variant="primary" size="sm" disabled={api.busy !== null} onClick={() => void submit()}>
-              {api.busy ? '保存中…' : '保存'}
+              {api.busy ? t('common.saving') : t('common.save')}
             </Button>
             <Button variant="ghost" size="sm" disabled={api.busy !== null} onClick={() => { setDraft(null); setEditing(false) }}>
-              取消
+              {t('common.cancel')}
             </Button>
           </div>
         </div>

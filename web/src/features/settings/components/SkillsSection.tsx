@@ -5,20 +5,25 @@
  * section reports `enabled`, `roots`, each skill and every load failure.
  */
 import { Button, EmptyState } from '../../../shared/ui'
+import { useI18n } from '../../../shared/i18n'
 import { useSkills } from '../hooks/use-skills'
 import { LoadError, Notice, SettingsSection, Skeleton } from './SectionShell'
 
 export function SkillsSection(): JSX.Element {
+  const { t } = useI18n()
   const api = useSkills()
 
   const body = ((): JSX.Element => {
     if (api.status === 'loading' || api.status === 'idle') return <Skeleton rows={3} />
-    if (api.status === 'error') return <LoadError message={api.error ?? '加载 skills 失败'} onRetry={() => void api.refresh()} />
+    if (api.status === 'error') return <LoadError message={api.error ?? t('settings.skills.loadFailed')} onRetry={() => void api.refresh()} />
     if (!api.enabled) {
-      return <EmptyState title="skills 未启用" hint="运行时未开启 skill 发现；启用后此处会列出已加载的 skill。" />
+      return <EmptyState title={t('settings.skills.disabledTitle')} hint={t('settings.skills.disabledHint')} />
     }
     if (api.skills.length === 0) {
-      return <EmptyState title="没有发现 skill" hint={api.roots.length > 0 ? `已扫描 ${api.roots.length} 个 root。` : '未配置 skill root。'} />
+      return <EmptyState
+        title={t('settings.skills.emptyTitle')}
+        hint={api.roots.length > 0 ? t('settings.skills.emptyHintRoots', { count: api.roots.length }) : t('settings.skills.emptyHintNoRoots')}
+      />
     }
     return (
       <div className="ark-settings__list">
@@ -45,11 +50,11 @@ export function SkillsSection(): JSX.Element {
 
   return (
     <SettingsSection
-      title="Skills"
-      desc="从配置的 root 发现；只读。"
+      title={t('settings.skills.title')}
+      desc={t('settings.skills.desc')}
       actions={
         <Button size="sm" disabled={api.status === 'loading'} onClick={() => void api.refresh()}>
-          {api.status === 'loading' ? '刷新中…' : '刷新'}
+          {api.status === 'loading' ? t('common.refreshing') : t('common.refresh')}
         </Button>
       }
     >
@@ -67,8 +72,10 @@ export function SkillsSection(): JSX.Element {
       {api.validationErrors.length > 0 ? (
         <Notice
           tone="error"
-          title={`加载失败 ${api.validationErrors.length} 处`}
-          items={api.validationErrors.map((row) => `${row.root}：${row.message}`)}
+          title={t('settings.skills.validationFailed', { count: api.validationErrors.length })}
+          items={api.validationErrors.map((row) =>
+            t('settings.skills.validationRow', { root: row.root, message: row.message })
+          )}
         />
       ) : null}
 

@@ -6,6 +6,7 @@
  * deltas, tracking `seq`, and recording gate requests that must be answered.
  */
 import type { ItemKind, RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot, TurnState } from '../../../shared/contracts'
+import { translateNow } from '../../../shared/i18n/current'
 import type { ChildCompletionNotice, ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
 
 export function emptyItemsState(): ItemsSnapshot {
@@ -216,7 +217,7 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
         seq: event.seq,
         timestamp: event.timestamp,
         code: 'model_request_failed',
-        message: `第 ${event.attempt} 次重试：${event.message}`
+        message: translateNow('canvas.retryAttempt', { attempt: event.attempt, message: event.message })
       })
       return next
 

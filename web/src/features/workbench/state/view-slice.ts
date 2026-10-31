@@ -5,14 +5,16 @@
  * Default is `code`, so the existing screen is unchanged on first paint.
  */
 import { create } from 'zustand'
+import type { MessageKey } from '../../../shared/i18n'
 
 export type AppView = 'code' | 'settings'
 
 export const APP_VIEWS: AppView[] = ['code', 'settings']
 
-export const APP_VIEW_LABELS: Record<AppView, string> = {
-  code: 'Code',
-  settings: '设置'
+/** Labels are catalog keys so the switch follows the display language. */
+export const APP_VIEW_LABEL_KEYS: Record<AppView, MessageKey> = {
+  code: 'workbench.view.code',
+  settings: 'workbench.view.settings'
 }
 
 export type ViewSlice = {

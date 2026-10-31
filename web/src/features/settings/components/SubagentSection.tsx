@@ -39,7 +39,7 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
 
   if (!config) {
     return (
-      <SettingsSection title="子 agent" desc="并行子 agent 的开关与并发上限。">
+      <SettingsSection title={t('settings.subagents.title')} desc={t('settings.subagents.descLoading')}>
         <Skeleton rows={2} />
       </SettingsSection>
     )
@@ -58,16 +58,22 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
     setRejection(null)
     const outcome: Outcome<ApplyResult> = await save({ subagents: payload }, 'subagents')
     if (!outcome.ok) {
-      toast.push('error', `${label}失败`, describeOutcome(outcome))
+      toast.push('error', t('settings.subagents.saveFailed', { label }), describeOutcome(outcome))
       return
     }
     if (outcome.value.result === 'rejected') {
       // Show the runtime's own words, both fields, without truncation.
       setRejection({ reason: outcome.value.reason, restartRequired: outcome.value.restart_required })
-      toast.push('error', '运行时拒绝了子 agent 配置', outcome.value.reason)
+      toast.push('error', t('settings.subagents.rejected'), outcome.value.reason)
       return
     }
-    toast.push('success', `${label}成功`, `已变更：${outcome.value.changed.join('、') || '无'}`)
+    toast.push(
+      'success',
+      t('settings.subagents.saveSucceeded', { label }),
+      t('settings.subagents.changed', {
+        keys: outcome.value.changed.join(t('common.listSeparator')) || t('common.none')
+      })
+    )
   }
 
   const toggleEnabled = async (next: boolean): Promise<void> => {
@@ -78,7 +84,7 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
         max_concurrency: clampConcurrency(Number(concurrency)),
         auto_continue: autoContinue,
       },
-      next ? '启动子 agent ' : '关闭子 agent ',
+      next ? t('settings.subagents.startLabel') : t('settings.subagents.stopLabel'),
     )
   }
 
@@ -95,10 +101,15 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
   }
 
   return (
-    <SettingsSection title="子 agent" desc={t('settings.subagents.description')}>
+    <SettingsSection title={t('settings.subagents.title')} desc={t('settings.subagents.description')}>
       <div className="ark-card__foot">
-        <CheckField label="启用子 agent（subagents.enabled）" checked={enabled} disabled={busy} onChange={(next) => void toggleEnabled(next)} />
-        <span className="ark-settings__hint">开关切换即保存。</span>
+        <CheckField
+          label={t('settings.subagents.enabledLabel')}
+          checked={enabled}
+          disabled={busy}
+          onChange={(next) => void toggleEnabled(next)}
+        />
+        <span className="ark-settings__hint">{t('settings.subagents.toggleHint')}</span>
       </div>
 
       <div className="ark-card__foot">
@@ -112,9 +123,9 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
       </div>
 
       <Field
-        label="最大并发（subagents.max_concurrency）"
+        label={t('settings.subagents.concurrency.label')}
         htmlFor="subagent-concurrency"
-        hint={`取值范围 ${SUBAGENT_MIN_CONCURRENCY}–${SUBAGENT_MAX_CONCURRENCY}（后端硬限制）。`}
+        hint={t('settings.subagents.concurrency.hint', { min: SUBAGENT_MIN_CONCURRENCY, max: SUBAGENT_MAX_CONCURRENCY })}
       >
         <div className="ark-field__inline">
           <input
@@ -142,28 +153,32 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
                   max_concurrency: clampConcurrency(parsed),
                   auto_continue: autoContinue,
                 },
-                '保存并发数',
+                t('settings.subagents.saveConcurrency'),
               )
             }
           >
-            {busy ? '保存中…' : '保存'}
+            {busy ? t('common.saving') : t('common.save')}
           </Button>
         </div>
       </Field>
 
       {invalid ? (
         <p className="ark-settings__hint ark-settings__hint--error">
-          并发数必须是 {SUBAGENT_MIN_CONCURRENCY}–{SUBAGENT_MAX_CONCURRENCY} 之间的整数。
+          {t('settings.subagents.concurrency.invalid', { min: SUBAGENT_MIN_CONCURRENCY, max: SUBAGENT_MAX_CONCURRENCY })}
         </p>
       ) : null}
 
       {rejection ? (
-        <Notice tone="error" title="保存被拒绝（result: rejected）">
-          <span>reason: {rejection.reason}</span>
+        <Notice tone="error" title={t('settings.subagents.rejectedTitle')}>
+          <span>{t('settings.subagents.reason', { reason: rejection.reason })}</span>
           {rejection.restartRequired.length > 0 ? (
-            <span>restart_required: {rejection.restartRequired.join('、')}</span>
+            <span>
+              {t('settings.subagents.restartRequired', {
+                keys: rejection.restartRequired.join(t('common.listSeparator'))
+              })}
+            </span>
           ) : (
-            <span>restart_required: （无）</span>
+            <span>{t('settings.subagents.restartNone')}</span>
           )}
         </Notice>
       ) : null}

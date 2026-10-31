@@ -4,6 +4,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useI18n } from '../i18n'
 
 export type ToastTone = 'info' | 'success' | 'error'
 
@@ -24,6 +25,7 @@ const DISMISS_AFTER_MS = 6_000
 const MAX_VISIBLE = 4
 
 export function ToastProvider({ children }: { children: ReactNode }): JSX.Element {
+  const { t } = useI18n()
   const [toasts, setToasts] = useState<Toast[]>([])
   const nextId = useRef(1)
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>())
@@ -73,7 +75,7 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
               <span className="ark-toast__message">{toast.message}</span>
               {toast.detail ? <span className="ark-toast__detail">{toast.detail}</span> : null}
             </div>
-            <button className="ark-toast__close" type="button" onClick={() => dismiss(toast.id)} aria-label="关闭">
+            <button className="ark-toast__close" type="button" onClick={() => dismiss(toast.id)} aria-label={t('ui.toastClose')}>
               ×
             </button>
           </div>
@@ -85,6 +87,7 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
 
 export function useToast(): ToastApi {
   const api = useContext(ToastContext)
-  if (!api) throw new Error('useToast 必须在 ToastProvider 内使用')
+  // Developer diagnostic, not user copy: it can only fire on a wiring bug.
+  if (!api) throw new Error('useToast must be used inside ToastProvider')
   return api
 }

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Button, EmptyState, ErrorBoundary } from '../../../shared/ui'
 import type { ThreadSummary } from '../../../shared/contracts'
 import { formatRelative } from '../../../shared/format'
+import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../state/store'
 import { useThreadList } from '../hooks/use-thread-list'
 import { filterThreads, type ThreadListScope } from './thread-list-filter'
@@ -27,6 +28,7 @@ function ThreadRow({
   onFork: () => Promise<void>
   onDelete: () => Promise<void>
 }): JSX.Element {
+  const { t } = useI18n()
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(thread.title)
 
@@ -44,11 +46,11 @@ function ThreadRow({
   return (
     <div className={`ark-threadrow${active ? ' is-active' : ''}`}>
       <button type="button" className="ark-threadrow__select" onClick={onSelect} title={thread.title}>
-        <span className="ark-threadrow__title">{thread.title || '未命名会话'}</span>
+        <span className="ark-threadrow__title">{thread.title || t('thread.row.untitled')}</span>
         <span className="ark-threadrow__meta">
-          <time>{formatRelative(thread.updated_at)}</time>
+          <time>{formatRelative(thread.updated_at, t)}</time>
           {typeof thread.last_seq === 'number' ? <span>seq {thread.last_seq}</span> : null}
-          {thread.archived ? <span>已归档</span> : null}
+          {thread.archived ? <span>{t('thread.row.archived')}</span> : null}
         </span>
       </button>
       {active ? (
@@ -70,27 +72,27 @@ function ThreadRow({
                 }}
               />
               <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void submitRename()}>
-                保存
+                {t('common.save')}
               </button>
               <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => setEditing(false)}>
-                取消
+                {t('common.cancel')}
               </button>
             </>
           ) : (
             <>
               <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => setEditing(true)}>
-                重命名
+                {t('thread.row.rename')}
               </button>
               <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void onFork()}>
-                分叉
+                {t('thread.row.fork')}
               </button>
               {thread.archived ? (
-                <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void onRestore()}>恢复</button>
+                <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void onRestore()}>{t('thread.row.restore')}</button>
               ) : (
-                <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void onArchive()}>归档</button>
+                <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void onArchive()}>{t('thread.row.archive')}</button>
               )}
               <button type="button" className="ark-linkbtn ark-linkbtn--danger" disabled={busy} onClick={() => void onDelete()}>
-                删除
+                {t('thread.row.delete')}
               </button>
             </>
           )}
@@ -102,6 +104,7 @@ function ThreadRow({
 
 /** Left column: thread list plus the only "new thread" action. */
 export function ThreadListPanel(): JSX.Element {
+  const { t } = useI18n()
   const threads = useCodeSessionStore((s) => s.threads)
   const activeThreadId = useCodeSessionStore((s) => s.activeThreadId)
   const listStatus = useCodeSessionStore((s) => s.listStatus)
@@ -117,10 +120,10 @@ export function ThreadListPanel(): JSX.Element {
     <aside className="ark-threadlist">
       <header className="ark-threadlist__head">
         <div>
-          <h1 className="ark-threadlist__title">会话</h1>
+          <h1 className="ark-threadlist__title">{t('thread.list.title')}</h1>
         </div>
         <Button variant="primary" size="sm" disabled={busy} onClick={() => void create()}>
-          {busy ? '创建中…' : '新会话'}
+          {busy ? t('thread.list.creating') : t('thread.list.create')}
         </Button>
       </header>
 
@@ -130,41 +133,44 @@ export function ThreadListPanel(): JSX.Element {
           <input
             type="search"
             value={query}
-            placeholder="搜索已加载会话"
-            aria-label="搜索已加载会话"
+            placeholder={t('thread.list.search')}
+            aria-label={t('thread.list.search')}
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
-        <div className="ark-threadlist__scope" role="group" aria-label="会话范围">
+        <div className="ark-threadlist__scope" role="group" aria-label={t('thread.list.scopeAria')}>
           <button type="button" className={scope === 'recent' ? 'is-active' : ''} aria-pressed={scope === 'recent'} onClick={() => setScope('recent')}>
-            最近 <span>{recentCount}</span>
+            {t('thread.list.scopeRecent')} <span>{recentCount}</span>
           </button>
           <button type="button" className={scope === 'archived' ? 'is-active' : ''} aria-pressed={scope === 'archived'} onClick={() => setScope('archived')}>
-            归档 <span>{archivedCount}</span>
+            {t('thread.list.scopeArchived')} <span>{archivedCount}</span>
           </button>
         </div>
       </div>
 
       <div className="ark-threadlist__body">
         {listStatus === 'loading' && threads.length === 0 ? (
-          <p className="ark-threadlist__hint">载入线程列表…</p>
+          <p className="ark-threadlist__hint">{t('thread.list.loading')}</p>
         ) : null}
         {listStatus === 'error' ? (
           <div className="ark-threadlist__hint is-error">
             <span>{listError}</span>
             <button type="button" className="ark-linkbtn" onClick={() => void refresh()}>
-              重试
+              {t('common.retry')}
             </button>
           </div>
         ) : null}
         {listStatus === 'ready' && threads.length === 0 ? (
-          <EmptyState title="还没有会话" hint="点击“新建”开始。" />
+          <EmptyState title={t('thread.list.emptyTitle')} hint={t('thread.list.emptyHint')} />
         ) : null}
         {listStatus === 'ready' && threads.length > 0 && visibleThreads.length === 0 ? (
-          <EmptyState title="没有匹配的会话" hint={query ? '尝试更换搜索词，搜索仅针对本地已加载列表。' : '当前范围内没有会话。'} />
+          <EmptyState
+            title={t('thread.list.noMatchTitle')}
+            hint={query ? t('thread.list.noMatchQueryHint') : t('thread.list.noMatchScopeHint')}
+          />
         ) : null}
 
-        <ErrorBoundary label="线程列表渲染失败">
+        <ErrorBoundary label={t('thread.list.boundary')}>
           <nav className="ark-threadlist__nav">
             {visibleThreads.map((thread) => (
               <ThreadRow
@@ -186,7 +192,8 @@ export function ThreadListPanel(): JSX.Element {
                   if (await restore(thread.thread_id)) setScope('recent')
                 }}
                 onDelete={async () => {
-                  if (window.confirm(`删除会话“${thread.title || '未命名会话'}”？此操作不可恢复。`)) {
+                  const name = thread.title || t('thread.row.untitled')
+                  if (window.confirm(t('thread.row.deleteConfirm', { title: name }))) {
                     await remove(thread.thread_id)
                   }
                 }}
@@ -198,9 +205,11 @@ export function ThreadListPanel(): JSX.Element {
 
       <footer className="ark-threadlist__foot">
         <button type="button" className="ark-linkbtn" onClick={() => void refresh()}>
-          刷新列表
+          {t('thread.list.refresh')}
         </button>
-        <span className="ark-threadlist__count">显示 {visibleThreads.length}/{threads.length}</span>
+        <span className="ark-threadlist__count">
+          {t('thread.list.count', { visible: visibleThreads.length, total: threads.length })}
+        </span>
       </footer>
     </aside>
   )

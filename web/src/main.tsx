@@ -7,7 +7,7 @@ import './styles/global.css'
 import './features/code-session/code-session.css'
 
 const container = document.getElementById('root')
-if (!container) throw new Error('#root 缺失，index.html 未正确加载')
+if (!container) throw new Error('#root is missing: index.html did not load correctly')
 
 createRoot(container).render(
   <StrictMode>

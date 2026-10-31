@@ -31,36 +31,36 @@ export function SettingsPage(): JSX.Element {
     switch (activeSection) {
       case 'general':
         return (
-          <ErrorBoundary label="通用设置崩溃">
+          <ErrorBoundary label={t('settings.boundary.general')}>
             <GeneralSection settings={settings} providers={providers} />
           </ErrorBoundary>
         )
       case 'runtime':
         return (
           <>
-            <ErrorBoundary label="运行调优设置崩溃">
+            <ErrorBoundary label={t('settings.boundary.runtime')}>
               <TuningSection settings={settings} />
             </ErrorBoundary>
-            <ErrorBoundary label="子 agent 设置崩溃">
+            <ErrorBoundary label={t('settings.boundary.subagents')}>
               <SubagentSection settings={settings} />
             </ErrorBoundary>
           </>
         )
       case 'providers':
         return (
-          <ErrorBoundary label="供应商设置崩溃">
+          <ErrorBoundary label={t('settings.boundary.providers')}>
             <ProvidersSection providers={providers} />
           </ErrorBoundary>
         )
       case 'integrations':
         return (
-          <ErrorBoundary label="MCP 设置崩溃">
+          <ErrorBoundary label={t('settings.boundary.mcp')}>
             <McpSection />
           </ErrorBoundary>
         )
       case 'skills':
         return (
-          <ErrorBoundary label="Skills 设置崩溃">
+          <ErrorBoundary label={t('settings.boundary.skills')}>
             <SkillsSection />
           </ErrorBoundary>
         )

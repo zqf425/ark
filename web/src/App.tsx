@@ -7,6 +7,7 @@
  */
 import { useEffect } from 'react'
 import { ErrorBoundary } from './shared/ui'
+import { useI18n } from './shared/i18n'
 import { useCodeSessionStore } from './features/code-session/state/store'
 import { useThreadList } from './features/code-session/hooks/use-thread-list'
 import { useThreadStream } from './features/code-session/hooks/use-thread-stream'
@@ -19,6 +20,7 @@ import { useViewStore } from './features/workbench/state/view-slice'
 import { SettingsPage } from './features/settings/components/SettingsPage'
 
 export function App(): JSX.Element {
+  const { t } = useI18n()
   const view = useViewStore((state) => state.view)
   const activeThreadId = useCodeSessionStore((s) => s.activeThreadId)
   const { refresh, create } = useThreadList()
@@ -34,7 +36,7 @@ export function App(): JSX.Element {
     return (
       <div className="ark-shell">
         <RuntimeStatusBar />
-        <ErrorBoundary label="设置页崩溃">
+        <ErrorBoundary label={t('workbench.boundary.settings')}>
           <SettingsPage />
         </ErrorBoundary>
       </div>
@@ -45,17 +47,17 @@ export function App(): JSX.Element {
     <WorkbenchLayout
       top={<RuntimeStatusBar />}
       left={
-        <ErrorBoundary label="会话列表崩溃">
+        <ErrorBoundary label={t('workbench.boundary.threadList')}>
           <ThreadListPanel />
         </ErrorBoundary>
       }
       center={
-        <ErrorBoundary label="会话流崩溃">
+        <ErrorBoundary label={t('workbench.boundary.stream')}>
           <ThreadStream threadId={activeThreadId} onCreateThread={create} />
         </ErrorBoundary>
       }
       right={
-        <ErrorBoundary label="面板崩溃">
+        <ErrorBoundary label={t('workbench.boundary.panel')}>
           <PanelSlot />
         </ErrorBoundary>
       }

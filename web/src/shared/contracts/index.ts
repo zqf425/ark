@@ -81,7 +81,6 @@ export type {
 } from './web-only'
 export {
   ENDPOINT_FORMATS,
-  ERROR_HINTS,
   LOG_LEVELS,
   SUBAGENT_MAX_CONCURRENCY,
   SUBAGENT_MIN_CONCURRENCY

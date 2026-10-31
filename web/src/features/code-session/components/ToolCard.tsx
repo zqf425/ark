@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import type { ThreadItem, ToolPayload } from '../../../shared/contracts'
 import { formatToolArguments } from '../../../shared/format'
+import { useI18n, type MessageKey } from '../../../shared/i18n'
 
-function statusLabel(item: ThreadItem, tool: ToolPayload): string {
-  if (tool.ok === true) return '成功'
-  if (tool.ok === false) return '失败'
-  return item.status === 'streaming' || item.status === 'pending' ? '运行中' : '已完成'
+function statusKey(item: ThreadItem, tool: ToolPayload): MessageKey {
+  if (tool.ok === true) return 'canvas.tool.succeeded'
+  if (tool.ok === false) return 'canvas.tool.failed'
+  return item.status === 'streaming' || item.status === 'pending' ? 'canvas.tool.running' : 'canvas.tool.completed'
 }
 
 function statusClass(item: ThreadItem, tool: ToolPayload): string {
@@ -19,6 +20,7 @@ function statusClass(item: ThreadItem, tool: ToolPayload): string {
  * nothing here infers the tool name from text.
  */
 export function ToolCard({ item }: { item: ThreadItem }): JSX.Element {
+  const { t } = useI18n()
   const tool = item.tool
   const [open, setOpen] = useState(false)
   if (!tool) {
@@ -41,7 +43,7 @@ export function ToolCard({ item }: { item: ThreadItem }): JSX.Element {
           {open ? '▾' : '▸'}
         </span>
         <span className="ark-tool__name">{tool.tool}</span>
-        <span className={`ark-chip ${statusClass(item, tool)}`}>{statusLabel(item, tool)}</span>
+        <span className={`ark-chip ${statusClass(item, tool)}`}>{t(statusKey(item, tool))}</span>
         {typeof tool.duration_ms === 'number' ? (
           <span className="ark-tool__meta">{tool.duration_ms} ms</span>
         ) : null}
@@ -52,13 +54,13 @@ export function ToolCard({ item }: { item: ThreadItem }): JSX.Element {
         <div className="ark-tool__body">
           {args ? (
             <section className="ark-tool__section">
-              <h4 className="ark-tool__label">参数</h4>
+              <h4 className="ark-tool__label">{t('canvas.tool.arguments')}</h4>
               <pre className="ark-tool__output">{args}</pre>
             </section>
           ) : null}
           {tool.output ? (
             <section className="ark-tool__section">
-              <h4 className="ark-tool__label">输出</h4>
+              <h4 className="ark-tool__label">{t('canvas.tool.output')}</h4>
               <pre className="ark-tool__output">{tool.output}</pre>
             </section>
           ) : null}

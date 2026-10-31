@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react'
-import { ApiError } from '../../../shared/api/client'
+import { describeError } from '../../../shared/api/error-describe'
+import { translateNow } from '../../../shared/i18n/current'
 import type { FilePreview } from '../../../shared/contracts'
 import { EmptyState } from '../../../shared/ui'
+import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../../code-session/state/store'
 import { getFilePreview } from '../api/workbench-api'
 
 function describe(error: unknown): string {
-  if (error instanceof ApiError) return error.message
-  return error instanceof Error ? error.message : String(error)
+  return describeError(error, translateNow)
 }
 
 export function FilePanel(): JSX.Element {
+  const { t } = useI18n()
   const threadId = useCodeSessionStore((state) => state.activeThreadId)
   const path = useCodeSessionStore((state) => state.selectedFilePath)
   const lastSeq = useCodeSessionStore((state) => state.lastSeq)
@@ -36,8 +38,17 @@ export function FilePanel(): JSX.Element {
     return () => controller.abort()
   }, [threadId, path, lastSeq])
 
-  if (!threadId || !path) return <EmptyState title="未选择文件" hint="在 Changes 中选择文件；预览只显示本会话 read 工具已经读取的内容。" />
-  if (error) return <EmptyState title="无法预览文件" hint={`${error}。先让 agent 使用 read 工具读取该文件。`} />
-  if (!file) return <p className="ark-panel__hint">正在加载文件预览…</p>
+  if (!threadId || !path) {
+    return <EmptyState title={t('workbench.noFileTitle')} hint={t('workbench.noFileHint')} />
+  }
+  if (error) {
+    return (
+      <EmptyState
+        title={t('workbench.filePreviewFailedTitle')}
+        hint={t('workbench.filePreviewFailedHint', { error })}
+      />
+    )
+  }
+  if (!file) return <p className="ark-panel__hint">{t('workbench.filePreviewLoading')}</p>
   return <section className="ark-panel"><header className="ark-panel__head"><h2>{file.path}</h2><span>seq {file.source_seq}</span></header><pre className="ark-panel__code">{file.content}</pre></section>
 }

@@ -5,15 +5,14 @@
  * *when* to call and how to reflect the result in the store.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError } from '../../../shared/api/client'
+import { describeError } from '../../../shared/api/error-describe'
+import { translateNow } from '../../../shared/i18n/current'
 import type { ThreadSummary } from '../../../shared/contracts'
 import { createThread, deleteThread, forkThread, listThreads, updateThread } from '../api/threads-api'
 import { useCodeSessionStore } from '../state/store'
 
 function describe(error: unknown): string {
-  if (error instanceof ApiError) return `${error.hint}：${error.message}`
-  if (error instanceof Error) return error.message
-  return String(error)
+  return describeError(error, translateNow)
 }
 
 export type ThreadListApi = {

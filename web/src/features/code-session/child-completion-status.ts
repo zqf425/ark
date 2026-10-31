@@ -1,17 +1,19 @@
-/** Maps child-run lifecycle states to user-facing Chinese labels. */
-export function childCompletionStatus(status: string): string {
+/** Maps child-run lifecycle states to message keys (localized at the call site). */
+import type { MessageKey } from '../../shared/i18n'
+
+export function childCompletionStatusKey(status: string): MessageKey {
   switch (status) {
     case 'queued':
-      return '排队中'
+      return 'canvas.child.status.queued'
     case 'running':
-      return '执行中'
+      return 'canvas.child.status.running'
     case 'completed':
-      return '已完成'
+      return 'canvas.child.status.completed'
     case 'failed':
-      return '失败'
+      return 'canvas.child.status.failed'
     case 'aborted':
-      return '已中止'
+      return 'canvas.child.status.aborted'
     default:
-      return '已结束'
+      return 'canvas.child.status.ended'
   }
 }

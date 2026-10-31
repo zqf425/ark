@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RuntimeEvent } from '../../../shared/contracts'
-import { childCompletionStatus } from '../child-completion-status'
+import { childCompletionStatusKey } from '../child-completion-status'
 import { applyEvent, emptyItemsState, seedFromItems } from './items-reducer'
 
 function childCompleted(seq: number): RuntimeEvent {
@@ -27,12 +27,13 @@ describe('items reducer child completions', () => {
     expect(state.childCompletions['child:51']?.seq).toBe(51)
   })
 
-  it('renders terminal child status in Chinese', () => {
-    expect(childCompletionStatus('queued')).toBe('排队中')
-    expect(childCompletionStatus('running')).toBe('执行中')
-    expect(childCompletionStatus('completed')).toBe('已完成')
-    expect(childCompletionStatus('failed')).toBe('失败')
-    expect(childCompletionStatus('aborted')).toBe('已中止')
+  it('maps terminal child status to localized message keys', () => {
+    expect(childCompletionStatusKey('queued')).toBe('canvas.child.status.queued')
+    expect(childCompletionStatusKey('running')).toBe('canvas.child.status.running')
+    expect(childCompletionStatusKey('completed')).toBe('canvas.child.status.completed')
+    expect(childCompletionStatusKey('failed')).toBe('canvas.child.status.failed')
+    expect(childCompletionStatusKey('aborted')).toBe('canvas.child.status.aborted')
+    expect(childCompletionStatusKey('something-else')).toBe('canvas.child.status.ended')
   })
 
   it('only refreshes child supervision for child lifecycle events', () => {

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Tabs } from '../../../shared/ui'
+import { useI18n, type MessageKey } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../../code-session/state/store'
 import type { PanelId } from '../../code-session/state/workbench-slice'
 import { ChangesPanel } from './ChangesPanel'
@@ -7,11 +8,11 @@ import { FilePanel } from './FilePanel'
 import { PlanPanel } from './PlanPanel'
 import { TerminalPanel } from './TerminalPanel'
 
-const PANEL_TABS: { id: PanelId; label: string }[] = [
-  { id: 'changes', label: '变更' },
-  { id: 'plan', label: '计划' },
-  { id: 'file', label: '文件' },
-  { id: 'terminal', label: '终端' }
+const PANEL_TABS: { id: PanelId; labelKey: MessageKey }[] = [
+  { id: 'changes', labelKey: 'workbench.panel.changes' },
+  { id: 'plan', labelKey: 'workbench.panel.plan' },
+  { id: 'file', labelKey: 'workbench.panel.file' },
+  { id: 'terminal', labelKey: 'workbench.panel.terminal' }
 ]
 
 function PanelBody({ panel }: { panel: PanelId }): ReactNode {
@@ -36,23 +37,30 @@ function PanelBody({ panel }: { panel: PanelId }): ReactNode {
  * panel never triggers a runtime request.
  */
 export function PanelSlot(): JSX.Element {
+  const { t } = useI18n()
   const activePanel = useCodeSessionStore((s) => s.activePanel)
   const setActivePanel = useCodeSessionStore((s) => s.setActivePanel)
   const toggleRight = useCodeSessionStore((s) => s.toggleRight)
 
   return (
-    <section className="ark-panelslot" aria-label="任务上下文">
+    <section className="ark-panelslot" aria-label={t('workbench.slot.title')}>
       <header className="ark-panelslot__head">
-        <h2>任务上下文</h2>
-        <button type="button" className="ark-panelslot__close" onClick={toggleRight} aria-label="关闭任务上下文" title="关闭任务上下文">
+        <h2>{t('workbench.slot.title')}</h2>
+        <button
+          type="button"
+          className="ark-panelslot__close"
+          onClick={toggleRight}
+          aria-label={t('workbench.slot.close')}
+          title={t('workbench.slot.close')}
+        >
           ×
         </button>
       </header>
       <Tabs
-        items={PANEL_TABS.map((tab) => ({ id: tab.id, label: tab.label }))}
+        items={PANEL_TABS.map((tab) => ({ id: tab.id, label: t(tab.labelKey) }))}
         active={activePanel}
         onChange={setActivePanel}
-        label="工作台面板"
+        label={t('workbench.slot.tabsAria')}
       />
       <div className="ark-panelslot__body">
         <PanelBody panel={activePanel} />

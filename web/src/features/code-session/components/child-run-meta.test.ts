@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChildRunSummary } from '../../../shared/contracts'
+import { translate } from '../../../shared/i18n/messages'
 import { childRunMeta } from './child-run-meta'
 
 const child = (overrides: Partial<ChildRunSummary> = {}): ChildRunSummary => ({
@@ -14,7 +15,9 @@ const child = (overrides: Partial<ChildRunSummary> = {}): ChildRunSummary => ({
 
 describe('childRunMeta', () => {
   it('shows only fields reported by the runtime', () => {
-    expect(childRunMeta(child({ model: 'gpt-5', providerId: 'openai', toolInvocations: 3, resumeCount: 2 }))).toEqual([
+    const parts = childRunMeta(child({ model: 'gpt-5', providerId: 'openai', toolInvocations: 3, resumeCount: 2 }))
+
+    expect(parts.map((part) => translate('zh-CN', part.key, part.params))).toEqual([
       'openai · gpt-5',
       '3 次工具调用',
       '已恢复 2 次'
@@ -23,5 +26,15 @@ describe('childRunMeta', () => {
 
   it('does not invent metadata absent from the child record', () => {
     expect(childRunMeta(child())).toEqual([])
+  })
+
+  it('renders the same facts in English without falling back to Chinese', () => {
+    const parts = childRunMeta(child({ model: 'gpt-5', providerId: 'openai', toolInvocations: 3, resumeCount: 2 }))
+
+    expect(parts.map((part) => translate('en-US', part.key, part.params))).toEqual([
+      'openai · gpt-5',
+      '3 tool calls',
+      'Resumed 2 times'
+    ])
   })
 })

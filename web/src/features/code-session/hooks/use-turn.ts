@@ -6,14 +6,13 @@
  * reflects command state (`sending` / `interrupting`) and errors.
  */
 import { useCallback } from 'react'
-import { ApiError } from '../../../shared/api/client'
+import { describeError } from '../../../shared/api/error-describe'
+import { translateNow } from '../../../shared/i18n/current'
 import { interruptTurn, startTurn, steerTurn } from '../api/turns-api'
 import { useCodeSessionStore } from '../state/store'
 
 function describe(error: unknown): string {
-  if (error instanceof ApiError) return `${error.hint}：${error.message}`
-  if (error instanceof Error) return error.message
-  return String(error)
+  return describeError(error, translateNow)
 }
 
 export type TurnApi = {

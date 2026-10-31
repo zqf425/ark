@@ -6,7 +6,7 @@
  * under `features/<x>/api` compose these primitives.
  */
 import type { ArkErrorCode } from '../contracts'
-import { ERROR_HINTS } from '../contracts'
+import { translateNow } from '../i18n/current'
 
 const TOKEN_STORAGE_KEY = 'ark_token'
 const TOKEN_QUERY_KEY = 'ark_token'
@@ -32,10 +32,11 @@ export class ApiError extends Error {
     this.detail = args.detail
   }
 
-  /** Short operator-facing hint derived from the error code, never from prose. */
-  get hint(): string {
-    return this.code === 'unknown' ? `HTTP ${this.status}` : ERROR_HINTS[this.code]
-  }
+  /**
+   * Operator-facing hint for this error code. The wording lives in the i18n
+   * catalog (`error.hint.*`), so the client never carries a hardcoded sentence
+   * and the hint follows the display language: call `describeError(error, t)`.
+   */
 }
 
 /**
@@ -165,7 +166,11 @@ export async function* stream(path: string, options: StreamOptions = {}): AsyncG
     headers: { accept: 'text/event-stream', ...sendOptions.headers }
   })
   if (!response.body) {
-    throw new ApiError({ status: response.status, code: 'internal_error', message: 'SSE 响应缺少 body' })
+    throw new ApiError({
+      status: response.status,
+      code: 'internal_error',
+      message: translateNow('api.sseBodyMissing')
+    })
   }
 
   const reader = response.body.getReader()

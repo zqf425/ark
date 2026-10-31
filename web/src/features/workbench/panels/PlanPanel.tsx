@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
-import { ApiError } from '../../../shared/api/client'
+import { describeError } from '../../../shared/api/error-describe'
+import { translateNow } from '../../../shared/i18n/current'
 import type { PlanView, TodoEntry, TodoStatus } from '../../../shared/contracts'
 import { Button, EmptyState, useToast } from '../../../shared/ui'
+import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../../code-session/state/store'
 import { clearGoal, getPlan, updateGoal, updateTodos } from '../api/workbench-api'
 
 function describe(error: unknown): string {
-  if (error instanceof ApiError) return `${error.hint}：${error.message}`
-  return error instanceof Error ? error.message : String(error)
+  return describeError(error, translateNow)
 }
 
 function nextStatus(status: TodoStatus): TodoStatus {
@@ -21,6 +22,7 @@ function todoId(): string {
 }
 
 export function PlanPanel(): JSX.Element {
+  const { t } = useI18n()
   const threadId = useCodeSessionStore((state) => state.activeThreadId)
   const lastSeq = useCodeSessionStore((state) => state.lastSeq)
   const toast = useToast()
@@ -48,8 +50,10 @@ export function PlanPanel(): JSX.Element {
     return () => controller.abort()
   }, [threadId, lastSeq])
 
-  if (!threadId) return <EmptyState title="未选择会话" hint="选择会话后可维护其目标和待办。" />
-  if (!plan && !error) return <p className="ark-panel__hint">正在加载计划…</p>
+  if (!threadId) {
+    return <EmptyState title={t('workbench.noThreadTitle')} hint={t('workbench.noThreadPlanHint')} />
+  }
+  if (!plan && !error) return <p className="ark-panel__hint">{t('workbench.plan.loading')}</p>
 
   const persistTodos = async (todos: TodoEntry[]): Promise<void> => {
     setBusy(true)
@@ -60,7 +64,7 @@ export function PlanPanel(): JSX.Element {
     } catch (reason) {
       const message = describe(reason)
       setError(message)
-      toast.push('error', '保存待办失败', message)
+      toast.push('error', t('workbench.plan.saveTodosFailed'), message)
     } finally {
       setBusy(false)
     }
@@ -78,7 +82,7 @@ export function PlanPanel(): JSX.Element {
     } catch (reason) {
       const message = describe(reason)
       setError(message)
-      toast.push('error', '保存目标失败', message)
+      toast.push('error', t('workbench.plan.saveGoalFailed'), message)
     } finally {
       setBusy(false)
     }
@@ -94,7 +98,7 @@ export function PlanPanel(): JSX.Element {
     } catch (reason) {
       const message = describe(reason)
       setError(message)
-      toast.push('error', '清除目标失败', message)
+      toast.push('error', t('workbench.plan.clearGoalFailed'), message)
     } finally {
       setBusy(false)
     }
@@ -104,16 +108,28 @@ export function PlanPanel(): JSX.Element {
   return (
     <section className="ark-panel">
       <header className="ark-panel__head">
-        <h2>计划</h2>
-        <span>{todos.length} 项待办</span>
+        <h2>{t('workbench.plan.title')}</h2>
+        <span>{t('workbench.plan.todoCount', { count: todos.length })}</span>
       </header>
       {error ? <p className="ark-panel__error">{error}</p> : null}
 
-      <label className="ark-panel__label" htmlFor="plan-goal">当前目标</label>
-      <textarea id="plan-goal" className="ark-textarea" rows={3} value={goal} disabled={busy} placeholder="描述本会话要达成的结果" onChange={(event) => setGoal(event.target.value)} />
+      <label className="ark-panel__label" htmlFor="plan-goal">{t('workbench.plan.goalLabel')}</label>
+      <textarea
+        id="plan-goal"
+        className="ark-textarea"
+        rows={3}
+        value={goal}
+        disabled={busy}
+        placeholder={t('workbench.plan.goalPlaceholder')}
+        onChange={(event) => setGoal(event.target.value)}
+      />
       <div className="ark-panel__actions">
-        <Button size="sm" variant="primary" disabled={busy || !goal.trim()} onClick={() => void saveGoal()}>保存目标</Button>
-        <Button size="sm" disabled={busy || !plan?.goal} onClick={() => void removeGoal()}>清除</Button>
+        <Button size="sm" variant="primary" disabled={busy || !goal.trim()} onClick={() => void saveGoal()}>
+          {t('workbench.plan.saveGoal')}
+        </Button>
+        <Button size="sm" disabled={busy || !plan?.goal} onClick={() => void removeGoal()}>
+          {t('workbench.plan.clear')}
+        </Button>
       </div>
 
       <div className="ark-plan__list">
@@ -123,13 +139,13 @@ export function PlanPanel(): JSX.Element {
               {todo.status === 'completed' ? '✓' : todo.status === 'in_progress' ? '•' : '○'}
             </button>
             <span className={todo.status === 'completed' ? 'is-done' : ''}>{todo.title}</span>
-            <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void persistTodos(todos.filter((row) => row.id !== todo.id))}>移除</button>
+            <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void persistTodos(todos.filter((row) => row.id !== todo.id))}>{t('common.remove')}</button>
           </div>
         ))}
       </div>
 
       <div className="ark-panel__add">
-        <input className="ark-field__input" value={newTodo} disabled={busy} placeholder="新增待办" onChange={(event) => setNewTodo(event.target.value)} onKeyDown={(event) => {
+        <input className="ark-field__input" value={newTodo} disabled={busy} placeholder={t('workbench.plan.newTodoPlaceholder')} onChange={(event) => setNewTodo(event.target.value)} onKeyDown={(event) => {
           if (event.key === 'Enter' && newTodo.trim()) {
             void persistTodos([...todos, { id: todoId(), title: newTodo.trim(), status: 'pending' }])
             setNewTodo('')
@@ -138,7 +154,7 @@ export function PlanPanel(): JSX.Element {
         <Button size="sm" disabled={busy || !newTodo.trim()} onClick={() => {
           void persistTodos([...todos, { id: todoId(), title: newTodo.trim(), status: 'pending' }])
           setNewTodo('')
-        }}>新增</Button>
+        }}>{t('workbench.plan.add')}</Button>
       </div>
     </section>
   )
