@@ -4,8 +4,10 @@
 > 已经通过；真实浏览器下已验证线程新建/重命名/fork/归档/恢复、普通回合发送、
 > 设置页 runtime tuning、provider/Skills/MCP 真实数据与空态、`subagents.auto_continue` 开关往返，
 > 并修复了 SSE 空 backlog 首帧与空闲看门狗误重连两个缺陷。
-> `POST /v1/threads/{id}/rewind` 只有服务端实现（`rewind.rs` 与 store 物理截断、4 条单测），
-> web 尚未提供入口，因此不计入浏览器验收，也不宣称可用。
+> `POST /v1/threads/{id}/rewind` 的 web 入口已在 Code 会话画布实现（`RewindControl`：终态回合
+> 「回退到这里」，确认后调用 rewind 并以新的 `last_seq` 重拉 detail、重建 SSE 订阅；409/404 走
+> 既有错误提示通道），已由 Vitest 覆盖确认流程、错误路径、重拉重订阅与中英文 i18n 键，
+> 但尚未取得真实浏览器验收证据，不计入浏览器验收清单。
 > 需真实模型行为才能触发的交互（steer/中断时序、审批与输入闸门、子代理全生命周期、
 > 自动续跑批次、四个右侧面板、会话级覆盖）尚未取得真实交互证据，
 > 逐项清单与阻塞原因见 [发布收尾与真实环境验收](release-readiness.md) 的「验收记录 D」。

@@ -9,6 +9,12 @@ export type ItemsSlice = ItemsSnapshot & {
   detailError: string | null
   streamStatus: StreamStatus
   streamError: string | null
+  /**
+   * Bumped to force the stream hook to re-fetch the detail and re-subscribe SSE
+   * from the new watermark (e.g. after rewind physically truncates history).
+   */
+  reloadToken: number
+  requestStreamReload: () => void
   /** Replace the stream with the authoritative server snapshot. */
   seedItems: (items: ThreadItem[], lastSeq: number, childCompletions: ChildCompletionNotice[], runtime: ThreadRuntimeSnapshot) => void
   /** Fold one SSE event through the pure reducer. */
@@ -26,6 +32,9 @@ export const createItemsSlice: StateCreator<ItemsSlice, [], [], ItemsSlice> = (s
   detailError: null,
   streamStatus: 'closed',
   streamError: null,
+  reloadToken: 0,
+
+  requestStreamReload: () => set((state) => ({ reloadToken: state.reloadToken + 1 })),
 
   seedItems: (items, lastSeq, childCompletions, runtime) => set({
     ...seedFromItems(items, lastSeq, childCompletions, runtime),

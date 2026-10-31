@@ -49,6 +49,14 @@ export const MESSAGES = {
   'settings.subagents.autoContinue.runtime': ['当前自动续跑值', 'Current auto-continue value']
   ,'session.context.compact': ['创建上下文检查点', 'Create context checkpoint']
   ,'session.context.compacted': ['上下文检查点已创建', 'Context checkpoint created']
+  ,'session.rewind.entry': ['回退到这里', 'Rewind here']
+  ,'session.rewind.confirmTitle': ['回退到此回合之前？', 'Rewind to before this turn?']
+  ,'session.rewind.confirmBody': ['将删除该回合及其后的所有消息，且不可恢复。', 'This permanently deletes this turn and every message after it.']
+  ,'session.rewind.confirmAction': ['确认回退', 'Confirm rewind']
+  ,'session.rewind.cancel': ['取消', 'Cancel']
+  ,'session.rewind.rewinding': ['回退中…', 'Rewinding…']
+  ,'session.rewind.failed': ['回退失败', 'Rewind failed']
+  ,'session.rewind.done': ['已回退，会话已恢复到所选回合之前。', 'Rewound; the session now ends before the selected turn.']
 } as const
 
 export type MessageKey = keyof typeof MESSAGES
