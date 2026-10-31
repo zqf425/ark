@@ -9,6 +9,7 @@ mod base;
 mod child;
 mod cli;
 mod load_skill;
+mod memory_seed;
 mod model;
 mod wiring;
 mod workspace;

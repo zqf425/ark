@@ -209,6 +209,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         roots: Arc::clone(&roots),
         tool_registry: Arc::clone(&tools),
         skills: Arc::clone(&skills),
+        memory: Arc::clone(&memory),
         gates: gate_broker,
     });
 
@@ -323,6 +324,9 @@ struct AgentTurnRunner {
     tool_registry: Arc<ToolRegistry>,
     /// Skill runtime, consulted once per turn for activated instructions.
     skills: Arc<ark_skills::SkillRuntime>,
+    /// Long-term memory document. Re-read once per turn so a memory the user
+    /// just saved is visible to the very next turn without a restart.
+    memory: Arc<ark_store::MemoryFileStore>,
     /// Human gate broker shared with the HTTP command surface.
     gates: Arc<dyn GateBroker>,
 }
@@ -598,6 +602,12 @@ impl TurnRunner for AgentTurnRunner {
             seed_messages.push(ModelMessage::system(format!(
                 "[available skills]\n{catalog}"
             )));
+        }
+        // Memory also rides the dynamic tail: it changes whenever the user edits
+        // a memory, so putting it in the static prefix would invalidate the
+        // prompt cache on every such edit.
+        if let Some(message) = crate::memory_seed::seed_for_turn(self.memory.as_ref()) {
+            seed_messages.push(message);
         }
         if let Some(message) = inbox.system_message() {
             seed_messages.push(message);

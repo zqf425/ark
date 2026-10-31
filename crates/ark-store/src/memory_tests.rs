@@ -129,3 +129,46 @@ fn rejects_an_oversized_text_without_changing_existing_entries() {
 
     let _ = std::fs::remove_dir_all(data_dir);
 }
+
+#[test]
+fn read_entries_observes_disk_state_after_the_store_was_opened() {
+    let data_dir = temp_data_dir("read-entries");
+    std::fs::create_dir_all(&data_dir).expect("data directory created");
+
+    // Absent document is an empty store, not a failure: injection must stay quiet.
+    let store = MemoryFileStore::open(&data_dir).expect("store opens");
+    assert!(store
+        .read_entries()
+        .expect("absent file reads empty")
+        .is_empty());
+
+    // A second store writing after this one opened proves the read is from disk
+    // rather than from the snapshot captured by `open`.
+    let writer = MemoryFileStore::open(&data_dir).expect("writer opens");
+    writer
+        .create(CreateMemoryRequest {
+            text: "下一次回合可见".to_string(),
+            tags: vec![],
+            source: None,
+        })
+        .expect("create succeeds");
+    let entries = store.read_entries().expect("fresh read succeeds");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].text, "下一次回合可见");
+
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
+#[test]
+fn read_entries_reports_a_damaged_document_instead_of_silently_emptying() {
+    let data_dir = temp_data_dir("read-damaged");
+    std::fs::create_dir_all(&data_dir).expect("data directory created");
+    std::fs::write(data_dir.join("memory.json"), b"not json").expect("damaged file written");
+
+    // Injection needs to warn about a damaged document, so this must be an
+    // error even though `open` deliberately recovers with an empty snapshot.
+    let store = MemoryFileStore::open(&data_dir).expect("damaged file is recoverable");
+    assert!(store.read_entries().is_err());
+
+    let _ = std::fs::remove_dir_all(data_dir);
+}

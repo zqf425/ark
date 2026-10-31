@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use ark_common::{read_json_file_opt, write_json_file, ArkError, Result};
+use ark_common::{read_json_file, read_json_file_opt, write_json_file, ArkError, Result};
 use ark_contract::{
     CreateMemoryRequest, MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse,
     UpdateMemoryRequest,
@@ -41,6 +41,21 @@ impl MemoryFileStore {
 
     fn lock(&self) -> MutexGuard<'_, MemoryFile> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Read the document from disk for one prompt injection.
+    ///
+    /// This deliberately bypasses the in-memory snapshot: the approved design
+    /// requires the next turn to observe a write made since the process
+    /// started. Unlike [`Self::open`], a damaged document is reported instead of
+    /// being folded into "empty", because injection has to warn about it rather
+    /// than silently pretend the user has no memory. A missing document is not
+    /// an error - that is simply an empty store.
+    pub fn read_entries(&self) -> Result<Vec<MemoryEntry>> {
+        if !self.path.exists() {
+            return Ok(Vec::new());
+        }
+        Ok(read_json_file::<MemoryFile>(&self.path)?.entries)
     }
 
     fn persist(&self, next: &MemoryFile) -> Result<()> {

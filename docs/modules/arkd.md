@@ -68,6 +68,11 @@ UI catalog 由组合根创建唯一 `UiBus`：授予本构建实际具备的能�
 assistant 行），后接一条截断到 16 KiB UTF-8 字节的 `ModelRole::Tool` 结果消息（Failed 条目结果内容为空
 兜底）；非终态（Streaming 等）条目不回放，投影顺序保持 durable items 的时间顺序。
 
+用户长期 memory 也走动态尾部：`run_turn` 在 skills 目录之后、completion inbox 之前，每回合重新读取
+`<data-dir>/memory.json` 并追加**至多一条** `[user memory]` system 消息（按 `created_at` 升序，拼接后
+按 UTF-8 字符数限 4096，超限整条丢弃最新条目并追加 truncated 尾注）。读取或解析失败只记 warn 并跳过注入，
+空 store 不注入，均不影响回合结果。
+
 ## 验证
 
 装配变更至少执行 `cargo check -p arkd`；涉及运行时、存储或并发时执行 workspace 测试，并验证启动/停机

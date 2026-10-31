@@ -16,9 +16,11 @@ ark 为用户显式维护、可跨会话复用的长期偏好或事实提供 JSO
 
 ## 已批准计划
 
-### 向模型 prompt 注入用户记忆（2026-11-01 批准，首期策略）
+### 向模型 prompt 注入用户记忆（2026-11-01 批准，首期策略；状态：已实现）
 
 范围：只做"全量注入 + 预算上限"，**不包含**自动抽取、检索排序与用户范围（仍留待决）。
+实现位置：`apps/arkd/src/memory_seed.rs`（纯函数 `memory_seed_message` / `seed_for_turn`）与
+`apps/arkd/src/wiring.rs` 的 `run_turn`；只读口为 `ark_store::MemoryFileStore::read_entries`。
 
 1. 注入点：组合根构建回合种子时（`apps/arkd/src/wiring.rs` 的 `run_turn`），在 skills 目录
    之后、completion inbox 之前追加**至多一条** system 消息。动态尾部注入，不进入静态
