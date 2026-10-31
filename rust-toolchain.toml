@@ -1,0 +1,6 @@
+# Cargo.lock uses lockfile v4, which cargo can only read from 1.78 on; the
+# rustup default toolchain on some machines is older (e.g. 1.75) and fails to
+# build this workspace. Resolve to the installed stable toolchain inside this
+# repository instead of relying on each machine's rustup default.
+[toolchain]
+channel = "stable"
