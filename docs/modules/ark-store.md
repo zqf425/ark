@@ -6,6 +6,10 @@
 `events.jsonl` 是权威日志，`items.jsonl`、`usage.jsonl`、`session.json`、child index 和全局
 索引均为可重建投影。
 
+条目投影把一次工具调用的 `ToolCallStarted` 与 `ToolCallFinished` 折叠为**单个** `ToolCall` 条目：
+结果（output/ok/duration_ms）内嵌在该条目的 tool payload 中，不会产生独立的 `ToolResult` 条目。
+下游（如组合根的回合种子回放）必须按此折叠形状消费，不得假设两条目配对。
+
 ## 一致性与并发
 
 - 每个线程由一个 writer actor 分配序号并追加事件；同一数据目录由 `data/.lock` 独占。

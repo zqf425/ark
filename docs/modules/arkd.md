@@ -62,10 +62,11 @@ UI catalog 由组合根创建唯一 `UiBus`：授予本构建实际具备的能�
 `request_user_input` 属于内置工具集，随 `ark_tool::builtins()` 在父/子两个注册表中可用；
 其执行由 `ark-agent` 的用户输入 gate 拦截，组合根不为它写任何特例。
 
-回合种子中的 `conversation_history` 将已完成的 ToolCall/ToolResult 行投影回模型上下文：同一 call_id 配对时，
-调用折叠进上一条 assistant 消息的 `tool_calls`（无文本时新建空内容 assistant 行），后接一条截断到 16 KiB
-UTF-8 字节的 `ModelRole::Tool` 结果消息（失败结果同样回放）；无配对结果的调用与无调用的结果不回放，
-投影顺序保持 durable items 的时间顺序。
+回合种子中的 `conversation_history` 把工具行投影回模型上下文。store 投影把 `ToolCallStarted` +
+`ToolCallFinished` 折叠为单个内嵌 output 的 `ToolCall` 条目（见 ark-store 设计），因此这里直接消费该条目：
+终态（Completed/Failed）条目将调用折叠进上一条 assistant 消息的 `tool_calls`（无文本时新建空内容
+assistant 行），后接一条截断到 16 KiB UTF-8 字节的 `ModelRole::Tool` 结果消息（Failed 条目结果内容为空
+兜底）；非终态（Streaming 等）条目不回放，投影顺序保持 durable items 的时间顺序。
 
 ## 验证
 
