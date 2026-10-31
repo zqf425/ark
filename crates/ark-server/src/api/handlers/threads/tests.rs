@@ -625,3 +625,50 @@ async fn the_wire_detail_exposes_patched_runtime_overrides() {
     assert_eq!(detail["runtime"]["workspace"], "/tmp/wire-ws");
     let _ = std::fs::remove_dir_all(data_dir);
 }
+
+/// 回归：一个子代理只应产生一个 `child_ids` 条目。
+///
+/// `children/runs.jsonl` 是 append-only，`queued`/`running`/`completed` 三行都
+/// 属于同一个 child；`load_detail` 曾经把原始日志逐行映射成 id，于是同一
+/// child 在 `child_ids` 里出现三次。这里走真实 store 的完整写入路径。
+#[tokio::test]
+async fn detail_lists_one_child_id_per_delegated_child() {
+    let data_dir = std::env::temp_dir().join(format!("ark-thread-child-ids-{}", TurnId::new()));
+    let state = state(&data_dir);
+    let parent = state.store.create_thread("parent").await.expect("thread");
+    let child = ChildId::new();
+    state
+        .store
+        .create_child_run(parent.thread_id, child, "scan")
+        .await
+        .expect("child dir");
+    for status in ["queued", "running", "completed"] {
+        let mut record = ark_ports::ChildRunRecord::queued(
+            child,
+            parent.thread_id,
+            TurnId::new(),
+            "scan",
+            Utc::now(),
+        );
+        record.status = status.to_string();
+        if status == "completed" {
+            record.ended_at = Some(Utc::now());
+        }
+        state.store.append_child_run(record).await.expect("append");
+    }
+
+    let records = state.store.list_child_runs(parent.thread_id).await.unwrap();
+    assert_eq!(
+        records.len(),
+        3,
+        "the log stays append-only: one row per status change"
+    );
+
+    let detail = load_detail(&state, parent.thread_id).await.expect("detail");
+    assert_eq!(
+        detail.child_ids,
+        vec![child],
+        "the projection must fold the log to one id per child"
+    );
+    let _ = std::fs::remove_dir_all(data_dir);
+}

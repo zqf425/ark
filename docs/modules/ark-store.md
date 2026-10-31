@@ -43,6 +43,11 @@ data/threads/<thread>/
 已经 fsync 的事件；它必须留下可恢复的 dirty/reconcile 状态。全局 `child_id` locator 从所有父目录的
 `runs.jsonl` 重建，授权以记录中的 `parent_thread_id` 判断，绝不从目录路径猜测。
 
+`runs.jsonl` 一行是一次**状态转换**，不是一个 child：`queued`、`running`、终态各占一行，`resume` 也
+只追加新行并把 `resume_count` 加一，不产生第二个 child。因此任何投影（`index.json`、线程 detail 的
+`child_ids`、`GET /v1/child-runs`）都必须先按 `child_id` 折叠到最新一行再计数或列项；直接映射原始
+日志会让同一个 child 按状态数重复出现。折叠规则统一由 `ark_ports::latest_child_runs` 提供。
+
 子代理完成收件箱不另建可变真源：它从父线程 `events.jsonl` 的 `child_completed` 与
 `child_completion_acknowledged` 事件投影。后者只有父回合成功结束后追加，因此确认写入失败会自然保留
 下一回合的重投递机会。

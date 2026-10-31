@@ -98,13 +98,12 @@ fn require_parent(query: &ChildRunsQuery) -> Result<ThreadId, ApiError> {
 }
 
 /// Fold append-only records to the latest row per child, newest first.
+///
+/// The fold itself is `ark_ports::latest_child_runs`, the one rule every
+/// projection of `children/runs.jsonl` shares; only the list ordering is local
+/// to this route.
 fn fold_latest(records: Vec<ChildRunRecord>) -> Vec<ChildRunRecord> {
-    let mut latest: std::collections::HashMap<ChildId, ChildRunRecord> =
-        std::collections::HashMap::new();
-    for record in records {
-        latest.insert(record.child_id, record);
-    }
-    let mut folded: Vec<ChildRunRecord> = latest.into_values().collect();
+    let mut folded = ark_ports::latest_child_runs(records);
     // Newest first, with the id as a tie-break so the order is stable instead of
     // depending on hash iteration.
     folded.sort_by(|a, b| {

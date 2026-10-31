@@ -118,11 +118,21 @@ pub(crate) async fn load_detail(
             .replay_child_completion_events(thread_id)
             .await?,
     );
+    // `children/runs.jsonl` is append-only, so one child owns a row per status
+    // change (`queued`, `running`, the terminal row, plus one row per resume).
+    // Mapping the raw log straight to ids listed the same child once per
+    // transition. Fold first: this is the same latest-row-per-child rule the
+    // derived `children/index.json` and `GET /v1/child-runs` already apply.
     let child_ids = state
         .store
         .list_child_runs(thread_id)
         .await
-        .map(|records| records.into_iter().map(|record| record.child_id).collect())
+        .map(|records| {
+            ark_ports::latest_child_runs(records)
+                .into_iter()
+                .map(|record| record.child_id)
+                .collect()
+        })
         .unwrap_or_default();
     let mut summary = summary_of(&meta);
     summary.last_seq = state.store.highest_seq(thread_id).await.ok();

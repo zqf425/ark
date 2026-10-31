@@ -37,7 +37,7 @@ pub use services::{
     ConfigView, CredentialService, FileService, KvService, LogService, MetricService,
     NotifyService, TraceService,
 };
-pub use store::{ChildRunRecord, SessionStore, SubscribeTicket, ThreadMeta};
+pub use store::{latest_child_runs, ChildRunRecord, SessionStore, SubscribeTicket, ThreadMeta};
 pub use subagent::{
     status as child_status, stop_reason, CancelHandle, SteerHandle, SubagentOutcome,
     SubagentPolicy, SubagentPolicySource, SubagentRegistry, SubagentRequest, SubagentRunner,

@@ -103,6 +103,34 @@ impl ChildRunRecord {
     }
 }
 
+/// Latest record per child, in order of first appearance.
+///
+/// `children/runs.jsonl` is append-only, so one child legitimately owns several
+/// rows: `queued`, `running`, and the terminal row, plus one row per `resume`
+/// (which bumps `resume_count` instead of creating a second child). Every
+/// projection must therefore fold before it counts or lists children — a raw
+/// `SessionStore::list_child_runs` result has one row per **status change**, not
+/// per child, and mapping it straight to a list multiplies the same child id.
+///
+/// The fold keeps the last row seen for an id (the log is ordered, so that is
+/// the newest state) and preserves first-appearance order so a UI list does not
+/// jump between refreshes.
+pub fn latest_child_runs(records: impl IntoIterator<Item = ChildRunRecord>) -> Vec<ChildRunRecord> {
+    let mut order: Vec<ChildId> = Vec::new();
+    let mut latest: std::collections::HashMap<ChildId, ChildRunRecord> =
+        std::collections::HashMap::new();
+    for record in records {
+        if !latest.contains_key(&record.child_id) {
+            order.push(record.child_id);
+        }
+        latest.insert(record.child_id, record);
+    }
+    order
+        .into_iter()
+        .filter_map(|id| latest.remove(&id))
+        .collect()
+}
+
 /// Result of the atomic "snapshot then subscribe" operation.
 pub struct SubscribeTicket {
     pub backlog: Vec<RuntimeEvent>,
@@ -204,4 +232,66 @@ pub trait SessionStore: Send + Sync {
     /// rebuilding the derived index — an atomic temp-and-rename, never an
     /// in-place truncation.
     async fn delete_child_run(&self, parent: ThreadId, child: ChildId) -> Result<bool>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(parent: ThreadId, child: ChildId, status: &str) -> ChildRunRecord {
+        let mut record = ChildRunRecord::queued(child, parent, TurnId::new(), "scan", Utc::now());
+        record.status = status.to_string();
+        record
+    }
+
+    #[test]
+    fn folding_a_status_transition_sequence_yields_one_row_per_child() {
+        // The regression this exists for: a single delegated child that went
+        // queued -> running -> completed produced three `child_ids` entries.
+        let parent = ThreadId::new();
+        let child = ChildId::new();
+        let folded = latest_child_runs(vec![
+            record(parent, child, "queued"),
+            record(parent, child, "running"),
+            record(parent, child, "completed"),
+        ]);
+        assert_eq!(folded.len(), 1);
+        assert_eq!(folded[0].child_id, child);
+        assert_eq!(folded[0].status, "completed", "the newest row wins");
+    }
+
+    #[test]
+    fn a_resume_keeps_one_child_and_the_last_row_wins() {
+        // `resume` appends a new row for the same child instead of creating a
+        // second one, so the fold must not report the retry as a duplicate.
+        let parent = ThreadId::new();
+        let child = ChildId::new();
+        let mut resumed = record(parent, child, "completed");
+        resumed.resume_count = Some(1);
+        // The rows that follow a resume are cloned from the resumed record, so
+        // the count survives to the row that actually wins the fold.
+        let mut running = record(parent, child, "running");
+        running.resume_count = Some(1);
+        let folded = latest_child_runs(vec![record(parent, child, "failed"), resumed, running]);
+        assert_eq!(folded.len(), 1);
+        assert_eq!(folded[0].status, "running");
+        assert_eq!(folded[0].resume_count, Some(1));
+    }
+
+    #[test]
+    fn distinct_children_keep_their_first_appearance_order() {
+        let parent = ThreadId::new();
+        let first = ChildId::new();
+        let second = ChildId::new();
+        let folded = latest_child_runs(vec![
+            record(parent, first, "queued"),
+            record(parent, second, "queued"),
+            record(parent, first, "completed"),
+        ]);
+        assert_eq!(
+            folded.iter().map(|r| r.child_id).collect::<Vec<_>>(),
+            vec![first, second],
+            "the list must not reorder between refreshes"
+        );
+    }
 }
