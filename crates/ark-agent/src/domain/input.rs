@@ -47,6 +47,24 @@ impl ApprovalAsk {
     }
 }
 
+/// A `request_user_input` call intercepted before dispatch: the prompt was
+/// already extracted from the arguments, so the step can emit `Action::AskUser`
+/// without re-parsing JSON.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UserInputAsk {
+    pub call: ToolCallRequest,
+    pub prompt: String,
+}
+
+impl UserInputAsk {
+    pub fn new(call: ToolCallRequest, prompt: impl Into<String>) -> Self {
+        Self {
+            call,
+            prompt: prompt.into(),
+        }
+    }
+}
+
 /// The event that moves the state machine.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputKind {
@@ -80,6 +98,11 @@ pub enum InputKind {
         /// Repeat counters aligned with `pending_dispatch`.
         repeats: Vec<u32>,
     },
+    /// A user-input gate was answered; the answer becomes the tool result.
+    UserInputResolved {
+        call: ToolCallRequest,
+        answer: String,
+    },
     /// Compaction finished.
     CompactionSettled { removed_items: u32 },
     /// Interrupt requested from outside the loop.
@@ -95,6 +118,8 @@ pub struct TurnInput {
     /// Calls that must pass the approval gate before they may run. Empty means
     /// "nothing to ask": the step will dispatch directly.
     pub approvals: Vec<ApprovalAsk>,
+    /// `request_user_input` calls intercepted before dispatch.
+    pub user_inputs: Vec<UserInputAsk>,
 }
 
 impl TurnInput {
@@ -104,11 +129,17 @@ impl TurnInput {
             progress,
             kind,
             approvals: Vec::new(),
+            user_inputs: Vec::new(),
         }
     }
 
     pub fn with_approvals(mut self, approvals: Vec<ApprovalAsk>) -> Self {
         self.approvals = approvals;
+        self
+    }
+
+    pub fn with_user_inputs(mut self, user_inputs: Vec<UserInputAsk>) -> Self {
+        self.user_inputs = user_inputs;
         self
     }
 }
@@ -153,5 +184,14 @@ mod tests {
             .with_approvals(vec![ApprovalAsk::new(call, "run it")]);
         assert_eq!(input.approvals.len(), 1);
         assert_eq!(input.approvals[0].summary, "run it");
+    }
+
+    #[test]
+    fn user_inputs_can_be_attached() {
+        let call = ToolCallRequest::new("c1", "request_user_input", serde_json::json!({}));
+        let input = TurnInput::new(TurnLimits::tiny(), Progress::default(), InputKind::Start)
+            .with_user_inputs(vec![UserInputAsk::new(call, "which branch?")]);
+        assert_eq!(input.user_inputs.len(), 1);
+        assert_eq!(input.user_inputs[0].prompt, "which branch?");
     }
 }

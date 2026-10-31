@@ -329,9 +329,18 @@ mod tests {
         let registry = registry();
         assert_eq!(
             registry.names(),
-            vec!["bash", "edit", "find", "grep", "ls", "read", "write"]
+            vec![
+                "bash",
+                "edit",
+                "find",
+                "grep",
+                "ls",
+                "read",
+                "request_user_input",
+                "write",
+            ]
         );
-        assert_eq!(registry.version(), 7);
+        assert_eq!(registry.version(), 8);
     }
 
     #[test]
@@ -340,7 +349,7 @@ mod tests {
         registry.register_all(builtins()).unwrap();
         let err = registry.register_all(builtins()).unwrap_err();
         assert!(err.message.contains("already registered"));
-        assert_eq!(registry.version(), 7, "a failed register does not bump");
+        assert_eq!(registry.version(), 8, "a failed register does not bump");
     }
 
     #[test]
@@ -360,7 +369,7 @@ mod tests {
             .iter()
             .filter_map(|schema| schema["name"].as_str().map(str::to_string))
             .collect();
-        assert_eq!(names.len(), 7);
+        assert_eq!(names.len(), 8);
         assert!(names.contains(&"read".to_string()));
     }
 
@@ -443,8 +452,8 @@ mod tests {
     fn port_view_exposes_the_same_catalogue() {
         let registry = Arc::new(registry());
         let port = registry.port();
-        assert_eq!(port.names().len(), 7);
-        assert_eq!(port.version(), 7);
-        assert_eq!(port.schemas().len(), 7);
+        assert_eq!(port.names().len(), 8);
+        assert_eq!(port.version(), 8);
+        assert_eq!(port.schemas().len(), 8);
     }
 }

@@ -16,6 +16,8 @@
 - 真实路径比较在两侧统一移除 Windows verbatim 前缀、规范分隔符并忽略大小写，因此 `\\?\` 根与普通 Windows 路径是同一工作区。
 - 文件变更按路径串行、不同路径可并行；所有输出走统一 UTF-8 安全截断。
 - `delegate_task` 只消费 `SubagentRunner` 端口，子任务工具集不含它。
+- `request_user_input` 是无法独立执行的门面工具：schema 为 `{"prompt": string, required}`，
+  `execute` 返回结构化错误；生产执行路径永远不会走到它，因为 agent 在派发前拦截该调用并交给用户输入 gate。
 
 ## 验证
 

@@ -6,7 +6,7 @@
 use super::*;
 
 use crate::exec::{ApprovalReply, MapToolRunner};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Gate double that tracks its live registrations, mirroring what an HTTP
 /// broker exposes, so tests can assert a dropped future left nothing pending.
@@ -195,4 +195,147 @@ async fn user_input_append_failure_drops_the_prepared_registration() {
 
     assert_eq!(error.code, ark_common::ArkErrorCode::InternalError);
     assert_eq!(gates.pending_count(), 0);
+}
+
+/// Model that answers the first round with one tool call, then stops.
+struct OnceToolModel {
+    tool: &'static str,
+    arguments: serde_json::Value,
+    called: AtomicBool,
+}
+
+impl OnceToolModel {
+    fn new(tool: &'static str, arguments: serde_json::Value) -> Self {
+        Self {
+            tool,
+            arguments,
+            called: AtomicBool::new(false),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ModelClient for OnceToolModel {
+    fn provider_id(&self) -> &str {
+        "test"
+    }
+
+    fn model(&self) -> &str {
+        "test"
+    }
+
+    async fn stream(
+        &self,
+        _request: ModelRequest,
+        _sink: mpsc::Sender<ModelChunk>,
+    ) -> Result<ModelResponse> {
+        if self.called.swap(true, Ordering::SeqCst) {
+            return Ok(ModelResponse::default());
+        }
+        Ok(ModelResponse {
+            text: String::new(),
+            tool_calls: vec![(
+                "call-1".to_string(),
+                self.tool.to_string(),
+                self.arguments.clone(),
+            )],
+            usage: Usage::default(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn request_user_input_full_chain_registers_answers_and_backfills() {
+    let gates = Arc::new(TrackingGates::default());
+    let events = crate::exec::TurnEvents::new(ThreadId::new(), TurnId::new());
+    let writer = Arc::new(MemoryWriter::for_turn(events));
+    let mut reactor = Reactor::new(ReactorConfig {
+        model: Arc::new(OnceToolModel::new(
+            "request_user_input",
+            serde_json::json!({ "prompt": "which branch?" }),
+        )),
+        tools: Arc::new(MapToolRunner::new().failing_unknown()),
+        writer: Arc::clone(&writer) as Arc<dyn SessionWriter>,
+        gates: Arc::clone(&gates) as Arc<dyn GateBroker>,
+        sandbox: Arc::new(ReadOnlySandbox),
+        events,
+        cancel: CancelToken::new(),
+        seed: ModelSeed::default(),
+        machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+        chunk_buffer: 1,
+    });
+    reactor.push_user("hi");
+
+    let outcome = reactor.run().await.unwrap();
+
+    // The gate registered, was observed, and drained after the answer.
+    assert_eq!(outcome, TurnOutcome::Completed);
+    assert_eq!(gates.pending_count(), 0);
+    let recorded = writer.recorded();
+    let requested = recorded
+        .iter()
+        .find_map(|event| match event {
+            RuntimeEvent::UserInputRequested { prompt, .. } => Some(prompt.clone()),
+            _ => None,
+        })
+        .expect("user_input_requested event");
+    assert_eq!(requested, "which branch?");
+    assert!(recorded
+        .iter()
+        .any(|event| matches!(event, RuntimeEvent::UserInputResolved { .. })));
+    // The answer travels back to the model as the tool result.
+    let tool_message = reactor
+        .history()
+        .iter()
+        .find(|message| message.role == ModelRole::Tool)
+        .expect("tool result message");
+    assert_eq!(tool_message.content, "answered");
+    assert_eq!(tool_message.tool_call_id.as_deref(), Some("call-1"));
+}
+
+#[tokio::test]
+async fn plain_bash_call_still_dispatches_normally() {
+    let gates = Arc::new(TrackingGates::default());
+    let events = crate::exec::TurnEvents::new(ThreadId::new(), TurnId::new());
+    let writer = Arc::new(MemoryWriter::for_turn(events));
+    let mut reactor = Reactor::new(ReactorConfig {
+        model: Arc::new(OnceToolModel::new(
+            "bash",
+            serde_json::json!({ "command": "echo hi" }),
+        )),
+        tools: Arc::new(MapToolRunner::new().with("bash", ToolOutput::ok("hi"))),
+        writer: Arc::clone(&writer) as Arc<dyn SessionWriter>,
+        gates: Arc::clone(&gates) as Arc<dyn GateBroker>,
+        sandbox: Arc::new(ReadOnlySandbox),
+        events,
+        cancel: CancelToken::new(),
+        seed: ModelSeed::default(),
+        machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+        chunk_buffer: 1,
+    });
+    reactor.push_user("hi");
+
+    let outcome = reactor.run().await.unwrap();
+
+    assert_eq!(outcome, TurnOutcome::Completed);
+    // No gate was ever touched by a plain tool call.
+    assert_eq!(gates.pending_count(), 0);
+    assert!(!writer
+        .recorded()
+        .iter()
+        .any(|event| matches!(event, RuntimeEvent::UserInputRequested { .. })));
+    let tool_message = reactor
+        .history()
+        .iter()
+        .find(|message| message.role == ModelRole::Tool)
+        .expect("tool result message");
+    assert_eq!(tool_message.content, "hi");
+    // The assistant turn keeps the structured tool_calls instead of inline text.
+    let assistant = reactor
+        .history()
+        .iter()
+        .find(|message| message.role == ModelRole::Assistant)
+        .expect("assistant message");
+    assert_eq!(assistant.tool_calls.len(), 1);
+    assert_eq!(assistant.tool_calls[0].name, "bash");
 }

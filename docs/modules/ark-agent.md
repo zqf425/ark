@@ -19,6 +19,9 @@
 
 - 子代理不是第二个 agent：它是同一 `Reactor` 驱动的独立 child turn。
 - 工具沙箱决策只在派发前计算一次，执行器仅消费不可变结果。
+- `request_user_input` 在 settle 阶段即被拦截为 `Action::AskUser`（契约参数 `{"prompt": string}`），
+  不进入分派计划；答案经 `UserInputResolved` 回填为该调用的 tool result。助手轮次的工具调用使用
+  `ModelMessage::tool_calls` 结构化字段进入历史，不再渲染进正文文本。
 - 预算、工具风暴、并发安全和历史裁剪属于独立 policy/context 模块，不得回流为巨型 reactor。
 - 工具风暴按工具名与规范化参数组成的签名计数；跨轮已执行次数与同一 `DispatchPlan` 内先前出现次数共同计入上限。被抑制调用必须以合成结果配对 `ToolCallStarted`/`ToolCallFinished`，并写入 `ToolStormSuppressed` 事件。
 - 每轮模型可见历史必须已经落盘；每个工具调用必须与终态结果配对。

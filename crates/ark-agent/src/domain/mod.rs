@@ -8,7 +8,7 @@ pub mod state;
 pub mod tool;
 
 pub use action::{Action, DispatchPlan, StormNote, SyntheticResult, TurnOutcome};
-pub use input::{ApprovalAsk, InputKind, Progress, TurnInput};
+pub use input::{ApprovalAsk, InputKind, Progress, TurnInput, UserInputAsk};
 pub use limits::TurnLimits;
 pub use state::TurnState;
 pub use tool::{ToolCallRequest, ToolExecution};

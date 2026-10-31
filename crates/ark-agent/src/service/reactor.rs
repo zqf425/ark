@@ -19,13 +19,13 @@ use ark_common::{ArkError, ItemId, Result, Usage};
 use ark_contract::{item::ItemKind, ThreadItem};
 use ark_ports::{
     ModelChunk, ModelClient, ModelMessage, ModelRequest, ModelResponse, ModelRole, SandboxDecision,
-    SandboxPolicy, ToolArgs, ToolOutput,
+    SandboxPolicy, ToolArgs, ToolCallRef, ToolOutput,
 };
 use tokio::sync::mpsc;
 
 use crate::context::{HistoryHygiene, TokenEstimator};
 use crate::domain::action::{Action, DispatchPlan, SyntheticResult, TurnOutcome};
-use crate::domain::input::{ApprovalAsk, InputKind, TurnInput};
+use crate::domain::input::{ApprovalAsk, InputKind, TurnInput, UserInputAsk};
 use crate::domain::state::TurnState;
 use crate::domain::tool::{ToolCallRequest, ToolExecution};
 use crate::exec::cancel::CancelToken;
@@ -450,13 +450,21 @@ impl Reactor {
     async fn settle_model(&mut self, response: ModelResponse) -> Result<TurnInput> {
         let usage = response.usage.clone();
         let mut calls = Vec::new();
+        let mut user_inputs = Vec::new();
         for (call_id, tool, arguments) in response.tool_calls.clone() {
             // The policy is consulted **once**, here, and the decision travels
             // with the call. The executor consumes it instead of asking again,
             // which is what makes an approved `bash` actually runnable
             // (design §7.3, P1-5).
             let decision = self.sandbox.decide(&tool, &ToolArgs(arguments.clone()));
-            calls.push(ToolCallRequest::new(call_id, tool, arguments).with_sandbox(decision));
+            let call = ToolCallRequest::new(call_id, tool, arguments).with_sandbox(decision);
+            // The user-input tool is intercepted before the dispatch plan is
+            // built: it answers by asking a human, never by executing.
+            if call.tool == USER_INPUT_TOOL {
+                let prompt = extract_user_input_prompt(&call.arguments);
+                user_inputs.push(UserInputAsk::new(call.clone(), prompt));
+            }
+            calls.push(call);
         }
         self.record_assistant_turn(&response.text, &calls);
         self.machine.note_usage(&usage);
@@ -476,11 +484,13 @@ impl Reactor {
                 repeats,
                 usage,
             })
-            .with_approvals(approvals))
+            .with_approvals(approvals)
+            .with_user_inputs(user_inputs))
     }
 
-    /// Record what the model said. `ModelMessage` has no `tool_calls` field, so
-    /// the calls are rendered into the assistant text (contract gap, reported).
+    /// Record what the model said. Tool calls ride on the structured
+    /// `ModelMessage::tool_calls` field so replayed history stays provider-legal;
+    /// the free-text rendering was only ever a placeholder for the missing field.
     fn record_assistant_turn(&mut self, text: &str, calls: &[ToolCallRequest]) {
         if calls.is_empty() {
             if !text.is_empty() {
@@ -488,14 +498,16 @@ impl Reactor {
             }
             return;
         }
-        let rendered: Vec<String> = calls
+        let refs = calls
             .iter()
-            .map(|call| format!("[{}({})]", call.tool, call.arguments))
+            .map(|call| ToolCallRef {
+                call_id: call.call_id.clone(),
+                name: call.tool.clone(),
+                arguments: call.arguments.clone(),
+            })
             .collect();
-        self.history.push(ModelMessage::assistant(format!(
-            "{text}\n{}",
-            rendered.join(" ")
-        )));
+        self.history
+            .push(ModelMessage::assistant_with_tool_calls(text, refs));
     }
 
     /// Calls that need a human decision.
@@ -633,12 +645,13 @@ impl Reactor {
                 &call.tool,
                 true,
                 0,
-                answer,
+                answer.clone(),
                 None,
             ))
             .await?;
-        Ok(self.input_of(InputKind::ToolsSettled {
-            executions: vec![execution],
+        Ok(self.input_of(InputKind::UserInputResolved {
+            call: call.clone(),
+            answer,
         }))
     }
 
@@ -867,6 +880,17 @@ fn summarize(call: &ToolCallRequest) -> String {
     let arguments = call.arguments.to_string();
     let args = ark_common::text::truncate_utf8(&arguments, 240);
     format!("{} {args}", call.tool)
+}
+
+/// The question shown to the user. Contract: `{"prompt": string}`; `question`
+/// is accepted as a legacy alias so a model that guessed the field name still
+/// reaches the gate instead of surfacing an empty prompt.
+fn extract_user_input_prompt(arguments: &serde_json::Value) -> String {
+    ["prompt", "question"]
+        .iter()
+        .find_map(|key| arguments.get(key).and_then(|value| value.as_str()))
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// Turn one raw tool result into a recorded execution.

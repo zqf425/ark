@@ -29,6 +29,9 @@ pub fn step(state: TurnState, input: &TurnInput) -> Action {
         }
         (TurnState::DispatchingTools, InputKind::ToolsSettled { .. }) => after_tools(input),
         (TurnState::AwaitingApproval, InputKind::GateResolved { .. }) => gate_resolved(input),
+        (TurnState::AwaitingUserInput, InputKind::UserInputResolved { .. }) => {
+            after_user_input(input)
+        }
         (TurnState::Compacting, InputKind::CompactionSettled { .. }) => after_compaction(input),
         (state, kind) => invalid(state, kind),
     }
@@ -51,6 +54,7 @@ fn kind_name(kind: &InputKind) -> &'static str {
         InputKind::ModelFailed { .. } => "model_failed",
         InputKind::ToolsSettled { .. } => "tools_settled",
         InputKind::GateResolved { .. } => "gate_resolved",
+        InputKind::UserInputResolved { .. } => "user_input_resolved",
         InputKind::CompactionSettled { .. } => "compaction_settled",
         InputKind::Interrupt { .. } => "interrupt",
     }
@@ -97,6 +101,14 @@ fn settle_model(input: &TurnInput) -> Action {
     };
     if tool_calls.is_empty() {
         return finish(TurnOutcome::Completed);
+    }
+    // `request_user_input` never dispatches: the reactor intercepted it before
+    // the plan was built, so the first ask blocks the turn on the human.
+    if let Some(ask) = input.user_inputs.first() {
+        return Action::AskUser {
+            call: ask.call.clone(),
+            prompt: ask.prompt.clone(),
+        };
     }
     let first_gate = input.approvals.first().cloned();
     match first_gate {
@@ -185,6 +197,12 @@ fn after_tools(input: &TurnInput) -> Action {
     call_model(input)
 }
 
+/// The user answered: the answer already became the tool result, so the turn
+/// simply continues with the next model round.
+fn after_user_input(input: &TurnInput) -> Action {
+    call_model(input)
+}
+
 fn after_compaction(input: &TurnInput) -> Action {
     let mut next = input.clone();
     next.progress.prompt_estimate = 0;
@@ -225,6 +243,45 @@ mod tests {
             repeats,
             usage: Usage::default(),
         }
+    }
+
+    #[test]
+    fn intercepted_user_input_becomes_ask_user_with_the_prompt() {
+        let ask = crate::domain::input::UserInputAsk::new(
+            ToolCallRequest::new("c1", "request_user_input", serde_json::json!({})),
+            "which branch?",
+        );
+        let mut turn = input(Progress::default(), settled(vec![ask.call.clone()]));
+        turn = turn.with_user_inputs(vec![ask]);
+        let action = step(TurnState::AwaitingModel, &turn);
+        assert_eq!(
+            action,
+            Action::AskUser {
+                call: ToolCallRequest::new("c1", "request_user_input", serde_json::json!({})),
+                prompt: "which branch?".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn user_input_resolved_continues_with_the_next_model_round() {
+        let call = ToolCallRequest::new("c1", "request_user_input", serde_json::json!({}));
+        let turn = input(
+            Progress::default(),
+            InputKind::UserInputResolved {
+                call: call.clone(),
+                answer: "main".into(),
+            },
+        );
+        let action = step(TurnState::AwaitingUserInput, &turn);
+        assert_eq!(action, Action::CallModel { round: 1 });
+    }
+
+    #[test]
+    fn plain_tools_are_not_blocked_by_the_user_input_gate() {
+        let turn = input(Progress::default(), settled(vec![call("c1", "bash", "a")]));
+        let action = step(TurnState::AwaitingModel, &turn);
+        assert!(matches!(action, Action::Dispatch(_)), "got {action:?}");
     }
 
     #[test]

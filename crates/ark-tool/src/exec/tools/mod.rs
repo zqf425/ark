@@ -13,6 +13,7 @@ pub mod bash;
 pub mod delegate;
 pub mod list;
 pub mod read;
+pub mod request_user_input;
 pub mod search;
 pub mod write;
 
@@ -20,6 +21,7 @@ pub use bash::BashTool;
 pub use delegate::DelegateTaskTool;
 pub use list::{FindTool, LsTool};
 pub use read::ReadTool;
+pub use request_user_input::RequestUserInputTool;
 pub use search::GrepTool;
 pub use write::{EditTool, WriteTool};
 
@@ -39,6 +41,7 @@ pub fn builtins() -> Vec<Box<dyn Tool>> {
         Box::new(GrepTool),
         Box::new(LsTool),
         Box::new(ReadTool),
+        Box::new(RequestUserInputTool),
         Box::new(WriteTool),
     ]
 }
