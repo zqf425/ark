@@ -30,19 +30,19 @@ use crate::{
     HealthResponse, ItemStatus, LlmRound, LlmRoundError, LlmRoundsResponse, McpServerEntry,
     McpServerListResponse, McpServerTestResponse, McpServerView, McpTransportKind,
     MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, PanelEntry, PendingApprovalView,
-    PendingUserInputView, PlanView, ProviderEntry, ProviderListResponse,
-    ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
-    ProviderModelSummary, ProviderTestRequest, ProviderTestResponse, ProviderView,
-    ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, ReviewRequest,
-    RewindRequest, RewindResponse, RuntimeConfigView, RuntimeEvent, RuntimeInfo,
-    SessionResumeResponse, SkillDiagnostics, SkillLoadWarning, SkillSource, SkillSummary,
-    SteerChildRequest, SubagentSettings, SwitchWorkspaceRequest, TerminalEntriesResponse,
-    TerminalEntry, ThreadDetail, ThreadExport, ThreadItem, ThreadListQuery, ThreadRuntimeSettings,
-    ThreadRuntimeSnapshot, ThreadSkillsResponse, ThreadSummary, ThreadUsageResponse, TodoEntry,
-    TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary, UiCatalog,
-    UpdateMemoryRequest, UpdateThreadRequest, UsageResponse, WorkspaceChange,
-    WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile,
-    WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
+    PendingUserInputView, PlanView, PluginDiagnosticView, PluginEntry, PluginHostReport,
+    ProviderEntry, ProviderListResponse, ProviderModelCatalogConnection,
+    ProviderModelCatalogRequest, ProviderModelCatalogResponse, ProviderModelSummary,
+    ProviderTestRequest, ProviderTestResponse, ProviderView, ResolveApprovalRequest,
+    ResolveUserInputRequest, ResumeChildRequest, ReviewRequest, RewindRequest, RewindResponse,
+    RuntimeConfigView, RuntimeEvent, RuntimeInfo, SessionResumeResponse, SkillDiagnostics,
+    SkillLoadWarning, SkillSource, SkillSummary, SteerChildRequest, SubagentSettings,
+    SwitchWorkspaceRequest, TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadExport,
+    ThreadItem, ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot,
+    ThreadSkillsResponse, ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest,
+    TuningSettings, TurnRequest, TurnSummary, UiCatalog, UpdateMemoryRequest, UpdateThreadRequest,
+    UsageResponse, WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
+    WorkspaceDiffFile, WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
 };
 use ark_common::{
     ArkErrorCode, ArkErrorPayload, AttachmentId, ChildId, ItemId, ThreadId, TurnId, Usage,
@@ -171,6 +171,9 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     SkillDiagnostics::export_all_to(dir)?;
     ThreadSkillsResponse::export_all_to(dir)?;
     FieldPath::export_all_to(dir)?;
+    PluginEntry::export_all_to(dir)?;
+    PluginDiagnosticView::export_all_to(dir)?;
+    PluginHostReport::export_all_to(dir)?;
 
     Ok(())
 }
@@ -300,6 +303,9 @@ const ROOT_NAMES: &[&str] = &[
     "McpServerView",
     "McpServerListResponse",
     "McpServerTestResponse",
+    "PluginEntry",
+    "PluginDiagnosticView",
+    "PluginHostReport",
     "SkillSummary",
     "SkillSource",
     "SkillLoadWarning",

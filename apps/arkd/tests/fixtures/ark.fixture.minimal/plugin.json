@@ -1,0 +1,24 @@
+{
+  "id": "ark.fixture.minimal",
+  "version": "1.0.0",
+  "kind": "tool",
+  "capabilities": ["tool", "ui_panel"],
+  "mcp": { "expose": ["greet"] },
+  "ui": {
+    "panels": [
+      {
+        "id": "ark.fixture.minimal.panel",
+        "slot": "right",
+        "title": "Fixture"
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "greet",
+      "description": "returns a fixed greeting",
+      "schema": { "type": "object", "properties": {} },
+      "action": { "kind": "static", "content": { "text": "hello from fixture" } }
+    }
+  ]
+}

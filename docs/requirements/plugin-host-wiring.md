@@ -1,7 +1,11 @@
 # 插件宿主接线（ark-plugin / ark-http 接入 arkd）
 
-> 状态：`ark-plugin` 与 `ark-http` 已实现但未接入组合根，全仓无任何宿主装配。本文档为接线需求
-> 设计提案；批准前不实施，批准后其"计划"节即构成已批准计划。
+> 状态：已实施。`ark-plugin` 目录插件源、`ark-mcp` 宿主工具适配、`arkd` 组合根装配与
+> `GET /v1/runtime/plugins` 诊断接口均已落地，验收场景由 `crates/ark-plugin/src/service/host/tests.rs`
+> 与 `apps/arkd/src/plugin_host/tests.rs` 覆盖。
+>
+> 首版取舍（已裁定）：插件工具并入现有 `mcp` 工具组；不做 per-plugin enable/disable；不做热重载，
+> 启动时装载一次；插件不获得原始 `EventSink`（`HostHandles.events` 保持 `None`）。
 
 ## 当前实现
 

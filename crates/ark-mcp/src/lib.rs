@@ -44,6 +44,6 @@ pub use domain::{
 };
 pub use service::{
     CallContext, ExposureHandle, HttpTransportConfig, McpBus, McpHandler, McpServerRegistry,
-    McpToolAdapter, McpTransport, RegisteredTool, SseTransport, StdioTransport,
-    StreamableHttpTransport, ToolRegistry, TransportKind,
+    McpToolAdapter, McpTransport, PluginTool, RegisteredTool, SseTransport, StdioTransport,
+    StreamableHttpTransport, ToolRegistry, TransportKind, HOST_CALLER,
 };

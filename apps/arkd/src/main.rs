@@ -11,6 +11,7 @@ mod cli;
 mod load_skill;
 mod memory_seed;
 mod model;
+mod plugin_host;
 mod wiring;
 mod workspace;
 
@@ -70,6 +71,11 @@ async fn serve(args: ServeArgs) -> ExitCode {
         wiring.store.data_paths().root().display()
     );
     println!("arkd usage turns {}", wiring.usage.turns());
+    println!("arkd plugins dir {}", wiring.plugins.root().display());
+    println!(
+        "arkd plugins loaded {}",
+        wiring.plugins.host().report().loaded.join(",")
+    );
 
     match handle.serve().await {
         Ok(()) => {

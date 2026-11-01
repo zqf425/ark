@@ -51,6 +51,11 @@ pub struct Wiring {
     pub config: Arc<ConfigStore>,
     pub usage: Arc<UsageRecorder>,
     pub model_label: String,
+    /// The local plugin host, kept alive for the process lifetime.
+    ///
+    /// Dropping it would run every plugin's `Registration::drop`, silently
+    /// unregistering the pages, panels and tools the runtime just published.
+    pub plugins: crate::plugin_host::PluginRuntime,
 }
 
 /// Load `data/config.json` for startup, keeping the three outcomes apart.
@@ -139,6 +144,22 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     }
     tracing::info!("registered built-in UI catalog");
 
+    // ---- local plugins (design §7.7) ----
+    //
+    // One MCP bus and one governed HTTP egress serve both plugins and external
+    // MCP servers. The host registers plugin tools on the bus while loading, and
+    // the tool group below merges them with the external adapters, so there is
+    // still exactly one catalog.
+    //
+    // The runtime must outlive assembly: dropping it runs every `Registration`'s
+    // `Drop`, which would unregister the pages, panels and tools it published.
+    //
+    // Plugins get no `EventSink`: the platform handle exposes the raw sink, so
+    // handing it over would let a plugin append arbitrary events to any thread.
+    // Nothing in this version needs it, so the field stays `None`.
+    let plugin_mcp = Arc::new(ark_mcp::McpBus::default());
+    let plugins = crate::plugin_host::assemble(&args.data_dir, &ui_bus, Arc::clone(&plugin_mcp))?;
+
     // The provider table is the source of truth for the model client, so a
     // provider added through the GUI takes effect on the next turn instead of
     // requiring a restart. `model_providers` in config.json stays honoured as a
@@ -197,7 +218,13 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         Arc::clone(&delegation) as Arc<dyn ark_ports::SubagentRunner>,
         Arc::clone(&skills),
     )?);
-    tools.replace_group("mcp", mcp.connect_all().await)?;
+    // One `mcp` group: external server adapters plus local plugin tools. Both
+    // families are qualified `<provider>.<tool>`, so a collision is a real
+    // configuration conflict and `replace_group` refuses it rather than letting
+    // one family silently shadow the other.
+    let mut mcp_tools = mcp.connect_all().await;
+    mcp_tools.extend(plugins.tools());
+    tools.replace_group("mcp", mcp_tools)?;
     let tool_runner = Arc::new(RegistryToolRunner::new(
         Arc::clone(&tools),
         Arc::clone(&policy),
@@ -236,7 +263,8 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
             Arc::clone(&tools),
         )))
         .with_memory(Arc::new(MemoryAdapter::new(Arc::clone(&memory))))
-        .with_ui(Arc::clone(&ui_bus) as Arc<dyn ark_ports::UiCapability>);
+        .with_ui(Arc::clone(&ui_bus) as Arc<dyn ark_ports::UiCapability>)
+        .with_plugins(Arc::clone(plugins.host()) as Arc<dyn ark_ports::PluginHostService>);
 
     let state = AppState::new(
         store_port,
@@ -268,6 +296,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         config,
         usage,
         model_label,
+        plugins,
     })
 }
 

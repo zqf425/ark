@@ -32,12 +32,14 @@ pub mod domain;
 pub mod service;
 
 pub use domain::{
-    plan_skips, resolve_order, resolve_within_root, sanitize_relative, Grant, HttpSection,
-    McpSection, PluginId, PluginIdentity, PluginKind, PluginManifest, TopologyErrorKind, Version,
-    VersionReq,
+    plan_local_load, plan_skips, resolve_order, resolve_within_root, sanitize_relative,
+    DirectoryManifest, Grant, HttpSection, IsolationPlan, McpSection, PageDecl, PanelDecl,
+    PluginDrop, PluginId, PluginIdentity, PluginKind, PluginManifest, ToolAction, ToolDecl,
+    TopologyErrorKind, UiSection, Version, VersionReq,
 };
 pub use service::{
-    HostHandles, LoadReport, MemoryPluginDiagnostics, Plugin, PluginContext, PluginDiagnostic,
-    PluginDiagnosticSink, PluginRegistry, Registration, ScopedConfig, ScopedCredentials,
-    ScopedFiles, ScopedKv, ScopedLog, ScopedMetrics, ScopedNotify, ScopedTrace,
+    load_host, scan, DirectoryPlugin, HostHandles, LoadReport, MemoryPluginDiagnostics, Plugin,
+    PluginContext, PluginDiagnostic, PluginDiagnosticSink, PluginHost, PluginRegistry,
+    Registration, ScannedPlugin, ScopedConfig, ScopedCredentials, ScopedFiles, ScopedKv, ScopedLog,
+    ScopedMetrics, ScopedNotify, ScopedTrace, MANIFEST_FILE,
 };

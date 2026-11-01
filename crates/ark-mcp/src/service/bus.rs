@@ -37,6 +37,13 @@ tokio::task_local! {
     static CHAIN: RefCell<Chain>;
 }
 
+/// `caller` reported for a call the runtime makes on the user's behalf.
+///
+/// Plugin ids are lowercase dot-separated labels, so this value can never name a
+/// plugin and cannot be impersonated as one; it exists so a trace shows where a
+/// call entered the bus.
+pub const HOST_CALLER: &str = "host.runtime";
+
 /// Handler used for tools exposed through the port-level API, which carries
 /// specs but no implementation. Calling such a tool is an explicit error, never
 /// a silent success.
@@ -149,6 +156,21 @@ impl McpBus {
                     0
                 })
                 .unwrap_or(0)
+    }
+
+    /// Every registered tool, unfiltered.
+    ///
+    /// This is the host's view, for publishing plugin tools into the model's
+    /// catalogue. It is deliberately not a capability anyone can call with: the
+    /// return value carries no handlers, and dispatch still enforces namespace
+    /// and visibility for every plugin caller.
+    pub fn catalog(&self) -> McpCatalog {
+        let tools = self
+            .registry
+            .lock()
+            .map(|registry| registry.catalog())
+            .unwrap_or_default();
+        McpCatalog { tools }
     }
 
     /// Catalog filtered by what `caller` declared it may consume.
@@ -266,6 +288,55 @@ impl McpBus {
             value.trace_id = ctx.trace_id.clone();
             value
         })
+    }
+
+    /// Host ingress: the agent loop calling a plugin tool on the user's behalf.
+    ///
+    /// This skips only the plugin-to-plugin `mcp.consume` gate, because the
+    /// runtime is not a plugin and has no declaration to make. Everything else
+    /// still applies: the tool must be registered, and depth, cycle and
+    /// deadlock guards run exactly as for a nested call. A plugin therefore
+    /// gains no reach over its peers from being published to the model.
+    pub async fn dispatch_from_host(
+        &self,
+        provider: &str,
+        tool: &str,
+        args: serde_json::Value,
+    ) -> Result<McpCallResult> {
+        let registered = self.lookup(provider, tool)?;
+
+        let mut chain = self.current_chain();
+        chain
+            .enter(provider, tool)
+            .map_err(|err| self.refuse(err))?;
+        let depth = chain.depth();
+        let trace_id = chain
+            .frames()
+            .first()
+            .map(|frame| format!("mcp-{}", frame.plugin_id))
+            .unwrap_or_else(|| "mcp-root".to_string());
+        let frames = chain.trace();
+
+        let ctx = CallContext {
+            // The host is not a plugin id, so it is reported the way the trace
+            // already names a root frame. No plugin can claim this value.
+            caller: HOST_CALLER.to_string(),
+            provider: provider.to_string(),
+            tool: tool.to_string(),
+            trace_id,
+            depth,
+            chain: frames,
+        };
+
+        CHAIN
+            .scope(RefCell::new(chain), async {
+                registered.handler.call(&ctx, args).await
+            })
+            .await
+            .map(|mut value| {
+                value.trace_id = ctx.trace_id.clone();
+                value
+            })
     }
 }
 

@@ -11,7 +11,7 @@
 use ark_common::Result;
 use ark_contract::{
     CreateMemoryRequest, McpServerEntry, McpServerListResponse, McpServerTestResponse,
-    MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, ProviderEntry,
+    MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, PluginHostReport, ProviderEntry,
     ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SkillTurnResolution,
     ThreadSkillsResponse, UpdateMemoryRequest, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
@@ -128,6 +128,19 @@ pub trait MemoryService: Send + Sync {
     fn diagnostics(&self) -> Result<MemoryDiagnosticsResponse>;
 }
 
+/// The local plugin host (design §7.7).
+///
+/// `ark-server` must answer `GET /v1/runtime/plugins` without linking the crate
+/// that loads plugins, so the read side lives behind this trait. There is no
+/// enable/disable or reload entry point: the host loads once at startup, and an
+/// unload is a `ark-plugin` service operation, not a platform route.
+pub trait PluginHostService: Send + Sync {
+    /// Every plugin the host currently serves, plus startup and egress
+    /// diagnostics. Contributions are read from the buses that own them, so a
+    /// page or tool appears only while it is actually resolvable.
+    fn report(&self) -> PluginHostReport;
+}
+
 /// The platform services, as one injectable bundle.
 ///
 /// A field is `Option` so a minimal build (or a test) can serve only some of
@@ -143,6 +156,10 @@ pub struct BaseServices {
     /// The UI catalog. Absent in a build without a UI bus, which makes
     /// `GET /v1/runtime/capabilities` report no pages instead of inventing them.
     pub ui: Option<Arc<dyn UiCapability>>,
+    /// The local plugin host. Absent in a build that loads no plugins, which
+    /// makes `GET /v1/runtime/plugins` report an unavailable service rather
+    /// than an empty, indistinguishable plugin list.
+    pub plugins: Option<Arc<dyn PluginHostService>>,
 }
 
 impl BaseServices {
@@ -177,6 +194,11 @@ impl BaseServices {
 
     pub fn with_ui(mut self, service: Arc<dyn UiCapability>) -> Self {
         self.ui = Some(service);
+        self
+    }
+
+    pub fn with_plugins(mut self, service: Arc<dyn PluginHostService>) -> Self {
+        self.plugins = Some(service);
         self
     }
 }

@@ -215,6 +215,32 @@ impl PluginContext {
         bus.expose_specs(self.plugin_id(), tools)
     }
 
+    /// Publish tool specs *with* in-process handlers under `<plugin_id>.<tool>`.
+    ///
+    /// The same identity check as [`Self::expose_tools`] applies: a handler
+    /// bundle that names another plugin is rejected instead of rewritten.
+    /// `Drop` of the returned handle unregisters every tool in the bundle.
+    pub fn expose_tool_handlers(
+        &self,
+        tools: Vec<(McpToolSpec, Arc<dyn ark_mcp::McpHandler>)>,
+    ) -> Result<ExposureHandle> {
+        let bus = self.mcp_bus.as_ref().ok_or_else(mcp_unavailable)?;
+        for (spec, _) in &tools {
+            if spec.plugin_id != self.plugin_id() {
+                return Err(ArkError::new(
+                    ark_common::ArkErrorCode::Unauthorized,
+                    format!(
+                        "plugin {} cannot expose tools for {}",
+                        self.plugin_id(),
+                        spec.plugin_id
+                    ),
+                )
+                .with_detail("plugin_identity_mismatch"));
+            }
+        }
+        bus.expose_with_handlers(self.plugin_id(), tools)
+    }
+
     /// Declare this plugin's `mcp.expose` / `mcp.consume` lists.
     pub fn declare_mcp(&self, expose: &[String], consume: &[String]) -> Result<()> {
         let bus = self.mcp_bus.as_ref().ok_or_else(mcp_unavailable)?;

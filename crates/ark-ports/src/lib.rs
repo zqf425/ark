@@ -22,8 +22,8 @@ pub use backend::{
     PublishResult, RemoteArtifactRef, RunOutcome, RunPlan,
 };
 pub use base::{
-    BaseServices, McpServerService, MemoryService, ModelEndpoint, ProviderService, SkillService,
-    WorkspaceService,
+    BaseServices, McpServerService, MemoryService, ModelEndpoint, PluginHostService,
+    ProviderService, SkillService, WorkspaceService,
 };
 pub use bus::{
     HeaderMap, HttpCapability, McpCallResult, McpCapability, McpCatalog, McpToolSpec,

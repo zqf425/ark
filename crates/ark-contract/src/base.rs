@@ -9,6 +9,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use crate::capability::Capability;
+
 // ---------------------------------------------------------------------------
 // Long-term memory
 // ---------------------------------------------------------------------------
@@ -517,4 +519,66 @@ pub struct McpServerTestResponse {
     #[ts(as = "f64")]
     pub latency_ms: u64,
     pub message: String,
+}
+
+// ---------------------------------------------------------------------------
+// Plugin host
+// ---------------------------------------------------------------------------
+
+/// One loaded plugin as `GET /v1/runtime/plugins` reports it.
+///
+/// Contributions come from the buses that actually own them (`UiBus` pages and
+/// panels, `McpBus` tools), so this view cannot claim a page or tool the
+/// runtime does not serve.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct PluginEntry {
+    pub id: String,
+    pub version: String,
+    /// `PluginKind` in its snake_case wire spelling.
+    pub kind: String,
+    #[serde(default)]
+    pub capabilities: Vec<Capability>,
+    #[serde(default)]
+    pub pages: Vec<String>,
+    #[serde(default)]
+    pub panels: Vec<String>,
+    /// Qualified tool names, `<plugin_id>.<tool>`.
+    #[serde(default)]
+    pub tools: Vec<String>,
+}
+
+/// One startup diagnostic or audit record.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct PluginDiagnosticView {
+    /// `plugin_loaded`, `plugin_load_failed`, `plugin_skipped`,
+    /// `plugin_manifest_invalid`, `plugin_declaration_mismatch` or `http_denied`.
+    pub kind: String,
+    pub plugin_id: String,
+    #[serde(default)]
+    pub version: String,
+    pub detail: String,
+}
+
+/// `GET /v1/runtime/plugins`.
+///
+/// `failed` and `skipped` mirror the loader's `LoadReport`, so a caller can tell
+/// "the plugin declared something wrong" from "the plugin's `register` failed".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct PluginHostReport {
+    pub plugins: Vec<PluginEntry>,
+    /// Plugins whose `register` returned an error.
+    #[serde(default)]
+    pub failed: Vec<String>,
+    /// Plugins skipped because a dependency never started.
+    #[serde(default)]
+    pub skipped: Vec<String>,
+    /// Startup diagnostics, in load order.
+    #[serde(default)]
+    pub diagnostics: Vec<PluginDiagnosticView>,
+    /// Refused outbound requests (`http_denied`), newest last.
+    #[serde(default)]
+    pub http_denials: Vec<PluginDiagnosticView>,
 }

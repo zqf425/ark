@@ -194,8 +194,11 @@ dependencies = [
  "ark-mcp",
  "ark-ports",
  "ark-ui",
+ "async-trait",
  "serde",
  "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -346,9 +349,11 @@ dependencies = [
  "ark-config",
  "ark-contract",
  "ark-delegation",
+ "ark-http",
  "ark-llm",
  "ark-mcp",
  "ark-obs",
+ "ark-plugin",
  "ark-ports",
  "ark-provider",
  "ark-server",

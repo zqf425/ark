@@ -25,6 +25,8 @@ ark-obs = { workspace = true }
 ark-provider = { workspace = true }
 ark-skills = { workspace = true }
 ark-workspace = { workspace = true }
+ark-http = { workspace = true }
+ark-plugin = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

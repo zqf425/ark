@@ -10,7 +10,7 @@ use axum::Json;
 use serde::Deserialize;
 
 use ark_contract::{
-    McpServerEntry, McpServerListResponse, McpServerTestResponse, ProviderEntry,
+    McpServerEntry, McpServerListResponse, McpServerTestResponse, PluginHostReport, ProviderEntry,
     ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SwitchWorkspaceRequest,
     ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
@@ -302,6 +302,26 @@ pub async fn mcp_test(
 ) -> Result<Json<McpServerTestResponse>, ApiError> {
     let service = state.base.mcp.as_ref().ok_or_else(|| missing("mcp"))?;
     Ok(Json(service.test(&id).await))
+}
+
+// ---------------------------------------------------------------------------
+// Plugins
+// ---------------------------------------------------------------------------
+
+/// `GET /v1/runtime/plugins`.
+///
+/// What the host actually serves, plus startup and egress diagnostics. The
+/// report is read from the buses, so an unloaded plugin cannot leave a page or
+/// tool behind here.
+pub async fn plugins_report(
+    State(state): State<AppState>,
+) -> Result<Json<PluginHostReport>, ApiError> {
+    let service = state
+        .base
+        .plugins
+        .as_ref()
+        .ok_or_else(|| missing("plugin"))?;
+    Ok(Json(service.report()))
 }
 
 #[cfg(test)]

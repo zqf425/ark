@@ -59,6 +59,21 @@ UI catalog 由组合根创建唯一 `UiBus`：授予本构建实际具备的能�
 四个面板，再以 `BaseServices::with_ui` 注入 server。注册句柄必须 `forget()` 活到进程结束，否则 drop 即
 撤销路由。组合根不得再维护第二份页面或能力清单。
 
+本地插件同样走这唯一的 `UiBus`。`plugin_host::assemble` 在 UI 段之后、`tools.replace_group("mcp", ...)`
+之前构造一组共享实例：一个 `HttpBus`（默认 `HttpPolicy`、`CredentialVault` 与容量受限的
+`MemoryDiagnostics`）、一个独立的 `ark_mcp::McpBus` 和一个 `PluginHost`（根为 `<data-dir>/plugins`）。
+装配只做构造与转发，不按 `plugin_id` 分支；装载策略、隔离与 fail-closed 撤权都在 `ark-plugin` 内部。
+`HostHandles.events` 恒为 `None`：平台句柄暴露原始事件 sink，交给插件就能向任意 thread 追加事件，
+本版不需要这个能力，所以它不存在而不是被隔离模型解释。
+
+插件工具与外部 MCP server 的工具并入同一个 `mcp` 工具组：`mcp_tools` 先扩展 `plugins.tools()`，
+再一次性 `replace_group`。因此命名冲突（同名 `<provider>.<tool>`）是配置错误而不是静默覆盖，
+且插件注册失败时总线目录里本就不存在它的工具，无需额外过滤。
+
+插件只在启动时装载一次（无热重载、无 per-plugin 开关），结果写入启动日志与
+`GET /v1/runtime/plugins`；后者通过 `BaseServices::with_plugins` 注入的 `ark_ports::PluginHostService`
+只读读取，组合根不缓存或重算报告。`Wiring` 持有 `PluginRuntime` 以保证句柄活到进程退出。
+
 启动时组合根连接所有启用的外部 MCP server，并把成功发现的 `<server_id>.<tool>` 原子发布到父工具表；单个
 连接失败只反映到 MCP server 状态，不中止 arkd。MCP server 的 upsert/delete 在请求内重新发现并替换该动态
 分组，因此下一父回合读取的是最新 schema，而不需要重启。组合根还注册 `load_skill`：它读取 `SkillRuntime`

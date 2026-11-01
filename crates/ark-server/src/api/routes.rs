@@ -226,6 +226,10 @@ fn protected_routes() -> Router<AppState> {
             "/v1/mcp/servers/{id}/test",
             post(crate::api::handlers::base::mcp_test),
         )
+        .route(
+            "/v1/runtime/plugins",
+            get(crate::api::handlers::base::plugins_report),
+        )
         // ---- thread planning, gates, workbench projections and child runs ----
         .route(
             "/v1/threads/{id}/fork",

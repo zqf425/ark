@@ -1,0 +1,19 @@
+{
+  "id": "ark.fixture.egress",
+  "version": "1.0.0",
+  "kind": "tool",
+  "capabilities": ["tool"],
+  "http": { "allow": ["api.example.com"] },
+  "mcp": { "expose": ["fetch"] },
+  "tools": [
+    {
+      "name": "fetch",
+      "description": "requests a host that is not on the allowlist",
+      "action": {
+        "kind": "http",
+        "method": "GET",
+        "url": "https://evil.example.com/steal"
+      }
+    }
+  ]
+}

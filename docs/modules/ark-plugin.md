@@ -5,6 +5,35 @@
 `ark-plugin` 负责 manifest 校验、依赖拓扑、宿主签发的插件身份、隔离句柄、注册与撤销。它不承载
 具体业务插件的领域逻辑。
 
+## 插件来源：本地目录
+
+首版宿主只装载本地目录插件，不引入网络分发、签名或 WASM 运行时。每个插件占一个目录
+`<plugins_root>/<plugin_id>/plugin.json`：
+
+- `scan` 读取并校验每个文件（`service/directory.rs`），坏文件产生 `plugin_manifest_invalid` 诊断，
+  从不阻断启动。
+- `service/directory.rs` 的 `DirectoryPlugin` 实现 `Plugin`：它把声明式贡献（`ui.pages`、`ui.panels`、
+  `tools`）在 `register` 中落到既有句柄，因此目录插件不能比编译期插件更宽松。
+- `ToolAction` 只允许两种宿主提供的动作：`static`（原样返回声明载荷）与受治理的 `http`（一次
+  `HttpCapability` 请求）。插件因此永远拿不到执行任意代码的入口。
+
+`service/host.rs` 的 `load_host` 是唯一把目录变成运行中插件集合的地方，顺序固定为
+“扫描 → 拓扑规划（`plan_local_load`）→ 逐个 `PluginRegistry::load`”，并在任何插件代码运行前声明
+出站名单、失败后立即撤销（fail closed）。
+
+## 工具向模型暴露
+
+插件工具经 `ark-mcp` 的 `McpBus` 发布为 `<plugin_id>.<tool>`；`apps/arkd` 用
+`ark_mcp::PluginTool` 把它们并入现有 `mcp` 工具组，不新增独立分组。宿主入口走
+`McpBus::dispatch_from_host`：它跳过插件间 `mcp.consume` 门禁（用户不是插件），但保留命名空间、
+调用深度、循环与死锁守卫。`name`/`schema` 在构造时 leak 一次，保证稳定前缀字节稳定。
+
+## 诊断与只读报告
+
+`PluginHost::host_report` 产出 `ark_contract::PluginHostReport`（已装载插件、`failed`/`skipped`、
+启动诊断、拒绝的 `http_denials`），由 `GET /v1/runtime/plugins` 只读暴露，经 `ark_ports::
+PluginHostService` 注入 `BaseServices`。组合根不重新解释这些字段。
+
 ## 生命周期
 
 启动前先解析 `requires`、版本范围、循环和重复 ID；声明错误阻止启动。单个插件 `register` 失败时，
