@@ -22,11 +22,15 @@ pub const CONFIG_KEYS: &[&str] = &[
     "default_workspace",
     "default_autonomy",
     "subagents",
+    "hooks",
     "tuning",
 ];
 
 /// Keys nested under `subagents`.
 pub const SUBAGENT_KEYS: &[&str] = &["enabled", "max_concurrency", "auto_continue"];
+
+/// Keys nested under `hooks`.
+pub const HOOK_KEYS: &[&str] = &["pre_tool_use", "post_tool_use"];
 
 /// Keys nested under `tuning`.
 pub const TUNING_KEYS: &[&str] = &[
@@ -88,7 +92,11 @@ pub fn diagnose(document: &Value) -> ConfigDiagnostics {
         return diagnostics;
     };
     for key in CONFIG_KEYS {
-        if !object.contains_key(*key) {
+        // `hooks` is a purely additive optional section (requirements/hooks.md):
+        // its absence is the normal state of every pre-hooks config file, so
+        // reporting it as "kept its default" would warn on every existing
+        // deployment at startup. Unknown keys inside it are still named.
+        if *key != "hooks" && !object.contains_key(*key) {
             diagnostics.missing.push((*key).to_string());
         }
     }
@@ -98,6 +106,7 @@ pub fn diagnose(document: &Value) -> ConfigDiagnostics {
         }
     }
     diagnose_nested(object, "subagents", SUBAGENT_KEYS, &mut diagnostics);
+    diagnose_nested(object, "hooks", HOOK_KEYS, &mut diagnostics);
     diagnose_nested(object, "tuning", TUNING_KEYS, &mut diagnostics);
     diagnostics
 }
@@ -116,9 +125,14 @@ fn diagnose_nested(
     let Some(Value::Object(nested)) = object.get(parent) else {
         return;
     };
-    for key in keys {
-        if !nested.contains_key(*key) {
-            diagnostics.missing.push(format!("{parent}.{key}"));
+    // `hooks` entries are individually optional (empty vec = no hooks at that
+    // point), so only unknown children are reported there.
+    let report_missing = parent != "hooks";
+    if report_missing {
+        for key in keys {
+            if !nested.contains_key(*key) {
+                diagnostics.missing.push(format!("{parent}.{key}"));
+            }
         }
     }
     for key in nested.keys() {
@@ -172,9 +186,16 @@ mod tests {
             "runtime": { "logLevel": "debug" }
         });
         let diagnostics = diagnose(&document);
+        // `hooks` absence is deliberately silent (additive optional section),
+        // so it is not expected in the missing report.
+        let expected_missing: Vec<&str> = CONFIG_KEYS
+            .iter()
+            .copied()
+            .filter(|key| *key != "hooks")
+            .collect();
         assert_eq!(
             diagnostics.missing(),
-            CONFIG_KEYS,
+            expected_missing,
             "every runtime key is absent"
         );
         assert_eq!(diagnostics.unknown(), ["models", "runtime", "serve"]);

@@ -235,7 +235,13 @@ mod tests {
 
         let loaded = load_report(&path).unwrap();
         let diagnostics = loaded.diagnostics().expect("a present file is diagnosed");
-        assert_eq!(diagnostics.missing(), crate::domain::CONFIG_KEYS);
+        // `hooks` absence is deliberately silent (additive optional section).
+        let expected_missing: Vec<&str> = crate::domain::CONFIG_KEYS
+            .iter()
+            .copied()
+            .filter(|key| *key != "hooks")
+            .collect();
+        assert_eq!(diagnostics.missing(), expected_missing);
         assert_eq!(
             diagnostics.unknown(),
             ["contextCompaction", "models", "runtime", "serve"]

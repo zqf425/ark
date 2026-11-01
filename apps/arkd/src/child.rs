@@ -281,6 +281,7 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             Arc::new(ark_tool::BuiltinSandboxPolicy::new(autonomy));
         let tools: Arc<dyn ark_agent::ToolRunner> = Arc::new(ChildToolRunner {
             inner: Arc::clone(&self.tools),
+            config: Arc::clone(&self.config),
             workspace: workspace.clone(),
             thread_id,
             turn_id,
@@ -444,6 +445,8 @@ impl ChildTurnExecutorImpl {
 /// Adapter from `ark-tool`'s runner to the reactor's `ToolRunner`.
 struct ChildToolRunner {
     inner: Arc<RegistryToolRunner>,
+    /// Live config: hooks are read per call so a patch applies immediately.
+    config: Arc<ark_config::ConfigStore>,
     workspace: PathBuf,
     thread_id: ThreadId,
     turn_id: TurnId,
@@ -452,34 +455,47 @@ struct ChildToolRunner {
 #[async_trait::async_trait]
 impl ark_agent::ToolRunner for ChildToolRunner {
     async fn execute(&self, call: &ToolCallRequest) -> Result<ToolOutput> {
+        let snapshot = self.config.snapshot();
+        let hooks = &snapshot.hooks;
+        let payload = crate::hooks::hook_payload(
+            "pre_tool_use",
+            &call.tool,
+            &call.arguments,
+            &self.thread_id,
+            &self.turn_id,
+        );
         // Same rule as the parent path: consume the decision the reactor already
         // made for this call instead of asking the policy a second time
-        // (design §7.3, P1-5).
-        match call.sandbox {
-            Some(decision) => {
-                self.inner
-                    .run_decided(
-                        self.workspace.clone(),
-                        self.thread_id,
-                        self.turn_id,
-                        &call.tool,
-                        call.arguments.clone(),
-                        decision,
-                    )
-                    .await
+        // (design §7.3, P1-5). The hook combinator is shared with the parent
+        // runner, so pre/post semantics cannot drift between the two paths.
+        crate::hooks::run_around(hooks, &self.workspace, &payload, || async {
+            match call.sandbox {
+                Some(decision) => {
+                    self.inner
+                        .run_decided(
+                            self.workspace.clone(),
+                            self.thread_id,
+                            self.turn_id,
+                            &call.tool,
+                            call.arguments.clone(),
+                            decision,
+                        )
+                        .await
+                }
+                None => {
+                    self.inner
+                        .run_in(
+                            self.workspace.clone(),
+                            self.thread_id,
+                            self.turn_id,
+                            &call.tool,
+                            call.arguments.clone(),
+                        )
+                        .await
+                }
             }
-            None => {
-                self.inner
-                    .run_in(
-                        self.workspace.clone(),
-                        self.thread_id,
-                        self.turn_id,
-                        &call.tool,
-                        call.arguments.clone(),
-                    )
-                    .await
-            }
-        }
+        })
+        .await
     }
 }
 

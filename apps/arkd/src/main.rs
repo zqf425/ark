@@ -11,6 +11,7 @@ mod attachment_seed;
 mod base;
 mod child;
 mod cli;
+mod hooks;
 mod load_skill;
 mod memory_seed;
 mod model;

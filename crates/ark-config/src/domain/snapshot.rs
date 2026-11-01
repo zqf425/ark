@@ -6,8 +6,8 @@
 //! value, so a rejected patch cannot leave the live snapshot half updated.
 
 use ark_contract::{
-    ConfigPatch, FieldPath, SubagentSettings, TuningSettings, SUBAGENT_CONCURRENCY_MAX,
-    SUBAGENT_CONCURRENCY_MIN,
+    ConfigPatch, FieldPath, HookSettings, SubagentSettings, TuningSettings,
+    SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -123,6 +123,9 @@ pub struct RuntimeConfig {
     pub default_autonomy: String,
     /// Sub-agent switch and concurrency cap (design §7.8).
     pub subagents: SubagentSettings,
+    /// Agent lifecycle hooks (requirements/hooks.md). Classed `Hot`: every tool
+    /// call reads the live snapshot, so a patch applies to the very next call.
+    pub hooks: HookSettings,
     pub tuning: TuningConfig,
 }
 
@@ -136,6 +139,7 @@ impl Default for RuntimeConfig {
             default_workspace: None,
             default_autonomy: "workspace_write".to_string(),
             subagents: SubagentSettings::default(),
+            hooks: HookSettings::default(),
             tuning: TuningConfig::default(),
         }
     }
@@ -184,6 +188,7 @@ impl RuntimeConfig {
         if tuning != self.tuning {
             return Err("tuning contains an out-of-range value".to_string());
         }
+        validate_hooks(&self.hooks)?;
         Ok(())
     }
 
@@ -239,9 +244,41 @@ impl RuntimeConfig {
                 changed.push(FieldPath::new("subagents"));
             }
         }
+        if let Some(value) = &patch.hooks {
+            if next.hooks != *value {
+                next.hooks = value.clone();
+                changed.push(FieldPath::new("hooks"));
+            }
+        }
         next.validate()?;
         Ok((next, changed))
     }
+}
+
+/// Hook configuration bounds (requirements/hooks.md §1): enough for a real
+/// policy setup, small enough that a runaway config cannot stall every tool
+/// call behind dozens of shell spawns.
+fn validate_hooks(hooks: &HookSettings) -> Result<(), String> {
+    for (phase, rules) in [
+        ("pre_tool_use", &hooks.pre_tool_use),
+        ("post_tool_use", &hooks.post_tool_use),
+    ] {
+        if rules.len() > 32 {
+            return Err(format!("hooks.{phase} has more than 32 commands"));
+        }
+        for rule in rules {
+            if rule.command.trim().is_empty() {
+                return Err(format!("hooks.{phase} contains an empty command"));
+            }
+            if rule.command.len() > 8 * 1024 {
+                return Err(format!("hooks.{phase} command exceeds 8 KiB"));
+            }
+            if rule.timeout_ms > 60_000 {
+                return Err(format!("hooks.{phase} timeout_ms must not exceed 60_000"));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -273,6 +310,52 @@ mod tests {
         let (next, changed) = config.candidate(&patch).unwrap();
         assert_eq!(next.log_level, "debug");
         assert_eq!(changed, vec![FieldPath::new("log_level")]);
+    }
+
+    #[test]
+    fn a_hooks_patch_applies_hot_and_validates_bounds() {
+        let config = RuntimeConfig::default();
+        let hooks = HookSettings {
+            pre_tool_use: vec![ark_contract::HookRule {
+                command: "cargo fmt".into(),
+                tools: vec!["write".into()],
+                timeout_ms: 5_000,
+            }],
+            post_tool_use: Vec::new(),
+        };
+        let patch = ConfigPatch {
+            hooks: Some(hooks.clone()),
+            ..ConfigPatch::default()
+        };
+        let (next, changed) = config.candidate(&patch).unwrap();
+        assert_eq!(next.hooks, hooks);
+        assert_eq!(changed, vec![FieldPath::new("hooks")]);
+
+        // The bounds are enforced at validate time, so a rejected patch cannot
+        // land in a snapshot.
+        let mut oversized = hooks;
+        oversized.pre_tool_use[0].timeout_ms = 61_000;
+        let patch = ConfigPatch {
+            hooks: Some(oversized),
+            ..ConfigPatch::default()
+        };
+        assert!(config.candidate(&patch).is_err());
+        let too_many = HookSettings {
+            pre_tool_use: (0..33)
+                .map(|index| ark_contract::HookRule {
+                    command: format!("true {index}"),
+                    tools: Vec::new(),
+                    timeout_ms: 0,
+                })
+                .collect(),
+            post_tool_use: Vec::new(),
+        };
+        assert!(RuntimeConfig {
+            hooks: too_many,
+            ..RuntimeConfig::default()
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]

@@ -41,8 +41,8 @@ pub use capability::{
     Placement, UiCatalog,
 };
 pub use config::{
-    ApplyResult, ConfigPatch, FieldPath, ReloadClass, RuntimeConfigView, SubagentSettings,
-    TuningSettings, SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
+    ApplyResult, ConfigPatch, FieldPath, HookRule, HookSettings, ReloadClass, RuntimeConfigView,
+    SubagentSettings, TuningSettings, SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
 };
 pub use dto::{
     ChildRunActionResult, ChildRunAggregates, ChildRunEventsResponse, ChildRunListResponse,
