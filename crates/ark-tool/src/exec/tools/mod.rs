@@ -15,6 +15,7 @@ pub mod list;
 pub mod read;
 pub mod request_user_input;
 pub mod search;
+pub mod web_fetch;
 pub mod write;
 
 pub use bash::BashTool;
@@ -23,16 +24,18 @@ pub use list::{FindTool, LsTool};
 pub use read::ReadTool;
 pub use request_user_input::RequestUserInputTool;
 pub use search::GrepTool;
+pub use web_fetch::WebFetchTool;
 pub use write::{EditTool, WriteTool};
 
 use std::sync::Arc;
 
-use ark_ports::{SubagentRunner, Tool};
+use ark_ports::{HttpCapability, SubagentRunner, Tool};
 
 /// Every builtin, in canonical (alphabetical) order.
 ///
 /// `delegate_task` is absent on purpose: it needs a runner. See
-/// [`delegation_tools`].
+/// [`delegation_tools`]. `web_fetch` is likewise absent: it needs the governed
+/// egress. See [`web_tools`].
 pub fn builtins() -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(BashTool),
@@ -52,4 +55,12 @@ pub fn builtins() -> Vec<Box<dyn Tool>> {
 /// `max_depth = 1`: a child has no `delegate_task` to call.
 pub fn delegation_tools(runner: Arc<dyn SubagentRunner>) -> Vec<Box<dyn Tool>> {
     vec![Box::new(DelegateTaskTool::new(runner))]
+}
+
+/// The web fetch tool, for a runtime that has the governed egress.
+///
+/// Both the parent and the child sets get it: children legitimately need to
+/// look up documentation, and the egress policy is the same for both.
+pub fn web_tools(http: Arc<dyn HttpCapability>) -> Vec<Box<dyn Tool>> {
+    vec![Box::new(WebFetchTool::new(http))]
 }

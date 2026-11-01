@@ -26,7 +26,7 @@ pub struct ToolMeta {
 /// [`crate::exec::tools::builtins`], because the sandbox policy and
 /// `GET /v1/runtime/tools` read this table: an unlisted tool would silently be
 /// treated as "unknown, so needs approval" and delegation would always ask.
-pub const TOOL_METAS: [ToolMeta; 9] = [
+pub const TOOL_METAS: [ToolMeta; 10] = [
     ToolMeta {
         name: "bash",
         description: "Run one shell command inside the workspace with a hard timeout",
@@ -69,6 +69,13 @@ pub const TOOL_METAS: [ToolMeta; 9] = [
         description: "Ask the user a question and wait for their answer; the agent runtime intercepts this tool, it never executes",
         // The gate, not the sandbox, owns this tool: intercepting before the
         // dispatch plan keeps the approval and user-input semantics separate.
+        baseline: SandboxDecision::ReadOnly,
+    },
+    ToolMeta {
+        name: "web_fetch",
+        description: "Fetch one public web page through the governed egress and return its text; text and JSON bodies only",
+        // A fetch mutates nothing in the workspace; network access itself is
+        // governed by the egress bus, not by the sandbox decision.
         baseline: SandboxDecision::ReadOnly,
     },
     ToolMeta {

@@ -44,6 +44,10 @@ pub struct PluginRuntime {
     host: Arc<PluginHost>,
     mcp: Arc<McpBus>,
     root: PathBuf,
+    /// The governed egress the host was built with. Returned typed so the
+    /// composition root can register the runtime's own builtin egress grants
+    /// (e.g. `ark.builtin.web`) beside the plugins'.
+    http: Arc<HttpBus>,
 }
 
 impl std::fmt::Debug for PluginRuntime {
@@ -59,6 +63,12 @@ impl PluginRuntime {
     /// The report behind `GET /v1/runtime/plugins`.
     pub fn host(&self) -> &Arc<PluginHost> {
         &self.host
+    }
+
+    /// The governed egress, for registering builtin grants and injecting the
+    /// runtime's own tools.
+    pub fn http(&self) -> &Arc<HttpBus> {
+        &self.http
     }
 
     /// Tools to merge into the `mcp` tool group.
@@ -116,11 +126,12 @@ pub fn assemble(data_dir: &Path, ui_bus: &Arc<UiBus>, mcp: Arc<McpBus>) -> Resul
 
     let http_diagnostics = Arc::new(MemoryDiagnostics::new(HTTP_DIAGNOSTIC_CAPACITY));
     let vault = Arc::new(CredentialVault::new());
-    let http = Arc::new(HttpBus::new(
+    let http_bus = Arc::new(HttpBus::new(
         HttpPolicy::default(),
         Arc::clone(&vault),
         http_diagnostics.clone(),
     )?);
+    let http = Arc::clone(&http_bus);
 
     let handles = HostHandles {
         http: Arc::clone(&http) as Arc<dyn HttpCapability>,
@@ -146,6 +157,7 @@ pub fn assemble(data_dir: &Path, ui_bus: &Arc<UiBus>, mcp: Arc<McpBus>) -> Resul
         host: Arc::new(host),
         mcp,
         root,
+        http: Arc::clone(&http_bus),
     })
 }
 

@@ -61,8 +61,13 @@ impl HostPattern {
 }
 
 /// Parsed allowlist for one plugin. Empty by default: fail closed.
+///
+/// The all-hosts form exists only for the runtime's own builtin egress
+/// (`HostAllowlist::allow_all`); [`Self::parse`] cannot produce it, so a plugin
+/// manifest can never declare an unrestricted allowlist.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HostAllowlist {
+    all: bool,
     patterns: Vec<HostPattern>,
 }
 
@@ -72,15 +77,28 @@ impl HostAllowlist {
         for entry in entries {
             patterns.push(HostPattern::parse(entry)?);
         }
-        Ok(Self { patterns })
+        Ok(Self {
+            all: false,
+            patterns,
+        })
+    }
+
+    /// Unrestricted list for the runtime's builtin egress (e.g. `web_fetch`,
+    /// where the tool layer owns the per-request guard). Not reachable through
+    /// [`Self::parse`], which is what keeps plugin manifests explicit.
+    pub fn allow_all() -> Self {
+        Self {
+            all: true,
+            patterns: Vec::new(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.patterns.is_empty()
+        !self.all && self.patterns.is_empty()
     }
 
     pub fn permits(&self, host: &str) -> bool {
-        self.patterns.iter().any(|pattern| pattern.matches(host))
+        self.all || self.patterns.iter().any(|pattern| pattern.matches(host))
     }
 
     pub fn patterns(&self) -> &[HostPattern] {
@@ -120,6 +138,15 @@ mod tests {
         let list = HostAllowlist::default();
         assert!(list.is_empty());
         assert!(!list.permits("api.example.com"));
+    }
+
+    #[test]
+    fn allow_all_permits_any_host_but_is_not_parseable() {
+        // Only the runtime's builtin egress may be unrestricted; a plugin
+        // declaring `*` must keep failing to parse.
+        assert!(HostAllowlist::allow_all().permits("anything.example"));
+        assert!(HostAllowlist::allow_all().permits("localhost"));
+        assert!(HostAllowlist::parse(&["*".to_string()]).is_err());
     }
 
     #[test]

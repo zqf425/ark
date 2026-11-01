@@ -11,4 +11,7 @@ ark-ports = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
-tokio = { workspace = true }
+# `net` is for the web_fetch SSRF guard's DNS resolution of the target host.
+tokio = { workspace = true, features = ["net"] }
+# URL parsing for the web_fetch tool's SSRF guard (same major as ark-http).
+url = "2"
