@@ -33,16 +33,6 @@ fn thread_id() -> Value {
     json!({ "type": "string", "description": "Path parameter: thread id." })
 }
 
-/// Path parameter: provider id.
-fn provider_id() -> Value {
-    json!({ "type": "string", "description": "Path parameter: provider id." })
-}
-
-/// Path parameter: MCP server id.
-fn server_id() -> Value {
-    json!({ "type": "string", "description": "Path parameter: MCP server id." })
-}
-
 /// Schema for a body whose shape is owned by a `ark-contract` DTO: name the
 /// type (the generated TypeScript in `web/src/generated` mirrors it) instead of
 /// re-listing the fields.
@@ -86,7 +76,6 @@ pub(crate) fn tools() -> Vec<McpToolDoc> {
     tools
 }
 
-/// Threads_lifecycle tools.
 fn threads_lifecycle(tools: &mut Vec<McpToolDoc>) {
     tools.extend([
 
@@ -157,7 +146,6 @@ fn threads_lifecycle(tools: &mut Vec<McpToolDoc>) {
     ]);
 }
 
-/// Threads_history tools.
 fn threads_history(tools: &mut Vec<McpToolDoc>) {
     tools.extend([
 
@@ -231,7 +219,6 @@ fn threads_history(tools: &mut Vec<McpToolDoc>) {
     ]);
 }
 
-/// Threads_insights tools.
 fn threads_insights(tools: &mut Vec<McpToolDoc>) {
     tools.extend([
 
@@ -298,7 +285,6 @@ fn threads_insights(tools: &mut Vec<McpToolDoc>) {
     ]);
 }
 
-/// Threads_goal_todos tools.
 fn threads_goal_todos(tools: &mut Vec<McpToolDoc>) {
     tools.extend([
 
