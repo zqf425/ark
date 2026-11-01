@@ -198,23 +198,44 @@ const REVIEW_DIFF_CAP_BYTES: usize = 64 * 1024;
 /// an unknown revision is a startup failure, not a turn.
 fn compute_diff(target: &crate::cli::ReviewTarget, workspace: &Path) -> Result<String, Failure> {
     use crate::cli::ReviewTarget;
-    let commands: Vec<Vec<String>> = match target {
-        ReviewTarget::Uncommitted => vec![git_args(["diff", "HEAD"])],
+    let mut combined = String::new();
+    match target {
+        ReviewTarget::Uncommitted => {
+            // `git diff HEAD` covers tracked changes only; untracked files are
+            // exactly what a pre-commit review usually looks at, so each one is
+            // appended as a new-file diff.
+            let tracked = git_run(workspace, &git_args(["diff", "HEAD"]))?;
+            combined.push_str(&tracked);
+            let untracked = git_capture(
+                workspace,
+                git_args(["ls-files", "--others", "--exclude-standard", "-z"]),
+            )?;
+            for path in untracked.split('\0').filter(|path| !path.is_empty()) {
+                // `--no-index` exits 1 when the files differ, which is the
+                // normal outcome here, not a failure.
+                let diff = git_run_accepting(
+                    workspace,
+                    &git_args(["diff", "--no-index", "--", "/dev/null", path]),
+                    &[1],
+                )?;
+                if !combined.is_empty() {
+                    combined.push('\n');
+                }
+                combined.push_str(&diff);
+            }
+        }
         ReviewTarget::Base(branch) => {
             // PR-style: everything on HEAD since it diverged from the base.
             let merge_base =
                 git_capture(workspace, git_args(["merge-base", branch.as_str(), "HEAD"]))?;
-            vec![git_args(["diff", &merge_base])]
+            combined.push_str(&git_run(workspace, &git_args(["diff", &merge_base]))?);
         }
-        ReviewTarget::Commit(rev) => vec![git_args(["diff", &format!("{rev}~1"), rev])],
-    };
-    let mut combined = String::new();
-    for args in commands {
-        let output = git_run(workspace, &args)?;
-        if !combined.is_empty() {
-            combined.push('\n');
+        ReviewTarget::Commit(rev) => {
+            combined.push_str(&git_run(
+                workspace,
+                &git_args(["diff", &format!("{rev}~1"), rev]),
+            )?);
         }
-        combined.push_str(&output);
     }
     if combined.trim().is_empty() {
         return Err(Failure::Startup(format!(
@@ -239,12 +260,23 @@ fn git_args<const N: usize>(args: [&str; N]) -> Vec<String> {
 }
 
 fn git_run(workspace: &Path, args: &[String]) -> Result<String, Failure> {
+    git_run_accepting(workspace, args, &[])
+}
+
+/// Run one git command; `extra_ok` lists exit codes that count as success
+/// (`git diff --no-index` exits 1 to mean "differences found").
+fn git_run_accepting(
+    workspace: &Path,
+    args: &[String],
+    extra_ok: &[i32],
+) -> Result<String, Failure> {
     let output = std::process::Command::new("git")
         .args(args)
         .current_dir(workspace)
         .output()
         .map_err(|err| Failure::Startup(format!("git {} failed: {err}", args.join(" "))))?;
-    if !output.status.success() {
+    let code = output.status.code().unwrap_or(-1);
+    if !output.status.success() && !extra_ok.contains(&code) {
         return Err(Failure::Startup(format!(
             "git {} failed: {}",
             args.join(" "),
@@ -473,6 +505,17 @@ mod tests {
             workspace.parent().expect("parent")
         )
         .is_err());
+    }
+
+    #[test]
+    fn uncommitted_diff_includes_untracked_files() {
+        // A brand-new file is invisible to `git diff HEAD`; a pre-commit
+        // review must still see it.
+        let (_dir, workspace) = git_repo("untracked");
+        std::fs::write(workspace.join("brand-new.py"), "print('hi')\n").unwrap();
+        let diff = compute_diff(&ReviewTarget::Uncommitted, &workspace).unwrap();
+        assert!(diff.contains("brand-new.py"), "got {diff}");
+        assert!(diff.contains("+print('hi')"), "got {diff}");
     }
 
     #[test]
