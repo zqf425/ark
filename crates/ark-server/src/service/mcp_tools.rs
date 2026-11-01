@@ -449,7 +449,7 @@ fn schedules(tools: &mut Vec<McpToolDoc>) {
         ),
         tool(
             "schedule_run",
-            "Run the task once, now (202): starts a real turn. Answers 409 while the task is running or the schedules switch is off.",
+            "Run the task once, now (202): starts a real turn. Answers 409 while the task is running, the task is disabled (enable it first), or the schedules switch is off.",
             "POST",
             "/v1/schedules/{id}/run",
             json!({ "id": schedule_id() }),

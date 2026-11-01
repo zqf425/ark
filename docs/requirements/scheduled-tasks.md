@@ -81,7 +81,7 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
 
 - `GET /v1/schedules` 全量列表;`POST /v1/schedules` 创建;`PATCH /v1/schedules/{id}` 更新
   (含启停);`DELETE /v1/schedules/{id}` 删除。
-- `POST /v1/schedules/{id}/run` 立即运行一次(不等 next_run_at;运行中返回 409)。
+- `POST /v1/schedules/{id}/run` 立即运行一次(不等 next_run_at;运行中、任务已停用(需先启用)或总开关关闭时返回 409)。
 - 以上全部经 wire DTO 生成前端类型(`ts_export`);错误复用 `ArkErrorCode` 结构化语义
   (不存在 404、超限 validation_error/400、冲突 409)。
 
@@ -136,7 +136,7 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
   `previous run was still in flight` 跳过、`begin` 建线程并写 runtime 覆盖(`autonomy` 缺省
   `unattended`)、`drive` 复用 `start_turn` 并以轮询取终态、从完成时刻重算 `next_run_at`。
 - 一次运行只有一条历史:`running` 只写 `last_run`,有界历史只存终态;`reconcile` 的 `aborted` 也折进历史。
-- `POST /v1/schedules/{id}/run` 在主开关关闭或任务仍在运行时返回 `Conflict`/409;主开关
+- `POST /v1/schedules/{id}/run` 在主开关关闭、任务已停用或任务仍在运行时返回 `Conflict`/409;主开关
   (`config.schedules.enabled`,`ReloadClass::Hot`)只影响触发,不影响 CRUD。
 - 路由 `/v1/schedules`(GET/POST)、`/v1/schedules/{id}`(PATCH/DELETE)、`/v1/schedules/{id}/run`(POST)。
 - 组合根 `apps/arkd/src/wiring/mod.rs` 用同一 `data_dir` 创建 `ScheduleFileStore` 并 `spawn` 调度循环;
