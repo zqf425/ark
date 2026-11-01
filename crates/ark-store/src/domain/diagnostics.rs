@@ -22,6 +22,7 @@ pub enum DiagnosticKind {
     OrphanChildrenCleaned,
     SlowSubscriberDropped,
     LockFileCreated,
+    TempFilesSwept,
 }
 
 impl DiagnosticKind {
@@ -37,6 +38,7 @@ impl DiagnosticKind {
             DiagnosticKind::OrphanChildrenCleaned => "orphan_children_cleaned",
             DiagnosticKind::SlowSubscriberDropped => "slow_subscriber_dropped",
             DiagnosticKind::LockFileCreated => "lock_file_created",
+            DiagnosticKind::TempFilesSwept => "temp_files_swept",
         }
     }
 }
@@ -144,6 +146,7 @@ mod tests {
     fn kinds_have_stable_snake_case_labels() {
         assert_eq!(DiagnosticKind::IndexRepaired.as_str(), "index_repaired");
         assert_eq!(DiagnosticKind::TailRepaired.as_str(), "tail_repaired");
+        assert_eq!(DiagnosticKind::TempFilesSwept.as_str(), "temp_files_swept");
     }
 
     #[test]

@@ -39,6 +39,16 @@
 所以崩溃留下的临时文件或已删除条目不会被暴露。`AttachmentId` 是 UUID newtype，文件路径只由该
 服务端生成 ID 组成，绝不拼接客户端路径。
 
+崩溃残留的临时文件由启动清扫回收：`FileSessionStore::with_diagnostics` 在取得数据目录锁之后、
+装载索引之前，对整个 `<data_dir>` 递归执行 `sweep_temp_files`（`store/fs_util.rs`），删除修改时间
+早于 5 分钟前的隐藏 `*.tmp` 文件（即原子写 `.{name}.{uuid}.tmp` 兄弟文件）。数据目录锁只排除本进程
+与其他 arkd 实例，排除不了 `--data-dir` 指向共享目录时其他程序正在写的隐藏 `*.tmp`，时效阈值就是
+为此保留的安全距离。可见名的 `*.tmp`（如 ark-config 的 `config.json.tmp`）不是本仓原子写产物，
+不在本清扫范围。目录不可读、符号链接与 mtime 不可读的条目静默跳过；单个文件删除失败记入
+`tracing::debug!`——都不阻断启动，清扫是卫生动作，不能反过来成为启动失败源。删除数大于零时把
+该事实记录到诊断 sink（`DiagnosticKind::TempFilesSwept`）；生产路径 `FileSessionStore::open` 自建
+内存 sink，arkd 侧目前没有消费者。
+
 上传时同时计算 SHA-256 并写入元数据的 `sha256` 字段；该字段仅用于完整性与后续去重，路径仍是
 UUID（不做内容寻址，避免迁移）。声明了 `mime_type` 的上传会拿前 16 字节做魔法数一致性校验，
 覆盖 png/jpeg/gif/webp/pdf，不匹配返回 `mime_mismatch`；未声明或无法识别的类型跳过该校验。
