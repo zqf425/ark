@@ -39,6 +39,13 @@
 所以崩溃留下的临时文件或已删除条目不会被暴露。`AttachmentId` 是 UUID newtype，文件路径只由该
 服务端生成 ID 组成，绝不拼接客户端路径。
 
+崩溃残留的临时文件由启动清扫回收：`FileSessionStore::with_diagnostics` 在取得数据目录锁之后、
+装载索引之前，对整个 `<data_dir>` 递归执行 `sweep_temp_files`（`store/fs_util.rs`），删除所有
+隐藏的 `*.tmp` 文件（原子写的 `.{name}.{uuid}.tmp` 兄弟文件与中断上传的 `.partial.tmp` 同规）。
+此时锁保证没有并发写者在途，清扫无条件安全；单个文件删除失败只跳过不阻断启动——清扫是卫生
+动作，不能反过来成为启动失败源。删除数大于零时经 `DiagnosticKind::temp_files_swept` 上报。
+非隐藏的 `*.tmp` 不是本仓原子写产物，一律不动。
+
 上传时同时计算 SHA-256 并写入元数据的 `sha256` 字段；该字段仅用于完整性与后续去重，路径仍是
 UUID（不做内容寻址，避免迁移）。声明了 `mime_type` 的上传会拿前 16 字节做魔法数一致性校验，
 覆盖 png/jpeg/gif/webp/pdf，不匹配返回 `mime_mismatch`；未声明或无法识别的类型跳过该校验。

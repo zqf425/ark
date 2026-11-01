@@ -8,14 +8,16 @@
 
 use crate::config::StoreConfig;
 use crate::domain::child_index::ChildLocator;
-use crate::domain::diagnostics::{DiagnosticSink, MemoryDiagnostics};
+use crate::domain::diagnostics::{
+    DiagnosticKind, DiagnosticSink, MemoryDiagnostics, StoreDiagnostic,
+};
 use crate::domain::layout::{names, DataPaths, ThreadPaths};
 use crate::domain::thread_file::{self, ThreadFile};
 use crate::service::child_service::ChildStore;
 use crate::service::reconcile::{reconcile_index, ReconcileReport};
 use crate::service::writer_registry::WriterRegistry;
 use crate::store::data_lock::DataLock;
-use crate::store::fs_util::{ensure_dir, remove_dir_all, write_json_atomic};
+use crate::store::fs_util::{ensure_dir, remove_dir_all, sweep_temp_files, write_json_atomic};
 use crate::store::index::{load_snapshot, save_snapshot, IndexEntry, ThreadIndex};
 use ark_common::{ArkError, Result, ThreadId};
 use std::collections::HashMap;
@@ -58,6 +60,15 @@ impl FileSessionStore {
         let paths = DataPaths::new(config.data_dir());
         ensure_dir(paths.root())?;
         let lock = DataLock::acquire(&paths.lock_file())?;
+        // The data-dir lock is held, so no other writer has a temp sibling in
+        // flight: crash residue from earlier runs can be swept unconditionally.
+        let swept = sweep_temp_files(paths.root())?;
+        if swept > 0 {
+            diagnostics.record(StoreDiagnostic::new(
+                DiagnosticKind::TempFilesSwept,
+                format!("{swept} atomic-write temp files removed at startup"),
+            ));
+        }
         ensure_dir(&paths.threads_dir())?;
         let index = load_snapshot(&paths.index_file());
         let registry = WriterRegistry::new(config.limits().clone(), diagnostics.clone());
@@ -388,6 +399,24 @@ pub(crate) mod tests {
         let store = test_store(&dir);
         let err = store.get_thread(ThreadId::new()).await.unwrap_err();
         assert_eq!(err.code, ark_common::ArkErrorCode::NotFound);
+    }
+
+    #[tokio::test]
+    async fn open_sweeps_crash_residual_temp_files_and_reports_it() {
+        let dir = crate::store::tests::TempDir::new("store-temp-sweep");
+        let nested = dir.path().join("threads/t1");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join(".thread.json.abc-123.tmp"), b"residue").unwrap();
+        std::fs::write(dir.path().join(".memory.json.def-456.tmp"), b"residue").unwrap();
+        let diagnostics = Arc::new(MemoryDiagnostics::new());
+        FileSessionStore::with_diagnostics(
+            StoreConfig::new(dir.path()).with_limits(StoreLimits::for_tests()),
+            diagnostics.clone(),
+        )
+        .unwrap();
+        assert!(!nested.join(".thread.json.abc-123.tmp").exists());
+        assert!(!dir.path().join(".memory.json.def-456.tmp").exists());
+        assert!(diagnostics.has(DiagnosticKind::TempFilesSwept));
     }
 
     #[tokio::test]

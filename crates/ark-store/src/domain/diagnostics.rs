@@ -22,6 +22,7 @@ pub enum DiagnosticKind {
     OrphanChildrenCleaned,
     SlowSubscriberDropped,
     LockFileCreated,
+    TempFilesSwept,
 }
 
 impl DiagnosticKind {
@@ -37,6 +38,7 @@ impl DiagnosticKind {
             DiagnosticKind::OrphanChildrenCleaned => "orphan_children_cleaned",
             DiagnosticKind::SlowSubscriberDropped => "slow_subscriber_dropped",
             DiagnosticKind::LockFileCreated => "lock_file_created",
+            DiagnosticKind::TempFilesSwept => "temp_files_swept",
         }
     }
 }

@@ -142,6 +142,43 @@ fn temp_sibling(path: &Path) -> PathBuf {
     }
 }
 
+/// Whether `path` looks like a `write_atomic` temp sibling (`.{name}.{uuid}.tmp`
+/// or any hidden `*.tmp`, which also covers interrupted attachment uploads).
+fn is_atomic_temp(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with('.') && name.ends_with(".tmp"))
+}
+
+/// Remove crash-residual atomic-write temp files under `root`, recursively.
+///
+/// `write_atomic` renames its temp sibling into place, but a crash between
+/// create and rename leaves a hidden `*.tmp` behind forever. Called once at
+/// store open while the data-directory lock is held, so no concurrent writer
+/// can have a temp file in flight. Per-file removal errors are skipped rather
+/// than propagated: the sweep is hygiene, it must never block startup.
+/// Returns how many files were removed; a missing directory is not an error.
+pub fn sweep_temp_files(root: &Path) -> Result<usize> {
+    let mut removed = 0;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(io_error("sweep temp files", &dir, err)),
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if is_atomic_temp(&path) && std::fs::remove_file(&path).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    Ok(removed)
+}
+
 fn io_error(action: &str, path: &Path, err: std::io::Error) -> ArkError {
     ArkError::store(format!("{action} failed for {}: {err}", path.display()))
 }
@@ -175,6 +212,29 @@ mod tests {
         write_json_atomic(&path, &serde_json::json!({"a": 1})).unwrap();
         let value: serde_json::Value = read_json_opt(&path).unwrap();
         assert_eq!(value["a"], 1);
+    }
+
+    #[test]
+    fn sweep_removes_hidden_temp_files_and_keeps_everything_else() {
+        let dir = TempDir::new("fs-util-sweep");
+        let nested = dir.path().join("threads/t1");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join(".thread.json.abc-123.tmp"), b"residue").unwrap();
+        std::fs::write(dir.path().join(".partial.tmp"), b"partial").unwrap();
+        std::fs::write(dir.path().join("data.json"), b"keep").unwrap();
+        std::fs::write(dir.path().join("visible.tmp"), b"keep").unwrap();
+        let removed = sweep_temp_files(dir.path()).unwrap();
+        assert_eq!(removed, 2);
+        assert!(dir.path().join("data.json").is_file());
+        assert!(dir.path().join("visible.tmp").is_file());
+        assert!(!nested.join(".thread.json.abc-123.tmp").exists());
+        assert!(!dir.path().join(".partial.tmp").exists());
+    }
+
+    #[test]
+    fn sweep_of_missing_directory_is_empty_success() {
+        let dir = TempDir::new("fs-util-sweep-missing");
+        assert_eq!(sweep_temp_files(&dir.path().join("absent")).unwrap(), 0);
     }
 
     #[test]
