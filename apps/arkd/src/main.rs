@@ -11,6 +11,7 @@ mod attachment_seed;
 mod base;
 mod child;
 mod cli;
+mod headless;
 mod hooks;
 mod load_skill;
 mod memory_seed;
@@ -39,6 +40,11 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(Command::Serve(args)) => serve(args).await,
+        Ok(Command::Run(args)) => {
+            let _ =
+                ark_obs::try_init_tracing(&TracingConfig::from_env().with_ansi(false).to_stderr());
+            headless::run(args).await
+        }
         Err(message) => {
             eprintln!("arkd: {message}");
             eprintln!("{}", cli::USAGE);

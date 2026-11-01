@@ -22,15 +22,25 @@ pub struct TracingGuard {
 
 /// Install the global subscriber, returning an error when one already exists.
 pub fn try_init_tracing(config: &TracingConfig) -> Result<TracingGuard, String> {
+    use tracing_subscriber::fmt::writer::BoxMakeWriter;
+
     let filter: EnvFilter = config.env_filter();
     let registry = tracing_subscriber::registry().with(filter);
+    // Stdout is the long-standing default; headless modes redirect to stderr
+    // so stdout can carry pure payload (requirements/headless-run.md).
+    let writer = if config.stderr() {
+        BoxMakeWriter::new(std::io::stderr)
+    } else {
+        BoxMakeWriter::new(std::io::stdout)
+    };
 
     match config.format() {
         LogFormat::Compact => registry
             .with(
                 tracing_subscriber::fmt::layer()
                     .with_ansi(config.ansi())
-                    .with_target(true),
+                    .with_target(true)
+                    .with_writer(writer),
             )
             .try_init()
             .map_err(|err| err.to_string())?,
@@ -38,7 +48,8 @@ pub fn try_init_tracing(config: &TracingConfig) -> Result<TracingGuard, String> 
             .with(
                 tracing_subscriber::fmt::layer()
                     .with_ansi(false)
-                    .event_format(JsonLines::default()),
+                    .event_format(JsonLines::default())
+                    .with_writer(writer),
             )
             .try_init()
             .map_err(|err| err.to_string())?,

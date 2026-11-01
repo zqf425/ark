@@ -35,6 +35,8 @@ chrono = { workspace = true }
 async-trait = { workspace = true }
 # Data-URL encoding of image bytes injected into the turn seed (attachment v2 phase 2).
 base64 = "0.22"
+# `arkd run` drives its own runtime over the real HTTP/SSE boundary.
+reqwest = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

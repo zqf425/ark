@@ -33,6 +33,9 @@ pub struct TracingConfig {
     filter: String,
     format: LogFormat,
     ansi: bool,
+    /// Which stream log lines go to. Stdout is the long-standing default;
+    /// headless modes switch to stderr so stdout can carry pure payload.
+    stderr: bool,
 }
 
 impl Default for TracingConfig {
@@ -41,6 +44,7 @@ impl Default for TracingConfig {
             filter: DEFAULT_FILTER.to_string(),
             format: LogFormat::Compact,
             ansi: true,
+            stderr: false,
         }
     }
 }
@@ -56,6 +60,7 @@ impl TracingConfig {
             },
             format,
             ansi: true,
+            stderr: false,
         }
     }
 
@@ -75,6 +80,13 @@ impl TracingConfig {
         self
     }
 
+    /// Send log lines to stderr instead of stdout (headless modes: stdout
+    /// carries pure payload, see requirements/headless-run.md).
+    pub fn to_stderr(mut self) -> Self {
+        self.stderr = true;
+        self
+    }
+
     pub fn filter(&self) -> &str {
         &self.filter
     }
@@ -85,6 +97,10 @@ impl TracingConfig {
 
     pub fn ansi(&self) -> bool {
         self.ansi
+    }
+
+    pub fn stderr(&self) -> bool {
+        self.stderr
     }
 
     /// Build the subscriber filter, falling back to the default on a bad spec.
