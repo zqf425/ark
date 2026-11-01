@@ -1,5 +1,6 @@
 import type {
   ArkErrorCode,
+  LoadStatus,
   ChildCompletionNotice,
   ItemId,
   PendingApprovalView,
@@ -12,7 +13,7 @@ import type {
 } from '../../../shared/contracts'
 import type { StreamStatus } from '../api/events-api'
 
-export type { ChildCompletionNotice } from '../../../shared/contracts'
+export type { ChildCompletionNotice, LoadStatus } from '../../../shared/contracts'
 
 /** One runtime `error` event surfaced inline in the stream. */
 export type ErrorLine = {
@@ -37,8 +38,6 @@ export type PendingUserInput = PendingUserInputView & {
   status: 'pending' | 'answered'
   answer?: string
 }
-
-export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 /** Everything the reducer owns, addressable as a plain value. */
 export type ItemsSnapshot = {

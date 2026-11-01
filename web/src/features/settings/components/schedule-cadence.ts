@@ -22,7 +22,7 @@ export const WEEKDAYS: readonly number[] = [0, 1, 2, 3, 4, 5, 6]
 export const MONTH_DAYS: readonly number[] = Array.from({ length: 31 }, (_, index) => index + 1)
 
 /** Wire autonomy ids; the labels come from the existing `session.runtime.*` keys. */
-export const SCHEDULE_AUTONOMY_VALUES: readonly string[] = ['strict', 'workspace_write', 'unattended']
+export { SCHEDULE_AUTONOMY_VALUES } from '../../../shared/contracts'
 
 /** Label key for one cadence option (also used by the list's kind chip). */
 export const SCHEDULE_KIND_LABEL_KEYS: Record<ScheduleKind, MessageKey> = {
