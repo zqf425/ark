@@ -64,6 +64,28 @@ pub struct ConfigPatch {
     /// reads the new snapshot.
     #[serde(default)]
     pub hooks: Option<HookSettings>,
+    /// Scheduled-task master switch (requirements/scheduled-tasks.md).
+    #[serde(default)]
+    pub schedules: Option<ScheduleSettings>,
+}
+
+/// Scheduled-task policy (requirements/scheduled-tasks.md).
+///
+/// Only the master switch is configuration: the tasks themselves live in
+/// `<data_dir>/schedules.json`, because their run bookkeeping changes on every
+/// tick, while a config patch is a rarer, validated, versioned edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ScheduleSettings {
+    /// When `false` the tick loop keeps running but fires nothing; the task
+    /// table stays readable and editable, it just triggers no run.
+    pub enabled: bool,
+}
+
+impl Default for ScheduleSettings {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 /// Hot runtime limits exposed by the settings screen.
@@ -197,6 +219,7 @@ pub struct RuntimeConfigView {
     pub default_workspace: Option<String>,
     pub default_autonomy: String,
     pub subagents: SubagentSettings,
+    pub schedules: ScheduleSettings,
     pub tuning: TuningSettings,
 }
 
@@ -229,6 +252,17 @@ mod tests {
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("\"result\":\"rejected\""));
         assert!(json.contains("server.port"));
+    }
+
+    #[test]
+    fn schedules_are_enabled_by_default_and_fold_legacy_json() {
+        assert!(ScheduleSettings::default().enabled);
+        // A settings document written before the switch existed must not
+        // disable the feature on load.
+        let patch: ConfigPatch = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(patch.schedules.is_none());
+        let parsed: ScheduleSettings = serde_json::from_str(r#"{"enabled":false}"#).unwrap();
+        assert!(!parsed.enabled);
     }
 
     #[test]

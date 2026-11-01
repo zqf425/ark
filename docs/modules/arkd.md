@@ -122,12 +122,21 @@ assistant 行），后接一条截断到 16 KiB UTF-8 字节的 `ModelRole::Tool
 按 UTF-8 字符数限 4096，超限整条丢弃最新条目并追加 truncated 尾注）。读取或解析失败只记 warn 并跳过注入，
 空 store 不注入，均不影响回合结果。
 
-## 定时任务装配(计划)
+## 定时任务装配
 
 组合根以同一 `data_dir` 创建 `ark_store::ScheduleFileStore`,注入 `ark_ports::ScheduleStore`;
-调度循环随 serve 启动、随全局 shutdown 收敛,执行直接复用注入的 `TurnRunner` 与 `start_turn`
-校验路径(与自动 continuation 同一先例),不新建第二执行通道。见
-[定时任务需求](../requirements/scheduled-tasks.md)。
+任务表独立于 `config.json`:运行时每次完成都会重写它,高频变更放在 settings 文件里会与配置存储的
+版本机制相互干扰。`wiring/mod.rs` 因此:
+
+1. 构造 `Arc<SchedulerService>`,与 `FileSessionStore`、附件存储并列;
+2. `AppState::with_schedules(Arc::clone(&schedules))`,让 `/v1/schedules` 路由拿到同一个实例;
+3. 在 `state` 定稿之后最后调 `schedules.spawn(state.clone())` —— 循环的第一个动作是
+   `reconcile`,它必须看到所有路由将来的那个 state;
+4. 调度循环订阅 `shutdown_receiver()`,在 `Ctrl-C`/drain 只置标志位的路径上靠每轮 tick 顶部的
+   `is_shutting_down()` 收敛。
+
+执行直接复用注入的 `TurnRunner` 与 `start_turn` 校验路径(与自动 continuation 同一先例),
+不新建第二执行通道。见 [定时任务需求](../requirements/scheduled-tasks.md)。
 
 ## 验证
 

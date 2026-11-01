@@ -19,6 +19,7 @@ pub mod pending;
 pub mod review;
 pub mod rewind;
 pub mod runtime;
+pub mod schedules;
 pub mod sessions;
 pub mod subagents;
 pub mod threads;

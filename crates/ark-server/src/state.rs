@@ -23,6 +23,7 @@ use tokio::sync::{broadcast, Mutex as AsyncMutex};
 
 use crate::gates::InteractiveGates;
 use crate::service::continuation::ContinuationRegistry;
+use crate::service::scheduler::SchedulerService;
 
 /// Durable abort reason used for process-owned shutdown cancellation.
 pub const SHUTDOWN_CANCEL_REASON: &str = "runtime shutting down";
@@ -390,6 +391,12 @@ pub struct AppState {
     /// captured immediately after registration, so neither operation can slip
     /// through the other's zero-active check.
     pub workspace_gate: Arc<AsyncMutex<()>>,
+    /// Scheduled-task orchestration (requirements/scheduled-tasks.md).
+    ///
+    /// `None` in a build without scheduling, which makes the `/v1/schedules`
+    /// routes answer a structured `unavailable` instead of panicking. The service
+    /// owns the port, so the boundary never reaches for `ScheduleFileStore`.
+    pub schedules: Option<Arc<SchedulerService>>,
     shutdown: Arc<broadcast::Sender<&'static str>>,
     turns_completed: Arc<AtomicU64>,
 }
@@ -436,6 +443,7 @@ impl AppState {
             auth_token: None,
             base: BaseServices::default(),
             workspace_gate: Arc::new(AsyncMutex::new(())),
+            schedules: None,
             shutdown: Arc::new(shutdown),
             turns_completed: Arc::new(AtomicU64::new(0)),
         }
@@ -477,6 +485,25 @@ impl AppState {
     pub fn with_gates(mut self, gates: Arc<InteractiveGates>) -> Self {
         self.gates = gates;
         self
+    }
+
+    /// Attach scheduled-task orchestration.
+    ///
+    /// Only `arkd` calls this: it builds the store, wraps it in the service, and
+    /// keeps the handle so it can start the loop once the state is final.
+    pub fn with_schedules(mut self, schedules: Arc<SchedulerService>) -> Self {
+        self.schedules = Some(schedules);
+        self
+    }
+
+    /// The scheduled-task service, or a structured `unavailable` error.
+    pub fn schedule_service(&self) -> Result<&Arc<SchedulerService>> {
+        self.schedules.as_ref().ok_or_else(|| {
+            ark_common::ArkError::new(
+                ark_common::ArkErrorCode::RuntimeUnavailable,
+                "scheduled tasks are not available in this build",
+            )
+        })
     }
 
     /// Require a bearer token on every route except `/health`.

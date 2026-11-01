@@ -345,6 +345,23 @@ fn protected_routes() -> Router<AppState> {
             "/v1/threads/{id}/export",
             get(crate::api::handlers::export::export),
         )
+        // Scheduled tasks (requirements/scheduled-tasks.md §HTTP API). Editing
+        // stays available while `config.schedules.enabled` is off; only the run
+        // route reports the switch, as a `409` from the service.
+        .route(
+            "/v1/schedules",
+            get(crate::api::handlers::schedules::list)
+                .post(crate::api::handlers::schedules::create),
+        )
+        .route(
+            "/v1/schedules/{id}",
+            patch(crate::api::handlers::schedules::update)
+                .delete(crate::api::handlers::schedules::delete),
+        )
+        .route(
+            "/v1/schedules/{id}/run",
+            post(crate::api::handlers::schedules::run),
+        )
         .route(
             "/v1/runtime/model-providers",
             post(crate::api::handlers::pending::model_providers),

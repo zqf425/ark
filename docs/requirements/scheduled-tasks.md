@@ -118,4 +118,21 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
 
 ## 落地情况
 
-- (未实现)
+阶段 1(调度域与存储)已实现:`ark-schedule` 的归一化/next_run/到期判定/历史有界纯函数、
+`ark-ports::ScheduleStore` 与 `ark-store::ScheduleFileStore`(原子写、损坏恢复)。
+
+阶段 2(调度与执行 + HTTP API)已实现:
+
+- `crates/ark-server/src/service/scheduler.rs`:`reconcile`(崩溃遗留 `running` → `aborted`、停机期间错过的
+  触发 → `skipped`)、30 秒 tick 的 `Due`/`Misfire`/`NotDue` 分类、`InFlightGuard` 串行化与
+  `previous run was still in flight` 跳过、`begin` 建线程并写 runtime 覆盖(`autonomy` 缺省
+  `unattended`)、`drive` 复用 `start_turn` 并以轮询取终态、从完成时刻重算 `next_run_at`。
+- 一次运行只有一条历史:`running` 只写 `last_run`,有界历史只存终态;`reconcile` 的 `aborted` 也折进历史。
+- `POST /v1/schedules/{id}/run` 在主开关关闭或任务仍在运行时返回 `Conflict`/409;主开关
+  (`config.schedules.enabled`,`ReloadClass::Hot`)只影响触发,不影响 CRUD。
+- 路由 `/v1/schedules`(GET/POST)、`/v1/schedules/{id}`(PATCH/DELETE)、`/v1/schedules/{id}/run`(POST)。
+- 组合根 `apps/arkd/src/wiring/mod.rs` 用同一 `data_dir` 创建 `ScheduleFileStore` 并 `spawn` 调度循环;
+  `Ctrl-C`/drain 这类只置标志位的关闭路径由 tick 顶部的 `is_shutting_down()` 收敛。
+- 测试:`cargo test -p ark-server --lib` 155 passed。
+
+尚未实现(需后续阶段):渲染层/设置页界面与 `web/src/generated` 契约导出校验、端到端真实模型验收。

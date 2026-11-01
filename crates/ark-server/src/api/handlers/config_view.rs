@@ -25,6 +25,7 @@ fn view_of(state: &AppState) -> RuntimeConfigView {
             .map(|path| path.to_string_lossy().to_string()),
         default_autonomy: snapshot.default_autonomy.clone(),
         subagents: snapshot.subagents,
+        schedules: snapshot.schedules,
         tuning: (&snapshot.tuning).into(),
     }
 }

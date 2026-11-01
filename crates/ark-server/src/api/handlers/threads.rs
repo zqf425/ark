@@ -80,7 +80,21 @@ pub async fn create(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| DEFAULT_TITLE.to_string());
-    let meta = state.store.create_thread(&title).await?;
+    let summary = create_thread(&state, &title).await?;
+    Ok((StatusCode::CREATED, Json(summary)))
+}
+
+/// Create a thread and publish its `thread_created` event.
+///
+/// Shared by `POST /v1/threads` and the scheduler's run path so both produce the
+/// same two records in the same order. A scheduled run that skipped the event
+/// would create a thread an attached SSE client never learns about, which is the
+/// one difference the renderer cannot compensate for.
+pub(crate) async fn create_thread(
+    state: &AppState,
+    title: &str,
+) -> Result<ThreadSummary, ApiError> {
+    let meta = state.store.create_thread(title).await?;
     // Publish the creation so an SSE client attached to the new thread sees it
     // without a special case in the stream handler.
     let event = RuntimeEvent::ThreadCreated {
@@ -92,7 +106,7 @@ pub async fn create(
     state.store.append_event(meta.thread_id, event).await?;
     let mut summary = summary_of(&meta);
     summary.last_seq = state.store.highest_seq(meta.thread_id).await.ok();
-    Ok((StatusCode::CREATED, Json(summary)))
+    Ok(summary)
 }
 
 /// `GET /v1/threads/{id}`.

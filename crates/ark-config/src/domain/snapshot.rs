@@ -6,7 +6,7 @@
 //! value, so a rejected patch cannot leave the live snapshot half updated.
 
 use ark_contract::{
-    ConfigPatch, FieldPath, HookSettings, SubagentSettings, TuningSettings,
+    ConfigPatch, FieldPath, HookSettings, ScheduleSettings, SubagentSettings, TuningSettings,
     SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
 };
 use serde::{Deserialize, Serialize};
@@ -126,6 +126,10 @@ pub struct RuntimeConfig {
     /// Agent lifecycle hooks (requirements/hooks.md). Classed `Hot`: every tool
     /// call reads the live snapshot, so a patch applies to the very next call.
     pub hooks: HookSettings,
+    /// Scheduled-task master switch (requirements/scheduled-tasks.md). Classed
+    /// `Hot`: the tick loop re-reads it every 30s, so disabling schedules takes
+    /// effect without a restart and without touching `schedules.json`.
+    pub schedules: ScheduleSettings,
     pub tuning: TuningConfig,
 }
 
@@ -140,6 +144,7 @@ impl Default for RuntimeConfig {
             default_autonomy: "workspace_write".to_string(),
             subagents: SubagentSettings::default(),
             hooks: HookSettings::default(),
+            schedules: ScheduleSettings::default(),
             tuning: TuningConfig::default(),
         }
     }
@@ -248,6 +253,12 @@ impl RuntimeConfig {
             if next.hooks != *value {
                 next.hooks = value.clone();
                 changed.push(FieldPath::new("hooks"));
+            }
+        }
+        if let Some(value) = &patch.schedules {
+            if next.schedules != *value {
+                next.schedules = *value;
+                changed.push(FieldPath::new("schedules"));
             }
         }
         next.validate()?;

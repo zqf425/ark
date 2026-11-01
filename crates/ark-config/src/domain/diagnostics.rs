@@ -23,6 +23,7 @@ pub const CONFIG_KEYS: &[&str] = &[
     "default_autonomy",
     "subagents",
     "hooks",
+    "schedules",
     "tuning",
 ];
 
@@ -31,6 +32,9 @@ pub const SUBAGENT_KEYS: &[&str] = &["enabled", "max_concurrency", "auto_continu
 
 /// Keys nested under `hooks`.
 pub const HOOK_KEYS: &[&str] = &["pre_tool_use", "post_tool_use"];
+
+/// Keys nested under `schedules`.
+pub const SCHEDULE_KEYS: &[&str] = &["enabled"];
 
 /// Keys nested under `tuning`.
 pub const TUNING_KEYS: &[&str] = &[
@@ -107,6 +111,7 @@ pub fn diagnose(document: &Value) -> ConfigDiagnostics {
     }
     diagnose_nested(object, "subagents", SUBAGENT_KEYS, &mut diagnostics);
     diagnose_nested(object, "hooks", HOOK_KEYS, &mut diagnostics);
+    diagnose_nested(object, "schedules", SCHEDULE_KEYS, &mut diagnostics);
     diagnose_nested(object, "tuning", TUNING_KEYS, &mut diagnostics);
     diagnostics
 }
@@ -160,7 +165,11 @@ mod tests {
         declared.sort_unstable();
         assert_eq!(serialized, declared, "CONFIG_KEYS is out of date");
 
-        for (parent, keys) in [("subagents", SUBAGENT_KEYS), ("tuning", TUNING_KEYS)] {
+        for (parent, keys) in [
+            ("subagents", SUBAGENT_KEYS),
+            ("schedules", SCHEDULE_KEYS),
+            ("tuning", TUNING_KEYS),
+        ] {
             let nested = object
                 .get(parent)
                 .and_then(Value::as_object)

@@ -88,14 +88,34 @@
   导出：仅含摘要元数据与升序 `seq` 的完整权威事件日志，不含导出时间戳、凭证、API key、header 或
   附件载荷；相同 store 状态两次导出字节一致。
 
-## 定时任务调度服务(计划)
+## 定时任务调度服务
 
-[定时任务需求](../requirements/scheduled-tasks.md) 批准后,`service/scheduler.rs` 将承载
-调度循环与执行编排:tick 到期扫描、经 `start_turn` 同一校验路径以任务 prompt 启动真实回合
-(线程 runtime 覆盖 `autonomy`,无人值守不等待 gate)、终态回写 `last_run` 与有界历史、
-shutdown 收敛。路由 `/v1/schedules`(CRUD + 立即运行)只解包 HTTP 并调用调度服务;调度域
-逻辑(归一化、next_run)位于 `ark-schedule`,存储经注入的 `ScheduleStore`。停机期间错过的
-触发不补跑,启动时直接推进到下一未来时点。
+[定时任务需求](../requirements/scheduled-tasks.md) 的「调度与执行」落在 `service/scheduler.rs`,
+它只拥有**循环**与**结果折叠**,节奏数学仍在 `ark-schedule`:
+
+- `spawn` 先 `reconcile` 再进入 tick 循环,`TICK_INTERVAL` 为 30 秒。循环退出有两条路径:
+  `/v1/shutdown` 的广播,以及 `Ctrl-C`/drain 只置标志位的路径——后者靠每轮循环顶部的
+  `is_shutting_down()` 检查收敛,最多晚一个 tick,不需要额外的唤醒通道。
+- `tick` 把每个任务分类为 `NotDue`/`Due`/`Misfire`(`MISFIRE_GRACE_SECS` 为 300 秒)。
+  `Misfire` 记一条 `skipped` 并推进 `next_run_at`,不补跑;`Due` 按 `next_run_at` 升序串行执行。
+  同一任务上一次运行还没结束(`InFlightGuard` 未释放)时,本次到期记 `skipped`
+  (`previous run was still in flight`)并推进,绝不排队。
+- `begin` 经 `threads::create_thread` 建线程、`set_thread_runtime` 写入任务覆盖(`autonomy`
+  缺省为 `unattended`,因此无人值守的回合不会停在 gate 上),然后写 `running` 标记。
+- `drive` 用 `start_turn` 启动真实回合,拿到与 HTTP 路由完全相同的文本上限、单回合冲突、
+  workspace 租约与附件校验;终态经轮询 `state.turns.get(turn_id)` 取得(注册表没有完成通知,
+  轮询不会像丢失唤醒那样漏掉终态),成功时摘要取该线程最后一条非空 assistant 文本。
+- **一次运行只有一条历史**。`running` 标记只写 `last_run`,有界历史只存终态:成功后历史里是
+  一行 `completed`,而不是 `running` 加终态两行。`reconcile` 关闭上个进程留下的 `running` 时
+  也把 `aborted` 折进历史(旧文档里的 `running` 行就地改写,不追加第二条)。
+- 节奏从**完成时刻**重算(`apply_next_run_at`),因此耗时 10 分钟的 interval 任务不会在结束后
+  5 分钟又触发一次。
+- `run_now`(`POST /v1/schedules/{id}/run`)在返回前就写好线程与 `running` 标记,响应即可反映
+  客户端将观察到的状态;主开关关闭或该任务仍在运行时返回 `Conflict`/409,主开关只影响触发,
+  不影响 CRUD。
+
+路由 `/v1/schedules`(CRUD + 立即运行)只解包 HTTP 并调用调度服务;捕获的输入与不存在 id 的错误
+沿用端口的结构化错误码。
 
 ## 路由清单
 

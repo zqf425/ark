@@ -11,6 +11,7 @@ ark-ports = { workspace = true }
 ark-agent = { workspace = true }
 ark-store = { workspace = true }
 ark-config = { workspace = true }
+ark-schedule = { workspace = true }
 ark-obs = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

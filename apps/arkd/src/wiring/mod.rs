@@ -108,6 +108,12 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         &args.data_dir,
         DEFAULT_MAX_ATTACHMENT_BYTES,
     )?);
+    // Scheduled tasks live in their own document (`schedules.json`), not in the
+    // config file: the runtime rewrites them on every run, and a settings file
+    // that changes that often would fight the config store's versioning.
+    let schedules = Arc::new(ark_server::SchedulerService::new(Arc::new(
+        ark_store::ScheduleFileStore::open(&args.data_dir)?,
+    )));
     store.reconcile()?;
     let interrupted = abort_interrupted_turns(store.as_ref()).await?;
     if interrupted != 0 {
@@ -321,12 +327,16 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         Arc::clone(&delegation) as Arc<dyn ark_ports::SubagentRegistry>,
     )
     .with_gates(gates)
+    .with_schedules(Arc::clone(&schedules))
     .with_auth_token(args.auth_token.clone());
 
     spawn_completion_listener(state.clone(), completion_notifications);
     // Recover unacknowledged completions that were durable before this process
     // started (for example, a crash after `child_completed` but before debounce).
     ark_server::service::sync_auto_continue_policy(state.clone()).await;
+    // The loop is started last, once `state` is final: its first act is
+    // reconciliation, which must observe the same state every route will use.
+    schedules.spawn(state.clone());
 
     Ok(Wiring {
         state,
