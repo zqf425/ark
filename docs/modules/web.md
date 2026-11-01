@@ -44,7 +44,7 @@
   不把 provider、MCP 或 runtime 配置逻辑回流到 Code 会话状态或 `ark-agent`。
 - 用户可见文本通过 `web/src/shared/i18n/` 的消息键与中英文资源提供；新增 UI 不得硬编码文案。
   该目录已按域拆分为 `catalogs/*`（`common`、`errors`、`session`、`thread-list`、`workbench`、
-  `session-canvas`、`settings-*`，当前共 11 个文件、537 个键）：每个 catalog 输出一张
+  `session-canvas`、`settings-*`）：每个 catalog 输出一张
   `键 -> [zh-CN, en-US]` 表，`messages.ts` 只做聚合并导出 `translate` 与由它推导的 `MessageKey`，
   所以拼错的键是编译错误而不是静默英文回落。新文案加到对应域文件，不新建巨型 `messages.ts`。
 - 非 React 代码（reducer、formatter、API 结果映射）不能调 `useI18n`，也不能直接写文案：
@@ -72,5 +72,5 @@
 ## 定时任务管理
 
 设置页「定时任务」section(需求见 [scheduled-tasks](../requirements/scheduled-tasks.md)):
-只消费 `/v1/schedules` 的生成契约类型;节奏编辑、启停、立即运行与最近结果展示;全部文案走
-i18n 消息键。客户端不做 next_run 计算,以后端返回为准。
+只消费 `/v1/schedules` 的生成契约类型;节奏编辑、启停、删除、立即运行、最近结果展示与
+"打开会话"跳转运行线程;全部文案走 i18n 消息键。客户端不做 next_run 计算,以后端返回为准。

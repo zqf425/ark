@@ -78,11 +78,12 @@ pub fn server_info(auth_required: bool, version: &str) -> McpServerInfo {
         auth: McpAuthInfo {
             required: auth_required,
             header: "authorization",
-            description: "Send `authorization: Bearer <token>` on every /v1 request; the token \
-                          is the arkd `--auth-token` value. `required` is false only when the \
-                          runtime was started without a token (an explicit local-only \
-                          configuration)."
-                .to_string(),
+            description:
+                "Send `authorization: Bearer <token>` on every /v1 request except /health \
+                          and /v1/mcp-info; the token is the arkd `--auth-token` value. `required` \
+                          is false only when the runtime was started without a token (an explicit \
+                          local-only configuration)."
+                    .to_string(),
         },
         tools: mcp_tools::tools(),
     }
