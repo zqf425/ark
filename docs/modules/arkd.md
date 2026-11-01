@@ -8,7 +8,8 @@
 `wiring` 仅做显式装配，不能包含业务规则、平台特例或生命周期状态机。新增实现应先落入所属 crate；
 只有装配代码才允许在这里引用多个实现 crate。
 
-入口命令：`serve`（常驻 HTTP/SSE 运行时）与 `run`（[headless 单回合](../requirements/headless-run.md)）。
+入口命令：`serve`（常驻 HTTP/SSE 运行时）与 `run`（[headless 单回合](../requirements/headless-run.md)，
+含 `--review` [审查预设](../requirements/review-preset.md)）。
 `run` 复用同一 `wiring::build` 装配，但**必须经真实 HTTP/SSE 边界驱动自身**（进程内 reqwest 客户端），
 不得为 headless 另开一条绕过授权与事件语义的内部路径；其日志经 `TracingConfig::to_stderr`
 走 stderr，stdout 只承载模型输出。
