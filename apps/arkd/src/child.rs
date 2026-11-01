@@ -29,6 +29,10 @@ use ark_ports::{EventSink, ModelClient, SandboxPolicy, SessionStore, ToolRegistr
 use ark_tool::{RegistryToolRunner, ToolRegistry};
 
 use crate::model;
+use crate::wiring::turn_common::{
+    build_reactor, chunk_buffer_for_turn, limits_for_turn, resolve_workspace, seed_prefix,
+    skill_tail, HookedToolRunner, ReactorSpec, CHILD_ROLE_LINE,
+};
 use crate::workspace::WorkspaceRoots;
 
 /// Resolve a child override against its parent setting. A `None` child value is
@@ -205,23 +209,24 @@ impl ChildTurnExecutorImpl {
         workspace: &std::path::Path,
         prompt: &str,
     ) -> Vec<ark_ports::ModelMessage> {
-        let mut seed_messages = super::wiring::turn_common::seed_prefix(workspace);
+        let mut seed_messages = seed_prefix(workspace);
         // A child is told what it is: it must answer, not converse.
-        seed_messages.push(ark_ports::ModelMessage::system(
-            "You are a child run. Finish the delegated task and answer with the result. \
-             You cannot delegate further.",
-        ));
+        seed_messages.push(ark_ports::ModelMessage::system(CHILD_ROLE_LINE));
         let resolution = self.skills.resolve_for_turn(prompt);
-        seed_messages.extend(super::wiring::turn_common::skill_tail(&resolution, false));
+        seed_messages.extend(skill_tail(&resolution, false));
         seed_messages
     }
 
     /// Effective child settings: the parent thread's runtime values, narrowed
     /// by explicit child overrides (workspace, provider, model, autonomy).
-    async fn inherited_settings(&self, ctx: &ChildTurnContext) -> Result<ChildTurnSettings> {
+    async fn inherited_settings(
+        &self,
+        ctx: &ChildTurnContext,
+        snapshot: &RuntimeConfig,
+    ) -> Result<ChildTurnSettings> {
         let parent = self.store.get_thread(ctx.parent_thread_id).await?;
         let parent_runtime = parent.runtime;
-        let workspace = super::wiring::turn_common::resolve_workspace(
+        let workspace = resolve_workspace(
             ctx.workspace.as_deref(),
             parent_runtime.workspace.clone().map(PathBuf::from),
             self.roots.current(),
@@ -243,10 +248,9 @@ impl ChildTurnExecutorImpl {
             parent_runtime.model.as_deref(),
         )
         .map(ToString::to_string);
-        let config = self.config.snapshot();
         let parent_autonomy = crate::wiring::autonomy_from_override_or_default(
             parent_runtime.autonomy.as_deref(),
-            &config,
+            snapshot,
         )?;
         Ok(ChildTurnSettings {
             workspace,
@@ -275,18 +279,20 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
         // parent has no override. This keeps a delegated task in the same
         // workspace, permission envelope and model unless it deliberately asks
         // to narrow or replace them.
-        let settings = self.inherited_settings(&ctx).await?;
+        // One snapshot per turn, same rule as the parent path: autonomy and
+        // limits must come from the same config state.
+        let snapshot = self.config.snapshot();
+        let settings = self.inherited_settings(&ctx, &snapshot).await?;
         let workspace = settings.workspace;
         let sandbox: Arc<dyn SandboxPolicy> =
             Arc::new(ark_tool::BuiltinSandboxPolicy::new(settings.autonomy));
-        let tools: Arc<dyn ark_agent::ToolRunner> =
-            Arc::new(super::wiring::turn_common::HookedToolRunner::new(
-                Arc::clone(&self.tools),
-                Arc::clone(&self.config),
-                workspace.clone(),
-                thread_id,
-                turn_id,
-            ));
+        let tools: Arc<dyn ark_agent::ToolRunner> = Arc::new(HookedToolRunner::new(
+            Arc::clone(&self.tools),
+            Arc::clone(&self.config),
+            workspace.clone(),
+            thread_id,
+            turn_id,
+        ));
 
         let seed_messages = self.child_seed(&workspace, &ctx.prompt);
 
@@ -295,28 +301,24 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             settings.provider_id.as_deref(),
             settings.model_override.as_deref(),
         )?;
-        let mut reactor =
-            super::wiring::turn_common::build_reactor(super::wiring::turn_common::ReactorSpec {
-                model: self.model_for(provider.clone()),
-                tools,
-                writer,
-                gates: Arc::new(ark_agent::AllowAllGates),
-                sandbox,
-                events,
-                cancel: (*cancel).clone(),
-                seed: ModelSeed {
-                    messages: seed_messages,
-                    tools: self.tool_schemas.clone(),
-                    temperature: provider.as_ref().and_then(|provider| provider.temperature),
-                    max_tokens: provider.as_ref().and_then(|provider| provider.max_tokens),
-                },
-                machine: TurnMachine::new(super::wiring::turn_common::limits_for_turn(
-                    &snapshot,
-                    provider.as_ref(),
-                )),
-                chunk_buffer: super::wiring::turn_common::chunk_buffer_for_turn(&snapshot),
-                steering: steer,
-            });
+        let mut reactor = build_reactor(ReactorSpec {
+            model: self.model_for(provider.clone()),
+            tools,
+            writer,
+            gates: Arc::new(ark_agent::AllowAllGates),
+            sandbox,
+            events,
+            cancel: (*cancel).clone(),
+            seed: ModelSeed {
+                messages: seed_messages,
+                tools: self.tool_schemas.clone(),
+                temperature: provider.as_ref().and_then(|provider| provider.temperature),
+                max_tokens: provider.as_ref().and_then(|provider| provider.max_tokens),
+            },
+            machine: TurnMachine::new(limits_for_turn(&snapshot, provider.as_ref())),
+            chunk_buffer: chunk_buffer_for_turn(&snapshot),
+            steering: steer,
+        });
         reactor.push_user(ctx.prompt.clone());
         let outcome = reactor.run().await;
 

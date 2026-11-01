@@ -29,6 +29,11 @@ provider 的模型目录显式声明 `supports_vision`（`ProviderStore::resolve
 记入 `turn_started.attachment_outcomes`。agent 不读取文件系统；坏附件不得使回合失败。
 关联回放不经过组合根——它由 `SessionStore` 的事件投影提供。
 
+`wiring/turn_common.rs` 是父/子两条 turn 路径的**共享规则宿主**，属本模块"仅装配"约束的显式例外：
+seed 静态前缀（prompt-cache 字节一致不变量的唯一构造点）、技能动态尾、工作区解析、每回合 limits、
+hook 包装的工具执行与 `ReactorSpec` 构造都住在这里。理由是结构性的——两条路径必须共用同一份规则才
+不会漂移；除该文件外，`wiring` 仍不得包含业务规则。
+
 ## 子代理装配
 
 child executor 在此复用同一个 `ark-agent::Reactor`，并桥接 cancel/steer、工具集和会话 writer。
