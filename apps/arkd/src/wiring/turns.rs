@@ -1,6 +1,6 @@
 //! One parent turn: the reactor wired to the real store, tools and gates.
 
-use super::history::{conversation_history, workspace_line};
+use super::history::conversation_history;
 use super::*;
 
 /// One turn, driven by the real reactor (`ark-agent`), with the real store and
@@ -45,38 +45,6 @@ impl AgentTurnRunner {
         match provider {
             Some(endpoint) => model::select_from_config(endpoint, Arc::clone(&self.usage)).0,
             None => model::select(snapshot, Arc::clone(&self.usage)).0,
-        }
-    }
-
-    /// Per-turn limits from the live `tuning` block.
-    ///
-    /// A running turn keeps the snapshot it started with; the next turn sees the
-    /// edit. That is the bounded-lifetime semantics the design asks for.
-    pub(super) fn limits_for_turn(
-        snapshot: &RuntimeConfig,
-        provider: Option<&ark_llm::ProviderConfig>,
-    ) -> TurnLimits {
-        let tuning = &snapshot.tuning;
-        let context_limit_tokens =
-            model::context_limit_tokens(tuning.context_limit_tokens, provider);
-        TurnLimits {
-            max_rounds: tuning.max_rounds.max(1),
-            max_tokens: tuning.max_tokens.max(1),
-            max_tool_calls: tuning.max_tool_calls.max(1),
-            max_identical_calls: tuning.max_identical_calls.max(1),
-            context_limit_tokens,
-            keep_recent_messages: tuning.keep_recent_messages.max(1),
-            max_compactions: TurnLimits::default().max_compactions,
-        }
-    }
-
-    /// Model-delta channel capacity from `tuning`, falling back to the default.
-    fn chunk_buffer_for_turn(snapshot: &RuntimeConfig) -> usize {
-        let tuned = snapshot.tuning.chunk_buffer;
-        if tuned == 0 {
-            CHUNK_BUFFER
-        } else {
-            tuned
         }
     }
 }
@@ -234,117 +202,44 @@ impl TurnRunner for AgentTurnRunner {
         };
         let history = conversation_history(&self.store.read_items(job.thread_id).await?);
         let thread = self.store.get_thread(job.thread_id).await?;
-        let (source_text, user_text) = match job.source {
-            TurnSource::User(text) => (text.clone(), Some(text)),
-            TurnSource::AutoContinuation => (String::new(), None),
-        };
+        let (source_text, user_text) = turn_source_texts(&job.source);
         // Capture once before building either the prompt or tool adapter. A
         // per-session override wins, otherwise the process workspace lease is
         // used; neither can change during this turn.
-        let workspace = match thread.runtime.workspace.as_deref() {
-            Some(raw) => {
-                let path = std::path::PathBuf::from(raw);
-                if !path.is_dir() {
-                    return Err(ark_common::ArkError::validation(format!(
-                        "thread workspace does not exist: {}",
-                        path.display()
-                    )));
-                }
-                path.canonicalize()
-                    .map(|path| {
-                        std::path::PathBuf::from(ark_common::path::strip_verbatim(
-                            &path.to_string_lossy(),
-                        ))
-                    })
-                    .map_err(|_| {
-                        ark_common::ArkError::validation(format!(
-                            "cannot canonicalize thread workspace: {}",
-                            path.display()
-                        ))
-                    })?
-            }
-            None => self.roots.lease().canonical_root,
-        };
-        // Attachment phase two: resolve the ids the route already authorized
-        // into seed parts *before* `turn_started` is written, so the delivery
-        // outcome rides the same durable record. Only an explicit
-        // catalog-reported `supports_vision` lets images through.
-        let vision = self
-            .providers
-            .resolve_vision(thread.runtime.provider_id.as_deref());
-        let attachments = crate::attachment_seed::resolve_attachments(
-            self.attachments.as_ref(),
-            &job.attachment_ids,
-            vision == Some(true),
-            crate::attachment_seed::IMAGE_BUDGET_BYTES,
-        );
+        let workspace = super::turn_common::resolve_workspace(
+            thread
+                .runtime
+                .workspace
+                .as_deref()
+                .map(std::path::Path::new),
+            None,
+            self.roots.lease().canonical_root,
+            "thread",
+        )?;
         let snapshot = self.config.snapshot();
+        let (attachments, events, writer) = self
+            .parent_delivery(&job, thread.runtime.provider_id.as_deref())
+            .await?;
         let policy: Arc<dyn SandboxPolicy> = Arc::new(BuiltinSandboxPolicy::new(
             autonomy_from_override_or_default(thread.runtime.autonomy.as_deref(), &snapshot)?,
         ));
-        // Auto-continuations are marked on the durable `turn_started` event so
-        // the per-notification delivery-attempt accounting survives restarts.
-        // The attachment ids ride the same record: the route already proved they
-        // are associated with this thread, and recording them is the audit trail
-        // that makes "which turn referenced this file" replayable. Phase two
-        // adds the per-attachment delivery outcome beside them.
-        let events = if is_auto {
-            TurnEvents::auto_continuation(job.thread_id, job.turn_id)
-        } else {
-            TurnEvents::new(job.thread_id, job.turn_id)
-        }
-        .with_attachments(job.attachment_ids.clone())
-        .with_attachment_outcomes(attachments.outcomes.clone());
-        let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events.clone()));
-        let tools: Arc<dyn AgentToolRunner> = Arc::new(ToolRunnerAdapter {
-            inner: Arc::clone(&self.tools),
-            config: Arc::clone(&self.config),
-            workspace: workspace.clone(),
-            thread_id: job.thread_id,
-            turn_id: job.turn_id,
-        });
-        // Skill instructions ride the *dynamic* tail, never the static prefix, so
-        // the prompt-cache prefix stays byte-identical between turns (design
-        // §7.4.6 / §7.14). Only activated skills are injected; the rest appear in
-        // the catalog line so the model knows they exist.
-        let resolution = self.skills.resolve_for_turn(&source_text);
-        let mut seed_messages = vec![
-            ModelMessage::system(SYSTEM_PROMPT),
-            ModelMessage::system(workspace_line(&workspace)),
-        ];
-        seed_messages.extend(history);
-        for instruction in &resolution.instructions {
-            seed_messages.push(ModelMessage::system(format!(
-                "[skill instructions]\n{instruction}"
-            )));
-        }
-        if let Some(catalog) = &resolution.catalog {
-            seed_messages.push(ModelMessage::system(format!(
-                "[available skills]\n{catalog}"
-            )));
-        }
-        // Memory also rides the dynamic tail: it changes whenever the user edits
-        // a memory, so putting it in the static prefix would invalidate the
-        // prompt cache on every such edit.
-        if let Some(message) = crate::memory_seed::seed_for_turn(self.memory.as_ref()) {
-            seed_messages.push(message);
-        }
-        if let Some(message) = inbox.system_message() {
-            seed_messages.push(message);
-        }
+        let tools: Arc<dyn AgentToolRunner> = Arc::new(super::turn_common::HookedToolRunner::new(
+            Arc::clone(&self.tools),
+            Arc::clone(&self.config),
+            workspace.clone(),
+            job.thread_id,
+            job.turn_id,
+        ));
+        let seed_messages = self.parent_seed(&workspace, history, &source_text, &inbox);
         // One snapshot per turn: every value below is derived from the same
         // config state, so a turn cannot mix a new model with old limits.
-        let mut provider = match thread.runtime.provider_id.as_deref() {
-            Some(id) => Some(self.providers.resolve(Some(id)).ok_or_else(|| {
-                ark_common::ArkError::validation(format!("thread provider is unavailable: {id}"))
-            })?),
-            None => self.providers.resolve(None),
-        };
-        if let (Some(provider), Some(model)) = (&mut provider, thread.runtime.model) {
-            provider.model = model;
-        }
+        let provider = resolve_thread_provider(
+            &self.providers,
+            thread.runtime.provider_id.as_deref(),
+            thread.runtime.model,
+        )?;
         let model = self.model_for_turn(&snapshot, provider.clone());
-        let mut reactor = Reactor::new(ReactorConfig {
+        let mut reactor = super::turn_common::build_reactor(super::turn_common::ReactorSpec {
             model,
             tools,
             writer,
@@ -358,15 +253,18 @@ impl TurnRunner for AgentTurnRunner {
                 temperature: provider.as_ref().and_then(|provider| provider.temperature),
                 max_tokens: provider.as_ref().and_then(|provider| provider.max_tokens),
             },
-            machine: TurnMachine::new(Self::limits_for_turn(&snapshot, provider.as_ref())),
-            chunk_buffer: Self::chunk_buffer_for_turn(&snapshot),
-        })
-        .with_steering(job.steering);
+            machine: TurnMachine::new(super::turn_common::limits_for_turn(
+                &snapshot,
+                provider.as_ref(),
+            )),
+            chunk_buffer: super::turn_common::chunk_buffer_for_turn(&snapshot),
+            steering: job.steering,
+        });
         if let Some(text) = user_text {
             reactor.push_user_message(user_message_with_attachments(text, &attachments));
         }
         let outcome = reactor.run().await?;
-        Ok(finish_parent_turn(
+        let end = finish_parent_turn(
             outcome,
             self.store.as_ref(),
             self.sink.as_ref(),
@@ -374,8 +272,104 @@ impl TurnRunner for AgentTurnRunner {
             job.turn_id,
             &inbox,
         )
-        .await)
+        .await;
+        Ok(end)
     }
+}
+
+impl AgentTurnRunner {
+    /// Resolve the turn's attachments and the durable `turn_started` event.
+    ///
+    /// Attachment phase two: the ids the route already authorized become seed
+    /// parts *before* `turn_started` is written, so the delivery outcome rides
+    /// the same durable record. Only an explicit catalog-reported
+    /// `supports_vision` lets images through. Auto-continuations are marked on
+    /// the same event so per-notification delivery accounting survives
+    /// restarts; the attachment ids are the audit trail that makes "which turn
+    /// referenced this file" replayable.
+    async fn parent_delivery(
+        &self,
+        job: &TurnJob,
+        provider_id: Option<&str>,
+    ) -> Result<(
+        crate::attachment_seed::AttachmentSeed,
+        TurnEvents,
+        Arc<EventSinkWriter>,
+    )> {
+        let is_auto = matches!(&job.source, TurnSource::AutoContinuation);
+        let vision = self.providers.resolve_vision(provider_id);
+        let attachments = crate::attachment_seed::resolve_attachments(
+            self.attachments.as_ref(),
+            &job.attachment_ids,
+            vision == Some(true),
+            crate::attachment_seed::IMAGE_BUDGET_BYTES,
+        );
+        let events = if is_auto {
+            TurnEvents::auto_continuation(job.thread_id, job.turn_id)
+        } else {
+            TurnEvents::new(job.thread_id, job.turn_id)
+        }
+        .with_attachments(job.attachment_ids.clone())
+        .with_attachment_outcomes(attachments.outcomes.clone());
+        let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events.clone()));
+        Ok((attachments, events, writer))
+    }
+
+    /// Assemble the parent turn's seed: static prefix, replayed history, then
+    /// the dynamic tail (skills, memory, completion inbox).
+    ///
+    /// Only the static prefix may enter the prompt cache; everything after it
+    /// changes between turns, so it must stay out of the prefix.
+    fn parent_seed(
+        &self,
+        workspace: &std::path::Path,
+        history: Vec<ModelMessage>,
+        source_text: &str,
+        inbox: &CompletionInbox,
+    ) -> Vec<ModelMessage> {
+        let resolution = self.skills.resolve_for_turn(source_text);
+        let mut seed_messages = super::turn_common::seed_prefix(workspace);
+        seed_messages.extend(history);
+        seed_messages.extend(super::turn_common::skill_tail(&resolution, true));
+        if let Some(message) = crate::memory_seed::seed_for_turn(self.memory.as_ref()) {
+            seed_messages.push(message);
+        }
+        if let Some(message) = inbox.system_message() {
+            seed_messages.push(message);
+        }
+        seed_messages
+    }
+}
+
+/// Split the turn source into the skill-resolution text and the user message
+/// text (an auto-continuation has neither).
+fn turn_source_texts(source: &TurnSource) -> (String, Option<String>) {
+    match source {
+        TurnSource::User(text) => (text.clone(), Some(text.clone())),
+        TurnSource::AutoContinuation => (String::new(), None),
+    }
+}
+
+/// Resolve the parent turn's provider from the live table, then apply the
+/// thread's model override.
+///
+/// The provider table wins; `model_providers` in `config.json` remains the
+/// legacy fallback (read inside [`AgentTurnRunner::model_for_turn`]).
+fn resolve_thread_provider(
+    providers: &ark_provider::ProviderStore,
+    provider_id: Option<&str>,
+    model: Option<String>,
+) -> Result<Option<ark_llm::ProviderConfig>> {
+    let mut provider = match provider_id {
+        Some(id) => Some(providers.resolve(Some(id)).ok_or_else(|| {
+            ark_common::ArkError::validation(format!("thread provider is unavailable: {id}"))
+        })?),
+        None => providers.resolve(None),
+    };
+    if let (Some(provider), Some(model)) = (&mut provider, model) {
+        provider.model = model;
+    }
+    Ok(provider)
 }
 
 /// Build the user message for one turn from the typed text and the resolved
@@ -396,61 +390,4 @@ pub(super) fn user_message_with_attachments(
     let mut message = ModelMessage::user(content);
     message.images = attachments.images.clone();
     message
-}
-
-/// Adapter from `ark-tool`'s runner to `ark-agent`'s `ToolRunner` trait.
-struct ToolRunnerAdapter {
-    inner: Arc<RegistryToolRunner>,
-    /// Live config: hooks are read per call so a patch applies immediately.
-    config: Arc<ConfigStore>,
-    workspace: std::path::PathBuf,
-    thread_id: ThreadId,
-    turn_id: TurnId,
-}
-
-#[async_trait::async_trait]
-impl AgentToolRunner for ToolRunnerAdapter {
-    async fn execute(&self, call: &ToolCallRequest) -> Result<ToolOutput> {
-        let snapshot = self.config.snapshot();
-        let hooks = &snapshot.hooks;
-        let payload = crate::hooks::hook_payload(
-            "pre_tool_use",
-            &call.tool,
-            &call.arguments,
-            &self.thread_id,
-            &self.turn_id,
-        );
-        // The reactor already decided the sandbox mode for this call and carried
-        // it here; re-deciding would flip an approved `bash` back to
-        // `NeedsApproval` (design §7.3, P1-5). `run_in` remains the fallback for
-        // calls that never went through the model path.
-        crate::hooks::run_around(hooks, &self.workspace, &payload, || async {
-            match call.sandbox {
-                Some(decision) => {
-                    self.inner
-                        .run_decided(
-                            self.workspace.clone(),
-                            self.thread_id,
-                            self.turn_id,
-                            &call.tool,
-                            call.arguments.clone(),
-                            decision,
-                        )
-                        .await
-                }
-                None => {
-                    self.inner
-                        .run_in(
-                            self.workspace.clone(),
-                            self.thread_id,
-                            self.turn_id,
-                            &call.tool,
-                            call.arguments.clone(),
-                        )
-                        .await
-                }
-            }
-        })
-        .await
-    }
 }

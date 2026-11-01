@@ -18,8 +18,8 @@ use std::sync::Arc;
 use ark_agent::exec::journal::EventSinkWriter;
 use ark_agent::exec::tool_runner::ToolRunner as AgentToolRunner;
 use ark_agent::{
-    CompletionInbox, GateBroker, ModelSeed, Reactor, ReactorConfig, ToolCallRequest, TurnEvents,
-    TurnLimits, TurnMachine, TurnOutcome,
+    CancelToken, CompletionInbox, GateBroker, ModelSeed, Reactor, ReactorConfig, SteerQueue,
+    ToolCallRequest, TurnEvents, TurnLimits, TurnMachine, TurnOutcome,
 };
 use ark_common::{Result, ThreadId, TurnId};
 use ark_config::{ConfigStore, RuntimeConfig};
@@ -43,6 +43,7 @@ use crate::workspace::WorkspaceRoots;
 
 mod history;
 mod tools;
+pub(crate) mod turn_common;
 mod turns;
 
 use tools::{build_child_tools, build_tools};

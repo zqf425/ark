@@ -19,18 +19,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ark_agent::{
-    EventSinkWriter, ModelSeed, Reactor, ReactorConfig, ToolCallRequest, TurnEvents, TurnLimits,
-    TurnMachine, TurnOutcome,
-};
+use ark_agent::{EventSinkWriter, ModelSeed, TurnEvents, TurnMachine, TurnOutcome};
 use ark_common::{Result, ThreadId, TurnId, Usage};
 use ark_config::RuntimeConfig;
 use ark_contract::{item::ItemKind, RuntimeEvent};
 use ark_delegation::{ChildTurnContext, ChildTurnExecutor, ChildTurnReport, ChildTurnStatus};
 use ark_obs::UsageRecorder;
-use ark_ports::{
-    EventSink, ModelClient, SandboxPolicy, SessionStore, ToolOutput, ToolRegistryPort,
-};
+use ark_ports::{EventSink, ModelClient, SandboxPolicy, SessionStore, ToolRegistryPort};
 use ark_tool::{RegistryToolRunner, ToolRegistry};
 
 use crate::model;
@@ -59,6 +54,72 @@ pub struct ChildTurnExecutorImpl {
     store: Arc<dyn SessionStore>,
     roots: Arc<WorkspaceRoots>,
     skills: Arc<ark_skills::SkillRuntime>,
+}
+
+/// Effective child settings resolved from the parent thread plus overrides.
+struct ChildTurnSettings {
+    workspace: PathBuf,
+    provider_id: Option<String>,
+    model_override: Option<String>,
+    autonomy: ark_tool::Autonomy,
+}
+
+/// A different provider owns its own default model: only inherit a parent
+/// model when the child retains the parent's provider selection.
+fn child_model_override<'a>(
+    requested: Option<&'a str>,
+    provider_switched: bool,
+    parent_model: Option<&'a str>,
+) -> Option<&'a str> {
+    let requested = requested.filter(|value| !value.trim().is_empty());
+    if provider_switched {
+        requested
+    } else {
+        child_setting(requested, parent_model)
+    }
+}
+
+/// Resolve the child's autonomy: an explicit override may narrow but never
+/// widen the parent thread's effective setting.
+fn capped_child_autonomy(
+    requested: Option<&str>,
+    parent: ark_tool::Autonomy,
+) -> Result<ark_tool::Autonomy> {
+    match requested.filter(|value| !value.trim().is_empty()) {
+        Some(value) => {
+            let requested = crate::wiring::autonomy_from_override(Some(value))?;
+            if autonomy_rank(requested) > autonomy_rank(parent) {
+                return Err(ark_common::ArkError::validation(
+                    "child autonomy cannot exceed the parent thread",
+                ));
+            }
+            Ok(requested)
+        }
+        None => Ok(parent),
+    }
+}
+
+/// Fold a reactor outcome into the child-run report the parent reads.
+fn child_report(
+    outcome: ark_common::Result<ark_agent::TurnOutcome>,
+    summary: String,
+    usage: Usage,
+    tool_invocations: u64,
+) -> ChildTurnReport {
+    let status = match outcome {
+        Ok(TurnOutcome::Completed) => ChildTurnStatus::Completed,
+        Ok(TurnOutcome::Aborted { reason }) => ChildTurnStatus::Aborted { reason },
+        Ok(TurnOutcome::Failed { message, .. }) => ChildTurnStatus::Failed { message },
+        Err(err) => ChildTurnStatus::Failed {
+            message: err.message,
+        },
+    };
+    ChildTurnReport {
+        status,
+        summary,
+        usage,
+        tool_invocations,
+    }
 }
 
 impl ChildTurnExecutorImpl {
@@ -92,32 +153,6 @@ impl ChildTurnExecutorImpl {
             store,
             roots,
             skills,
-        }
-    }
-
-    /// Turn limits for a child run, read from the live config snapshot.
-    ///
-    /// A child gets the same budget as a parent turn unless the request asked
-    /// for a narrower one. Copying the values here (instead of hardcoding
-    /// defaults) is what makes a Settings change apply to the next child without
-    /// a restart, which is the `Hot` contract for `tuning`.
-    fn limits_of(
-        snapshot: &RuntimeConfig,
-        provider: Option<&ark_llm::ProviderConfig>,
-    ) -> TurnLimits {
-        let tuning = &snapshot.tuning;
-        // A child is a *bounded* sub-task: it gets the same ceilings, never more.
-        TurnLimits {
-            max_rounds: tuning.max_rounds.max(1),
-            max_tokens: tuning.max_tokens.max(1),
-            max_tool_calls: tuning.max_tool_calls.max(1),
-            max_identical_calls: tuning.max_identical_calls.max(1),
-            context_limit_tokens: crate::model::context_limit_tokens(
-                tuning.context_limit_tokens,
-                provider,
-            ),
-            keep_recent_messages: tuning.keep_recent_messages.max(1),
-            max_compactions: TurnLimits::default().max_compactions,
         }
     }
 
@@ -159,6 +194,67 @@ impl ChildTurnExecutorImpl {
             None => Arc::clone(&self.parent_model),
         }
     }
+
+    /// Assemble the child seed: the same static prefix as a parent turn (the
+    /// shared builder guarantees byte-identical bytes, which is what lets the
+    /// provider cache the prefix across parent and child), the child role line,
+    /// then skill instructions. The catalog line does not ride a child seed: a
+    /// child cannot load skills itself.
+    fn child_seed(
+        &self,
+        workspace: &std::path::Path,
+        prompt: &str,
+    ) -> Vec<ark_ports::ModelMessage> {
+        let mut seed_messages = super::wiring::turn_common::seed_prefix(workspace);
+        // A child is told what it is: it must answer, not converse.
+        seed_messages.push(ark_ports::ModelMessage::system(
+            "You are a child run. Finish the delegated task and answer with the result. \
+             You cannot delegate further.",
+        ));
+        let resolution = self.skills.resolve_for_turn(prompt);
+        seed_messages.extend(super::wiring::turn_common::skill_tail(&resolution, false));
+        seed_messages
+    }
+
+    /// Effective child settings: the parent thread's runtime values, narrowed
+    /// by explicit child overrides (workspace, provider, model, autonomy).
+    async fn inherited_settings(&self, ctx: &ChildTurnContext) -> Result<ChildTurnSettings> {
+        let parent = self.store.get_thread(ctx.parent_thread_id).await?;
+        let parent_runtime = parent.runtime;
+        let workspace = super::wiring::turn_common::resolve_workspace(
+            ctx.workspace.as_deref(),
+            parent_runtime.workspace.clone().map(PathBuf::from),
+            self.roots.current(),
+            "child",
+        )?;
+        let requested_provider = ctx
+            .provider_id
+            .as_deref()
+            .filter(|value| !value.trim().is_empty());
+        let provider_id = child_setting(
+            requested_provider.map(ToString::to_string),
+            parent_runtime.provider_id.clone(),
+        );
+        // A different provider owns its own default model: only inherit a
+        // parent model when the child retains the parent's provider selection.
+        let model_override = child_model_override(
+            ctx.model.as_deref(),
+            requested_provider.is_some(),
+            parent_runtime.model.as_deref(),
+        )
+        .map(ToString::to_string);
+        let config = self.config.snapshot();
+        let parent_autonomy = crate::wiring::autonomy_from_override_or_default(
+            parent_runtime.autonomy.as_deref(),
+            &config,
+        )?;
+        Ok(ChildTurnSettings {
+            workspace,
+            provider_id,
+            model_override,
+            autonomy: capped_child_autonomy(ctx.autonomy.as_deref(), parent_autonomy)?,
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -179,111 +275,48 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
         // parent has no override. This keeps a delegated task in the same
         // workspace, permission envelope and model unless it deliberately asks
         // to narrow or replace them.
-        let parent = self.store.get_thread(ctx.parent_thread_id).await?;
-        let parent_runtime = parent.runtime;
-        let workspace = child_setting(
-            ctx.workspace.clone(),
-            parent_runtime.workspace.clone().map(PathBuf::from),
-        )
-        .unwrap_or_else(|| self.roots.current());
-        if !workspace.is_dir() {
-            return Err(ark_common::ArkError::validation(format!(
-                "child workspace does not exist: {}",
-                workspace.display()
-            )));
-        }
-        let workspace = workspace
-            .canonicalize()
-            .map_err(|_| ark_common::ArkError::validation("cannot canonicalize child workspace"))?;
-        let requested_provider = ctx
-            .provider_id
-            .as_deref()
-            .filter(|value| !value.trim().is_empty());
-        let provider_id = child_setting(requested_provider, parent_runtime.provider_id.as_deref());
-        // A different provider owns its own default model. Only inherit a parent
-        // model when the child retains the parent's provider selection.
-        let model_override = if requested_provider.is_some() {
-            ctx.model
-                .as_deref()
-                .filter(|value| !value.trim().is_empty())
-        } else {
-            child_setting(
-                ctx.model
-                    .as_deref()
-                    .filter(|value| !value.trim().is_empty()),
-                parent_runtime.model.as_deref(),
-            )
-        };
-        let config = self.config.snapshot();
-        let parent_autonomy = crate::wiring::autonomy_from_override_or_default(
-            parent_runtime.autonomy.as_deref(),
-            &config,
-        )?;
-        let autonomy = match ctx
-            .autonomy
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-        {
-            Some(value) => {
-                let requested = crate::wiring::autonomy_from_override(Some(value))?;
-                if autonomy_rank(requested) > autonomy_rank(parent_autonomy) {
-                    return Err(ark_common::ArkError::validation(
-                        "child autonomy cannot exceed the parent thread",
-                    ));
-                }
-                requested
-            }
-            None => parent_autonomy,
-        };
+        let settings = self.inherited_settings(&ctx).await?;
+        let workspace = settings.workspace;
         let sandbox: Arc<dyn SandboxPolicy> =
-            Arc::new(ark_tool::BuiltinSandboxPolicy::new(autonomy));
-        let tools: Arc<dyn ark_agent::ToolRunner> = Arc::new(ChildToolRunner {
-            inner: Arc::clone(&self.tools),
-            config: Arc::clone(&self.config),
-            workspace: workspace.clone(),
-            thread_id,
-            turn_id,
-        });
+            Arc::new(ark_tool::BuiltinSandboxPolicy::new(settings.autonomy));
+        let tools: Arc<dyn ark_agent::ToolRunner> =
+            Arc::new(super::wiring::turn_common::HookedToolRunner::new(
+                Arc::clone(&self.tools),
+                Arc::clone(&self.config),
+                workspace.clone(),
+                thread_id,
+                turn_id,
+            ));
 
-        // Same static prefix as a parent turn: byte-identical bytes are what let
-        // the provider cache the prefix across parent and child.
-        let mut seed_messages = vec![
-            ark_ports::ModelMessage::system(crate::wiring::SYSTEM_PROMPT),
-            ark_ports::ModelMessage::system(format!("workspace root: {}", workspace.display())),
-            // A child is told what it is: it must answer, not converse.
-            ark_ports::ModelMessage::system(
-                "You are a child run. Finish the delegated task and answer with the result. \
-                 You cannot delegate further.",
-            ),
-        ];
-        // Skill instructions ride the dynamic tail, exactly like a parent turn.
-        let resolution = self.skills.resolve_for_turn(&ctx.prompt);
-        for instruction in &resolution.instructions {
-            seed_messages.push(ark_ports::ModelMessage::system(format!(
-                "[skill instructions]\n{instruction}"
-            )));
-        }
+        let seed_messages = self.child_seed(&workspace, &ctx.prompt);
 
         let snapshot = self.config.snapshot();
-        let provider = self.provider_for(provider_id, model_override)?;
-        let mut reactor = Reactor::new(ReactorConfig {
-            model: self.model_for(provider.clone()),
-            tools,
-            writer,
-            gates: Arc::new(ark_agent::AllowAllGates),
-            sandbox,
-            events,
-            cancel: (*cancel).clone(),
-            seed: ModelSeed {
-                messages: seed_messages,
-                tools: self.tool_schemas.clone(),
-                temperature: provider.as_ref().and_then(|provider| provider.temperature),
-                max_tokens: provider.as_ref().and_then(|provider| provider.max_tokens),
-            },
-            machine: TurnMachine::new(Self::limits_of(&snapshot, provider.as_ref())),
-            chunk_buffer: crate::wiring::CHUNK_BUFFER,
-        })
-        .with_steering(steer);
+        let provider = self.provider_for(
+            settings.provider_id.as_deref(),
+            settings.model_override.as_deref(),
+        )?;
+        let mut reactor =
+            super::wiring::turn_common::build_reactor(super::wiring::turn_common::ReactorSpec {
+                model: self.model_for(provider.clone()),
+                tools,
+                writer,
+                gates: Arc::new(ark_agent::AllowAllGates),
+                sandbox,
+                events,
+                cancel: (*cancel).clone(),
+                seed: ModelSeed {
+                    messages: seed_messages,
+                    tools: self.tool_schemas.clone(),
+                    temperature: provider.as_ref().and_then(|provider| provider.temperature),
+                    max_tokens: provider.as_ref().and_then(|provider| provider.max_tokens),
+                },
+                machine: TurnMachine::new(super::wiring::turn_common::limits_for_turn(
+                    &snapshot,
+                    provider.as_ref(),
+                )),
+                chunk_buffer: super::wiring::turn_common::chunk_buffer_for_turn(&snapshot),
+                steering: steer,
+            });
         reactor.push_user(ctx.prompt.clone());
         let outcome = reactor.run().await;
 
@@ -294,37 +327,15 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             .observed_counts(thread_id, progress.tokens_used, progress.tool_calls)
             .await;
 
-        Ok(match outcome {
-            Ok(TurnOutcome::Completed) => {
-                let summary = self.final_answer(thread_id).await;
-                ChildTurnReport {
-                    status: ChildTurnStatus::Completed,
-                    summary,
-                    usage,
-                    tool_invocations,
-                }
+        // The parent reads the child's last assistant message; a run that never
+        // produced one reports no summary instead of an invented placeholder.
+        let summary = match &outcome {
+            Ok(TurnOutcome::Completed) | Ok(TurnOutcome::Aborted { .. }) => {
+                self.final_answer(thread_id).await
             }
-            Ok(TurnOutcome::Aborted { reason }) => ChildTurnReport {
-                status: ChildTurnStatus::Aborted { reason },
-                summary: self.final_answer(thread_id).await,
-                usage,
-                tool_invocations,
-            },
-            Ok(TurnOutcome::Failed { message, .. }) => ChildTurnReport {
-                status: ChildTurnStatus::Failed { message },
-                summary: String::new(),
-                usage,
-                tool_invocations,
-            },
-            Err(err) => ChildTurnReport {
-                status: ChildTurnStatus::Failed {
-                    message: err.message,
-                },
-                summary: String::new(),
-                usage,
-                tool_invocations,
-            },
-        })
+            _ => String::new(),
+        };
+        Ok(child_report(outcome, summary, usage, tool_invocations))
     }
 }
 
@@ -392,63 +403,6 @@ impl ChildTurnExecutorImpl {
             .find(|item| item.kind == ItemKind::AssistantMessage)
             .and_then(|item| item.text.clone())
             .unwrap_or_default()
-    }
-}
-
-/// Adapter from `ark-tool`'s runner to the reactor's `ToolRunner`.
-struct ChildToolRunner {
-    inner: Arc<RegistryToolRunner>,
-    /// Live config: hooks are read per call so a patch applies immediately.
-    config: Arc<ark_config::ConfigStore>,
-    workspace: PathBuf,
-    thread_id: ThreadId,
-    turn_id: TurnId,
-}
-
-#[async_trait::async_trait]
-impl ark_agent::ToolRunner for ChildToolRunner {
-    async fn execute(&self, call: &ToolCallRequest) -> Result<ToolOutput> {
-        let snapshot = self.config.snapshot();
-        let hooks = &snapshot.hooks;
-        let payload = crate::hooks::hook_payload(
-            "pre_tool_use",
-            &call.tool,
-            &call.arguments,
-            &self.thread_id,
-            &self.turn_id,
-        );
-        // Same rule as the parent path: consume the decision the reactor already
-        // made for this call instead of asking the policy a second time
-        // (design §7.3, P1-5). The hook combinator is shared with the parent
-        // runner, so pre/post semantics cannot drift between the two paths.
-        crate::hooks::run_around(hooks, &self.workspace, &payload, || async {
-            match call.sandbox {
-                Some(decision) => {
-                    self.inner
-                        .run_decided(
-                            self.workspace.clone(),
-                            self.thread_id,
-                            self.turn_id,
-                            &call.tool,
-                            call.arguments.clone(),
-                            decision,
-                        )
-                        .await
-                }
-                None => {
-                    self.inner
-                        .run_in(
-                            self.workspace.clone(),
-                            self.thread_id,
-                            self.turn_id,
-                            &call.tool,
-                            call.arguments.clone(),
-                        )
-                        .await
-                }
-            }
-        })
-        .await
     }
 }
 

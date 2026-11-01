@@ -4,7 +4,6 @@ use super::history::conversation_history;
 use super::tools::{build_child_tools, build_tools};
 use super::turns::{
     abort_interrupted_turns, completion_inbox, finish_parent_turn, user_message_with_attachments,
-    AgentTurnRunner,
 };
 use super::*;
 
@@ -481,7 +480,7 @@ fn provider_context_window_caps_the_next_turn_and_reserves_requested_output() {
     provider.context_window_tokens = Some(32_000);
     provider.max_tokens = Some(4_096);
 
-    let limits = AgentTurnRunner::limits_for_turn(&config, Some(&provider));
+    let limits = super::turn_common::limits_for_turn(&config, Some(&provider));
 
     assert_eq!(limits.context_limit_tokens, 27_904);
 }
