@@ -80,7 +80,7 @@ UI catalog 由组合根创建唯一 `UiBus`：授予本构建实际具备的能�
 
 本地插件同样走这唯一的 `UiBus`。`plugin_host::assemble` 在 UI 段之后、`tools.replace_group("mcp", ...)`
 之前构造一组共享实例：一个 `HttpBus`（默认 `HttpPolicy`、`CredentialVault` 与容量受限的
-`MemoryDiagnostics`）、一个独立的 `ark_mcp::McpBus` 和一个 `PluginHost`（根为 `<data-dir>/plugins`）。
+`InMemoryDiagnosticSink`）、一个独立的 `ark_mcp::McpBus` 和一个 `PluginHost`（根为 `<data-dir>/plugins`）。
 装配只做构造与转发，不按 `plugin_id` 分支；装载策略、隔离与 fail-closed 撤权都在 `ark-plugin` 内部。
 `HostHandles.events` 恒为 `None`：平台句柄暴露原始事件 sink，交给插件就能向任意 thread 追加事件，
 本版不需要这个能力，所以它不存在而不是被隔离模型解释。
