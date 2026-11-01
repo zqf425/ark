@@ -60,6 +60,10 @@ pub struct ConfigPatch {
     /// Sub-agent switch plus the concurrency cap.
     #[serde(default)]
     pub subagents: Option<SubagentSettings>,
+    /// Agent lifecycle hooks (requirements/hooks.md). Hot: the next tool call
+    /// reads the new snapshot.
+    #[serde(default)]
+    pub hooks: Option<HookSettings>,
 }
 
 /// Hot runtime limits exposed by the settings screen.
@@ -148,6 +152,34 @@ impl SubagentSettings {
             auto_continue: self.auto_continue,
         }
     }
+}
+
+/// One lifecycle hook: a shell command the runtime executes at a defined point
+/// (requirements/hooks.md). The command is trusted configuration, not model
+/// input; the payload describing the action arrives on stdin as JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct HookRule {
+    pub command: String,
+    /// Restrict the rule to these tool names; empty matches every tool.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
+    /// Hard timeout in milliseconds; `0` means the runtime default (10s).
+    #[serde(default)]
+    #[ts(as = "f64")]
+    pub timeout_ms: u64,
+}
+
+/// Hooks attached to the two v1 lifecycle points.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct HookSettings {
+    /// Run before a tool dispatches; exit code 2 blocks the call.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_tool_use: Vec<HookRule>,
+    /// Run after a tool completes; stdout is appended to the tool output.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub post_tool_use: Vec<HookRule>,
 }
 
 /// `GET /v1/runtime/config` — what the settings screen renders.

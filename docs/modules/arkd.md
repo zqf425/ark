@@ -91,6 +91,11 @@ egress 授权（该构造器对插件清单路径不可达），并把同一能�
 `request_user_input` 属于内置工具集，随 `ark_tool::builtins()` 在父/子两个注册表中可用；
 其执行由 `ark-agent` 的用户输入 gate 拦截，组合根不为它写任何特例。
 
+生命周期 hooks（[需求设计](../requirements/hooks.md)）的唯一执行宿主是 `apps/arkd/src/hooks.rs`：
+父回合 `ToolRunnerAdapter` 与子回合 `ChildToolRunner` 都经 `run_around` 组合器包住工具派发，
+每次调用从 config 快照现读 `hooks`（`Hot`）。exit 2 拦截、其他失败放行、post stdout 回注的
+语义只在这一处实现。
+
 回合种子中的 `conversation_history` 把工具行投影回模型上下文。store 投影把 `ToolCallStarted` +
 `ToolCallFinished` 折叠为单个内嵌 output 的 `ToolCall` 条目（见 ark-store 设计），因此这里直接消费该条目：
 终态（Completed/Failed）条目将调用折叠进上一条 assistant 消息的 `tool_calls`（无文本时新建空内容
