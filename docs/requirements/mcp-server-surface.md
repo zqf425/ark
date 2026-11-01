@@ -87,3 +87,7 @@
   防止目录与路由表漂移。
 - handler 测试：`/v1/mcp-info` 返回 200、`auth.required` 随 token 配置变化（且配置后受保护路由
   对无 token 请求返回 401，语义闭环）、`version` 为构建版本。
+- 真实运行时自测（2026-11-01，本地确定性模型，无凭据）：对 live `arkd` 执行 35 项端到端检查
+  （按文档逐族调用 thread/turn/workbench/schedule/memory/attachment/child-runs/平台观测工具，
+  含错误语义与状态码断言）全部通过；自测暴露的 `run_now` 忽略任务级 `enabled` 缺陷已修复
+  并回归。
