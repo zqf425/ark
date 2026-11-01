@@ -45,5 +45,9 @@ ark 的模型已有能力做代码审查,但缺少一个**明确目标 + 只读�
 - CLI:`RunArgs.review: Option<ReviewTarget>`(`Uncommitted`/`Base(branch)`/`Commit(sha)`)。
 - 驱动:`apps/arkd/src/headless.rs` 的 `compute_diff`(git CLI,64 KiB 字符边界截断,空 diff
   为启动失败)与 `review_prompt`;回合前 `PATCH runtime.autonomy=strict` 固定只读约束。
-- 冒烟:临时 git 仓库上 `arkd run --review uncommitted` 完成建线程 → strict pin → diff →
-  审查回合 → 流式输出 → exit 0。
+- **`uncommitted` 含未跟踪文件**(真实校验发现并修复,0e80fd5):`git diff HEAD` 之外,以
+  `git ls-files --others --exclude-standard -z` 枚举新文件并逐个 `git diff --no-index
+  -- /dev/null <path>` 追加新文件 diff(该命令 exit 1 表示有差异,按成功处理)。
+- 冒烟与真实校验:临时 git 仓库上 `arkd run --review uncommitted` 完成建线程 → strict pin →
+  diff → 审查回合 → 流式输出 → exit 0;真实网关模型对预埋缺陷产出 P0/P1 findings(证据见
+  release-readiness.md 校验轮记录)。
