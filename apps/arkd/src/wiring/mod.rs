@@ -339,8 +339,8 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     ark_server::service::sync_auto_continue_policy(state.clone()).await;
     // The loop is NOT started here: a one-shot headless `run` reuses this
     // assembly and must not fire due schedules (or spend model budget) while
-    // executing a single turn. `serve` starts it after binding, via
-    // `Wiring::start_schedule_loop`.
+    // executing a single turn. `serve` calls `Wiring::schedules.spawn(...)`
+    // after binding; `run` holds the handle without starting anything.
 
     Ok(Wiring {
         state,

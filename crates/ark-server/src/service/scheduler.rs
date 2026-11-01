@@ -161,6 +161,12 @@ impl SchedulerService {
         })
     }
 
+    /// Whether the loop has already been started. Read-only guard for tests:
+    /// assembly must hand out the handle without starting the loop.
+    pub fn is_started(&self) -> bool {
+        self.started.load(Ordering::Acquire)
+    }
+
     /// Start the loop. Returns immediately; the task is detached.
     ///
     /// Reconciliation runs once, before the first tick, so the state a restart

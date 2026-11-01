@@ -656,3 +656,21 @@ impl ark_ports::SubagentRunner for TestSubagentRunner {
         Err(ark_common::ArkError::internal("not used by this test"))
     }
 }
+
+/// The invariant the headless fix rests on: `wiring::build` hands out the
+/// schedule handle but never starts the loop — only `serve` does. If a future
+/// refactor moves `spawn` back into `build`, a headless `run` would silently
+/// fire due schedules again.
+#[tokio::test]
+async fn build_hands_out_the_schedule_handle_without_starting_the_loop() {
+    let data_dir = TestDataDir::new();
+    let workspace = tempfile::tempdir().expect("temp dir is creatable");
+    let args = crate::cli::ServeArgs {
+        port: 0,
+        data_dir: data_dir.path().to_path_buf(),
+        auth_token: None,
+        workspace: workspace.path().to_path_buf(),
+    };
+    let wiring = crate::wiring::build(&args).await.expect("runtime build");
+    assert!(!wiring.schedules.is_started());
+}

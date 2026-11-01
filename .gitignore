@@ -10,3 +10,4 @@
 /apps/ark-desktop/src-tauri/icons/*
 !/apps/ark-desktop/src-tauri/icons/ark.svg
 !/apps/ark-desktop/src-tauri/icons/icon.ico
+.idea/
