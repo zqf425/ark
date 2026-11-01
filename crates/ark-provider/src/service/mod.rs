@@ -7,5 +7,5 @@ pub mod store;
 
 pub use entry_config::config_from_entry;
 pub use persist::{load_document, read_document, write_document, DocumentLoad};
-pub use probe::{http_status, unusable};
+pub use probe::{is_transport_failure, unusable};
 pub use store::ProviderStore;

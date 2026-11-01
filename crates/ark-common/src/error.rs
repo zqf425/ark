@@ -66,6 +66,12 @@ pub struct ArkError {
     pub code: ArkErrorCode,
     pub message: String,
     pub detail: Option<String>,
+    /// HTTP status of the *upstream* call that failed, when this error reports
+    /// a proxied remote failure (a model request). Distinct from
+    /// [`ArkErrorCode::http_status`], which is the status this boundary itself
+    /// answers with. Consumers must read this field instead of parsing the
+    /// message, whose wording is for humans.
+    pub upstream_status: Option<u16>,
 }
 
 impl ArkError {
@@ -74,7 +80,14 @@ impl ArkError {
             code,
             message: message.into(),
             detail: None,
+            upstream_status: None,
         }
+    }
+
+    /// Attach the upstream HTTP status (see the field's doc).
+    pub fn with_upstream_status(mut self, status: u16) -> Self {
+        self.upstream_status = Some(status);
+        self
     }
 
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
