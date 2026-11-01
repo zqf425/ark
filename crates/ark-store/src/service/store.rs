@@ -74,7 +74,7 @@ impl FileSessionStore {
         if swept > 0 {
             diagnostics.record(StoreDiagnostic::new(
                 DiagnosticKind::TempFilesSwept,
-                format!("{swept} atomic-write temp files removed at startup"),
+                format!("{swept} hidden *.tmp temp files removed at startup"),
             ));
         }
         ensure_dir(&paths.threads_dir())?;

@@ -270,7 +270,8 @@ mod tests {
     }
 
     /// Backdate `path`'s mtime so the age threshold treats it as crash residue.
-    #[cfg(unix)]
+    /// `File::set_times`/`FileTimes` are stable since 1.75 (= `rust-version`),
+    /// so this is cross-platform and needs no `cfg(unix)`.
     fn set_mtime_to_yesterday(path: &Path) {
         let yesterday = SystemTime::now() - Duration::from_secs(24 * 3600);
         let file = std::fs::File::options().write(true).open(path).unwrap();
