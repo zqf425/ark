@@ -1,9 +1,16 @@
+import { memo } from 'react'
 import type { ThreadItem } from '../../../shared/contracts'
 import { formatClock } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
 
+/*
+ * Rows are memoized on their `item` object. The reducer keeps the identity of
+ * every item a fold does not touch (`items-draft.ts`), so one streamed token
+ * re-renders exactly one row instead of the whole turn.
+ */
+
 /** User message bubble. Text is the runtime's accumulated `text`, verbatim. */
-export function UserBubble({ item }: { item: ThreadItem }): JSX.Element {
+export const UserBubble = memo(function UserBubble({ item }: { item: ThreadItem }): JSX.Element {
   const { t, locale } = useI18n()
   return (
     <article className="ark-msg ark-msg--user">
@@ -14,13 +21,13 @@ export function UserBubble({ item }: { item: ThreadItem }): JSX.Element {
       <div className="ark-msg__body">{item.text ?? ''}</div>
     </article>
   )
-}
+})
 
 /**
  * Assistant bubble. `streaming` only drives the caret: the text itself is never
  * re-parsed or re-assembled on the client.
  */
-export function AssistantBubble({ item }: { item: ThreadItem }): JSX.Element {
+export const AssistantBubble = memo(function AssistantBubble({ item }: { item: ThreadItem }): JSX.Element {
   const { t, locale } = useI18n()
   const streaming = item.status === 'streaming' || item.status === 'pending'
   const failed = item.status === 'failed'
@@ -41,10 +48,10 @@ export function AssistantBubble({ item }: { item: ThreadItem }): JSX.Element {
       {item.detail ? <p className="ark-msg__detail">{item.detail}</p> : null}
     </article>
   )
-}
+})
 
 /** Reasoning is collapsed by default and visually subordinate. */
-export function ReasoningBlock({ item }: { item: ThreadItem }): JSX.Element {
+export const ReasoningBlock = memo(function ReasoningBlock({ item }: { item: ThreadItem }): JSX.Element {
   const { t, locale } = useI18n()
   return (
     <details className="ark-reasoning">
@@ -55,4 +62,4 @@ export function ReasoningBlock({ item }: { item: ThreadItem }): JSX.Element {
       <pre className="ark-reasoning__body">{item.text ?? ''}</pre>
     </details>
   )
-}
+})

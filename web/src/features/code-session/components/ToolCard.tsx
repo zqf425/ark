@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import type { ThreadItem, ToolPayload } from '../../../shared/contracts'
 import { formatToolArguments } from '../../../shared/format'
 import { useI18n, type MessageKey } from '../../../shared/i18n'
@@ -18,8 +18,11 @@ function statusClass(item: ThreadItem, tool: ToolPayload): string {
 /**
  * Foldable tool card. The `tool` payload is the runtime's structured facet, so
  * nothing here infers the tool name from text.
+ *
+ * Memoized on its `item` object with `MessageBubble`: a tool card is by far the
+ * most common row in a long turn, and it re-renders only when its own item does.
  */
-export function ToolCard({ item }: { item: ThreadItem }): JSX.Element {
+export const ToolCard = memo(function ToolCard({ item }: { item: ThreadItem }): JSX.Element {
   const { t } = useI18n()
   const tool = item.tool
   const [open, setOpen] = useState(false)
@@ -69,4 +72,4 @@ export function ToolCard({ item }: { item: ThreadItem }): JSX.Element {
       ) : null}
     </div>
   )
-}
+})

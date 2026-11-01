@@ -1,6 +1,7 @@
+import { useMemo } from 'react'
 import { useI18n, type MessageKey } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../state/store'
-import { hasLiveItems } from '../state/selectors'
+import { hasLiveItems, type ItemView } from '../state/selectors'
 
 const STREAM_LABEL_KEYS: Record<string, MessageKey> = {
   connecting: 'canvas.footer.connecting',
@@ -18,8 +19,11 @@ export function StreamFooter(): JSX.Element {
   const streamStatus = useCodeSessionStore((s) => s.streamStatus)
   const streamError = useCodeSessionStore((s) => s.streamError)
   const lastSeq = useCodeSessionStore((s) => s.lastSeq)
-  const snapshot = useCodeSessionStore((s) => s)
-  const live = hasLiveItems(snapshot)
+  // Two channels instead of the whole store: a gate or error event no longer
+  // re-renders this strip.
+  const itemOrder = useCodeSessionStore((s) => s.itemOrder)
+  const itemsById = useCodeSessionStore((s) => s.itemsById)
+  const live = useMemo(() => hasLiveItems({ itemOrder, itemsById } satisfies ItemView), [itemOrder, itemsById])
 
   return (
     <div className="ark-streamfooter">

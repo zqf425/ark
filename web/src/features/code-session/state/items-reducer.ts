@@ -4,9 +4,27 @@
  * The semantic mapping already happened in Rust (design §7.10.3). What is left
  * here is bookkeeping the server cannot do for us: replacing snapshots, appending
  * deltas, tracking `seq`, and recording gate requests that must be answered.
+ *
+ * Folding happens on a copy-on-write draft (see `items-draft.ts`) so a single
+ * streamed token does not replace every channel of the snapshot. Channels and
+ * item objects that a fold does not touch keep their previous identity, which is
+ * what allows the canvas to memoize its projections.
  */
-import type { ItemKind, RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot, TurnState } from '../../../shared/contracts'
+import type { ItemId, ItemKind, RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot, TurnId, TurnState } from '../../../shared/contracts'
 import { translateNow } from '../../../shared/i18n/current'
+import {
+  commitDraft,
+  draftApprovals,
+  draftChildCompletions,
+  draftErrors,
+  draftItemOrder,
+  draftItems,
+  draftOf,
+  draftTurnState,
+  draftUserInputs,
+  sameItemContent,
+  type ItemsDraft
+} from './items-draft'
 import type { ChildCompletionNotice, ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
 
 export function emptyItemsState(): ItemsSnapshot {
@@ -35,50 +53,48 @@ const DELTA_ITEM_KIND: Partial<Record<RuntimeEvent['kind'], ItemKind>> = {
 const MAX_ERROR_LINES = 50
 const MAX_CHILD_COMPLETIONS = 50
 
-function clone(state: ItemsSnapshot): ItemsSnapshot {
-  return {
-    itemsById: { ...state.itemsById },
-    itemOrder: [...state.itemOrder],
-    turnState: { ...state.turnState },
-    activeTurnId: state.activeTurnId,
-    lastSeq: state.lastSeq,
-    errors: [...state.errors],
-    approvals: { ...state.approvals },
-    userInputs: { ...state.userInputs },
-    childCompletions: { ...state.childCompletions },
-    childRunRevision: state.childRunRevision,
-    rewindRevision: state.rewindRevision,
-    rewoundFromSeq: state.rewoundFromSeq
-  }
+/** Draft-first read: a copied channel is authoritative, otherwise use the base. */
+function currentItem(draft: ItemsDraft, itemId: ItemId): ThreadItem | undefined {
+  return draft.itemsById ? draft.itemsById[itemId] : draft.base.itemsById[itemId]
+}
+
+function currentChildCompletion(draft: ItemsDraft, id: string): ChildCompletionNotice | undefined {
+  return draft.childCompletions ? draft.childCompletions[id] : draft.base.childCompletions[id]
 }
 
 /**
  * Snapshot events are authoritative, but a snapshot may be partial (status-only
  * `item_updated`). Field-level merge keeps accumulated text in that case.
+ *
+ * A re-sent item whose content already matches keeps the stored object: the
+ * snapshot is authoritative in content, not in object identity.
  */
-function upsertItem(next: ItemsSnapshot, item: ThreadItem): void {
-  const existing = next.itemsById[item.item_id]
-  const merged: ThreadItem = existing
-    ? {
-        ...existing,
-        ...item,
-        text: item.text ?? existing.text,
-        tool: item.tool ?? existing.tool,
-        detail: item.detail ?? existing.detail
-      }
-    : item
+function upsertItem(draft: ItemsDraft, item: ThreadItem): void {
+  const existing = currentItem(draft, item.item_id)
+  if (!existing) {
+    draftItems(draft)[item.item_id] = item
+    draftItemOrder(draft).push(item.item_id)
+    return
+  }
 
-  if (!existing) next.itemOrder.push(item.item_id)
-  next.itemsById[item.item_id] = merged
+  const merged: ThreadItem = {
+    ...existing,
+    ...item,
+    text: item.text ?? existing.text,
+    tool: item.tool ?? existing.tool,
+    detail: item.detail ?? existing.detail
+  }
+  if (sameItemContent(existing, merged)) return
+  draftItems(draft)[item.item_id] = merged
 }
 
 function appendDelta(
-  next: ItemsSnapshot,
+  draft: ItemsDraft,
   event: Extract<RuntimeEvent, { kind: 'assistant_text_delta' | 'assistant_reasoning_delta' }>
 ): void {
-  const existing = next.itemsById[event.item_id]
+  const existing = currentItem(draft, event.item_id)
   if (existing) {
-    next.itemsById[event.item_id] = {
+    draftItems(draft)[event.item_id] = {
       ...existing,
       text: (existing.text ?? '') + event.delta,
       status: existing.status === 'pending' ? 'streaming' : existing.status
@@ -89,8 +105,7 @@ function appendDelta(
   // The runtime normally creates the item first; if a delta wins the race we
   // materialise a streaming row so no token is silently dropped.
   const kind = DELTA_ITEM_KIND[event.kind] ?? 'assistant_message'
-  next.itemOrder.push(event.item_id)
-  next.itemsById[event.item_id] = {
+  draftItems(draft)[event.item_id] = {
     item_id: event.item_id,
     turn_id: event.turn_id,
     kind,
@@ -98,31 +113,33 @@ function appendDelta(
     created_at: event.timestamp,
     text: event.delta
   }
+  draftItemOrder(draft).push(event.item_id)
 }
 
-function setTurn(next: ItemsSnapshot, turnId: string, state: TurnState): void {
-  next.turnState[turnId] = state
+function setTurn(draft: ItemsDraft, turnId: TurnId, state: TurnState): void {
+  draftTurnState(draft)[turnId] = state
   const terminal = state === 'completed' || state === 'failed' || state === 'aborted'
-  if (terminal && next.activeTurnId === turnId) next.activeTurnId = null
+  if (terminal && draft.activeTurnId === turnId) draft.activeTurnId = null
 }
 
-function pushError(next: ItemsSnapshot, line: ErrorLine): void {
-  next.errors = [...next.errors, line].slice(-MAX_ERROR_LINES)
+function pushError(draft: ItemsDraft, line: ErrorLine): void {
+  draft.errors = [...draftErrors(draft), line].slice(-MAX_ERROR_LINES)
 }
 
 /** Keep UI-only completion cards bounded even if a stream is unusually long. */
-function recordChildCompletion(next: ItemsSnapshot, notice: ChildCompletionNotice): void {
-  if (next.childCompletions[notice.notification_id]) return
-  next.childCompletions[notice.notification_id] = notice
-  const notificationIds = Object.keys(next.childCompletions)
+function recordChildCompletion(draft: ItemsDraft, notice: ChildCompletionNotice): void {
+  if (currentChildCompletion(draft, notice.notification_id)) return
+  const completions = draftChildCompletions(draft)
+  completions[notice.notification_id] = notice
+  const notificationIds = Object.keys(completions)
   if (notificationIds.length <= MAX_CHILD_COMPLETIONS) return
 
   const oldestId = notificationIds.reduce((oldest, id) => {
-    const candidate = next.childCompletions[id]
-    const current = next.childCompletions[oldest]
+    const candidate = completions[id]
+    const current = completions[oldest]
     return candidate && current && candidate.seq < current.seq ? id : oldest
   })
-  delete next.childCompletions[oldestId]
+  delete completions[oldestId]
 }
 
 /** Seed history from `GET /v1/threads/{id}`. */
@@ -132,24 +149,25 @@ export function seedFromItems(
   childCompletions: ChildCompletionNotice[],
   runtime: ThreadRuntimeSnapshot
 ): ItemsSnapshot {
-  const next = emptyItemsState()
-  next.lastSeq = lastSeq
-  for (const item of items) upsertItem(next, item)
-  for (const notice of childCompletions) recordChildCompletion(next, notice)
+  const draft = draftOf(emptyItemsState())
+  draft.lastSeq = lastSeq
+  for (const item of items) upsertItem(draft, item)
+  for (const notice of childCompletions) recordChildCompletion(draft, notice)
   if (runtime.active_turn) {
-    next.activeTurnId = runtime.active_turn.turn_id
+    draft.activeTurnId = runtime.active_turn.turn_id
     // An active registry entry can only be running or aborting. Keep an
     // unknown future wire string actionable as running rather than inventing a
     // terminal state in the browser.
-    next.turnState[runtime.active_turn.turn_id] = runtime.active_turn.state === 'aborting' ? 'aborting' : 'running'
+    draftTurnState(draft)[runtime.active_turn.turn_id] =
+      runtime.active_turn.state === 'aborting' ? 'aborting' : 'running'
   }
   for (const approval of runtime.pending_approvals) {
-    next.approvals[approval.approval_id] = { ...approval, status: 'pending' }
+    draftApprovals(draft)[approval.approval_id] = { ...approval, status: 'pending' }
   }
   for (const request of runtime.pending_user_inputs) {
-    next.userInputs[request.request_id] = { ...request, status: 'pending' }
+    draftUserInputs(draft)[request.request_id] = { ...request, status: 'pending' }
   }
-  return next
+  return commitDraft(draft)
 }
 
 /**
@@ -157,39 +175,39 @@ export function seedFromItems(
  * reconnect watermark correct even for events the UI does not render.
  */
 export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnapshot {
-  const next = clone(state)
-  if (event.seq > next.lastSeq) next.lastSeq = event.seq
+  const draft = draftOf(state)
+  if (event.seq > draft.lastSeq) draft.lastSeq = event.seq
 
   switch (event.kind) {
     case 'item_created':
     case 'item_updated':
     case 'item_completed':
-      upsertItem(next, event.item)
-      return next
+      upsertItem(draft, event.item)
+      return commitDraft(draft)
 
     case 'assistant_text_delta':
     case 'assistant_reasoning_delta':
-      appendDelta(next, event)
-      return next
+      appendDelta(draft, event)
+      return commitDraft(draft)
 
     case 'turn_started':
-      next.activeTurnId = event.turn_id
-      setTurn(next, event.turn_id, 'running')
-      return next
+      draft.activeTurnId = event.turn_id
+      setTurn(draft, event.turn_id, 'running')
+      return commitDraft(draft)
 
     case 'turn_completed':
-      setTurn(next, event.turn_id, 'completed')
-      return next
+      setTurn(draft, event.turn_id, 'completed')
+      return commitDraft(draft)
 
     case 'turn_failed':
-      setTurn(next, event.turn_id, 'failed')
-      pushError(next, {
+      setTurn(draft, event.turn_id, 'failed')
+      pushError(draft, {
         seq: event.seq,
         timestamp: event.timestamp,
         code: 'internal_error',
         message: event.message
       })
-      return next
+      return commitDraft(draft)
 
     case 'thread_rewound': {
       // The writer physically truncated `events.jsonl` and appended this
@@ -200,35 +218,35 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       // watermark. `lastSeq` is kept: it is the notification's own seq, which is
       // already ahead of anything the discarded suffix ever carried.
       const rebuilt = emptyItemsState()
-      rebuilt.lastSeq = next.lastSeq
-      rebuilt.rewindRevision = next.rewindRevision + 1
+      rebuilt.lastSeq = draft.lastSeq
+      rebuilt.rewindRevision = draft.rewindRevision + 1
       rebuilt.rewoundFromSeq = event.rewind_from_seq
       // Child runs may have been discarded with the suffix; let the panel refetch.
-      rebuilt.childRunRevision = next.childRunRevision + 1
+      rebuilt.childRunRevision = draft.childRunRevision + 1
       return rebuilt
     }
 
     case 'turn_aborted':
-      setTurn(next, event.turn_id, 'aborted')
-      return next
+      setTurn(draft, event.turn_id, 'aborted')
+      return commitDraft(draft)
 
     case 'transient_retry':
-      pushError(next, {
+      pushError(draft, {
         seq: event.seq,
         timestamp: event.timestamp,
         code: 'model_request_failed',
         message: translateNow('canvas.retryAttempt', { attempt: event.attempt, message: event.message })
       })
-      return next
+      return commitDraft(draft)
 
     case 'error':
-      pushError(next, {
+      pushError(draft, {
         seq: event.seq,
         timestamp: event.timestamp,
         code: event.code,
         message: event.message
       })
-      return next
+      return commitDraft(draft)
 
     case 'approval_requested': {
       const approval: PendingApproval = {
@@ -239,19 +257,19 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
         status: 'pending',
         requested_at: event.timestamp
       }
-      next.approvals[event.approval_id] = approval
-      return next
+      draftApprovals(draft)[event.approval_id] = approval
+      return commitDraft(draft)
     }
 
     case 'approval_resolved': {
-      const existing = next.approvals[event.approval_id]
+      const existing = draft.base.approvals[event.approval_id]
       if (existing) {
-        next.approvals[event.approval_id] = {
+        draftApprovals(draft)[event.approval_id] = {
           ...existing,
           status: event.approved ? 'approved' : 'rejected'
         }
       }
-      return next
+      return commitDraft(draft)
     }
 
     case 'user_input_requested': {
@@ -262,16 +280,16 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
         status: 'pending',
         requested_at: event.timestamp
       }
-      next.userInputs[event.request_id] = request
-      return next
+      draftUserInputs(draft)[event.request_id] = request
+      return commitDraft(draft)
     }
 
     case 'user_input_resolved': {
-      const existing = next.userInputs[event.request_id]
+      const existing = draft.base.userInputs[event.request_id]
       if (existing) {
-        next.userInputs[event.request_id] = { ...existing, status: 'answered', answer: event.answer }
+        draftUserInputs(draft)[event.request_id] = { ...existing, status: 'answered', answer: event.answer }
       }
-      return next
+      return commitDraft(draft)
     }
 
     case 'child_completed': {
@@ -286,17 +304,17 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
         completed_at: event.timestamp,
         seq: event.seq
       }
-      recordChildCompletion(next, notice)
-      next.childRunRevision += 1
-      return next
+      recordChildCompletion(draft, notice)
+      draft.childRunRevision += 1
+      return commitDraft(draft)
     }
 
     case 'child_activity':
-      next.childRunRevision += 1
-      return next
+      draft.childRunRevision += 1
+      return commitDraft(draft)
 
     default:
-      return next
+      return commitDraft(draft)
   }
 }
 

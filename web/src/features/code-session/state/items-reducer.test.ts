@@ -196,3 +196,99 @@ describe('items reducer thread_rewound', () => {
     expect(rebuilt.turnState).toEqual({})
   })
 })
+
+/**
+ * Reference stability is the contract the canvas memoizes on: `StreamRow`,
+ * `TurnBlock` and the per-channel selectors only bail out because a fold leaves
+ * untouched channels and untouched items at the same object identity.
+ */
+describe('items reducer reference stability', () => {
+  const THREAD_ID = '00000000-0000-0000-0000-000000000001'
+  const TURN_ID = '00000000-0000-0000-0000-000000000003'
+  const ITEM_A = '00000000-0000-0000-0000-00000000000a'
+  const ITEM_B = '00000000-0000-0000-0000-00000000000b'
+
+  function seeded(): ReturnType<typeof seedFromItems> {
+    return seedFromItems(
+      [
+        { item_id: ITEM_A, turn_id: TURN_ID, kind: 'tool_call', status: 'completed', created_at: '2026-10-28T00:00:00Z' },
+        { item_id: ITEM_B, turn_id: TURN_ID, kind: 'assistant_message', status: 'streaming', created_at: '2026-10-28T00:00:01Z', text: 'a' }
+      ],
+      2,
+      [],
+      { pending_approvals: [], pending_user_inputs: [] }
+    )
+  }
+
+  function delta(seq: number, text: string): RuntimeEvent {
+    return {
+      kind: 'assistant_text_delta',
+      seq,
+      thread_id: THREAD_ID,
+      turn_id: TURN_ID,
+      item_id: ITEM_B,
+      timestamp: '2026-10-28T00:00:02Z',
+      delta: text
+    }
+  }
+
+  it('流式增量只替换 itemsById，其余通道保持原引用', () => {
+    const start = seeded()
+    const next = applyEvent(start, delta(3, 'b'))
+
+    expect(next.itemsById).not.toBe(start.itemsById)
+    expect(next.itemOrder).toBe(start.itemOrder)
+    expect(next.turnState).toBe(start.turnState)
+    expect(next.approvals).toBe(start.approvals)
+    expect(next.userInputs).toBe(start.userInputs)
+    expect(next.errors).toBe(start.errors)
+    expect(next.childCompletions).toBe(start.childCompletions)
+  })
+
+  it('未变化的行对象在增量后保持同一引用', () => {
+    const start = seeded()
+    const next = applyEvent(start, delta(3, 'b'))
+
+    expect(next.itemsById[ITEM_A]).toBe(start.itemsById[ITEM_A])
+    expect(next.itemsById[ITEM_B]).not.toBe(start.itemsById[ITEM_B])
+    expect(next.itemsById[ITEM_B]?.text).toBe('ab')
+  })
+
+  it('内容相同的 snapshot 重发不替换行对象，也不替换通道', () => {
+    const start = seeded()
+    const replayed = applyEvent(start, {
+      kind: 'item_updated',
+      seq: 3,
+      thread_id: THREAD_ID,
+      turn_id: TURN_ID,
+      timestamp: '2026-10-28T00:00:02Z',
+      item: {
+        item_id: ITEM_B,
+        turn_id: TURN_ID,
+        kind: 'assistant_message',
+        status: 'streaming',
+        created_at: '2026-10-28T00:00:01Z',
+        text: 'a'
+      }
+    })
+
+    expect(replayed.itemsById).toBe(start.itemsById)
+    expect(replayed.itemsById[ITEM_B]).toBe(start.itemsById[ITEM_B])
+  })
+
+  it('局部 item_updated 仍按字段合并，不会清空已累积文本', () => {
+    const start = seeded()
+    const completed = applyEvent(start, {
+      kind: 'item_completed',
+      seq: 3,
+      thread_id: THREAD_ID,
+      turn_id: TURN_ID,
+      timestamp: '2026-10-28T00:00:02Z',
+      item: { item_id: ITEM_B, turn_id: TURN_ID, kind: 'assistant_message', status: 'completed', created_at: '2026-10-28T00:00:01Z' }
+    })
+
+    expect(completed.itemsById[ITEM_B]?.text).toBe('a')
+    expect(completed.itemsById[ITEM_B]?.status).toBe('completed')
+    expect(completed.itemsById[ITEM_A]).toBe(start.itemsById[ITEM_A])
+  })
+})

@@ -200,6 +200,17 @@
   gap: 12px;
 }
 
+/*
+ * One content wrapper so a single ResizeObserver can observe stream growth
+ * instead of reading `scrollHeight` per delta. The gap is inherited from the
+ * scroll container above, so the rendered spacing is unchanged.
+ */
+.ark-stream__content {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+}
+
 .ark-stream__hint {
   color: var(--ark-text-faint);
   font-size: 12px;

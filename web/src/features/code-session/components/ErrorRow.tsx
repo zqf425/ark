@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import type { ThreadItem } from '../../../shared/contracts'
 import { formatClock } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
@@ -10,7 +10,9 @@ import type { ChildCompletionNotice } from '../state/types'
  * (design §6.2); the message is shown verbatim so operators can search logs.
  * The fallback is client copy and therefore localized.
  */
-export function ErrorRow({ item }: { item: ThreadItem }): JSX.Element {
+/* Memoized on their props like the other rows: the reducer keeps unchanged
+ * items reference-stable, so these re-render only when their own payload does. */
+export const ErrorRow = memo(function ErrorRow({ item }: { item: ThreadItem }): JSX.Element {
   const { t, locale } = useI18n()
   return (
     <div className="ark-errorrow" role="alert">
@@ -21,19 +23,23 @@ export function ErrorRow({ item }: { item: ThreadItem }): JSX.Element {
       </div>
     </div>
   )
-}
+})
 
 /** Neutral notice row (compaction, abort reason, notices from the loop). */
-export function NoticeRow({ item }: { item: ThreadItem }): JSX.Element {
+export const NoticeRow = memo(function NoticeRow({ item }: { item: ThreadItem }): JSX.Element {
   return (
     <div className="ark-notice">
       <span className="ark-notice__text">{item.text ?? item.detail ?? ''}</span>
     </div>
   )
-}
+})
 
 /** Durable parent-thread summary for one finished background child. */
-export function ChildCompletionCard({ notice }: { notice: ChildCompletionNotice }): JSX.Element {
+export const ChildCompletionCard = memo(function ChildCompletionCard({
+  notice
+}: {
+  notice: ChildCompletionNotice
+}): JSX.Element {
   const { t, locale } = useI18n()
   const failed = notice.status !== 'completed'
   const detail = notice.summary ?? notice.error ?? t('canvas.child.noSummary')
@@ -50,13 +56,13 @@ export function ChildCompletionCard({ notice }: { notice: ChildCompletionNotice 
       <p className="ark-childcompletion__summary">{detail}</p>
     </div>
   )
-}
+})
 
 /**
  * Tool result without a preceding call card: the runtime sends standalone
  * results when a tool is retried, so it gets its own collapsible row.
  */
-export function ToolResultRow({ item }: { item: ThreadItem }): JSX.Element {
+export const ToolResultRow = memo(function ToolResultRow({ item }: { item: ThreadItem }): JSX.Element {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const output = item.tool?.output ?? item.text ?? ''
@@ -74,4 +80,4 @@ export function ToolResultRow({ item }: { item: ThreadItem }): JSX.Element {
       {open ? <pre className="ark-tool__output">{output}</pre> : null}
     </div>
   )
-}
+})
