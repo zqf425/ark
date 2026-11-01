@@ -7,6 +7,7 @@
 
 #![deny(clippy::all)]
 
+mod attachment_seed;
 mod base;
 mod child;
 mod cli;

@@ -229,6 +229,7 @@ mod tests {
                 timestamp: Utc::now(),
                 auto_continuation: false,
                 attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
             },
             RuntimeEvent::ItemCreated {
                 seq: 0,
@@ -252,6 +253,7 @@ mod tests {
                 timestamp: Utc::now(),
                 auto_continuation: false,
                 attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
             },
             RuntimeEvent::ItemCreated {
                 seq: 0,

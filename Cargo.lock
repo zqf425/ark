@@ -363,6 +363,7 @@ dependencies = [
  "ark-ui",
  "ark-workspace",
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "serde",
  "serde_json",

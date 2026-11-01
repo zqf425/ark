@@ -151,6 +151,35 @@ pub struct ChildCompletionNotice {
     pub error: Option<String>,
 }
 
+/// How one referenced attachment reached (or did not reach) the model seed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct TurnAttachmentOutcome {
+    pub attachment_id: ark_common::AttachmentId,
+    pub delivered: TurnAttachmentDelivery,
+    /// Human-readable reason for anything that did not ride the seed as an
+    /// image, e.g. the per-turn image budget or a missing model capability.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// Delivery channel of one attachment in a turn's model seed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnAttachmentDelivery {
+    /// Image bytes rode the seed as multimodal parts.
+    Image,
+    /// Non-image attachment whose `preview_text` rode the seed as text.
+    PreviewText,
+    /// Image attachment downgraded to `preview_text` because the model did not
+    /// declare vision support.
+    Degraded,
+    /// Skipped entirely, e.g. over the per-turn image budget.
+    Skipped,
+    /// Metadata or bytes could not be read at seed time.
+    Unavailable,
+}
+
 /// A persisted runtime event.
 ///
 /// `#[serde(tag = "kind")]` keeps the wire shape flat, which is what the
@@ -202,11 +231,18 @@ pub enum RuntimeEvent {
         /// Attachments this turn referenced, already authorized against the
         /// thread by `attachment_associated` events.
         ///
-        /// First phase records usage only: the ids are validated and journaled
-        /// but never turned into model content. Additive with a serde default so
-        /// logs written before this field existed stay readable.
+        /// Phase one records usage only; since phase two the per-attachment
+        /// delivery outcome rides `attachment_outcomes`. Additive with a serde
+        /// default so logs written before this field existed stay readable.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachment_ids: Vec<ark_common::AttachmentId>,
+        /// How each referenced attachment reached (or did not reach) the model
+        /// seed. Recorded here rather than as separate events so one turn's
+        /// attachment audit is a single replayable record. Additive with a
+        /// serde default; empty means every attachment was delivered as an
+        /// image or the turn had none.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachment_outcomes: Vec<TurnAttachmentOutcome>,
     },
     TurnCompleted {
         #[ts(as = "f64")]
@@ -562,6 +598,7 @@ mod tests {
             timestamp: Utc::now(),
             auto_continuation: false,
             attachment_ids: Vec::new(),
+            attachment_outcomes: Vec::new(),
         };
         assert_eq!(event.with_seq(42).seq(), 42);
     }

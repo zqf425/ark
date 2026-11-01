@@ -104,7 +104,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
 
     // Real store: the session directory is the system of record.
     let store = Arc::new(FileSessionStore::open(StoreConfig::new(&args.data_dir))?);
-    let attachments = Arc::new(AttachmentStore::open(
+    let attachments: Arc<dyn ark_ports::AttachmentStore> = Arc::new(AttachmentStore::open(
         &args.data_dir,
         DEFAULT_MAX_ATTACHMENT_BYTES,
     )?);
@@ -264,6 +264,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         tool_registry: Arc::clone(&tools),
         skills: Arc::clone(&skills),
         memory: Arc::clone(&memory),
+        attachments: Arc::clone(&attachments),
         gates: gate_broker,
     });
 

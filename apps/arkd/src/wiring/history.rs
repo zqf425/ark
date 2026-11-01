@@ -59,6 +59,7 @@ pub(super) fn conversation_history(items: &[ark_contract::ThreadItem]) -> Vec<Mo
                 let tool = payload.tool.clone();
                 history.push(ModelMessage {
                     role: ModelRole::Tool,
+                    images: Vec::new(),
                     content: truncate_utf8(payload.output.as_deref().unwrap_or("")),
                     tool_call_id: Some(call_id),
                     name: Some(tool),

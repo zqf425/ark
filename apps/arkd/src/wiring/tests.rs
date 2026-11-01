@@ -3,7 +3,8 @@
 use super::history::conversation_history;
 use super::tools::{build_child_tools, build_tools};
 use super::turns::{
-    abort_interrupted_turns, completion_inbox, finish_parent_turn, AgentTurnRunner,
+    abort_interrupted_turns, completion_inbox, finish_parent_turn, user_message_with_attachments,
+    AgentTurnRunner,
 };
 use super::*;
 
@@ -171,6 +172,7 @@ fn paired_tool_rows_fold_into_the_assistant_history() {
             ),
             ModelMessage {
                 role: ModelRole::Tool,
+                images: Vec::new(),
                 content: "file body".into(),
                 tool_call_id: Some("c1".into()),
                 name: Some("read".into()),
@@ -500,6 +502,7 @@ async fn startup_aborts_a_parent_turn_left_open_by_a_previous_process() {
                 timestamp: Utc::now(),
                 auto_continuation: false,
                 attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
             },
         )
         .await
@@ -533,6 +536,30 @@ fn conversation_history_keeps_visible_messages_and_excludes_reasoning() {
     assert_eq!(history.len(), 2);
     assert_eq!(history[0], ModelMessage::user("first question"));
     assert_eq!(history[1], ModelMessage::assistant("first answer"));
+}
+
+#[test]
+fn user_message_carries_previews_in_content_and_images_in_parts() {
+    let seed = crate::attachment_seed::AttachmentSeed {
+        images: vec![ark_ports::ModelImage {
+            mime_type: "image/png".into(),
+            data: "aGk=".into(),
+        }],
+        preview: "[attachment: notes.txt]\nbody".into(),
+        outcomes: Vec::new(),
+    };
+    let message = user_message_with_attachments("look at this".into(), &seed);
+    assert_eq!(
+        message.content,
+        "look at this\n[attachment: notes.txt]\nbody"
+    );
+    assert_eq!(message.images.len(), 1);
+    assert_eq!(message.images[0].mime_type, "image/png");
+
+    // A turn without attachments keeps the text-only shape.
+    let plain = user_message_with_attachments("hello".into(), &Default::default());
+    assert!(plain.images.is_empty());
+    assert_eq!(plain.content, "hello");
 }
 
 #[test]

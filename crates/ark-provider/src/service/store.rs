@@ -201,6 +201,23 @@ impl ProviderStore {
         config_from_entry(target)
     }
 
+    /// Whether the resolved provider's model explicitly declared vision support.
+    ///
+    /// Same selection rules as [`Self::resolve`], but reads the catalog-reported
+    /// `supports_vision` flag. `None` (unknown) must be treated as "not
+    /// declared": image parts are only sent on an explicit positive, never on a
+    /// guess from the model name.
+    pub fn resolve_vision(&self, id: Option<&str>) -> Option<bool> {
+        let document = self.lock();
+        let target = match id.map(str::trim).filter(|value| !value.is_empty()) {
+            Some(explicit) => document.get(explicit),
+            None => document
+                .effective_default()
+                .and_then(|default| document.get(default)),
+        }?;
+        target.supports_vision
+    }
+
     /// Probe connectivity with one minimal request.
     ///
     /// `request.entry` wins so the settings dialog can test a draft before it is
@@ -718,6 +735,29 @@ mod tests {
         assert_eq!(store.resolve(None).unwrap().provider_id, "a");
         assert_eq!(store.resolve(Some("b")).unwrap().provider_id, "b");
         assert!(store.resolve(Some("ghost")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_vision_follows_the_same_selection_rules() {
+        // Image parts are only sent on an explicit catalog-reported positive;
+        // unknown (`None`) must read as "not declared", never as a guess.
+        let dir = temp_dir("resolve-vision");
+        let store = store(&dir);
+        let mut vision = entry("v", Some("sk-1234567890v"));
+        vision.supports_vision = Some(true);
+        store.upsert(vision, true).unwrap();
+        let mut blind = entry("b", Some("sk-1234567890b"));
+        blind.supports_vision = Some(false);
+        store.upsert(blind, true).unwrap();
+        let mut unknown = entry("u", Some("sk-1234567890u"));
+        unknown.supports_vision = None;
+        store.upsert(unknown, true).unwrap();
+
+        assert_eq!(store.resolve_vision(Some("v")), Some(true));
+        assert_eq!(store.resolve_vision(Some("b")), Some(false));
+        assert_eq!(store.resolve_vision(Some("u")), None);
+        assert_eq!(store.resolve_vision(Some("ghost")), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

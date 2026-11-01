@@ -58,7 +58,7 @@ fn message_json(message: &ModelMessage) -> Value {
         ModelRole::Assistant => "assistant",
         ModelRole::Tool => "tool",
     };
-    let mut value = json!({ "role": role, "content": message.content });
+    let mut value = json!({ "role": role, "content": content_json(message) });
     if !message.tool_calls.is_empty() {
         // Chat-completions wire shape: arguments travel as a JSON string, so
         // the parsed Value must be re-serialised before sending.
@@ -87,6 +87,25 @@ fn message_json(message: &ModelMessage) -> Value {
         value["name"] = json!(name);
     }
     value
+}
+
+/// Chat-completions content: a plain string for text-only messages, or a
+/// `text`/`image_url` part array once the message carries images.
+fn content_json(message: &ModelMessage) -> Value {
+    if message.images.is_empty() {
+        return json!(message.content);
+    }
+    let mut parts = Vec::new();
+    if !message.content.is_empty() {
+        parts.push(json!({ "type": "text", "text": message.content }));
+    }
+    parts.extend(message.images.iter().map(|image| {
+        json!({
+            "type": "image_url",
+            "image_url": { "url": crate::common::data_url(image) },
+        })
+    }));
+    Value::Array(parts)
 }
 
 fn validate(body: &Value) -> Result<()> {
@@ -231,6 +250,36 @@ mod tests {
         }
     }
 
+    fn image_message() -> ModelMessage {
+        let mut message = ModelMessage::user("what is in this picture");
+        message.images.push(ark_ports::ModelImage {
+            mime_type: "image/png".into(),
+            data: "aGk=".into(),
+        });
+        message
+    }
+
+    #[test]
+    fn images_serialize_as_a_text_image_url_part_array() {
+        let body = build_body(
+            &config(),
+            &ModelRequest {
+                messages: vec![image_message()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let content = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "what is in this picture");
+        assert_eq!(content[1]["type"], "image_url");
+        assert_eq!(content[1]["image_url"]["url"], "data:image/png;base64,aGk=");
+
+        // A text-only message keeps the plain-string content shape.
+        let plain = build_body(&config(), &request()).unwrap();
+        assert_eq!(plain["messages"][1]["content"], json!("hi"));
+    }
+
     #[test]
     fn body_streams_and_keeps_message_order() {
         let body = build_body(&config(), &request()).unwrap();
@@ -370,6 +419,7 @@ mod tests {
         let message = ModelMessage {
             role: ModelRole::Tool,
             content: "ok".into(),
+            images: Vec::new(),
             tool_call_id: Some("c1".into()),
             name: Some("read".into()),
             tool_calls: Vec::new(),

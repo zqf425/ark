@@ -20,6 +20,12 @@ pub enum ModelRole {
 pub struct ModelMessage {
     pub role: ModelRole,
     pub content: String,
+    /// Images attached to this message as multimodal parts. Only the user side
+    /// carries them today; an empty list serialises no field at all, so old
+    /// JSON and text-only consumers stay byte-compatible. The composition root
+    /// fills them from authorized attachments — the agent never reads files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ModelImage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30,6 +36,15 @@ pub struct ModelMessage {
     /// as empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCallRef>,
+}
+
+/// One multimodal image part: MIME type plus raw base64 payload (no `data:`
+/// prefix). Adapters render it in their provider's wire shape; the data-URL
+/// form only exists at the openai-compatible serialization point.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelImage {
+    pub mime_type: String,
+    pub data: String,
 }
 
 /// One replayed assistant tool call: id, tool name and parsed arguments.
@@ -45,6 +60,7 @@ impl ModelMessage {
         Self {
             role: ModelRole::System,
             content: content.into(),
+            images: Vec::new(),
             tool_call_id: None,
             name: None,
             tool_calls: Vec::new(),
@@ -55,6 +71,7 @@ impl ModelMessage {
         Self {
             role: ModelRole::User,
             content: content.into(),
+            images: Vec::new(),
             tool_call_id: None,
             name: None,
             tool_calls: Vec::new(),
@@ -65,6 +82,7 @@ impl ModelMessage {
         Self {
             role: ModelRole::Assistant,
             content: content.into(),
+            images: Vec::new(),
             tool_call_id: None,
             name: None,
             tool_calls: Vec::new(),
@@ -75,6 +93,7 @@ impl ModelMessage {
         Self {
             role: ModelRole::Assistant,
             content: content.into(),
+            images: Vec::new(),
             tool_call_id: None,
             name: None,
             tool_calls: calls,
@@ -110,6 +129,30 @@ mod tests {
         // An empty list must be omitted so old consumers see no field at all.
         let json = serde_json::to_value(ModelMessage::assistant("hi")).unwrap();
         assert!(json.get("tool_calls").is_none());
+    }
+
+    #[test]
+    fn images_survive_a_serde_roundtrip_and_are_omitted_when_empty() {
+        let mut message = ModelMessage::user("what is in this picture");
+        message.images.push(ModelImage {
+            mime_type: "image/png".into(),
+            data: "aGVsbG8=".into(),
+        });
+        let json = serde_json::to_string(&message).unwrap();
+        assert!(json.contains("\"images\""));
+        assert_eq!(
+            serde_json::from_str::<ModelMessage>(&json).unwrap(),
+            message
+        );
+
+        // Text-only messages must not grow an images field on the wire.
+        let plain = serde_json::to_value(ModelMessage::user("hello")).unwrap();
+        assert!(plain.get("images").is_none());
+        let legacy = r#"{"role":"user","content":"hello"}"#;
+        assert_eq!(
+            serde_json::from_str::<ModelMessage>(legacy).unwrap(),
+            ModelMessage::user("hello")
+        );
     }
 }
 

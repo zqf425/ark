@@ -58,5 +58,7 @@ pub use dto::{
     LLM_ROUNDS_MAX_LIMIT, LLM_ROUNDS_MAX_THREADS, MAX_TURN_TEXT_BYTES,
     THREAD_EXPORT_FORMAT_VERSION, THREAD_PAGE_DEFAULT_LIMIT, THREAD_PAGE_MAX_LIMIT,
 };
-pub use event::{ChildCompletionNotice, EventKind, RuntimeEvent};
+pub use event::{
+    ChildCompletionNotice, EventKind, RuntimeEvent, TurnAttachmentDelivery, TurnAttachmentOutcome,
+};
 pub use item::{ItemStatus, ThreadItem};

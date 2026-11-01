@@ -6,6 +6,7 @@ import type { ItemId } from "./ItemId";
 import type { ThreadId } from "./ThreadId";
 import type { ThreadItem } from "./ThreadItem";
 import type { TodoEntry } from "./TodoEntry";
+import type { TurnAttachmentOutcome } from "./TurnAttachmentOutcome";
 import type { TurnId } from "./TurnId";
 import type { Usage } from "./Usage";
 import type { JsonValue } from "./serde_json/JsonValue";
@@ -27,11 +28,19 @@ auto_continuation: boolean,
  * Attachments this turn referenced, already authorized against the
  * thread by `attachment_associated` events.
  *
- * First phase records usage only: the ids are validated and journaled
- * but never turned into model content. Additive with a serde default so
- * logs written before this field existed stay readable.
+ * Phase one records usage only; since phase two the per-attachment
+ * delivery outcome rides `attachment_outcomes`. Additive with a serde
+ * default so logs written before this field existed stay readable.
  */
-attachment_ids: Array<AttachmentId>, } | { "kind": "turn_completed", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, } | { "kind": "turn_failed", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, message: string, 
+attachment_ids: Array<AttachmentId>, 
+/**
+ * How each referenced attachment reached (or did not reach) the model
+ * seed. Recorded here rather than as separate events so one turn's
+ * attachment audit is a single replayable record. Additive with a
+ * serde default; empty means every attachment was delivered as an
+ * image or the turn had none.
+ */
+attachment_outcomes: Array<TurnAttachmentOutcome>, } | { "kind": "turn_completed", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, } | { "kind": "turn_failed", seq: number, thread_id: ThreadId, turn_id: TurnId, timestamp: string, message: string, 
 /**
  * `true` when the failure was caused by the model request itself
  * (for example a gateway 5xx). Additive with a serde default; the

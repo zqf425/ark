@@ -94,9 +94,28 @@ fn input_json(message: &ModelMessage) -> Vec<Value> {
                 ModelRole::User => "user",
                 _ => "assistant",
             };
-            vec![json!({ "role": role, "content": message.content })]
+            vec![json!({ "role": role, "content": content_json(message) })]
         }
     }
+}
+
+/// Responses content: a plain string for text-only messages, or an
+/// `input_text`/`input_image` part array once the message carries images.
+fn content_json(message: &ModelMessage) -> Value {
+    if message.images.is_empty() {
+        return json!(message.content);
+    }
+    let mut parts = Vec::new();
+    if !message.content.is_empty() {
+        parts.push(json!({ "type": "input_text", "text": message.content }));
+    }
+    parts.extend(message.images.iter().map(|image| {
+        json!({
+            "type": "input_image",
+            "image_url": crate::common::data_url(image),
+        })
+    }));
+    Value::Array(parts)
 }
 
 /// Streaming frame parser for this family.
@@ -282,6 +301,7 @@ mod tests {
         let mut result = ModelMessage {
             role: ModelRole::Tool,
             content: "body".into(),
+            images: Vec::new(),
             tool_call_id: Some("call_1".into()),
             name: None,
             tool_calls: Vec::new(),
@@ -423,5 +443,27 @@ mod tests {
         assert_eq!(input[1]["call_id"], "call_1");
         assert_eq!(input[1]["name"], "read");
         assert_eq!(input[1]["arguments"], r#"{"path":"a.txt"}"#);
+    }
+
+    #[test]
+    fn images_serialize_as_input_text_and_input_image_parts() {
+        let mut message = ModelMessage::user("what is in this picture");
+        message.images.push(ark_ports::ModelImage {
+            mime_type: "image/png".into(),
+            data: "aGk=".into(),
+        });
+        let body = build_body(
+            &config(),
+            &ModelRequest {
+                messages: vec![message],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let content = body["input"][0]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "input_text");
+        assert_eq!(content[0]["text"], "what is in this picture");
+        assert_eq!(content[1]["type"], "input_image");
+        assert_eq!(content[1]["image_url"], "data:image/png;base64,aGk=");
     }
 }
