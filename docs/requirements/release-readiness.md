@@ -199,9 +199,31 @@ run2 发现的 P2/P3（未修复，记录为后续项）：
 > 3. P3（环境）上游网关在多任务并发时间歇 503，子代理可能大面积以 `ModelRequestFailed`
 >    结束；熔断按设计暂停续跑、通知不丢（run1/观察项 O1 佐证）。
 
+> 补充收尾轮（2026-11-01，master 689c076；fix 类经 DSH 修复、发起方独立复验合入）：
+>
+> 已修复并合入：run4 观察项 2（config 部分回落告警，12a68c0）；测试 TempDir 命名竞争
+> （1ca6625，两轮验收抖动根因）。
+>
+> 设计文档未完成功能推进：
+> - **插件宿主接线已实施**（689c076）：本地目录插件源、fail-closed 装载、`<plugin_id>.<tool>`
+>    工具经 mcp 组暴露、`GET /v1/runtime/plugins` 诊断、7 个端到端用例（含坏 manifest/循环
+>    依赖/越权 egress 隔离），需求状态转"已实施"。
+> - **附件生命周期 v2 首期已实施**（86759e4，设计 bbbcdcc）：SHA-256、MIME+magic-byte、
+>    线程关联授权链（AttachmentAssociated 事件 + TurnRequest 校验）、删除路由、orphan 诊断；
+>    第二期（多模态传递）待实施。
+> - **memory prompt 注入已实施**（671fdea，设计 57e3bab）：动态尾部 system 消息、4096 字符
+>    预算整条丢弃、失败降级不阻塞回合；真实模型验证下一回合可见。
+>
+> 新发现的既有问题（未修复，记录为后续项）：
+> 1. P2 `ark-tool` 的 Windows 盘符路径语义测试与 bash timeout 测试在 macOS 上未做平台门控，
+>    `cargo test --workspace` 在 macOS 必失败 3 项（干净 master 复现）；建议 `#[cfg(windows)]`
+>    或按平台断言。
+> 2. P3 `apps/arkd/src/wiring.rs` 1361 行，超出 800 行红线（历史存量），建议按装配段拆分。
+
 仍未覆盖（延续原清单，不宣称通过）：
 
 - 语言/字号/主题的"保存失败提示"路径（保存成功路径 run3 已验）；
+- 附件 v2 第二期（模型多模态传递）；
 - Windows 桌面端整体复验（保持既有外部阻塞：端口 18791 被用户进程占用）。
 
 ## 完成条件
