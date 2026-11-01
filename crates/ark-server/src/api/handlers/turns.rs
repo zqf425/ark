@@ -8,11 +8,10 @@ use std::sync::Arc;
 
 use ark_agent::CancelToken;
 use ark_common::{ThreadId, TurnId};
-use ark_contract::{RuntimeEvent, TurnRequest, TurnSummary, MAX_TURN_TEXT_BYTES};
+use ark_contract::{TurnRequest, TurnSummary, MAX_TURN_TEXT_BYTES};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
-use chrono::Utc;
 
 use crate::api::error::ApiError;
 use crate::api::handlers::threads::parse_thread;
@@ -243,51 +242,27 @@ pub async fn interrupt(
 
 /// `POST /v1/threads/{id}/compact`.
 ///
-/// Records an explicit compaction pair. Folding the JSONL log itself is a store
-/// responsibility reached through its writer; this route declares the intent and
-/// keeps the boundary honest about what it did.
+/// Transport only: existence checks, checkpoint detection and persistence are
+/// `service::ensure_checkpoint`'s job; this route declares the intent and keeps
+/// the boundary honest about what it did.
 pub async fn compact(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let thread_id = parse_thread(&id)?;
-    state.store.get_thread(thread_id).await?;
-    let items = state.store.read_items(thread_id).await?;
-    if let Some(existing) = items.iter().find_map(|item| {
-        item.text
-            .as_deref()
-            .filter(|text| text.starts_with("[context checkpoint"))
-    }) {
-        return Ok(Json(
-            serde_json::json!({ "thread_id": thread_id, "checkpoint": existing }),
-        ));
+    match crate::service::ensure_checkpoint(&state.store, thread_id).await? {
+        crate::service::CompactionOutcome::Existing(existing) => Ok(Json(
+            serde_json::json!({ "thread_id": thread_id, "checkpoint": existing.text }),
+        )),
+        crate::service::CompactionOutcome::Created {
+            turn_id,
+            checkpoint,
+        } => Ok(Json(serde_json::json!({
+            "thread_id": thread_id,
+            "turn_id": turn_id,
+            "checkpoint": checkpoint,
+        }))),
     }
-    let checkpoint = ark_agent::ContextCheckpoint::from_texts(
-        items.iter().filter_map(|item| item.text.as_deref()),
-    )
-    .render();
-    let turn_id = TurnId::new();
-    let item = ark_contract::ThreadItem::new(turn_id, ark_contract::item::ItemKind::Notice)
-        .with_text(checkpoint.clone())
-        .completed();
-    state
-        .store
-        .append_event(
-            thread_id,
-            RuntimeEvent::ItemCreated {
-                seq: 0,
-                thread_id,
-                turn_id,
-                timestamp: Utc::now(),
-                item,
-            },
-        )
-        .await?;
-    Ok(Json(serde_json::json!({
-        "thread_id": thread_id,
-        "turn_id": turn_id,
-        "checkpoint": checkpoint,
-    })))
 }
 
 /// Parse a turn id with a validation error instead of a 500.
@@ -307,6 +282,7 @@ pub fn thread_of(summary: &TurnSummary) -> ThreadId {
 
 #[cfg(test)]
 mod tests {
+    use ark_contract::RuntimeEvent;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 

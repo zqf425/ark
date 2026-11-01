@@ -63,7 +63,7 @@ pub use dto::{
 pub use event::{
     ChildCompletionNotice, EventKind, RuntimeEvent, TurnAttachmentDelivery, TurnAttachmentOutcome,
 };
-pub use item::{ItemStatus, ThreadItem};
+pub use item::{ItemKind, ItemMarker, ItemStatus, ThreadItem};
 pub use schedule::{
     CreateScheduleRequest, RunStatus, ScheduleKind, ScheduledRunRecord, ScheduledTask,
     ScheduledTaskListResponse, TaskSchedule, UpdateScheduleRequest, DEFAULT_SCHEDULE_AUTONOMY,

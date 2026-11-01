@@ -24,6 +24,18 @@ pub enum ItemKind {
     Notice,
 }
 
+/// Structural marker for system-generated item families that a renderer or a
+/// projection must recognize without parsing their text. Text prefixes are not
+/// identity: a user can type any prefix, so matching on it would let user input
+/// masquerade as generated state (or hide real checkpoints after a render-format
+/// change).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemMarker {
+    /// Rendered context checkpoint produced by compaction (`ark-agent`).
+    ContextCheckpoint,
+}
+
 /// Lifecycle of an item. Streaming text keeps `Streaming` until the turn or the
 /// item terminates, so the renderer can show a caret without extra inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
@@ -72,7 +84,14 @@ pub struct ThreadItem {
     pub tool: Option<ToolPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub marker: Option<ItemMarker>,
 }
+
+/// Text prefix rendered by `ark-agent`'s checkpoint family. Kept only as the
+/// legacy fallback for items persisted before `marker` existed; new code must
+/// match on [`ThreadItem::marker`] instead.
+pub const CONTEXT_CHECKPOINT_PREFIX: &str = "[context checkpoint";
 
 impl ThreadItem {
     pub fn new(turn_id: TurnId, kind: ItemKind) -> Self {
@@ -85,7 +104,27 @@ impl ThreadItem {
             text: None,
             tool: None,
             detail: None,
+            marker: None,
         }
+    }
+
+    pub fn with_marker(mut self, marker: ItemMarker) -> Self {
+        self.marker = Some(marker);
+        self
+    }
+
+    /// Whether this item carries a rendered context checkpoint.
+    ///
+    /// Matches the structural marker first; items persisted before the marker
+    /// existed are recognized by their text prefix, which is safe here because
+    /// the fallback only widens to *older* logs, never to user input.
+    pub fn is_context_checkpoint(&self) -> bool {
+        self.marker == Some(ItemMarker::ContextCheckpoint)
+            || (self.marker.is_none()
+                && self
+                    .text
+                    .as_deref()
+                    .is_some_and(|text| text.starts_with(CONTEXT_CHECKPOINT_PREFIX)))
     }
 
     pub fn with_text(mut self, text: impl Into<String>) -> Self {

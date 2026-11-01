@@ -450,6 +450,9 @@ impl Reactor {
                 text: Some(item.text),
                 tool: None,
                 detail: None,
+                // StreamItem only buffers assistant/reasoning text, which never
+                // carries a marker.
+                marker: None,
             };
             self.writer
                 .append(self.events.item_completed(completed))
