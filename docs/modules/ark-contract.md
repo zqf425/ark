@@ -63,5 +63,17 @@ skill 视图，以及插件宿主的只读报告（`PluginHostReport`、`PluginE
 Changes 投影，明确提供 staged/unstaged/untracked、rename、二进制、patch 上限和 truncation；所有
 generation 均以 JSON number 输出。
 
+定时任务 wire 由 `schedule.rs` 提供：`ScheduleKind`、`RunStatus`、`TaskSchedule`、
+`ScheduledRunRecord`、`ScheduledTask`、`ScheduledTaskListResponse`、`CreateScheduleRequest`、
+`UpdateScheduleRequest`，以及 `MAX_SCHEDULED_TASKS`(100)、`SCHEDULE_TITLE_MAX_BYTES`(200)、
+`SCHEDULE_RUN_HISTORY_LIMIT`(10)、`MIN_EVERY_MINUTES`(1)、`MAX_EVERY_MINUTES`(525600)、
+`DEFAULT_TIME_OF_DAY`("09:00")、`DEFAULT_SCHEDULE_AUTONOMY`("unattended")。
+
+关键形状约定：`UpdateScheduleRequest` 的每个字段都是合并语义（缺省即保留），清空可选文本靠发空串，
+由归一化折回"未设置"；`ScheduledTask.enabled` 带 serde default 且缺省为 `false`，使损坏或旧文档
+不会开火无人值守回合；`next_run_at` 用空串表示不调度（manual、禁用、已触发的一次性 `at`）；
+`history` 最旧在前、上限 10 条。`RunStatus` 刻意不派生 `Default`："默认运行结果"没有语义。归一化与
+`next_run_at` 计算不在本 crate，而在 `ark-schedule`；本 crate 只定义形状与上限常量。
+
 长期 memory wire 包含 `MemoryEntry`、创建/更新请求、列表和诊断响应。它只表达跨会话可复用的
 用户偏好或事实，不包含模型推理、检索排名或自动注入策略；这些后续能力仍属待决。

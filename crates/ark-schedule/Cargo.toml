@@ -1,0 +1,14 @@
+[package]
+name = "ark-schedule"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ark-common = { workspace = true }
+ark-contract = { workspace = true }
+ark-ports = { workspace = true }
+# `chrono` is not an implementation crate: `DateTime<Local>` is the time type
+# the wire DTOs already carry, and the caller-supplied "now" is part of the
+# pure signatures. Keeping it here avoids re-exporting chrono from ark-common.
+chrono = { workspace = true }

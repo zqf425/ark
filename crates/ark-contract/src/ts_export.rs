@@ -26,23 +26,26 @@ use crate::{
     AttachmentDiagnostics, AttachmentEntry, AttachmentUploadRequest, AttachmentUploadResponse,
     CapabilitiesResponse, ChildCompletionNotice, ChildRunActionResult, ChildRunAggregates,
     ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
-    CreateMemoryRequest, CreateThreadRequest, EventKind, FieldPath, FilePreview, GoalRequest,
-    HealthResponse, ItemStatus, LlmRound, LlmRoundError, LlmRoundsResponse, McpServerEntry,
-    McpServerListResponse, McpServerTestResponse, McpServerView, McpTransportKind,
-    MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, PanelEntry, PendingApprovalView,
-    PendingUserInputView, PlanView, PluginDiagnosticView, PluginEntry, PluginHostReport,
-    ProviderEntry, ProviderListResponse, ProviderModelCatalogConnection,
-    ProviderModelCatalogRequest, ProviderModelCatalogResponse, ProviderModelSummary,
-    ProviderTestRequest, ProviderTestResponse, ProviderView, ResolveApprovalRequest,
-    ResolveUserInputRequest, ResumeChildRequest, ReviewRequest, RewindRequest, RewindResponse,
-    RuntimeConfigView, RuntimeEvent, RuntimeInfo, SessionResumeResponse, SkillDiagnostics,
-    SkillLoadWarning, SkillSource, SkillSummary, SteerChildRequest, SubagentSettings,
-    SwitchWorkspaceRequest, TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadExport,
-    ThreadItem, ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot,
-    ThreadSkillsResponse, ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest,
-    TuningSettings, TurnRequest, TurnSummary, UiCatalog, UpdateMemoryRequest, UpdateThreadRequest,
-    UsageResponse, WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
-    WorkspaceDiffFile, WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
+    CreateMemoryRequest, CreateScheduleRequest, CreateThreadRequest, EventKind, FieldPath,
+    FilePreview, GoalRequest, HealthResponse, ItemStatus, LlmRound, LlmRoundError,
+    LlmRoundsResponse, McpServerEntry, McpServerListResponse, McpServerTestResponse,
+    McpServerView, McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse,
+    PanelEntry, PendingApprovalView, PendingUserInputView, PlanView, PluginDiagnosticView,
+    PluginEntry, PluginHostReport, ProviderEntry, ProviderListResponse,
+    ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
+    ProviderModelSummary, ProviderTestRequest, ProviderTestResponse, ProviderView,
+    ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, ReviewRequest,
+    RewindRequest, RewindResponse, RunStatus, RuntimeConfigView, RuntimeEvent, RuntimeInfo,
+    ScheduleKind, ScheduledRunRecord, ScheduledTask, ScheduledTaskListResponse,
+    SessionResumeResponse, SkillDiagnostics, SkillLoadWarning, SkillSource, SkillSummary,
+    SteerChildRequest, SubagentSettings, SwitchWorkspaceRequest, TaskSchedule,
+    TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadExport, ThreadItem,
+    ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSkillsResponse,
+    ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest, TuningSettings,
+    TurnRequest, TurnSummary, UiCatalog, UpdateMemoryRequest, UpdateScheduleRequest,
+    UpdateThreadRequest, UsageResponse, WorkspaceChange, WorkspaceChangesResponse,
+    WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile, WorkspaceStatus,
+    WorkspaceValidateResponse, WorkspaceView,
 };
 use ark_common::{
     ArkErrorCode, ArkErrorPayload, AttachmentId, ChildId, ItemId, ThreadId, TurnId, Usage,
@@ -174,6 +177,16 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     PluginEntry::export_all_to(dir)?;
     PluginDiagnosticView::export_all_to(dir)?;
     PluginHostReport::export_all_to(dir)?;
+
+    // ---- scheduled tasks ----
+    ScheduleKind::export_all_to(dir)?;
+    RunStatus::export_all_to(dir)?;
+    TaskSchedule::export_all_to(dir)?;
+    ScheduledRunRecord::export_all_to(dir)?;
+    ScheduledTask::export_all_to(dir)?;
+    ScheduledTaskListResponse::export_all_to(dir)?;
+    CreateScheduleRequest::export_all_to(dir)?;
+    UpdateScheduleRequest::export_all_to(dir)?;
 
     Ok(())
 }
@@ -312,6 +325,14 @@ const ROOT_NAMES: &[&str] = &[
     "SkillDiagnostics",
     "ThreadSkillsResponse",
     "FieldPath",
+    "ScheduleKind",
+    "RunStatus",
+    "TaskSchedule",
+    "ScheduledRunRecord",
+    "ScheduledTask",
+    "ScheduledTaskListResponse",
+    "CreateScheduleRequest",
+    "UpdateScheduleRequest",
 ];
 
 #[cfg(test)]
