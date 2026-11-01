@@ -13,7 +13,7 @@ use ark_common::ThreadId;
 use ark_contract::{
     ChildCompletionNotice, CreateThreadRequest, PendingApprovalView, PendingUserInputView,
     RuntimeEvent, ThreadDetail, ThreadListQuery, ThreadRuntimeSnapshot, ThreadSummary,
-    UpdateThreadRequest, THREAD_PAGE_DEFAULT_LIMIT, THREAD_PAGE_MAX_LIMIT,
+    UpdateThreadRequest, THREAD_PAGE_MAX_LIMIT,
 };
 use ark_ports::ThreadMeta;
 use std::collections::HashSet;
@@ -36,10 +36,12 @@ pub async fn list(
     State(state): State<AppState>,
     Query(query): Query<ThreadListQuery>,
 ) -> Result<Json<Vec<ThreadSummary>>, ApiError> {
+    // Absent `limit` is the legacy "list everything" mode; clamping it to the
+    // page default would truncate existing clients. Only an explicit `limit`
+    // enables paging, and only it is clamped.
     let limit = query
         .limit
-        .unwrap_or(THREAD_PAGE_DEFAULT_LIMIT)
-        .clamp(1, THREAD_PAGE_MAX_LIMIT);
+        .map(|limit| limit.clamp(1, THREAD_PAGE_MAX_LIMIT));
     let offset = query.offset.unwrap_or(0);
     let needle = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty());
 
@@ -62,7 +64,7 @@ pub async fn list(
     let summaries = rows
         .iter()
         .skip(offset as usize)
-        .take(limit as usize)
+        .take(limit.map_or(usize::MAX, |limit| limit as usize))
         .map(|meta| summary_of(meta))
         .collect();
     Ok(Json(summaries))

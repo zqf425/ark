@@ -3,7 +3,9 @@
 ## 职责与边界
 
 `ark-ui` 是页面和面板的注册总线，实现 `UiCapability`。它维护路由、导航和能力门禁的单一 catalog；
-页面通过注册获得句柄，句柄 drop 后自动撤销，避免遗留死路由。
+页面通过注册获得句柄，句柄 drop 后自动撤销，避免遗留死路由。另有按插件批量注销的卸载路径
+`UiBus::unregister_plugin(plugin_id)`：一次摘除该插件注册的全部页与面板，与 `PluginHost::unload`
+配套使用。
 
 ## 约束
 

@@ -24,10 +24,10 @@
   调度下一批，确认失败不会自行循环。自动作业仍调用注入的普通 `TurnRunner`，不会绕过 reactor、gate
   或 sandbox，也不会写入伪用户消息。
 - 路径、HTTP 方法、字段名和兼容别名均是对外契约；变更前必须检查 `ark-contract`、`web` 与集成方。
-- `GET /v1/threads` 支持分页与筛选：`limit` 缺省 `THREAD_PAGE_DEFAULT_LIMIT`，clamp 到
-  `[1, THREAD_PAGE_MAX_LIMIT]`；`offset` 按确定顺序（active 优先、`updated_at` 降序、
-  `thread_id` 兜底）取页，空页即最后一页；`archived` 与 `q`（标题大小写不敏感子串）可与分页
-  组合。不带 query 的调用保持旧行为返回全部线程（响应仍为裸 `ThreadSummary` 数组）。
+- `GET /v1/threads` 支持分页与筛选：`limit` 显式给出时 clamp 到 `[1, THREAD_PAGE_MAX_LIMIT]`，
+  `offset` 按确定顺序（active 优先、`updated_at` 降序、`thread_id` 兜底）取页，空页即最后一页；
+  `archived` 与 `q`（标题大小写不敏感子串）可与分页组合。`limit` 缺省保持旧行为返回全部线程
+  （响应仍为裸 `ThreadSummary` 数组），不得暗中套用默认页大小截断既有客户端。
 - `GET /v1/threads/{id}` 的 `child_completions` 是最新 50 个不同通知 ID 的有界视图；它从 store 的窄
   completion 查询投影，不能全量回放普通会话事件。
 - `InteractiveGates` 只做 HTTP 决议与 reactor gate future 的一次性 rendezvous；`prepare_*` 同步插入
@@ -37,7 +37,15 @@
   写入 `ThreadDetail.runtime_snapshot`；`ThreadDetail.runtime` 只携带已持久化的每线程覆盖值。历史 gate 或
   已移除 waiter 不得出现在可操作快照中。
 - workbench 的 Plan、Changes、File、Terminal 投影均在 `service/workbench.rs`，handler 只读取权威事件并
-  调用该纯函数；File 不直接访问磁盘，而是返回已持久化的 `read` 工具输出。
+  调用该纯函数；File 不直接访问磁盘，而是返回已持久化的 `read` 工具输出。workbench 的 goal/todos
+  读写端点（`GET/POST/DELETE /v1/threads/{id}/goal` 与 `/todos`）不经回合注册，直接向线程事件流追加
+  `GoalUpdated`/`GoalCleared`/`TodosUpdated`/`TodosCleared` 权威事件（todos 经 `validate_todos` 校验），
+  空文本 goal 与非法 todos 返回结构化 400；它们是 workbench 唯一的写路径，读侧 Plan 投影消费同一事件流。
+- `POST /v1/threads/{id}/fork` 以当前持久水位为切点物理复制前缀线程（不接受任意历史 seq：选择历史
+  前缀需要明确的历史 UI，裸露数字会成为一个无法解释选中范围的半成品功能）。
+- `/v1/child-runs` 管理族（list/get/delete/abort/steer/resume/thread/events）只解包 HTTP 并转发
+  `SubagentRunner`/`SubagentRegistry` 端口；行为语义（预算、终态收敛、resume 继承）以
+  [ark-delegation 模块设计](ark-delegation.md) 与 [background-subagent-completion 需求](../requirements/background-subagent-completion.md) 为准，handler 不复制规则。
 - provider model catalog 路由只转发 `ProviderService::models`，不读取、记录或回显 api key/header；具体
   限时、限体积和元数据规范化留在 `ark-llm` / `ark-provider`。
 - `GET /v1/runtime/plugins` 只转发 `BaseServices::plugins`（`PluginHostService::report`）的

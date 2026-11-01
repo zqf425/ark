@@ -22,6 +22,11 @@
 `subagents.enabled` 与 `subagents.auto_continue` 同时为 `true` 时，server 才扫描持久 completion inbox
 并调度符合条件的父线程；关闭任一开关会立即取消进程内待调度 continuation，不影响已开始回合。
 
+`hooks` 配置节（[hooks 需求](../requirements/hooks.md)）整体为 `Hot`：命令清单、匹配规则与
+`timeout_ms` 在快照替换后对下一次工具调用即时生效。校验边界：至多 32 条 hook、单条命令编码后
+不超过 8 KiB、timeout 不超过 60 s，越界 patch 事务性拒绝。`hooks` 整节缺席是合法的常态（多数
+安装不使用 hooks），加载诊断对它**刻意不告警**，不能把它列入 `defaulted`/`ignored`。
+
 ## 加载诊断
 
 `config.json` 的加载区分三种结果：文件缺失属正常首次启动（取默认值，不打日志）；JSON 非法或

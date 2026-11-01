@@ -206,15 +206,28 @@ impl WorkspaceService for WorkspaceAdapter {
 pub struct McpServerAdapter {
     inner: Arc<ark_mcp::McpServerRegistry>,
     tools: Arc<ToolRegistry>,
+    /// Live view of the plugin tools. `replace_group` takes the whole `mcp`
+    /// group, so every re-discovery must re-merge them or an MCP config change
+    /// would evict plugin tools until restart.
+    plugin_tools: Arc<dyn Fn() -> Vec<Arc<dyn Tool>> + Send + Sync>,
 }
 
 impl McpServerAdapter {
-    pub fn new(inner: Arc<ark_mcp::McpServerRegistry>, tools: Arc<ToolRegistry>) -> Self {
-        Self { inner, tools }
+    pub fn new(
+        inner: Arc<ark_mcp::McpServerRegistry>,
+        tools: Arc<ToolRegistry>,
+        plugin_tools: Arc<dyn Fn() -> Vec<Arc<dyn Tool>> + Send + Sync>,
+    ) -> Self {
+        Self {
+            inner,
+            tools,
+            plugin_tools,
+        }
     }
 
     async fn synchronize_tools(&self) -> Result<()> {
-        let connected = self.inner.connect_all().await;
+        let mut connected = self.inner.connect_all().await;
+        connected.extend((self.plugin_tools)());
         self.tools.replace_group("mcp", connected)
     }
 }

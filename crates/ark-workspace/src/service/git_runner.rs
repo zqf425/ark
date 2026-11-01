@@ -38,13 +38,6 @@ pub struct GitOutput {
     pub stderr: String,
 }
 
-impl GitOutput {
-    /// Trimmed stdout, the form every caller wants for a single-value answer.
-    pub fn stdout_trimmed(&self) -> &str {
-        self.stdout.trim()
-    }
-}
-
 /// Run `git -C <cwd> <args>` with a hard timeout.
 ///
 /// Returns `None` when git is missing, cannot be spawned, exceeds
@@ -139,15 +132,6 @@ fn wait_with_timeout(child: &mut Child, timeout: Duration) -> Option<ExitStatus>
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn stdout_trimmed_strips_trailing_newline() {
-        let output = GitOutput {
-            stdout: "true\n".to_string(),
-            stderr: String::new(),
-        };
-        assert_eq!(output.stdout_trimmed(), "true");
-    }
 
     #[test]
     fn missing_cwd_fails_without_panicking() {

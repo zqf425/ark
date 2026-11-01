@@ -7,7 +7,7 @@ pub mod prepare;
 pub mod vault;
 
 pub use egress::{EgressGrant, EgressRegistry};
-pub use execute::{ExecuteError, Executor};
+pub use execute::{transport_client, ExecuteError, Executor};
 pub use outbound::{HttpBus, HttpBusBuilder};
 pub use prepare::{denial_reason, prepare, Prepared};
 pub use vault::CredentialVault;

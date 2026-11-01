@@ -12,16 +12,16 @@
 `Completed`/`Failed`/`Aborted`。`step(state, input) -> Action` 保持纯逻辑，`Reactor`
 是唯一把 action 转为 I/O 的位置。
 
-取消由 `CancellationToken` 与 `select!` 完成；任何退出路径都必须写终态并清理活动注册，
-不得留下“磁盘记录 running 但任务已丢失”的状态。
+取消由自研 `CancelToken`（基于 `tokio::sync::watch`，刻意不引入 tokio-util 依赖）与 `select!` 完成；
+任何退出路径都必须写终态并清理活动注册，不得留下“磁盘记录 running 但任务已丢失”的状态。
 
 ## 关键约束
 
 - 子代理不是第二个 agent：它是同一 `Reactor` 驱动的独立 child turn。
 - 工具沙箱决策只在派发前计算一次，执行器仅消费不可变结果。
-- `request_user_input` 在 settle 阶段即被拦截为 `Action::AskUser`（契约参数 `{"prompt": string}`），
-  不进入分派计划；答案经 `UserInputResolved` 回填为该调用的 tool result。助手轮次的工具调用使用
-  `ModelMessage::tool_calls` 结构化字段进入历史，不再渲染进正文文本。
+- `request_user_input` 在 settle 阶段即被拦截为 `Action::AskUser`（契约参数 `{"prompt": string}`，
+  兼容别名 `question` 仍被接受），不进入分派计划；答案经 `UserInputResolved` 回填为该调用的
+  tool result。助手轮次的工具调用使用 `ModelMessage::tool_calls` 结构化字段进入历史，不再渲染进正文文本。
 - 预算、工具风暴、并发安全和历史裁剪属于独立 policy/context 模块，不得回流为巨型 reactor。
 - 工具风暴按工具名与规范化参数组成的签名计数；跨轮已执行次数与同一 `DispatchPlan` 内先前出现次数共同计入上限。被抑制调用必须以合成结果配对 `ToolCallStarted`/`ToolCallFinished`，并写入 `ToolStormSuppressed` 事件。
 - 每轮模型可见历史必须已经落盘；每个工具调用必须与终态结果配对。历史修复只按配对合法性裁剪：携带 `tool_calls` 的 assistant 行即使 `content` 为空也必须保留（chat-completions 的标准形态），只有既无文本又无 `tool_calls` 的空行才删除。
@@ -37,10 +37,12 @@
 - 新回合须从权威线程项恢复此前的 user/assistant 对话，并在回合启动时持久化当前用户消息；reasoning 不进入
   后续模型历史。会话级工作空间、模型和权限覆盖只在创建新回合时读取，运行中回合保留其创建快照。
 - parent steer 的有界 `SteerQueue` 由 server registry 创建并由 `arkd` 注入同一个 reactor；reactor 只在
-  轮次边界 drain、写 `turn_steered` 后把文本加入用户历史。
+  轮次边界 drain：先把 steer 文本写入用户历史（并落一条 `UserMessage` item），随后才写 `turn_steered`
+  事件——journal 不能声称一条模型尚未见到的更正。
 - 子代理完成 inbox 从父线程权威事件投影为带标记的 system source，而非用户消息；按稳定通知 ID 去重，
   跳过已确认项，并且每个父回合最多交付 8 条、每条最多 1,200 UTF-8 字节，避免完成风暴突破上下文
-  预算。
+  预算。同一条通知最多自动投递 2 次（`MAX_AUTO_DELIVERY_ATTEMPTS`），超限后只在用户显式回合投递；
+  模型请求连续失败达到熔断阈值时暂停自动续跑，避免在 provider 故障时烧空预算。
 - 每个实际启动的回合（含自动续跑）必须在父线程事件日志中留下 `turn_started` 与一条终态记录。
   reactor 覆盖不到的退出路径（panic、任务被丢弃、`prepare()` 之前的 runner 错误）由 server supervisor
   补齐：缺起始记录则先补写（保留 `auto_continuation` 标记），已有终态则不再重复写入。

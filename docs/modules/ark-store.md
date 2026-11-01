@@ -15,9 +15,13 @@
 - 每个线程由一个 writer actor 分配序号并追加事件；同一数据目录由 `data/.lock` 独占。
 - `subscribe` 必须在同一 actor 临界区完成“定水位、读取 backlog、注册 live channel”；慢订阅者
   断开后用 `since_seq` 重连，绝不反压 writer。
-- 同父目录的 child append、删除、索引重建共用父级锁；锁顺序固定为锁表、父级锁、locator。
+- 同父目录的 child append、删除、索引重建共用父级锁。锁表 mutex 只用于登记锁的短暂取用，在获取
+  父级锁**之前**释放；真正嵌套持有的顺序为父级锁 → locator。
 - 启动时修复日志末尾半行并从权威日志重建派生数据；非末尾损坏不得静默掩盖。
 - `rewind` 采用**物理删除**：writer actor 在同一序列化点拒绝仍有未终结回合的日志、重写 `events.jsonl`，删除目标序号及之后的事件，随后从保留前缀重建 `items.jsonl` 与 `session.json`。它不使用逻辑截断；为让已连接 SSE 客户端丢弃旧投影，会追加一个序号绝不复用的 `thread_rewound` 通知事件。`rewinds.json` 保留已接受目标的幂等标记，因此后续压缩移除通知事件也不改变重复回退的成功语义。
+- `fork`（`fork_thread(thread, upto_seq)`）同样物理复制：按序号复制目标前缀的 `events.jsonl` 等权威
+  文件到新线程目录，新线程从复制前缀的末尾继续分配序号，并从该前缀重建全部投影。fork 是新线程
+  而非分支指针，不与原线程共享任何文件。
 
 ## 定时任务存储(计划)
 
@@ -85,11 +89,14 @@ data/threads/<thread>/
 ## 长期 memory
 
 当前实现使用 `<data_dir>/memory.json` 保存用户显式维护的长期偏好和事实。文件通过
-`ark_common::write_json_file` 原子替换，读取使用 `read_json_file_opt`：缺失或损坏文件均以空集合恢复，
-不会阻断 arkd 启动。进程内 mutex 将读改写串行化，写失败不会提交内存中的变更。
+`ark_common::write_json_file` 原子替换，进程内 mutex 将读改写串行化，写失败不会提交内存中的变更。
+两条读取路径的损坏语义不同：启动时 `open()` 用 `read_json_file_opt`，缺失或损坏文件均以空集合恢复，
+不阻断 arkd 启动；每回合 prompt 注入路径用 `read_json_file`，损坏文件上报为错误，由调用方
+（组合根的 memory seed）记录告警并跳过注入，不使回合失败。
 
-文本上限为 16 KiB UTF-8 字节；空文本、超限文本和未知 id 是结构化错误。自动抽取、检索、模型 prompt
-注入和损坏文件的备份/告警策略尚属待决，当前不会暗中执行。
+文本上限为 16 KiB UTF-8 字节；空文本、超限文本和未知 id 是结构化错误。模型 prompt 注入已实现：
+组合根每回合把 memory 渲染为**至多一条** `[user memory]` system 消息（见 arkd 设计）。自动抽取与
+检索仍属待决，当前不会暗中执行。
 
 ## 迁移与删除
 

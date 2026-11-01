@@ -26,4 +26,4 @@ pub use domain::{
     base_status, clean_branch, clean_sha, count_status_lines, empty_status, expand_home, home_dir,
     resolve_candidate,
 };
-pub use service::{run_git, GitOutput, WorkspaceInspector, GIT_TIMEOUT, POLL_INTERVAL};
+pub use service::WorkspaceInspector;

@@ -32,7 +32,7 @@ pub fn select(config: &RuntimeConfig, usage: Arc<UsageRecorder>) -> (Arc<dyn Mod
                 "http provider `{}` model `{}`",
                 provider.provider_id, provider.model
             );
-            let client = HttpModelClient::with_config(provider);
+            let client = HttpModelClient::new(provider, governed_transport());
             (Arc::new(MeteredModel::new(Arc::new(client), usage)), label)
         }
         None => {
@@ -58,8 +58,25 @@ pub fn select_from_config(
         "http provider `{}` model `{}`",
         provider.provider_id, provider.model
     );
-    let client = HttpModelClient::with_config(provider);
+    let client = HttpModelClient::new(provider, governed_transport());
     (Arc::new(MeteredModel::new(Arc::new(client), usage)), label)
+}
+
+/// The one transport for model and catalog traffic.
+///
+/// Model responses are SSE streams, so no client-level timeout: request phases
+/// are bounded inside `ark-llm` instead. Proxy/TLS settings come from the same
+/// [`ark_http::HttpPolicy`] the plugin egress bus uses, keeping a single
+/// transport configuration in the process (design §7.2).
+pub(crate) fn governed_transport() -> reqwest::Client {
+    ark_http::transport_client(&ark_http::HttpPolicy::default(), "ark-llm/model", None)
+        .unwrap_or_else(|err| {
+            tracing::warn!(
+                error = %err.message,
+                "falling back to default http transport for model traffic"
+            );
+            reqwest::Client::new()
+        })
 }
 
 /// Cap a configured compaction threshold to the selected model's known window.

@@ -247,11 +247,20 @@ mod tests {
     }
 
     #[test]
-    fn empty_patch_is_a_no_op_version_bump() {
+    fn empty_patch_is_a_no_op_without_version_bump() {
         let store = store();
+        let version = store.version();
         let result = store.apply(ConfigPatch::default());
         match result {
-            ApplyResult::Applied { changed, .. } => assert!(changed.is_empty()),
+            // The version identifies a configuration state (see `apply`), so a
+            // no-op patch must return the current version unchanged.
+            ApplyResult::Applied {
+                version: applied,
+                changed,
+            } => {
+                assert_eq!(applied, version);
+                assert!(changed.is_empty());
+            }
             other => panic!("expected applied, got {other:?}"),
         }
     }

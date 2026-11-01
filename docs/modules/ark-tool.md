@@ -14,8 +14,12 @@
 - `SandboxDecision` 在派发前计算一次并写入 `ToolContext`，工具不得重新决策。
 - `Strict` 与 `WorkspaceWrite` 的路径先经 `ark_common::path::normalize`，再按真实路径和工作区边界校验；必须拒绝 symlink/junction 逃逸。`Unattended` 派发不可变的 `Unrestricted` 决策，保留畸形路径校验但有意跳过该次调用的工作区包含性检查。
 - 真实路径比较在两侧统一移除 Windows verbatim 前缀、规范分隔符并忽略大小写，因此 `\\?\` 根与普通 Windows 路径是同一工作区。
-- 文件变更按路径串行、不同路径可并行；所有输出走统一 UTF-8 安全截断。
-- `delegate_task` 只消费 `SubagentRunner` 端口，子任务工具集不含它。
+- 工具并发由 `ark-agent` 的 `ParallelPolicy` 统一规划（设计刻意保守）：任何变更类调用独占一个批次，
+  即使不同路径也不并行；只有**不同资源**的只读调用可共享批次，同资源的只读调用按资源串行。
+  未知工具名一律按变更类处理。所有输出走统一 UTF-8 安全截断。
+- `delegate_task` 只消费 `SubagentRunner` 端口，子任务工具集不含它。它另支持后台派发
+  （`background: true`，立即返回 queued，完成经完成收件箱投递）与恢复（`resumeChildId`，优先级高于
+  `background`）；两者均复用同一端口边界。
 - `request_user_input` 是无法独立执行的门面工具：schema 为 `{"prompt": string, required}`，
   `execute` 返回结构化错误；生产执行路径永远不会走到它，因为 agent 在派发前拦截该调用并交给用户输入 gate。
 - `web_fetch`（需求见 [web-fetch-tool](../requirements/web-fetch-tool.md)）只消费注入的
