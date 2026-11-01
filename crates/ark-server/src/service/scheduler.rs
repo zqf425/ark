@@ -28,8 +28,7 @@ use ark_common::text::truncate_utf8;
 use ark_common::{ArkError, ArkErrorCode, Result, ThreadId};
 use ark_contract::item::ItemKind;
 use ark_contract::{
-    RunStatus, ScheduledRunRecord, ScheduledTask, ThreadRuntimeSettings,
-    DEFAULT_SCHEDULE_AUTONOMY,
+    RunStatus, ScheduledRunRecord, ScheduledTask, ThreadRuntimeSettings, DEFAULT_SCHEDULE_AUTONOMY,
 };
 use ark_ports::ScheduleStore;
 use ark_schedule::{apply_next_run_at, is_due, parse_stored_next_run, push_record, record_run};
@@ -149,7 +148,10 @@ impl SchedulerService {
 
     /// Claim the run slot, or explain why the task is already busy.
     fn claim(&self, id: &str) -> Option<InFlightGuard> {
-        let mut set = self.in_flight.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut set = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         if !set.insert(id.to_string()) {
             return None;
         }
@@ -213,7 +215,10 @@ impl SchedulerService {
         for mut task in tasks {
             let mut changed = settle_stale_run(&mut task);
             if classify(&task, now) == DueState::Misfire {
-                record_run(&mut task, skipped_record(SKIPPED_PREFIX, now.with_timezone(&Utc)));
+                record_run(
+                    &mut task,
+                    skipped_record(SKIPPED_PREFIX, now.with_timezone(&Utc)),
+                );
                 apply_next_run_at(&mut task, now);
                 changed = true;
             }
@@ -825,22 +830,33 @@ mod tests {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
-        assert_eq!(prompts, vec![seeded.prompt.clone()], "the task prompt is the turn text");
+        assert_eq!(
+            prompts,
+            vec![seeded.prompt.clone()],
+            "the task prompt is the turn text"
+        );
 
         let stored = harness.stored(&seeded.id);
         let last = stored.last_run.as_ref().expect("a run was recorded");
         assert_eq!(last.status, RunStatus::Completed);
-        assert_eq!(last.message, "all done", "the assistant's last text is the summary");
+        assert_eq!(
+            last.message, "all done",
+            "the assistant's last text is the summary"
+        );
         assert!(last.finished_at.is_some());
         let thread_id = last.thread_id.expect("the run names its thread");
         assert_eq!(
-            harness.store.get_thread(thread_id).await.expect("thread exists").thread_id,
+            harness
+                .store
+                .get_thread(thread_id)
+                .await
+                .expect("thread exists")
+                .thread_id,
             thread_id
         );
         assert_eq!(stored.history.len(), 1, "history mirrors the run");
         assert!(
-            parse_stored_next_run(&stored.next_run_at)
-                .is_some_and(|next| next > Local::now()),
+            parse_stored_next_run(&stored.next_run_at).is_some_and(|next| next > Local::now()),
             "the cadence advances past the run"
         );
     }
@@ -877,7 +893,11 @@ mod tests {
         let harness = Harness::new(true, false, None);
         let seeded = harness.seed(due_task(6 * 60));
 
-        assert_eq!(harness.service.tick(&harness.state).await, 0, "no catch-up run");
+        assert_eq!(
+            harness.service.tick(&harness.state).await,
+            0,
+            "no catch-up run"
+        );
         assert!(harness.runner.prompts.lock().unwrap().is_empty());
 
         let stored = harness.stored(&seeded.id);
@@ -930,10 +950,16 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(
-            harness.stored(&seeded.id).last_run.map(|record| record.status),
+            harness
+                .stored(&seeded.id)
+                .last_run
+                .map(|record| record.status),
             Some(RunStatus::Completed)
         );
-        assert!(!harness.service.is_running(&seeded.id), "the slot is released");
+        assert!(
+            !harness.service.is_running(&seeded.id),
+            "the slot is released"
+        );
     }
 
     #[tokio::test]
@@ -1020,7 +1046,11 @@ mod tests {
         // then the trigger that passed while the process was down.
         let stored = harness.stored(&seeded.id);
         assert_eq!(
-            stored.history.iter().map(|record| record.status).collect::<Vec<_>>(),
+            stored
+                .history
+                .iter()
+                .map(|record| record.status)
+                .collect::<Vec<_>>(),
             vec![RunStatus::Aborted, RunStatus::Skipped]
         );
         assert_eq!(

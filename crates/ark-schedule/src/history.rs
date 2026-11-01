@@ -95,7 +95,10 @@ mod tests {
 
     #[test]
     fn bounding_an_already_bounded_history_is_a_no_op() {
-        let mut history = vec![record(0, RunStatus::Completed), record(1, RunStatus::Failed)];
+        let mut history = vec![
+            record(0, RunStatus::Completed),
+            record(1, RunStatus::Failed),
+        ];
         bound_history(&mut history);
         assert_eq!(history.len(), 2);
     }

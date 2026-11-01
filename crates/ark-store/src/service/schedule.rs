@@ -301,6 +301,9 @@ mod tests {
         }
         let reopened = ScheduleFileStore::open(dir.path()).unwrap();
         assert_eq!(reopened.list().unwrap().len(), 1);
-        assert_eq!(reopened.get("sch_1").unwrap().next_run_at, "2026-11-02T01:00:00+00:00");
+        assert_eq!(
+            reopened.get("sch_1").unwrap().next_run_at,
+            "2026-11-02T01:00:00+00:00"
+        );
     }
 }

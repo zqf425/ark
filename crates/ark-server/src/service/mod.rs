@@ -2,6 +2,8 @@
 
 pub mod attachment_auth;
 pub mod continuation;
+pub mod mcp_info;
+pub mod mcp_tools;
 pub mod scheduler;
 pub mod serve;
 pub mod workbench;

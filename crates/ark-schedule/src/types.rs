@@ -38,12 +38,10 @@ const FALLBACK_TITLE: &str = "Scheduled task";
 /// and the current task count; the store stays a dumb persistence boundary.
 pub fn ensure_capacity(existing: usize) -> Result<()> {
     if existing >= MAX_SCHEDULED_TASKS {
-        return Err(
-            ArkError::validation(format!(
-                "at most {MAX_SCHEDULED_TASKS} scheduled tasks are supported (already {existing})"
-            ))
-            .with_detail("schedule_limit"),
-        );
+        return Err(ArkError::validation(format!(
+            "at most {MAX_SCHEDULED_TASKS} scheduled tasks are supported (already {existing})"
+        ))
+        .with_detail("schedule_limit"));
     }
     Ok(())
 }
@@ -428,7 +426,11 @@ mod tests {
             ..TaskSchedule::default()
         })
         .unwrap();
-        assert!(normalized.at_time.ends_with("+00:00"), "{}", normalized.at_time);
+        assert!(
+            normalized.at_time.ends_with("+00:00"),
+            "{}",
+            normalized.at_time
+        );
     }
 
     #[test]
