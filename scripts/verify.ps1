@@ -44,7 +44,7 @@ function Enable-GnuToolchain {
 function Invoke-CoreChecks {
     Enable-GnuToolchain
     Invoke-CheckedNative cargo @('fmt', '--all', '--', '--check')
-    Invoke-CheckedNative cargo @('check', '--workspace', '--exclude', 'ark-desktop')
+    Invoke-CheckedNative cargo @('check', '--workspace')
     Invoke-CheckedNative cargo @('test', '--workspace', '--exclude', 'ark-desktop')
     & "$PSScriptRoot/check-architecture.ps1"
 }
