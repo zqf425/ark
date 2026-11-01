@@ -7,7 +7,7 @@
 use crate::config::HttpPolicy;
 use crate::domain::diagnostics::{HttpDenialReason, HttpDiagnostic, HttpDiagnosticSink};
 use crate::domain::rate_limit::RateLimiter;
-use crate::domain::request_guard::redact_url;
+use crate::domain::request_guard::sanitize_url_for_log;
 use crate::domain::retry::{backoff_ms, is_idempotent, retryable_status, should_retry};
 use crate::service::egress::{EgressGrant, EgressRegistry};
 use crate::service::execute::{ExecuteError, Executor};
@@ -168,7 +168,7 @@ impl HttpBus {
             plugin_id: completed.prepared.plugin_id.clone(),
             host: completed.prepared.host.clone(),
             method: completed.prepared.method.clone(),
-            redacted_url: redact_url(&completed.prepared.url),
+            redacted_url: sanitize_url_for_log(&completed.prepared.url),
             reason: None,
             detail: completed.prepared.credential_label.clone(),
             status: Some(completed.response.status),
@@ -321,7 +321,7 @@ impl HttpCapability for HttpBus {
 
 fn redact_for_log(raw: &str) -> String {
     match crate::domain::parse_target(raw) {
-        Ok(url) => redact_url(&url),
+        Ok(url) => sanitize_url_for_log(&url),
         Err(_) => "<invalid-url>".to_string(),
     }
 }

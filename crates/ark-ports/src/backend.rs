@@ -4,6 +4,13 @@
 //! vendor field. `ark-studio` depends on this trait alone, and switching backend
 //! is a plugin registration rather than a core change.
 
+//! STATUS (2026-11): **planned, not wired**. No implementation of
+//! `BackendProvider` exists anywhere in the workspace; the type stays so the
+//! capability catalog (§7.5.2) can name the `backend`/`studio`/`artifact_upload`
+//! capabilities without inventing them later, and so a future vertical slice
+//! starts from a reviewed shape. Do not extend this file further until an
+//! implementation lands; delete it instead if the studio milestone is dropped.
+
 use ark_common::{Result, Usage};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

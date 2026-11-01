@@ -57,8 +57,8 @@ impl Fixture {
     }
 
     /// The bus plus the same diagnostics sink it records into.
-    fn http(&self) -> (Arc<HttpBus>, Arc<MemoryDiagnostics>) {
-        let sink = Arc::new(MemoryDiagnostics::new(64));
+    fn http(&self) -> (Arc<HttpBus>, Arc<InMemoryDiagnosticSink>) {
+        let sink = Arc::new(InMemoryDiagnosticSink::new(64));
         let bus = Arc::new(
             HttpBus::new(
                 ark_http::HttpPolicy::default(),
@@ -99,7 +99,7 @@ impl Fixture {
         .unwrap();
     }
 
-    fn load(&self) -> (PluginHost, Arc<MemoryDiagnostics>) {
+    fn load(&self) -> (PluginHost, Arc<InMemoryDiagnosticSink>) {
         let (http, sink) = self.http();
         let host = load_host(
             self.root.path(),

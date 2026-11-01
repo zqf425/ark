@@ -171,7 +171,7 @@ pub fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::diagnostics::MemoryDiagnostics;
+    use crate::domain::diagnostics::InMemoryDiagnosticSink;
     use std::sync::Arc;
 
     fn allowlist(entries: &[&str]) -> HostAllowlist {
@@ -329,7 +329,8 @@ mod tests {
 
     #[test]
     fn sink_type_is_usable_as_a_trait_object() {
-        let sink: Arc<dyn crate::domain::HttpDiagnosticSink> = Arc::new(MemoryDiagnostics::new(4));
+        let sink: Arc<dyn crate::domain::HttpDiagnosticSink> =
+            Arc::new(InMemoryDiagnosticSink::new(4));
         assert!(Arc::strong_count(&sink) == 1);
     }
 }

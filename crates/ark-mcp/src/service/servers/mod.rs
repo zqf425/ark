@@ -41,7 +41,7 @@ mod tests;
 
 use ark_common::{ArkError, Result};
 use ark_contract::{McpServerEntry, McpServerListResponse, McpServerTestResponse, McpServerView};
-use ark_http::{HttpBus, HttpPolicy, MemoryDiagnostics};
+use ark_http::{HttpBus, HttpPolicy, InMemoryDiagnosticSink};
 use ark_ports::Tool;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -451,7 +451,7 @@ fn build_bus() -> BusSlot {
     HttpBus::new(
         policy,
         Arc::new(ark_http::CredentialVault::new()),
-        Arc::new(MemoryDiagnostics::new(256)),
+        Arc::new(InMemoryDiagnosticSink::new(256)),
     )
     .map(Arc::new)
     .map_err(|err| format!("cannot build mcp http egress: {}", err.message))

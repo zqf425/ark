@@ -142,7 +142,7 @@ fn delegate_task_schema() -> serde_json::Value {
             "label": { "type": "string", "description": "Short human label shown in the parent thread" },
             "model": { "type": "string", "description": "Model override; defaults to the parent turn's model" },
             "provider_id": { "type": "string", "description": "Provider override; defaults to the parent turn's provider" },
-            "autonomy": { "type": "string", "enum": ["strict", "workspace_write", "unattended"], "description": "Permission override; defaults to the parent thread's permission" },
+            "autonomy": { "type": "string", "enum": autonomy_values_for_schema(), "description": "Permission override; defaults to the parent thread's permission" },
             "background": { "type": "boolean", "description": "Return after the child is queued and keep it running under the runtime supervisor" },
             "resumeChildId": { "type": "string", "description": "Resume this interrupted child on its existing session instead of creating a new child" },
         }),
@@ -241,5 +241,36 @@ mod tests {
     fn fnv_is_deterministic() {
         assert_eq!(fingerprint_text("abc"), fingerprint_text("abc"));
         assert_ne!(fingerprint_text("abc"), fingerprint_text("abd"));
+    }
+}
+
+/// The `autonomy` enum values shown to the model, derived from the shared
+/// vocabulary so a new level is immediately usable through `delegate_task`.
+fn autonomy_values_for_schema() -> Vec<&'static str> {
+    ark_common::Autonomy::ALL
+        .iter()
+        .map(|level| level.as_str())
+        .collect()
+}
+
+#[cfg(test)]
+mod schema_tests {
+
+    #[test]
+    fn the_delegate_schema_offers_every_autonomy_level() {
+        let schema = super::schema_of("delegate_task").expect("delegate_task is a builtin");
+        let enum_values: Vec<&str> = schema["properties"]["autonomy"]["enum"]
+            .as_array()
+            .expect("enum array")
+            .iter()
+            .map(|value| value.as_str().expect("string value"))
+            .collect();
+        assert_eq!(
+            enum_values,
+            ark_common::Autonomy::ALL
+                .iter()
+                .map(|level| level.as_str())
+                .collect::<Vec<_>>()
+        );
     }
 }

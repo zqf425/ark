@@ -406,7 +406,7 @@ mod tests {
             ark_http::HttpBus::new(
                 ark_http::HttpPolicy::default(),
                 Arc::new(ark_http::CredentialVault::new()),
-                Arc::new(ark_http::MemoryDiagnostics::new(16)),
+                Arc::new(ark_http::InMemoryDiagnosticSink::new(16)),
             )
             .unwrap(),
         )

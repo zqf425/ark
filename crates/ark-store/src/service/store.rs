@@ -147,10 +147,19 @@ impl FileSessionStore {
     /// found by its own id without the caller having to know its parent.
     pub fn resolve_paths(&self, thread: ThreadId) -> ThreadPaths {
         let child = ark_common::ChildId::from_uuid(thread.as_uuid());
-        if let Ok(locator) = self.children.lock() {
-            if let Some(location) = locator.get(&child) {
-                return self.paths.child(&location.parent_thread_id, &child);
+        match self.children.lock() {
+            Ok(locator) => {
+                if let Some(location) = locator.get(&child) {
+                    return self.paths.child(&location.parent_thread_id, &child);
+                }
             }
+            // Poisoned means a writer panicked mid-update; the in-memory index
+            // can no longer be trusted, so fall through to the default layout
+            // loudly instead of silently answering with possibly wrong paths.
+            Err(_) => tracing::error!(
+                thread = %thread,
+                "child locator lock poisoned; falling back to the default thread layout"
+            ),
         }
         self.paths.thread(&thread)
     }
@@ -195,9 +204,17 @@ impl FileSessionStore {
 
     /// Update the indexed watermark without touching the rest of the row.
     pub(crate) fn index_set_watermark(&self, thread: ThreadId, seq: u64) {
-        if let Ok(mut index) = self.lock_index() {
-            index.set_watermark(&thread, seq);
-            let _ = save_snapshot(&mut index, &self.paths.index_file());
+        match self.lock_index() {
+            Ok(mut index) => {
+                index.set_watermark(&thread, seq);
+                // Fire-and-forget is fine for the in-memory watermark (it is
+                // rebuilt from the log), but a failed snapshot write is a
+                // durability regression worth one warning line.
+                if let Err(error) = save_snapshot(&mut index, &self.paths.index_file()) {
+                    tracing::warn!(thread = %thread, %error, "failed to persist the index snapshot");
+                }
+            }
+            Err(error) => tracing::error!(thread = %thread, %error, "index lock poisoned"),
         }
     }
 
@@ -327,14 +344,23 @@ impl FileSessionStore {
 
     /// Register a freshly created child so depth checks see it immediately.
     pub(crate) fn note_child_location(&self, parent: ThreadId, child: ark_common::ChildId) {
-        if let Ok(mut locator) = self.children.lock() {
-            locator.insert(
-                child,
-                crate::domain::child_index::ChildLocation::new(
-                    parent,
-                    self.paths.child_rel(&parent, &child),
-                ),
-            );
+        match self.children.lock() {
+            Ok(mut locator) => {
+                locator.insert(
+                    child,
+                    crate::domain::child_index::ChildLocation::new(
+                        parent,
+                        self.paths.child_rel(&parent, &child),
+                    ),
+                );
+            }
+            // Dropping the note silently would strand the child at the wrong
+            // path for every later reader; make the corruption visible.
+            Err(_) => tracing::error!(
+                parent = %parent,
+                child = %child,
+                "child locator lock poisoned; child location note lost"
+            ),
         }
     }
     /// Parent id for a child run, resolved from the authoritative run log.
