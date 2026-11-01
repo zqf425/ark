@@ -48,14 +48,15 @@
 
 一期目录覆盖全部已落地路由族：
 
-- 线程族：list/create/get/update/delete/fork/rewind/compact/export/review/events(SSE)/usage/skills；
-- 回合族：start/get/steer/interrupt，以及审批 `approvals_resolve`、用户输入 `user_inputs_resolve`；
+- 线程族：list/create/get/update/delete/fork/rewind/compact/export/review/events(SSE)/usage/
+  skills/skills_refresh/goal/todos 读写；
+- 回合族：start/get/steer/interrupt，以及审批 `approval_resolve`、用户输入 `user_input_resolve`；
 - workbench：plan/changes/files/terminal/goal/todos 读写；
 - 定时任务：list/create/update/delete/run；
 - memory、attachments（上传/读取/删除/内容/诊断/线程关联）；
 - child-runs 管理族（list/get/delete/abort/steer/resume/thread/events）；
 - 平台管理面（providers、skills、workspace、mcp servers、plugins、runtime info/tools/capabilities、
-  config、subagents、sessions resume、debug llm-rounds、shutdown）。
+  config、subagents、sessions resume、debug llm-rounds、`usage_total`、shutdown）。
 
 刻意不登记的路由（目录是"唯一工具目录"，排除必须留痕）：
 

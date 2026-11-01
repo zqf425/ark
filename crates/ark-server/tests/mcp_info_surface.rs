@@ -95,6 +95,9 @@ async fn get_document(app: &axum::Router) -> serde_json::Value {
 async fn discovery_document_answers_without_a_token() {
     let json = get_document(&app()).await;
     assert_eq!(json["server_name"], "arkd");
+    // The document must carry the version injected into the test AppState ("test"),
+    // proving the handler reads `state.version` instead of a hardcoded value.
+    assert_eq!(json["version"], "test");
     assert_eq!(json["transport"], "http");
     assert_eq!(json["auth"]["required"], false);
     assert!(json["tools"].as_array().expect("tools").len() >= 75);

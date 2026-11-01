@@ -1,7 +1,7 @@
 # ark-schedule 模块设计
 
-> 状态:**核心层已实现**(`crates/ark-schedule`)。本文件即实现语义;HTTP 路由、调度循环与
-> 前端属于下一阶段。需求边界见 [定时任务需求](../requirements/scheduled-tasks.md)。
+> 状态:**已实现**(`crates/ark-schedule` + `ark-server` 的路由与调度循环 + web 设置页)。
+> 本文件即实现语义。需求边界见 [定时任务需求](../requirements/scheduled-tasks.md)。
 
 ## 职责与边界
 

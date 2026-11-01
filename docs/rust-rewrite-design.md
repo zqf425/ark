@@ -84,14 +84,15 @@ ark-plugin     → ark-common, ark-contract, ark-ports, ark-http, ark-ui, ark-mc
 ark-skills     → ark-common, ark-contract, ark-ports
 ark-workspace  → ark-common, ark-contract
 ark-obs        → ark-common, ark-contract
-ark-server     → ark-common, ark-contract, ark-ports, ark-agent, ark-store, ark-config, ark-obs
+ark-server     → ark-common, ark-contract, ark-ports, ark-agent, ark-store, ark-config, ark-obs, ark-schedule
+ark-schedule   → ark-common, ark-contract, ark-ports
 ark-studio     → ark-common, ark-contract, ark-ports
 arkd           → 所有实现（组合根）
 ark-desktop    → 无 ark crate 依赖；以受控进程启动 arkd
 ```
 
-`ark-schedule`（`ark-common, ark-contract, ark-ports`）属[定时任务需求](requirements/scheduled-tasks.md)
-的已批准计划，crate 尚未创建；`ark-server` 依赖它是计划的一部分，落地前不进入上面的当前依赖图。
+`ark-schedule` 属[定时任务需求](requirements/scheduled-tasks.md)，已落地（域 crate + 调度循环 +
+HTTP 路由 + 设置页）。
 
 特别约束：`ark-agent` 不得依赖具体实现；`ark-contract` 不得承载端口 trait 或内部业务对象；
 `ark-studio` 不得依赖模型或具体后端；跨 crate 不得穿透 `pub(crate)` 内部模块。

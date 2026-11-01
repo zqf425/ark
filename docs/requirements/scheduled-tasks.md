@@ -7,7 +7,8 @@
 ## 背景与目标
 
 smart-ark 在桌面端主进程实现了定时任务(`src/main/schedule-runtime.ts` + 管理界面),可按
-manual/at/interval/weekly/monthly 五种节奏周期性向运行时发起一个无人值守回合。ark 作为重写
+manual/at/interval/weekly/monthly 五种节奏周期性向运行时发起一个无人值守回合;ark 的契约
+枚举在此基础上增加 `daily`,共六种节奏。ark 作为重写
 版需要等价能力:用户配置一个提示词与触发节奏,arkd 到点自动建会话执行,并把结果留在可打开的
 会话线程里。
 
@@ -56,15 +57,20 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
 
 ### 调度与执行(ark-server service + arkd 装配)
 
-1. 调度循环随 arkd serve 启动,tick 间隔 30s;单次 tick 串行执行所有到期任务(不并发,v1)。
+1. 调度循环随 arkd serve 与 headless `run` 启动(经同一 `wiring::build` 装配,一次性 headless
+   回合期间到期的任务同样会触发),tick 间隔 30s;单次 tick 串行执行所有到期任务(不并发,v1)。
+   已知边界:`config.schedules.enabled` 关闭时 `reconcile` 与 tick 一同空转,上个进程崩溃遗留的
+   `running` 标记在开关重新打开前不会收敛,设置页会一直显示运行中。
 2. 到期判定:`enabled && next_run_at <= now`;执行后立刻按节奏计算下一次 `next_run_at`
    (interval 从本次执行完成时刻起算,与 smart-ark 一致)。
 3. **执行 = 新线程 + 真实回合**:复用 `start_turn` 的注册/冲突/文本上限/workspace_gate 全部
    校验,提示词为任务 `prompt`,不伪造消息类型;线程 runtime 覆盖 `autonomy`(任务字段)、
    `provider_id`/`model`(任务字段,空则缺省)。无人值守语义由 `autonomy=unattended` 的
    sandbox/gate 路径保证——审批与 user-input gate 永不阻塞等待。
-4. **停机期间错过的触发不补跑**:启动或 tick 恢复时,`next_run_at` 已过去的任务直接推进到
-   下一个未来时点,`last_run` 记一条 `skipped`;`at` 一次性任务过期即标记完成不再触发。
+4. **停机期间错过的触发不补跑**:启动或 tick 恢复时,`next_run_at` 已过去超过 300 秒宽限
+   (`MISFIRE_GRACE_SECS`)的任务才记一条 `skipped` 并推进到下一个未来时点;宽限内(健康循环
+   至多晚一个 tick)的触发仍真实执行。`at` 一次性任务过期即标记完成不再触发。落地与批准条文
+   的这一偏差已同步至本条与 ark-server 模块设计。
 5. 结果折叠:回合终态事件到达后写 `last_run` 与有界历史(成功/失败/中止/跳过 + 助手末条文本
    摘要);运行中的任务再次到期时跳过本次 tick 并顺延(不排队并发)。
 6. shutdown:调度循环随全局 shutdown 收敛取消,不遗留 in-flight 记账。
@@ -75,7 +81,7 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
   (含启停);`DELETE /v1/schedules/{id}` 删除。
 - `POST /v1/schedules/{id}/run` 立即运行一次(不等 next_run_at;运行中返回 409)。
 - 以上全部经 wire DTO 生成前端类型(`ts_export`);错误复用 `ArkErrorCode` 结构化语义
-  (不存在 404、超限 422、冲突 409)。
+  (不存在 404、超限 validation_error/400、冲突 409)。
 
 ### 配置(web 设置页)
 
