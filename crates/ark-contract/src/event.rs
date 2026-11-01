@@ -74,7 +74,86 @@ pub enum EventKind {
     AttachmentAssociated,
 }
 
+/// Kinds declared on the wire but with **no producer and no consumer yet**:
+/// they name an event family a designed milestone still intends to emit.
+///
+/// The gate below is two-way: a variant that leaves this list must have grown a
+/// `RuntimeEvent` arm (the serde tag check in the test fails otherwise), and a
+/// new ghost variant cannot be added without being listed here explicitly.
+/// Keeping the wire union complete is deliberate — the renderer's `default`
+/// branch must be able to represent "server may send this one day".
+pub const PLANNED_KINDS: &[EventKind] = &[
+    EventKind::ToolCallReady,
+    EventKind::ToolDispatchTrace,
+    EventKind::ToolResultUploadWait,
+    EventKind::ToolCatalogChanged,
+    EventKind::PipelineStage,
+    EventKind::ContextPressure,
+    EventKind::BashSessionStarted,
+    EventKind::BashSessionUpdated,
+    EventKind::BashSessionCompleted,
+    EventKind::LlmSpanStart,
+    EventKind::LlmSpanEnd,
+    EventKind::FingerprintDrift,
+    EventKind::RecoveryTriggered,
+];
+
 impl EventKind {
+    /// Every kind, in declaration order. Exhaustive on purpose: adding a
+    /// variant fails to compile here, forcing the allowlist question.
+    pub fn all() -> Vec<EventKind> {
+        vec![
+            EventKind::ThreadCreated,
+            EventKind::ThreadUpdated,
+            EventKind::ThreadRewound,
+            EventKind::TurnStarted,
+            EventKind::TurnCompleted,
+            EventKind::TurnFailed,
+            EventKind::TurnAborted,
+            EventKind::TurnSteered,
+            EventKind::ItemCreated,
+            EventKind::ItemUpdated,
+            EventKind::ItemCompleted,
+            EventKind::AssistantTextDelta,
+            EventKind::AssistantReasoningDelta,
+            EventKind::ToolCallReady,
+            EventKind::ToolDispatchTrace,
+            EventKind::ToolResultUploadWait,
+            EventKind::ToolStormSuppressed,
+            EventKind::ToolCatalogChanged,
+            EventKind::ToolCallStarted,
+            EventKind::ToolCallFinished,
+            EventKind::ApprovalRequested,
+            EventKind::ApprovalResolved,
+            EventKind::UserInputRequested,
+            EventKind::UserInputResolved,
+            EventKind::CompactionStarted,
+            EventKind::CompactionCompleted,
+            EventKind::GoalUpdated,
+            EventKind::GoalCleared,
+            EventKind::TodosUpdated,
+            EventKind::TodosCleared,
+            EventKind::PipelineStage,
+            EventKind::ContextPressure,
+            EventKind::BashSessionStarted,
+            EventKind::BashSessionUpdated,
+            EventKind::BashSessionCompleted,
+            EventKind::Usage,
+            EventKind::Error,
+            EventKind::Heartbeat,
+            EventKind::LlmSpanStart,
+            EventKind::LlmSpanEnd,
+            EventKind::FingerprintDrift,
+            EventKind::RecoveryTriggered,
+            EventKind::SseIdleTimeout,
+            EventKind::TransientRetry,
+            EventKind::ChildActivity,
+            EventKind::ChildCompleted,
+            EventKind::ChildCompletionAcknowledged,
+            EventKind::AttachmentAssociated,
+        ]
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             EventKind::ThreadCreated => "thread_created",
@@ -562,6 +641,49 @@ mod with_seq;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn as_str_and_serde_agree_for_every_kind() {
+        for kind in EventKind::all() {
+            let serialized = serde_json::to_value(kind).expect("serializable");
+            assert_eq!(
+                serialized.as_str(),
+                Some(kind.as_str()),
+                "as_str and serde disagree for {:?}",
+                kind
+            );
+        }
+        // The union's serialized names are unique, so a wire tag identifies
+        // exactly one kind.
+        let mut names: Vec<String> = EventKind::all()
+            .iter()
+            .map(|kind| kind.as_str().to_string())
+            .collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), EventKind::all().len());
+    }
+
+    #[test]
+    fn every_kind_is_produced_or_explicitly_planned() {
+        for kind in EventKind::all() {
+            // A bare `{"kind": ...}` payload is enough to tell a produced kind
+            // from a ghost: a produced kind maps to a real `RuntimeEvent`
+            // variant, so serde complains about *missing fields*; a ghost has
+            // no variant at all, so serde reports *unknown variant*.
+            let payload = format!("{{\"kind\":\"{}\"}}", kind.as_str());
+            let error = serde_json::from_str::<RuntimeEvent>(&payload)
+                .expect_err("an empty payload is never a valid event");
+            let unknown_variant = error.to_string().contains("unknown variant");
+            let planned = PLANNED_KINDS.contains(&kind);
+            assert_eq!(
+                unknown_variant,
+                planned,
+                "kind {}: producer/allowlist state changed; update PLANNED_KINDS",
+                kind.as_str()
+            );
+        }
+    }
+
     use super::*;
 
     #[test]
