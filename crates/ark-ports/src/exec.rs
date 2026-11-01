@@ -38,7 +38,7 @@ impl CancelToken {
 
     /// Trip the signal with the ordinary user-interrupt reason.
     pub fn cancel(&self) {
-        self.cancel_with_reason("turn interrupted");
+        self.cancel_with_reason(ark_common::CancelReason::UserInterrupt.as_durable_str());
     }
 
     /// Trip the signal with a durable reason. The first cancellation wins so a

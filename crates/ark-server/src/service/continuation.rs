@@ -119,7 +119,7 @@ impl ContinuationRegistry {
     }
 
     pub fn cancel_all(&self) {
-        self.cancel_all_with_reason("turn interrupted");
+        self.cancel_all_with_reason(ark_common::CancelReason::UserInterrupt.as_durable_str());
     }
 
     /// Cancel every pending debounce with a process-owned durable reason.
@@ -234,8 +234,13 @@ async fn interrupted_user_lifecycle(state: &AppState, thread_id: ThreadId) -> bo
     };
     events.iter().rev().find_map(|event| match event {
         RuntimeEvent::TurnAborted { reason, .. } => Some(
-            reason != "runtime restarted before turn could finish"
-                && reason != crate::state::SHUTDOWN_CANCEL_REASON,
+            // A process-owned abort (restart, shutdown) is not a user signal;
+            // anything else — including unknown historical strings — is.
+            !matches!(
+                ark_common::CancelReason::from_durable(reason),
+                Some(ark_common::CancelReason::RuntimeRestart)
+                    | Some(ark_common::CancelReason::Shutdown)
+            ),
         ),
         RuntimeEvent::TurnCompleted { .. } | RuntimeEvent::TurnFailed { .. } => Some(false),
         _ => None,

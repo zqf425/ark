@@ -272,10 +272,14 @@ impl Reactor {
 
     /// Preserve a boundary-supplied detail for ordinary interrupts, while a
     /// process-owned reason such as shutdown remains distinguishable on disk.
+    /// Unknown strings pass through: only the shared vocabulary is classified.
     fn cancellation_reason(&self, fallback: &str) -> String {
         match self.cancel.reason().as_deref() {
-            Some("turn interrupted") | None => fallback.to_string(),
-            Some(reason) => reason.to_string(),
+            Some(reason) => match ark_common::CancelReason::from_durable(reason) {
+                Some(ark_common::CancelReason::UserInterrupt) | None => fallback.to_string(),
+                Some(_) => reason.to_string(),
+            },
+            None => fallback.to_string(),
         }
     }
 
