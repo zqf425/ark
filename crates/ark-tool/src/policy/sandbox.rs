@@ -7,7 +7,7 @@
 
 use ark_ports::{SandboxDecision, SandboxPolicy, ToolArgs};
 
-use ark_ports::Autonomy;
+use ark_common::Autonomy;
 
 use crate::domain::meta::meta_of;
 

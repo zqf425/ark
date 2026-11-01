@@ -70,12 +70,12 @@ Tauri desktop ── 管理本地 arkd 进程 ── React web（同一 HTTP/SSE
 ark-common     → 无内部依赖
 ark-contract   → ark-common
 ark-ports      → ark-common, ark-contract
-ark-config     → ark-common, ark-contract, ark-ports
+ark-config     → ark-common, ark-contract
 ark-store      → ark-common, ark-contract, ark-ports
 ark-common     → （无 ark crate 依赖）
 ark-contract   → ark-common
 ark-ports      → ark-common, ark-contract
-ark-config     → ark-common, ark-contract, ark-ports
+ark-config     → ark-common, ark-contract
 ark-store      → ark-common, ark-contract, ark-ports
 ark-agent      → ark-common, ark-contract, ark-ports
 ark-delegation → ark-common, ark-contract, ark-ports

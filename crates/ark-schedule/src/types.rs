@@ -13,9 +13,9 @@
 //! return a structured error instead.
 
 use ark_common::text::truncate_utf8;
+use ark_common::Autonomy;
 use ark_common::{ArkError, Result};
 use ark_contract::MAX_TURN_TEXT_BYTES;
-use ark_ports::Autonomy;
 use chrono::{DateTime, Local, Utc};
 
 use crate::next_run::apply_next_run_at;
@@ -269,7 +269,7 @@ mod tests {
         // so neither side can drift.
         assert_eq!(
             AUTONOMY_VALUES.to_vec(),
-            ark_ports::Autonomy::ALL
+            ark_common::Autonomy::ALL
                 .iter()
                 .map(|level| level.as_str())
                 .collect::<Vec<_>>()

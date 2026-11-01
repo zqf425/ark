@@ -1,13 +1,13 @@
-//! Shared policy vocabulary (design §5.2).
+//! The autonomy vocabulary (design §7.3).
 //!
-//! `Autonomy` is one vocabulary consumed by four layers — `ark-config`
-//! (settings validation), `ark-schedule` (task normalization), `ark-tool`
-//! (sandbox policy) and `arkd` (child-run escalation) — so the enum, its wire
-//! strings and its escalation order live here, next to the other shared
-//! primitives. A string match in each consumer would let a new level be added
-//! in one place and silently ignored in the other three.
+//! One vocabulary, four consumers: `ark-config` (settings validation),
+//! `ark-schedule` (task normalization), `ark-tool` (sandbox policy) and `arkd`
+//! (child-run escalation). The enum, its wire strings and its escalation order
+//! live here because it is a pure shared vocabulary — same class as
+//! `CancelReason`, and deliberately not in `ark-ports`: ports already pulls
+//! tokio into its dependents, and a pure enum must not.
 
-use ark_common::{ArkError, Result};
+use crate::error::{ArkError, Result};
 use serde::{Deserialize, Serialize};
 
 /// How much autonomy the runtime grants.
@@ -87,6 +87,12 @@ mod tests {
         );
         assert!(Autonomy::parse("Unattended").is_err(), "case sensitive");
         assert!(Autonomy::parse("").is_err());
+        // The full message is part of the operator-facing contract: both the
+        // settings layer and thread PATCH surface it verbatim.
+        assert_eq!(
+            Autonomy::parse("bogus").expect_err("unknown value").message,
+            "invalid autonomy: bogus; expected one of strict, workspace_write, unattended"
+        );
     }
 
     #[test]

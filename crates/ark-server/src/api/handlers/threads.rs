@@ -194,7 +194,9 @@ fn merge_runtime(
 ) -> Result<ark_contract::ThreadRuntimeSettings, ApiError> {
     let autonomy = patch.autonomy.or(current.autonomy);
     if let Some(value) = autonomy.as_deref() {
-        if !matches!(value, "strict" | "workspace_write" | "unattended") {
+        // Same vocabulary as the settings layer; the terser message predates it
+        // and is kept so existing clients' assertions do not shift.
+        if ark_common::Autonomy::parse(value).is_err() {
             return Err(ApiError::new(
                 ark_common::ArkErrorCode::ValidationError,
                 "invalid autonomy",
