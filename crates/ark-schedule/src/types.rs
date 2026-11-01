@@ -29,6 +29,8 @@ pub use ark_contract::{
 
 /// Permission values the runtime accepts for an unattended run.
 ///
+/// Permission values the runtime accepts for an unattended run.
+///
 /// Kept as a literal because a const cannot call the enum's `as_str`; the test
 /// below pins it to the shared vocabulary both ways, so adding a level without
 /// updating this list (or vice versa) is a red test.

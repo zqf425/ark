@@ -90,13 +90,7 @@ export function useWorkspaceProbe(): WorkspaceProbeApi {
   const probeSequence = useRef(0)
   const activeProbe = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    probeMounted.current = true
-    return () => {
-      probeMounted.current = false
-      activeProbe.current?.abort()
-    }
-  }, [])
+  useEffect(() => () => activeProbe.current?.abort(), [])
 
   const probe = useCallback(async (path: string) => {
     const trimmed = path.trim()

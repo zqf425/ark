@@ -68,6 +68,9 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     Usage::export_all_to(dir)?;
     ArkErrorCode::export_all_to(dir)?;
     ArkErrorPayload::export_all_to(dir)?;
+    // The autonomy vocabulary lives in ark-common, but the settings form and
+    // the schedule normalization share it, so it exports with the wire set.
+    ark_common::Autonomy::export_all_to(dir)?;
 
     // ---- thread and turn surface ----
     ThreadSummary::export_all_to(dir)?;
@@ -220,6 +223,7 @@ fn barrel() -> String {
 
 /// Names in the same order as [`export_roots`].
 const ROOT_NAMES: &[&str] = &[
+    "Autonomy",
     "ThreadId",
     "TurnId",
     "ItemId",

@@ -11,7 +11,11 @@ use crate::error::{ArkError, Result};
 use serde::{Deserialize, Serialize};
 
 /// How much autonomy the runtime grants.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `ts(export)` mirrors it into `web/src/generated/Autonomy.ts`, so the
+/// settings form consumes the same union the Rust validation accepts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "Autonomy.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum Autonomy {
     /// Every mutation and every shell command needs a human decision.
