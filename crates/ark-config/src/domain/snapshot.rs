@@ -174,10 +174,8 @@ impl RuntimeConfig {
                 return Err("default_workspace must not be an empty path".to_string());
             }
         }
-        if !matches!(
-            self.default_autonomy.as_str(),
-            "strict" | "workspace_write" | "unattended"
-        ) {
+        // The shared vocabulary owns the wire strings and the error text.
+        if ark_ports::Autonomy::parse(self.default_autonomy.as_str()).is_err() {
             return Err(
                 "default_autonomy must be strict, workspace_write, or unattended".to_string(),
             );

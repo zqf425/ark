@@ -92,7 +92,7 @@ fn capped_child_autonomy(
     match requested.filter(|value| !value.trim().is_empty()) {
         Some(value) => {
             let requested = crate::wiring::autonomy_from_override(Some(value))?;
-            if autonomy_rank(requested) > autonomy_rank(parent) {
+            if requested.rank() > parent.rank() {
                 return Err(ark_common::ArkError::validation(
                     "child autonomy cannot exceed the parent thread",
                 ));
@@ -338,14 +338,6 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             _ => String::new(),
         };
         Ok(child_report(outcome, summary, usage, tool_invocations))
-    }
-}
-
-fn autonomy_rank(value: ark_tool::Autonomy) -> u8 {
-    match value {
-        ark_tool::Autonomy::Strict => 0,
-        ark_tool::Autonomy::WorkspaceWrite => 1,
-        ark_tool::Autonomy::Unattended => 2,
     }
 }
 

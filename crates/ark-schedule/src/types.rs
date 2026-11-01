@@ -15,6 +15,7 @@
 use ark_common::text::truncate_utf8;
 use ark_common::{ArkError, Result};
 use ark_contract::MAX_TURN_TEXT_BYTES;
+use ark_ports::Autonomy;
 use chrono::{DateTime, Local, Utc};
 
 use crate::next_run::apply_next_run_at;
@@ -27,6 +28,10 @@ pub use ark_contract::{
 };
 
 /// Permission values the runtime accepts for an unattended run.
+///
+/// Kept as a literal because a const cannot call the enum's `as_str`; the test
+/// below pins it to the shared vocabulary both ways, so adding a level without
+/// updating this list (or vice versa) is a red test.
 pub const AUTONOMY_VALUES: [&str; 3] = ["strict", "workspace_write", "unattended"];
 
 /// Placeholder title for a task whose prompt yields no usable first line.
@@ -139,12 +144,8 @@ pub fn normalize_autonomy(raw: Option<&str>) -> Result<Option<String>> {
     let Some(value) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(None);
     };
-    if !AUTONOMY_VALUES.contains(&value) {
-        return Err(ArkError::validation(format!(
-            "unknown autonomy `{value}`; expected one of {}",
-            AUTONOMY_VALUES.join(", ")
-        )));
-    }
+    // Parse, don't allowlist: the enum owns the vocabulary and its error text.
+    Autonomy::parse(value)?;
     Ok(Some(value.to_string()))
 }
 
@@ -262,6 +263,19 @@ pub fn apply_update(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn autonomy_values_track_the_shared_vocabulary_both_ways() {
+        // The list is a literal (const cannot call as_str); pin it to the enum
+        // so neither side can drift.
+        assert_eq!(
+            AUTONOMY_VALUES.to_vec(),
+            ark_ports::Autonomy::ALL
+                .iter()
+                .map(|level| level.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
     use super::*;
     use crate::next_run::parse_stored_next_run;
     use chrono::TimeZone;
