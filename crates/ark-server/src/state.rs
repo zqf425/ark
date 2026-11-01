@@ -5,7 +5,7 @@
 //! the HTTP layer be tested against fakes and keeps `if plugin_id == ...` out of
 //! the boundary entirely.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -90,10 +90,40 @@ pub trait TurnRunner: Send + Sync {
     async fn run_turn(&self, job: TurnJob) -> Result<TurnEnd>;
 }
 
+/// How many terminal turns stay readable after they end.
+///
+/// Two callers legitimately read a finished turn: `GET
+/// /v1/threads/{id}/turns/{turn_id}`, and a `/steer` sent before the client has
+/// received the terminal event. Dropping the slot the instant it closes would
+/// turn those answers from "completed"/"already finished" into "unknown". The
+/// window therefore stays small: it is the only brake on growth, so a long-lived
+/// process keeps at most `active + TERMINAL_TURNS_RETAINED` slots and answers the
+/// documented not-found error for anything older.
+const TERMINAL_TURNS_RETAINED: usize = 8;
+
 /// Live turn bookkeeping (state + the cancel handle used by `/interrupt`).
 pub struct TurnRegistry {
-    inner: Mutex<HashMap<TurnId, TurnSlot>>,
+    inner: Mutex<TurnRegistryState>,
     latest_by_thread: Mutex<HashMap<ThreadId, TurnId>>,
+}
+
+/// Slots plus the finish order used to reclaim them.
+///
+/// Both live behind one lock so eviction can never race the close that queued
+/// the id: the map and the retention window stay consistent after every write.
+struct TurnRegistryState {
+    slots: HashMap<TurnId, TurnSlot>,
+    /// Terminal turn ids in finish order; the front is evicted first.
+    finished: VecDeque<TurnId>,
+}
+
+impl TurnRegistryState {
+    fn new() -> Self {
+        Self {
+            slots: HashMap::new(),
+            finished: VecDeque::new(),
+        }
+    }
 }
 
 struct TurnSlot {
@@ -111,13 +141,23 @@ impl Default for TurnRegistry {
 impl TurnRegistry {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(HashMap::new()),
+            inner: Mutex::new(TurnRegistryState::new()),
             latest_by_thread: Mutex::new(HashMap::new()),
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<TurnId, TurnSlot>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, TurnRegistryState> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Drop the oldest terminal slots once the retention window is exceeded.
+    fn evict_finished(state: &mut TurnRegistryState) {
+        while state.finished.len() > TERMINAL_TURNS_RETAINED {
+            let Some(expired) = state.finished.pop_front() else {
+                break;
+            };
+            state.slots.remove(&expired);
+        }
     }
 
     /// Register a turn as running and hand back the handles its worker needs.
@@ -135,6 +175,7 @@ impl TurnRegistry {
     ) -> Option<TurnRegistration> {
         let mut guard = self.lock();
         let busy = guard
+            .slots
             .values()
             .any(|slot| slot.summary.thread_id == thread_id && slot.summary.ended_at.is_none());
         if busy {
@@ -149,7 +190,7 @@ impl TurnRegistry {
             error: None,
         };
         let steering = Arc::new(SteerQueue::new());
-        guard.insert(
+        guard.slots.insert(
             turn_id,
             TurnSlot {
                 summary: summary.clone(),
@@ -167,13 +208,22 @@ impl TurnRegistry {
     /// The in-flight turn of a thread, if any.
     pub fn active_for(&self, thread_id: ThreadId) -> Option<TurnSummary> {
         self.lock()
+            .slots
             .values()
             .find(|slot| slot.summary.thread_id == thread_id && slot.summary.ended_at.is_none())
             .map(|slot| slot.summary.clone())
     }
 
+    /// The summary of a known turn, terminal or running.
+    ///
+    /// A terminal record only lives for the [`TERMINAL_TURNS_RETAINED`] window,
+    /// so `None` reads as "not running and no longer retained", which is the same
+    /// not-found the route already documents for an unknown turn.
     pub fn get(&self, turn_id: TurnId) -> Option<TurnSummary> {
-        self.lock().get(&turn_id).map(|slot| slot.summary.clone())
+        self.lock()
+            .slots
+            .get(&turn_id)
+            .map(|slot| slot.summary.clone())
     }
 
     /// The newest process-local lifecycle epoch registered for this thread.
@@ -195,6 +245,7 @@ impl TurnRegistry {
     /// The queue the reactor must drain for this still-running turn.
     pub fn steering_for(&self, turn_id: TurnId) -> Option<Arc<SteerQueue>> {
         self.lock()
+            .slots
             .get(&turn_id)
             .filter(|slot| slot.summary.ended_at.is_none())
             .map(|slot| Arc::clone(&slot.steering))
@@ -209,7 +260,7 @@ impl TurnRegistry {
         text: &str,
     ) -> std::result::Result<TurnSummary, SteerError> {
         let guard = self.lock();
-        let slot = guard.get(&turn_id).ok_or(SteerError::NotFound)?;
+        let slot = guard.slots.get(&turn_id).ok_or(SteerError::NotFound)?;
         if slot.summary.thread_id != thread_id {
             return Err(SteerError::NotFound);
         }
@@ -225,7 +276,7 @@ impl TurnRegistry {
     /// Trip the turn's cancel token, if the turn is still known.
     pub fn cancel(&self, turn_id: TurnId) -> Option<TurnSummary> {
         let mut guard = self.lock();
-        let slot = guard.get_mut(&turn_id)?;
+        let slot = guard.slots.get_mut(&turn_id)?;
         slot.cancel.cancel();
         slot.summary.state = "aborting".to_string();
         Some(slot.summary.clone())
@@ -238,7 +289,7 @@ impl TurnRegistry {
     /// a terminal state to `aborting`.
     pub fn cancel_active(&self, thread_id: ThreadId, turn_id: TurnId) -> Option<TurnSummary> {
         let mut guard = self.lock();
-        let slot = guard.get_mut(&turn_id)?;
+        let slot = guard.slots.get_mut(&turn_id)?;
         if slot.summary.thread_id != thread_id || slot.summary.ended_at.is_some() {
             return None;
         }
@@ -247,10 +298,16 @@ impl TurnRegistry {
         Some(slot.summary.clone())
     }
 
-    /// Record the terminal state reported by the runner.
+    /// Record the terminal state reported by the runner and schedule reclaim.
+    ///
+    /// The slot is not dropped in place: a client may still be reading this turn
+    /// over HTTP when the terminal event lands. It is queued for eviction
+    /// instead, so finished turns stay answerable for a bounded window and then
+    /// leave the map. Without this the registry kept one slot per turn the
+    /// process ever ran, each holding a `SteerQueue` and a cancel token.
     pub fn finish(&self, turn_id: TurnId, end: &TurnEnd) {
         let mut guard = self.lock();
-        let Some(slot) = guard.get_mut(&turn_id) else {
+        let Some(slot) = guard.slots.get_mut(&turn_id) else {
             return;
         };
         let (state, error) = match end {
@@ -263,7 +320,15 @@ impl TurnRegistry {
         };
         slot.summary.state = state.to_string();
         slot.summary.error = error;
+        // The reactor and the supervisor can both settle one turn. A second
+        // close must not queue the id twice, or the duplicate would evict a
+        // still-relevant record one turn too early.
+        let first_close = slot.summary.ended_at.is_none();
         slot.summary.ended_at = Some(Utc::now());
+        if first_close {
+            guard.finished.push_back(turn_id);
+            Self::evict_finished(&mut guard);
+        }
     }
 
     /// Cancel every in-flight turn with the ordinary interrupt reason.
@@ -273,7 +338,7 @@ impl TurnRegistry {
 
     /// Cancel every in-flight turn with one durable process-owned reason.
     pub fn cancel_all_with_reason(&self, reason: &str) {
-        for slot in self.lock().values_mut() {
+        for slot in self.lock().slots.values_mut() {
             slot.cancel.cancel_with_reason(reason);
             if slot.summary.ended_at.is_none() {
                 slot.summary.state = "aborting".to_string();
@@ -283,6 +348,7 @@ impl TurnRegistry {
 
     pub fn active(&self) -> usize {
         self.lock()
+            .slots
             .values()
             .filter(|slot| slot.summary.ended_at.is_none())
             .count()
@@ -785,5 +851,85 @@ mod tests {
         let registry = TurnRegistry::new();
         assert!(registry.get(TurnId::new()).is_none());
         assert!(registry.cancel(TurnId::new()).is_none());
+    }
+
+    #[test]
+    fn finished_turns_are_reclaimed_after_the_retention_window() {
+        let registry = TurnRegistry::new();
+        let thread = ThreadId::new();
+        let turns: Vec<TurnId> = (0..TERMINAL_TURNS_RETAINED + 3)
+            .map(|_| {
+                let turn = TurnId::new();
+                registry
+                    .try_register(thread, turn, CancelToken::new())
+                    .expect("the previous turn already ended");
+                registry.finish(turn, &TurnEnd::Completed);
+                turn
+            })
+            .collect();
+
+        // The registry tracks live work, not the transcript: only the newest
+        // terminal turns stay addressable, so a long-running process cannot keep
+        // one slot (queue plus cancel token) per turn it ever ran.
+        assert_eq!(registry.lock().slots.len(), TERMINAL_TURNS_RETAINED);
+        let evicted = turns.len() - TERMINAL_TURNS_RETAINED;
+        for turn in turns.iter().take(evicted) {
+            assert!(
+                registry.get(*turn).is_none(),
+                "a turn older than the window must not linger"
+            );
+        }
+        for turn in turns.iter().skip(evicted) {
+            assert!(
+                registry.get(*turn).is_some(),
+                "the window keeps recent terminal turns readable"
+            );
+        }
+    }
+
+    #[test]
+    fn a_finished_turn_answers_explicitly_instead_of_panicking() {
+        let registry = TurnRegistry::new();
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        registry.try_register(thread, turn, CancelToken::new());
+        registry.finish(turn, &TurnEnd::Completed);
+
+        // A client can still address the turn whose end it just observed. It has
+        // to learn "already finished" rather than a not-found for a turn it knows
+        // exists, while the interrupt and activity paths report nothing to do.
+        assert_eq!(
+            registry
+                .enqueue_steering(thread, turn, "too late")
+                .unwrap_err(),
+            SteerError::Finished
+        );
+        assert!(registry.cancel_active(thread, turn).is_none());
+        assert!(registry.steering_for(turn).is_none());
+        assert!(registry.active_for(thread).is_none());
+        assert_eq!(registry.get(turn).expect("still retained").state, "completed");
+    }
+
+    #[test]
+    fn lookups_of_a_reclaimed_turn_report_not_found() {
+        let registry = TurnRegistry::new();
+        let thread = ThreadId::new();
+        let first = TurnId::new();
+        registry.try_register(thread, first, CancelToken::new());
+        registry.finish(first, &TurnEnd::Completed);
+        for _ in 0..TERMINAL_TURNS_RETAINED {
+            let next = TurnId::new();
+            registry.try_register(thread, next, CancelToken::new());
+            registry.finish(next, &TurnEnd::Completed);
+        }
+
+        assert!(registry.get(first).is_none());
+        assert_eq!(
+            registry
+                .enqueue_steering(thread, first, "too late")
+                .unwrap_err(),
+            SteerError::NotFound
+        );
+        assert!(registry.cancel_active(thread, first).is_none());
     }
 }
