@@ -72,6 +72,11 @@ ark-contract   → ark-common
 ark-ports      → ark-common, ark-contract
 ark-config     → ark-common, ark-contract
 ark-store      → ark-common, ark-contract, ark-ports
+ark-common     → （无 ark crate 依赖）
+ark-contract   → ark-common
+ark-ports      → ark-common, ark-contract
+ark-config     → ark-common, ark-contract
+ark-store      → ark-common, ark-contract, ark-ports
 ark-agent      → ark-common, ark-contract, ark-ports
 ark-delegation → ark-common, ark-contract, ark-ports
 ark-llm        → ark-common, ark-contract, ark-ports
@@ -96,6 +101,8 @@ HTTP 路由 + 设置页）。
 
 特别约束：`ark-agent` 不得依赖具体实现；`ark-contract` 不得承载端口 trait 或内部业务对象；
 `ark-studio` 不得依赖模型或具体后端；跨 crate 不得穿透 `pub(crate)` 内部模块。
+上表由 `crates/ark-common/tests/dependency_direction.rs` 在 CI 强制（解析各 crate 的
+`[dependencies]` 段，`dev-dependencies` 不受表约束）；改动依赖方向必须先改这张表再改代码。
 
 ## 6. 跨模块不变量
 
