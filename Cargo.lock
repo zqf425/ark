@@ -82,6 +82,7 @@ version = "0.1.0"
 dependencies = [
  "ark-common",
  "ark-contract",
+ "ark-ports",
  "serde",
  "serde_json",
  "tracing",

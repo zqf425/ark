@@ -13,6 +13,7 @@ pub mod bus;
 pub mod event;
 pub mod exec;
 pub mod model;
+pub mod policy;
 pub mod schedule;
 pub mod services;
 pub mod store;
@@ -39,6 +40,7 @@ pub use model::{
     ModelChunk, ModelClient, ModelImage, ModelMessage, ModelRequest, ModelResponse, ModelRole,
     ToolCallRef,
 };
+pub use policy::Autonomy;
 pub use schedule::ScheduleStore;
 pub use services::{
     ConfigView, CredentialService, FileService, KvService, LogService, MetricService,

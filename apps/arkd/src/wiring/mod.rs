@@ -378,15 +378,11 @@ fn spawn_completion_listener(
 }
 
 pub(crate) fn autonomy_from_override(value: Option<&str>) -> ark_common::Result<Autonomy> {
-    match value {
-        Some("workspace_write") => Ok(Autonomy::WorkspaceWrite),
-        Some("strict") => Ok(Autonomy::Strict),
-        Some("unattended") => Ok(Autonomy::Unattended),
-        Some(value) => Err(ark_common::ArkError::validation(format!(
-            "invalid autonomy: {value}"
-        ))),
-        None => Err(ark_common::ArkError::validation("autonomy is missing")),
-    }
+    // The enum owns the vocabulary; this wrapper only supplies the "missing"
+    // case, which the settings layer never produces.
+    value
+        .map(Autonomy::parse)
+        .unwrap_or_else(|| Err(ark_common::ArkError::validation("autonomy is missing")))
 }
 
 pub(crate) fn autonomy_from_override_or_default(

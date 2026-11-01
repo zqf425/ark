@@ -6,22 +6,10 @@
 //! one field away instead of a per-tool branch.
 
 use ark_ports::{SandboxDecision, SandboxPolicy, ToolArgs};
-use serde::{Deserialize, Serialize};
+
+use ark_ports::Autonomy;
 
 use crate::domain::meta::meta_of;
-
-/// How much autonomy the runtime grants.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Autonomy {
-    /// Every mutation and every shell command needs a human decision.
-    Strict,
-    /// Workspace writes run unattended; shell commands still ask.
-    #[default]
-    WorkspaceWrite,
-    /// Everything the builtin catalogue offers runs unattended.
-    Unattended,
-}
 
 /// Policy implementation injected into the reactor.
 #[derive(Debug, Clone, Copy, Default)]
