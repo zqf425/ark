@@ -2,11 +2,12 @@
  * Skill discovery view (v1 routes). Read-only by design: roots come from the
  * runtime config, so the page only reports what was discovered and what failed.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { SkillLoadWarning, SkillSummary } from '../../../shared/contracts'
+import { useCallback, useEffect, useState } from 'react'
+import type {
+  LoadStatus, SkillLoadWarning, SkillSummary } from '../../../shared/contracts'
+import { useMounted } from '../../../shared/api/use-mounted'
 import { listSkills } from '../api/skills-api'
 import { describeApiError } from '../api/outcome'
-import type { LoadStatus } from './use-settings'
 
 export type SkillsApi = {
   enabled: boolean
@@ -25,14 +26,7 @@ export function useSkills(): SkillsApi {
   const [validationErrors, setValidationErrors] = useState<SkillLoadWarning[]>([])
   const [status, setStatus] = useState<LoadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
-  const mounted = useRef(true)
-
-  useEffect(() => {
-    mounted.current = true
-    return () => {
-      mounted.current = false
-    }
-  }, [])
+  const mounted = useMounted()
 
   const refresh = useCallback(async () => {
     setStatus((prev) => (prev === 'ready' ? prev : 'loading'))

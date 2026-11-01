@@ -4,7 +4,8 @@
  * All runtime access goes through `../api/threads-api`; the hook only decides
  * *when* to call and how to reflect the result in the store.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useMounted } from '../../../shared/api/use-mounted'
 import { describeError } from '../../../shared/api/error-describe'
 import { translateNow } from '../../../shared/i18n/current'
 import type { ThreadSummary } from '../../../shared/contracts'
@@ -36,14 +37,7 @@ export function useThreadList(): ThreadListApi {
   const upsertThread = useCodeSessionStore((s) => s.upsertThread)
   const setActiveThread = useCodeSessionStore((s) => s.setActiveThread)
   const [busy, setBusy] = useState(false)
-  const mounted = useRef(true)
-
-  useEffect(() => {
-    mounted.current = true
-    return () => {
-      mounted.current = false
-    }
-  }, [])
+  const mounted = useMounted()
 
   const refresh = useCallback(async () => {
     setListStatus('loading')

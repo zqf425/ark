@@ -4,11 +4,12 @@
  * `test` is a probe, so its result stays with the caller and is shown per row;
  * only list-changing calls are folded back into state.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { McpServerListResponse, McpServerUpsertRequest, McpServerView, McpServerTestResponse } from '../../../shared/contracts'
+import { useCallback, useEffect, useState } from 'react'
+import type {
+  LoadStatus, McpServerListResponse, McpServerUpsertRequest, McpServerView, McpServerTestResponse } from '../../../shared/contracts'
 import { deleteMcpServer, listMcpServers, testMcpServer, upsertMcpServer } from '../api/mcp-api'
+import { useMounted } from '../../../shared/api/use-mounted'
 import { attempt, describeApiError, type Outcome } from '../api/outcome'
-import type { LoadStatus } from './use-settings'
 
 export type McpApi = {
   servers: McpServerView[]
@@ -26,14 +27,7 @@ export function useMcpServers(): McpApi {
   const [status, setStatus] = useState<LoadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const mounted = useRef(true)
-
-  useEffect(() => {
-    mounted.current = true
-    return () => {
-      mounted.current = false
-    }
-  }, [])
+  const mounted = useMounted()
 
   const apply = useCallback((response: McpServerListResponse) => {
     setServers(response.servers ?? [])

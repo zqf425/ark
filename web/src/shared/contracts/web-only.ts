@@ -29,3 +29,6 @@ export type UiLocale = 'zh-CN' | 'en-US'
 export type UiFontSize = 'small' | 'medium' | 'large'
 export type UiTheme = 'light' | 'dark' | 'system'
 export type UiPreferences = { locale: UiLocale; fontSize: UiFontSize; theme: UiTheme }
+
+/** Lifecycle of a renderer-side resource load. Pure UI state, not a wire contract. */
+export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'

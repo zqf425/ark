@@ -107,6 +107,7 @@ export type {
 } from '../../generated'
 export type {
   EndpointFormat,
+  LoadStatus,
   LogLevel,
   McpServerUpsertRequest,
   ProviderUpsertRequest,

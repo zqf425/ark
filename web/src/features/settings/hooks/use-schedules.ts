@@ -7,8 +7,9 @@
  * master switch lives in runtime config and is therefore the caller's business
  * (`SubagentSection` pattern), not this hook's.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { CreateScheduleRequest, ScheduledTask, UpdateScheduleRequest } from '../../../shared/contracts'
+import { useCallback, useEffect, useState } from 'react'
+import type {
+  LoadStatus, CreateScheduleRequest, ScheduledTask, UpdateScheduleRequest } from '../../../shared/contracts'
 import {
   createSchedule,
   deleteSchedule,
@@ -16,8 +17,8 @@ import {
   runScheduleNow,
   updateSchedule
 } from '../api/schedules-api'
+import { useMounted } from '../../../shared/api/use-mounted'
 import { attempt, describeApiError, type Outcome } from '../api/outcome'
-import type { LoadStatus } from './use-settings'
 
 export type SchedulesApi = {
   tasks: ScheduledTask[]
@@ -37,14 +38,7 @@ export function useSchedules(): SchedulesApi {
   const [status, setStatus] = useState<LoadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const mounted = useRef(true)
-
-  useEffect(() => {
-    mounted.current = true
-    return () => {
-      mounted.current = false
-    }
-  }, [])
+  const mounted = useMounted()
 
   /** Replace one row in place: the store owns ordering, so no re-sort here. */
   const apply = useCallback((task: ScheduledTask) => {
