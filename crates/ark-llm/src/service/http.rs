@@ -16,7 +16,7 @@ use ark_ports::{ModelChunk, ModelClient, ModelRequest, ModelResponse};
 use futures::StreamExt;
 use tokio::sync::mpsc;
 
-use crate::common::retry::{FailureKind, RetryPolicy, RetryState};
+use crate::common::retry::{jittered, parse_retry_after, FailureKind, RetryPolicy, RetryState};
 use crate::common::sse::SseParser;
 use crate::common::stream::StreamAccumulator;
 use crate::config::endpoint::ProviderConfig;
@@ -121,7 +121,22 @@ impl ModelClient for HttpModelClient {
                                 return Err(failure.error);
                             }
                             state = next;
-                            tokio::time::sleep(next.next_delay).await;
+                            // A provider-supplied Retry-After overrides the
+                            // backoff schedule (already capped by the parser);
+                            // jitter desynchronises concurrent turns hitting
+                            // the same rate-limit window.
+                            let base = failure.retry_after.unwrap_or(next.next_delay);
+                            let delay = jittered(base, salt_for(state.failures));
+                            tracing::warn!(
+                                provider = %self.config.provider_id,
+                                model = %self.config.model,
+                                kind = ?kind,
+                                attempt = state.failures,
+                                max_attempts = self.retry.max_attempts,
+                                delay_ms = delay.as_millis() as u64,
+                                "transient model request failure; retrying"
+                            );
+                            tokio::time::sleep(delay).await;
                         }
                         None => return Err(failure.error),
                     }
@@ -131,12 +146,24 @@ impl ModelClient for HttpModelClient {
     }
 }
 
+/// Salt for [`jittered`]: wall-clock nanos mixed with the attempt count, so
+/// concurrent turns on the same rate-limit window do not retry in lockstep.
+fn salt_for(failures: u32) -> u64 {
+    use std::time::SystemTime;
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64 ^ u64::from(failures).wrapping_mul(0x9E37_79B9_7F4A_7C15))
+        .unwrap_or(u64::from(failures))
+}
+
 /// A failed attempt plus what it already published.
 struct AttemptError {
     error: ArkError,
     kind: FailureKind,
     /// True once at least one chunk reached the sink.
     published: bool,
+    /// Provider-advised wait from a `Retry-After` header, already capped.
+    retry_after: Option<Duration>,
 }
 
 impl HttpModelClient {
@@ -161,6 +188,7 @@ impl HttpModelClient {
                 error,
                 kind: FailureKind::Permanent,
                 published: false,
+                retry_after: None,
             })?;
         let mut builder = self
             .client
@@ -181,13 +209,22 @@ impl HttpModelClient {
                 self.config.request_url()
             )),
             published: false,
+            retry_after: None,
         })?;
         let status = response.status();
         if status.is_success() {
             return Ok(response);
         }
-        // Read a bounded amount of the body so the message explains the 4xx/5xx
-        // without dumping a whole HTML error page into the log.
+        // Read the provider-advised wait before the body read consumes the
+        // response, then a bounded amount of the body so the message explains
+        // the 4xx/5xx without dumping a whole HTML error page into the log.
+        let retry_after = response
+            .headers()
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.to_string());
+        let retry_after = retry_after
+            .and_then(|value| parse_retry_after(Some(&value), std::time::SystemTime::now()));
         let text = response.text().await.unwrap_or_default();
         let summary = ark_common::text::truncate_utf8(&text, 512).to_string();
         Err(AttemptError {
@@ -204,6 +241,7 @@ impl HttpModelClient {
             )
             .with_detail(summary),
             published: false,
+            retry_after,
         })
     }
 
@@ -225,6 +263,8 @@ impl HttpModelClient {
                 error: ArkError::model(format!("model stream broke: {error}")),
                 kind: FailureKind::Transient,
                 published,
+                // Mid-stream there is no fresh Retry-After to read.
+                retry_after: None,
             })?;
             // SSE is UTF-8 text; a multi-byte codepoint split across chunks is
             // re-assembled because `from_utf8_lossy` would corrupt it. The
@@ -268,6 +308,7 @@ async fn forward(
                     error: ArkError::new(ArkErrorCode::RuntimeUnavailable, "model sink closed"),
                     kind: FailureKind::Permanent,
                     published: true,
+                    retry_after: None,
                 });
             }
         }
@@ -393,6 +434,39 @@ mod tests {
             1,
             "request contained duplicate content-type headers:\n{received}"
         );
+    }
+
+    /// A 429 with `Retry-After: 0` must be retried (the smart-ark-aligned
+    /// behaviour); the provider-advised zero delay keeps the test instant.
+    #[tokio::test]
+    async fn rate_limited_response_is_retried_honouring_retry_after() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let responses: [&[u8]; 2] = [
+                b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 14\r\nConnection: close\r\n\r\ndata: [DONE]\n\n",
+            ];
+            for response in responses {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 4_096];
+                let _ = socket.read(&mut request).unwrap();
+                socket.write_all(response).unwrap();
+            }
+        });
+        let client = HttpModelClient::with_config(
+            ProviderConfig::new("test", "test-model")
+                .with_base_url(format!("http://{address}"))
+                .with_api_key("test-key"),
+        );
+        let (sink, _drain) = mpsc::channel(1);
+
+        let response = client.stream(request(), sink).await.unwrap();
+        assert_eq!(response.text, "", "the [DONE]-only stream yields no text");
+        server.join().unwrap();
     }
 
     #[test]
