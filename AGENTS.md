@@ -40,7 +40,8 @@ docs/
   能力总线；Write、Connect、工作流及旧 Electron 运行时不在本仓库恢复。
 - `ark-agent` 只能依赖 `ark-ports` 的边界，模型、工具和存储实现由 `arkd` 注入；全进程只有它
   一个模型决策循环。
-- `ark-contract` 只放跨进程 wire 契约；端口 trait 放 `ark-ports`；跨 crate 不得穿透内部模块。
+- `ark-contract` 只放跨进程 wire 契约；端口 trait 放 `ark-ports`，被多方共享的控制原语
+  （`exec.rs` 的 `CancelToken`/`SteerQueue`）也放 `ark-ports`；跨 crate 不得穿透内部模块。
 - `ark-studio` 只能依赖端口，不得依赖具体后端或模型实现；新增平台能力通过模块或插件扩展，
   核心不得出现平台名称分支。
 - `apps/arkd` 是唯一组合根，只负责装配，不写业务规则。

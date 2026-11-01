@@ -27,12 +27,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
 
 use ark_common::{ArkError, ArkErrorCode, ChildId, Result, ThreadId};
 use ark_contract::RuntimeEvent;
 use ark_ports::{
-    CancelHandle, ChildRunRecord, EventSink, SessionStore, SteerHandle, SubagentOutcome,
+    CancelToken, ChildRunRecord, EventSink, SessionStore, SteerQueue, SubagentOutcome,
     SubagentPolicy, SubagentPolicySource, SubagentRegistry, SubagentRequest, SubagentRunner,
 };
 use chrono::Utc;
@@ -41,12 +40,6 @@ use tokio::sync::{broadcast, oneshot, Notify};
 use crate::domain::{
     acquire_error, finished_record, ChildTurnContext, ChildTurnReport, SlotGate, StopReason,
 };
-
-/// How often a queued run re-checks its cancel token.
-///
-/// Abort is a human-paced action, so 25 ms worst-case latency is invisible, and
-/// polling keeps the wait path allocation-free without a second wakeup channel.
-const QUEUE_POLL: Duration = Duration::from_millis(25);
 
 /// Runs one child turn. Implemented by `arkd`, because only the composition root
 /// may wire a model client, a tool runner and a session writer together.
@@ -66,8 +59,11 @@ pub trait ChildTurnExecutor: Send + Sync {
 pub struct RunningChild {
     pub child_id: ChildId,
     pub parent_thread_id: ThreadId,
-    cancel: Arc<dyn CancelHandle>,
-    steer: Arc<dyn SteerHandle>,
+    /// Same object the child reactor awaits: the runtime trips it, the reactor
+    /// only reads it. Nothing inside the reactor may call `cancel()`, or an
+    /// in-turn abort would surface as a runtime-requested cancellation here.
+    cancel: Arc<CancelToken>,
+    steer: Arc<SteerQueue>,
 }
 
 impl RunningChild {
@@ -400,18 +396,8 @@ fn child_context(request: &SubagentRequest, child_id: ChildId, prompt: String) -
         model: request.model.clone(),
         provider_id: request.provider_id.clone(),
         autonomy: request.autonomy.clone(),
-        cancel: Arc::new(NoCancel),
-        steer: Arc::new(NoSteer),
-    }
-}
-
-/// Resolve once the handle has been cancelled.
-async fn wait_cancelled(cancel: Arc<dyn CancelHandle>) {
-    loop {
-        if cancel.is_cancelled() {
-            return;
-        }
-        tokio::time::sleep(QUEUE_POLL).await;
+        cancel: Arc::new(CancelToken::new()),
+        steer: Arc::new(SteerQueue::new()),
     }
 }
 
@@ -436,104 +422,6 @@ fn default_label(prompt: &str) -> String {
         "child run".to_string()
     } else {
         ark_common::text::truncate_utf8(first, 60).to_string()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Default handles
-// ---------------------------------------------------------------------------
-
-/// A child that cannot be aborted yet (before `execute` attaches a real token).
-#[derive(Debug, Default)]
-struct NoCancel;
-
-impl CancelHandle for NoCancel {
-    fn cancel(&self) {}
-
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-}
-
-/// A child with no steering queue yet.
-#[derive(Debug, Default)]
-struct NoSteer;
-
-impl SteerHandle for NoSteer {
-    fn push(&self, _text: &str) -> bool {
-        false
-    }
-
-    fn len(&self) -> usize {
-        0
-    }
-
-    fn drain(&self) -> Vec<String> {
-        Vec::new()
-    }
-}
-
-/// Minimal cancel token the runtime owns, so `arkd` does not have to hand one in.
-#[derive(Debug, Default)]
-struct TokenCancel {
-    cancelled: std::sync::atomic::AtomicBool,
-}
-
-impl CancelHandle for TokenCancel {
-    fn cancel(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
-    }
-
-    fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
-    }
-}
-
-/// Bounded steering queue owned by the runtime.
-#[derive(Debug)]
-struct QueueSteer {
-    pending: Mutex<std::collections::VecDeque<String>>,
-}
-
-impl Default for QueueSteer {
-    fn default() -> Self {
-        Self {
-            pending: Mutex::new(std::collections::VecDeque::new()),
-        }
-    }
-}
-
-/// Matches `ark-agent`'s `SteerQueue::DEFAULT_CAPACITY`.
-const STEER_CAPACITY: usize = 16;
-
-impl SteerHandle for QueueSteer {
-    fn push(&self, text: &str) -> bool {
-        let text = text.trim();
-        if text.is_empty() {
-            return false;
-        }
-        let Ok(mut pending) = self.pending.lock() else {
-            return false;
-        };
-        if pending.len() >= STEER_CAPACITY {
-            return false;
-        }
-        pending.push_back(text.to_string());
-        true
-    }
-
-    fn len(&self) -> usize {
-        self.pending
-            .lock()
-            .map(|pending| pending.len())
-            .unwrap_or(0)
-    }
-
-    fn drain(&self) -> Vec<String> {
-        let Ok(mut pending) = self.pending.lock() else {
-            return Vec::new();
-        };
-        pending.drain(..).collect()
     }
 }
 

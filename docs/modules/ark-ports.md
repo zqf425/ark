@@ -55,8 +55,10 @@
   **一行 = 一次状态转换**，而不是一个 child。任何计数或列表投影必须先经该函数折叠：保留每个 id 最后
   看到的那行（日志有序，即最新状态），并按首次出现顺序输出，避免刷新间列表跳动。直接把原始行映射成
   列表会把同一个 child id 重复多份。
-- `SteerHandle` 同时提供 `len` 与默认实现的 `is_empty`，调用方经 `dyn SteerHandle` 判断队列是否为空，
-  不必自行写 `len() == 0`。
+- 子代理控制原语 `CancelToken`（`tokio::sync::watch`，首次取消原因获胜）与有界 `SteerQueue` 是本 crate
+  的具体类型（`exec.rs`），不是 trait：runtime 侧 abort/steer 与 reactor 侧 await/drain 必须是同一个
+  对象，trait 化会迫使执行器在两个包装对象之间做桥接复制。`ark-agent` 根 re-export 它们，`ark-delegation`
+  直接使用，二者都不得为此依赖 `ark-agent`。
 
 ## 变更规则
 

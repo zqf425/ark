@@ -28,13 +28,13 @@ use crate::domain::action::{Action, DispatchPlan, SyntheticResult, TurnOutcome};
 use crate::domain::input::{ApprovalAsk, InputKind, TurnInput, UserInputAsk};
 use crate::domain::state::TurnState;
 use crate::domain::tool::{ToolCallRequest, ToolExecution};
-use crate::exec::cancel::CancelToken;
 use crate::exec::events::TurnEvents;
 use crate::exec::gate::{ApprovalRequest, GateBroker, UserInputRequest};
 use crate::exec::journal::SessionWriter;
 use crate::exec::tool_runner::ToolRunner;
 use crate::service::machine::TurnMachine;
 use crate::service::step::step;
+use ark_ports::{CancelToken, SteerQueue};
 
 mod compaction;
 mod gate;
@@ -113,7 +113,7 @@ pub struct Reactor {
     /// Mid-turn corrections. Drained at a *round boundary* (before the next
     /// model call), never in the middle of a tool-call/result pair: injecting
     /// there would hand the provider a history it considers malformed.
-    steer: Option<Arc<crate::exec::steer::SteerQueue>>,
+    steer: Option<Arc<SteerQueue>>,
 }
 
 impl Reactor {
@@ -156,7 +156,7 @@ impl Reactor {
     }
 
     /// Attach a steering queue so a running turn can be corrected mid-flight.
-    pub fn with_steering(mut self, queue: Arc<crate::exec::steer::SteerQueue>) -> Self {
+    pub fn with_steering(mut self, queue: Arc<SteerQueue>) -> Self {
         self.steer = Some(queue);
         self
     }

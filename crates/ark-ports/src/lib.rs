@@ -11,6 +11,7 @@ pub mod backend;
 pub mod base;
 pub mod bus;
 pub mod event;
+pub mod exec;
 pub mod model;
 pub mod schedule;
 pub mod services;
@@ -33,6 +34,7 @@ pub use bus::{
     OutboundRequest, OutboundResponse, PageHandle, PanelHandle, UiCapability,
 };
 pub use event::{EventSink, Subscription};
+pub use exec::{CancelToken, SteerQueue};
 pub use model::{
     ModelChunk, ModelClient, ModelImage, ModelMessage, ModelRequest, ModelResponse, ModelRole,
     ToolCallRef,
@@ -44,8 +46,8 @@ pub use services::{
 };
 pub use store::{latest_child_runs, ChildRunRecord, SessionStore, SubscribeTicket, ThreadMeta};
 pub use subagent::{
-    status as child_status, stop_reason, CancelHandle, SteerHandle, SubagentOutcome,
-    SubagentPolicy, SubagentPolicySource, SubagentRegistry, SubagentRequest, SubagentRunner,
+    status as child_status, stop_reason, SubagentOutcome, SubagentPolicy, SubagentPolicySource,
+    SubagentRegistry, SubagentRequest, SubagentRunner,
 };
 pub use tool::{
     SandboxDecision, SandboxPolicy, Tool, ToolArgs, ToolContext, ToolOutput, ToolRegistryPort,

@@ -38,10 +38,10 @@ impl RuntimeCore {
     /// resumed children: once the caller receives the child id, the handle is
     /// already present in the registry.
     pub(super) fn install_handle(&self, prepared: &mut PreparedChild) {
-        let cancel = Arc::new(TokenCancel::default());
-        let steer = Arc::new(QueueSteer::default());
-        prepared.ctx.cancel = Arc::clone(&cancel) as Arc<dyn CancelHandle>;
-        prepared.ctx.steer = Arc::clone(&steer) as Arc<dyn SteerHandle>;
+        let cancel = Arc::new(ark_ports::CancelToken::new());
+        let steer = Arc::new(ark_ports::SteerQueue::new());
+        prepared.ctx.cancel = Arc::clone(&cancel);
+        prepared.ctx.steer = Arc::clone(&steer);
         self.lock_handles().insert(
             prepared.record.child_id,
             Arc::new(RunningChild {
@@ -163,8 +163,8 @@ impl RuntimeCore {
             model: request.model.or(existing.model),
             provider_id: request.provider_id.or(existing.provider_id),
             autonomy: request.autonomy.or(existing.autonomy),
-            cancel: Arc::new(NoCancel),
-            steer: Arc::new(NoSteer),
+            cancel: Arc::new(ark_ports::CancelToken::new()),
+            steer: Arc::new(ark_ports::SteerQueue::new()),
         };
 
         Ok(PreparedChild {
@@ -212,7 +212,7 @@ impl RuntimeCore {
                     return Err(err);
                 }
             },
-            _ = wait_cancelled(cancel_for_wait) => {
+            _ = cancel_for_wait.cancelled() => {
                 self.lock_handles().remove(&child);
                 let aborted = self
                     .finish(

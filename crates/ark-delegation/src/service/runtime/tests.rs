@@ -393,7 +393,7 @@ async fn a_saturated_queue_fails_fast_instead_of_hanging() {
 
 /// Executor that waits for its cancel token, so an abort test proves the signal.
 struct BlockingExecutor {
-    seen: Mutex<Vec<Arc<dyn ark_ports::CancelHandle>>>,
+    seen: Mutex<Vec<Arc<ark_ports::CancelToken>>>,
 }
 
 #[async_trait::async_trait]

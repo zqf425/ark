@@ -8,7 +8,7 @@ pub mod gate;
 pub use gate::{acquire_error, SlotGate, SlotGuard, ERR_QUEUE_FULL};
 
 use ark_common::{ChildId, ThreadId, TurnId, Usage};
-use ark_ports::{CancelHandle, ChildRunRecord, SteerHandle};
+use ark_ports::{CancelToken, ChildRunRecord, SteerQueue};
 use chrono::{DateTime, Utc};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -82,9 +82,9 @@ pub struct ChildTurnContext {
     /// Permission override; `None` inherits the parent thread's setting.
     pub autonomy: Option<String>,
     /// Trips when the child is aborted (explicit abort, or parent shutdown).
-    pub cancel: Arc<dyn CancelHandle>,
+    pub cancel: Arc<CancelToken>,
     /// Mid-run corrections, drained by the reactor at a round boundary.
-    pub steer: Arc<dyn SteerHandle>,
+    pub steer: Arc<SteerQueue>,
 }
 
 impl std::fmt::Debug for ChildTurnContext {
