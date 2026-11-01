@@ -58,7 +58,7 @@ pub use domain::{
 };
 pub use service::{
     reconcile_index, AttachmentStore, ChildStore, DelegationPolicy, FileSessionStore,
-    MemoryFileStore, ReconcileReport, DEFAULT_MAX_ATTACHMENT_BYTES,
+    MemoryFileStore, ReconcileReport, ScheduleFileStore, DEFAULT_MAX_ATTACHMENT_BYTES,
 };
 pub use store::{
     load_snapshot, plan_reconcile, DiskFacts, IndexEntry, IndexProjector, IndexSnapshot, LogParse,

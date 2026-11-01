@@ -13,6 +13,13 @@
 层不能借此访问任意本地文件。存储只拥有字节与元数据，不拥有线程：所以 `diagnostics` 的已关联集合
 由调用方（能读事件日志的边界层）传入，`orphan_count` 只统计不在该集合内、且超过孤儿阈值的条目。
 
+`ScheduleStore` 是定时任务文档的持久化边界，同步而非异步：整个 `schedules.json` 在一次进程内锁的
+临界区里读取或重写，没有可 await 的对象。它只做持久化——id 补全（`sch_<uuid>`）、重复 id 的
+`conflict`、缺失 id 的 `not_found`；节奏修复、`next_run_at` 重算和 100 条任务上限都在
+`ark-schedule`，由组合根在调用存储之前完成。存储若擅自改写任务，返回给客户端的文档就会与刚写入的
+不一致。`replace` 是运行记账的唯一写路径：历史追加与 `last_run` 镜像必须是一次任务变更，拆成两次
+调用就会与 UI 更新交错。
+
 ## 硬约束
 
 - `ark-agent` 只能依赖到本 crate，不得引用 `ark-store`、`ark-llm`、`ark-tool` 等实现。
@@ -27,6 +34,9 @@
 - `SessionStore::rewind_thread` 是物理截断边界：实现必须在同一 writer 序列化点删去目标及之后的权威事件、
   重建投影并发出可使 SSE 客户端失效旧状态的持久化通知；实现还必须拒绝有未终结持久化回合的线程，且
   `rewind_record` 的幂等标记不得随普通事件压缩丢失。
+- `ScheduleStore` 不得归一化或补算任务：`next_run_at`、节奏回退与任务数上限属于 `ark-schedule`。
+  实现只需保证文档级原子写与串行读改写；跨 `list` 与 `insert` 的上限检查窗口由单用户桌面运行时
+  接受，结构化拒绝仍由 `ark-schedule::ensure_capacity` 给出。
 - 插件只能经 `HttpCapability`、`McpCapability` 和 `UiCapability` 与基础设施或其它插件交互。
 - `McpServerService` 的 upsert/delete 是异步边界：实现可以在返回前发现远程工具并原子刷新运行时 catalog，
   但不得在 registry 锁持有期间 await。

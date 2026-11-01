@@ -233,6 +233,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-schedule"
+version = "0.1.0"
+dependencies = [
+ "ark-common",
+ "ark-contract",
+ "ark-ports",
+ "chrono",
+]
+
+[[package]]
 name = "ark-server"
 version = "0.1.0"
 dependencies = [
