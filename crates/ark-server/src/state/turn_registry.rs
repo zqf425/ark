@@ -255,7 +255,7 @@ impl TurnRegistry {
 
     /// Cancel every in-flight turn with the ordinary interrupt reason.
     pub fn cancel_all(&self) {
-        self.cancel_all_with_reason("turn interrupted");
+        self.cancel_all_with_reason(ark_common::CancelReason::UserInterrupt.as_durable_str());
     }
 
     /// Cancel every in-flight turn with one durable process-owned reason.

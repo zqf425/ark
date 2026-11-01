@@ -7,6 +7,6 @@
 pub mod sandbox;
 pub mod truncate;
 
-pub use ark_ports::Autonomy;
+pub use ark_common::Autonomy;
 pub use sandbox::{is_self_service, BuiltinSandboxPolicy};
 pub use truncate::{cap_all, cap_bytes, cap_lines, TruncationLimits, DEFAULT_LIMITS};

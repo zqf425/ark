@@ -272,10 +272,16 @@ impl Reactor {
 
     /// Preserve a boundary-supplied detail for ordinary interrupts, while a
     /// process-owned reason such as shutdown remains distinguishable on disk.
+    /// Only the shared `UserInterrupt` vocabulary maps to the fallback; an
+    /// unknown string passes through unchanged (the previous behavior), so a
+    /// future durable reason is never silently overwritten here.
     fn cancellation_reason(&self, fallback: &str) -> String {
         match self.cancel.reason().as_deref() {
-            Some("turn interrupted") | None => fallback.to_string(),
-            Some(reason) => reason.to_string(),
+            Some(reason) => match ark_common::CancelReason::from_durable(reason) {
+                Some(ark_common::CancelReason::UserInterrupt) => fallback.to_string(),
+                _ => reason.to_string(),
+            },
+            None => fallback.to_string(),
         }
     }
 

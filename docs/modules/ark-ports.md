@@ -58,7 +58,7 @@
 - 子代理控制原语 `CancelToken`（`tokio::sync::watch`，首次取消原因获胜）与有界 `SteerQueue` 是本 crate
   的具体类型（`exec.rs`），不是 trait：runtime 侧 abort/steer 与 reactor 侧 await/drain 必须是同一个
   对象，trait 化会迫使执行器在两个包装对象之间做桥接复制。`ark-agent` 根 re-export 它们，`ark-delegation`
-  直接使用，二者都不得为此依赖 `ark-agent`。
+  直接使用，后者不得为此依赖 `ark-agent`。
 
 ## 变更规则
 

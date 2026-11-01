@@ -104,7 +104,9 @@ pub(super) async fn abort_interrupted_turns(store: &dyn SessionStore) -> Result<
                         thread_id: thread.thread_id,
                         turn_id,
                         timestamp: chrono::Utc::now(),
-                        reason: "runtime restarted before turn could finish".to_string(),
+                        reason: ark_common::CancelReason::RuntimeRestart
+                            .as_durable_str()
+                            .to_string(),
                     },
                 )
                 .await?;

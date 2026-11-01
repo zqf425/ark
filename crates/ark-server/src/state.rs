@@ -25,7 +25,10 @@ use crate::service::continuation::ContinuationRegistry;
 use crate::service::scheduler::SchedulerService;
 
 /// Durable abort reason used for process-owned shutdown cancellation.
-pub const SHUTDOWN_CANCEL_REASON: &str = "runtime shutting down";
+///
+/// Sourced from the shared vocabulary; kept as a named constant because four
+/// call sites use it and the name reads better at those boundaries.
+pub const SHUTDOWN_CANCEL_REASON: &str = ark_common::CancelReason::Shutdown.as_durable_str();
 
 mod turn_registry;
 pub use turn_registry::TurnRegistry;

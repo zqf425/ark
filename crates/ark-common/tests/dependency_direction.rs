@@ -29,7 +29,7 @@ fn allowed_dependencies() -> BTreeMap<&'static str, &'static [&'static str]> {
         ("ark-common", &[] as &[&str]),
         ("ark-contract", &["ark-common"]),
         ("ark-ports", &["ark-common", "ark-contract"]),
-        ("ark-config", &["ark-common", "ark-contract", "ark-ports"]),
+        ("ark-config", &["ark-common", "ark-contract"]),
         ("ark-store", &["ark-common", "ark-contract", "ark-ports"]),
         ("ark-schedule", &["ark-common", "ark-contract", "ark-ports"]),
         ("ark-agent", &["ark-common", "ark-contract", "ark-ports"]),
