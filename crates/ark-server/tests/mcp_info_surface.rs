@@ -124,7 +124,7 @@ async fn discovery_stays_open_when_a_token_is_configured() {
         .expect("body");
     let json: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
     assert_eq!(json["auth"]["required"], true);
-    assert_eq!(json["auth"]["apply_as_header"], "authorization");
+    assert_eq!(json["auth"]["header"], "authorization");
 }
 
 /// Every advertised tool must resolve to a real route. Placeholder replacement

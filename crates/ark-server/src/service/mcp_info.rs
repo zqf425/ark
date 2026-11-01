@@ -64,11 +64,8 @@ pub fn server_info(auth_required: bool, version: &str) -> McpServerInfo {
         transport: "http",
         auth: json!({
             "required": auth_required,
-            "type": "bearer",
-            "apply_as_header": "authorization",
-            "format": "Bearer <token>",
-            "required_for": ["/v1/* (except /health and /v1/mcp-info)"],
-            "description": "Pass the arkd `--auth-token` value as `authorization: Bearer <token>` on every /v1 request. `required` is false only when the runtime was started without a token (an explicit local-only configuration).",
+            "header": "authorization",
+            "description": "Send `authorization: Bearer <token>` on every /v1 request; the token is the arkd `--auth-token` value. `required` is false only when the runtime was started without a token (an explicit local-only configuration).",
         }),
         tools: mcp_tools::tools(),
     }

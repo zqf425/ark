@@ -25,11 +25,8 @@
   "transport": "http",
   "auth": {
     "required": "<运行时是否配置了 auth_token>",
-    "type": "bearer",
-    "apply_as_header": "authorization",
-    "format": "Bearer <token>",
-    "required_for": ["/v1/*（/health 与 /v1/mcp-info 除外）"],
-    "description": "把 arkd 启动参数 --auth-token 的值以 `authorization: Bearer <token>` 头随每个 /v1 请求携带。required 为 false 表示运行时未配置 token（本地显式放开，不是默认安全）。"
+    "header": "authorization",
+    "description": "把 arkd 启动参数 --auth-token 的值以 `authorization: Bearer <token>` 头随每个 /v1 请求携带（/health 与 /v1/mcp-info 除外）。required 为 false 表示运行时未配置 token（本地显式放开，不是默认安全）。"
   },
   "tools": [ { "name": "...", "description": "...", "inputSchema": {}, "http": { "method": "POST", "path": "/v1/threads" } } ]
 }
