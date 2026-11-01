@@ -127,6 +127,12 @@
 路由 `/v1/schedules`(CRUD + 立即运行)只解包 HTTP 并调用调度服务;捕获的输入与不存在 id 的错误
 沿用端口的结构化错误码。
 
+turn 启动与线程创建的编排宿主是 `service` 层（`service::turns::start_turn`/`spawn_turn`、
+`service::threads::create_thread`、`service::compaction::ensure_checkpoint`）：HTTP handler 只做
+解析与状态码包装，scheduler/continuation 等其他消费者调用同一编排并直接使用 `ArkError`。
+`service` 层不得引用 `api::handlers` 或 `ApiError`（`serve.rs` 为绑定路由表的结构性豁免）；
+错误到状态码的映射仍集中在 `api::error`。
+
 ## 路由清单
 
 当前路由以 `src/api/routes.rs` 为准。新增或修改路由必须同步更新 wire DTO、接口测试、渲染层 client

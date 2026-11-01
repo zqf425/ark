@@ -8,9 +8,14 @@
 当前公开面包括线程/回合/子代理 DTO、运行时事件、渲染 item、能力目录、配置视图、provider 与
 skill 视图，以及插件宿主的只读报告（`PluginHostReport`、`PluginEntry`、`PluginDiagnosticView`）。
 后三者的贡献项（pages/panels/tools）由宿主从真正拥有它们的总线汇总，本 crate 只定义形状，不保
-平行清单。wire 字段保持 Rust 既有的 snake_case 命名（生成的 TypeScript 同名，如 `thread_id`、
-`prompt_tokens`）；仅 child-runs 系列 DTO 使用 `rename_all = "camelCase"` 的既有例外，新增字段
-不得再引入新的命名风格。
+平行清单。wire 字段全量使用 snake_case 命名（生成的 TypeScript 同名，如 `thread_id`、`prompt_tokens`），
+child-runs 系列曾有的 camelCase 例外已随生成类型管线移除；`parentThreadId` 是子代理路由的查询
+参数名（文档化的 HTTP API 面），与 JSON 字段命名无关。新增字段不得引入其他命名风格。
+
+`ThreadItem.marker`（`ItemMarker::ContextCheckpoint`）是系统生成条目的结构化标识，取代按文本
+前缀识别；判定入口是 `ThreadItem::is_context_checkpoint`（对历史无 marker 条目按前缀兜底，且
+gated 在 `Notice` kind 上）。取消原因词表与自治权词表不在本 crate：它们是纯共享词汇，宿主为
+`ark-common`（`CancelReason`、`Autonomy`，见其模块文档）。
 
 `TurnRequest.text` 的 UTF-8 字节数上限由 `MAX_TURN_TEXT_BYTES` 定义为 1 MiB；HTTP 边界在创建回合前执行该校验。
 
