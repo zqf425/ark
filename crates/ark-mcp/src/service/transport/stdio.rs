@@ -195,7 +195,10 @@ impl McpTransport for StdioTransport {
         }
         let managed = self.child.lock().await.take();
         if let Some(managed) = managed {
-            let ManagedChild { mut child, mut tree } = managed;
+            let ManagedChild {
+                mut child,
+                mut tree,
+            } = managed;
             // Signal the group first, then reap. Children that outlived the
             // server would otherwise keep the inherited stdout pipe open; the
             // direct kill is the fallback for a group that already exited.

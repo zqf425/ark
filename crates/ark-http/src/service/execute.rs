@@ -43,6 +43,36 @@ impl From<ExecuteError> for ArkError {
     }
 }
 
+/// Build a `reqwest::Client` that honours the policy's transport settings.
+///
+/// This is the single place transport is configured, so proxy/TLS policy cannot
+/// drift between the plugin bus and host-internal callers (model and model
+/// catalog clients) that inject the returned client. `client_timeout` is a
+/// client-level cap on the whole request including body read; streaming callers
+/// (SSE model responses) must pass `None` and bound individual phases instead.
+pub fn transport_client(
+    policy: &HttpPolicy,
+    user_agent: &str,
+    client_timeout: Option<std::time::Duration>,
+) -> Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .danger_accept_invalid_certs(policy.accept_invalid_certs)
+        .pool_max_idle_per_host(8)
+        .user_agent(user_agent);
+    if let Some(timeout) = client_timeout {
+        builder = builder.timeout(timeout);
+    }
+    if let Some(proxy) = policy.proxy.as_deref().filter(|p| !p.trim().is_empty()) {
+        builder = builder.proxy(reqwest::Proxy::all(proxy).map_err(|err| {
+            ArkError::validation(format!("invalid proxy: {err}")).with_detail("invalid_url")
+        })?);
+    }
+    builder
+        .build()
+        .map_err(|err| ArkError::internal(format!("failed to build http client: {err}")))
+}
+
 /// Wrapper around the shared client with bounded body reads.
 pub struct Executor {
     client: reqwest::Client,
@@ -52,20 +82,13 @@ pub struct Executor {
 impl Executor {
     /// Build the one client for the bus.
     pub fn new(policy: HttpPolicy) -> Result<Self> {
-        let mut builder = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(std::time::Duration::from_millis(policy.max_timeout_ms))
-            .danger_accept_invalid_certs(policy.accept_invalid_certs)
-            .pool_max_idle_per_host(8)
-            .user_agent("ark-plugin/bus");
-        if let Some(proxy) = policy.proxy.as_deref().filter(|p| !p.trim().is_empty()) {
-            builder = builder.proxy(reqwest::Proxy::all(proxy).map_err(|err| {
-                ArkError::validation(format!("invalid proxy: {err}")).with_detail("invalid_url")
-            })?);
-        }
-        let client = builder
-            .build()
-            .map_err(|err| ArkError::internal(format!("failed to build http client: {err}")))?;
+        // The bus enforces a total body cap per request, so a client-level
+        // timeout is safe here (unlike the streaming model path).
+        let client = transport_client(
+            &policy,
+            "ark-plugin/bus",
+            Some(std::time::Duration::from_millis(policy.max_timeout_ms)),
+        )?;
         Ok(Self { client, policy })
     }
 

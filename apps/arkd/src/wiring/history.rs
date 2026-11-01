@@ -27,10 +27,13 @@ pub(super) fn conversation_history(items: &[ark_contract::ThreadItem]) -> Vec<Mo
                 }
             }
             ark_contract::item::ItemKind::Notice => {
+                // Checkpoints also render as "[context checkpoint: ...]" variants
+                // (no facts / truncated); the match must cover the whole family
+                // or those turns silently lose their persisted context.
                 if let Some(text) = item
                     .text
                     .as_deref()
-                    .filter(|text| text.starts_with("[context checkpoint]"))
+                    .filter(|text| text.starts_with("[context checkpoint"))
                 {
                     history.push(ModelMessage::system(text));
                 }

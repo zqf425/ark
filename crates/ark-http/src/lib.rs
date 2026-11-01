@@ -31,6 +31,6 @@ pub use domain::{
     HttpDiagnostic, HttpDiagnosticSink, MemoryDiagnostics,
 };
 pub use service::{
-    denial_reason, prepare, CredentialVault, EgressGrant, EgressRegistry, ExecuteError, Executor,
-    HttpBus, HttpBusBuilder, Prepared,
+    denial_reason, prepare, transport_client, CredentialVault, EgressGrant, EgressRegistry,
+    ExecuteError, Executor, HttpBus, HttpBusBuilder, Prepared,
 };

@@ -907,7 +907,10 @@ mod tests {
         assert!(registry.cancel_active(thread, turn).is_none());
         assert!(registry.steering_for(turn).is_none());
         assert!(registry.active_for(thread).is_none());
-        assert_eq!(registry.get(turn).expect("still retained").state, "completed");
+        assert_eq!(
+            registry.get(turn).expect("still retained").state,
+            "completed"
+        );
     }
 
     #[test]

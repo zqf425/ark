@@ -39,18 +39,10 @@ impl Default for ParallelPolicy {
     /// classified as mutating on purpose.
     fn default() -> Self {
         Self {
-            read_only: [
-                "read",
-                "grep",
-                "find",
-                "ls",
-                "glob",
-                "web_fetch",
-                "web_search",
-            ]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
+            read_only: ["read", "grep", "find", "ls", "web_fetch"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
         }
     }
 }

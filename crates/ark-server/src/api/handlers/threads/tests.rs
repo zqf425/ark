@@ -257,14 +257,16 @@ async fn list_without_query_stays_compatible() {
     let dir = test_dir("compat");
     let data_dir = dir.path().to_path_buf();
     let state = state(&data_dir);
-    seed_threads(&state, 5).await;
+    // More than THREAD_PAGE_DEFAULT_LIMIT: an absent `limit` must keep listing
+    // every thread, not silently truncate to the page default.
+    seed_threads(&state, 55).await;
 
     let summaries = list_response(state.clone(), ThreadListQuery::default()).await;
 
-    assert_eq!(summaries.len(), 5);
+    assert_eq!(summaries.len(), 55);
     // Deterministic order: active first, then most recently updated, so
     // the newest active thread (seeded last, even index) leads.
-    assert_eq!(summaries[0].title, "thread-04");
+    assert_eq!(summaries[0].title, "thread-54");
 }
 
 #[tokio::test]

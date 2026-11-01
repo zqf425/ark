@@ -77,17 +77,23 @@ impl PluginRuntime {
     /// register contributes nothing here. `replace_group` takes the whole group,
     /// so the caller passes external MCP adapters alongside these.
     pub fn tools(&self) -> Vec<Arc<dyn Tool>> {
-        self.mcp
-            .catalog()
-            .tools
-            .into_iter()
-            .filter_map(|spec| {
-                PluginTool::new(
-                    Arc::clone(&self.mcp),
-                    &spec.plugin_id,
-                    &spec.tool,
-                    spec.schema,
-                )
+        plugin_tools(&self.mcp)
+    }
+
+    /// Where plugins were read from.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+}
+
+/// Adapt the bus catalog into model tools. One host for the conversion so the
+/// startup merge and the MCP adapter's re-discovery cannot drift apart.
+pub fn plugin_tools(mcp: &Arc<McpBus>) -> Vec<Arc<dyn Tool>> {
+    mcp.catalog()
+        .tools
+        .into_iter()
+        .filter_map(|spec| {
+            PluginTool::new(Arc::clone(mcp), &spec.plugin_id, &spec.tool, spec.schema)
                 .map(|tool| Arc::new(tool) as Arc<dyn Tool>)
                 .map_err(|err| {
                     // A spec the bus accepted but the adapter rejects would be a
@@ -101,14 +107,8 @@ impl PluginRuntime {
                     );
                 })
                 .ok()
-            })
-            .collect()
-    }
-
-    /// Where plugins were read from.
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
+        })
+        .collect()
 }
 
 /// Build the HTTP egress bus and the plugin host rooted at `<data_dir>/plugins`.

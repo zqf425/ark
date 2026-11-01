@@ -133,7 +133,10 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     //
     // Built here and only here. Each store owns its own file under `data_dir`,
     // and the HTTP layer sees them through the `ark-ports` traits below.
-    let providers = Arc::new(ark_provider::ProviderStore::new(args.data_dir.clone()));
+    let providers = Arc::new(ark_provider::ProviderStore::with_catalog_client(
+        args.data_dir.clone(),
+        ark_llm::ModelCatalogClient::new(crate::model::governed_transport()),
+    ));
     let skills = Arc::new(ark_skills::SkillRuntime::new(
         ark_skills::SkillsConfig::default(),
         roots.current(),
@@ -293,6 +296,10 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         .with_mcp(Arc::new(McpServerAdapter::new(
             Arc::clone(&mcp),
             Arc::clone(&tools),
+            {
+                let plugin_mcp = Arc::clone(&plugin_mcp);
+                Arc::new(move || crate::plugin_host::plugin_tools(&plugin_mcp))
+            },
         )))
         .with_memory(Arc::new(MemoryAdapter::new(Arc::clone(&memory))))
         .with_ui(Arc::clone(&ui_bus) as Arc<dyn ark_ports::UiCapability>)
