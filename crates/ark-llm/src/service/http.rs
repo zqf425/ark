@@ -247,6 +247,7 @@ impl HttpModelClient {
                     status.as_u16()
                 ),
             )
+            .with_upstream_status(status.as_u16())
             .with_detail(summary),
             published: false,
             retry_after,

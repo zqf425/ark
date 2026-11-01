@@ -92,7 +92,7 @@ fn failure(
         .map(|body| scrub_secret(&bounded_body(body), secret))
         .unwrap_or_default();
 
-    if let Some(status) = http_status(&message) {
+    if let Some(status) = error.upstream_status {
         let body = if detail.is_empty() {
             String::new()
         } else {
@@ -147,26 +147,6 @@ fn bounded_body(body: &str) -> String {
     truncate_utf8(body.trim(), PROBE_BODY_LIMIT).to_string()
 }
 
-/// Extract `with HTTP <code>` from a model-client error message.
-///
-/// `ark_llm::HttpModelClient` reports a non-2xx status inside its error message
-/// rather than as a typed field, so the probe reads it back out. Only the trailer
-/// after the *last* marker is considered, and digits must follow immediately.
-pub fn http_status(message: &str) -> Option<u16> {
-    let tail = message.rsplit("with HTTP ").next()?;
-    if std::ptr::eq(tail, message) {
-        return None;
-    }
-    let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
-    if digits.is_empty() {
-        return None;
-    }
-    digits
-        .parse::<u16>()
-        .ok()
-        .filter(|code| (100..600).contains(code))
-}
-
 /// Build the "cannot probe" response used when a request never reaches the wire
 /// (missing key, unknown provider, invalid draft).
 pub fn unusable(message: impl Into<String>, request_url: Option<String>) -> ProviderTestResponse {
@@ -192,19 +172,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_status_is_read_back_from_the_client_message() {
-        let message =
-            "model request failed for p m at https://x.local/v1/chat/completions with HTTP 404";
-        assert_eq!(http_status(message), Some(404));
-        let message = "model request failed for p m at https://x.local/v1 with HTTP 429";
-        assert_eq!(http_status(message), Some(429));
-    }
+    fn the_status_is_read_from_the_typed_field_not_the_message() {
+        // The client reports the upstream status as data; the message wording
+        // is for humans and must never be parsed back.
+        let error = ArkError::model("model request failed ...").with_upstream_status(404);
+        let response = failure(&error, 10, "https://x.local/v1".into(), "sk-secret");
+        assert!(!response.ok);
+        assert_eq!(response.status, Some(404));
 
-    #[test]
-    fn a_message_without_a_status_yields_none() {
-        assert_eq!(http_status("model stream broke: connection reset"), None);
-        assert_eq!(http_status("with HTTP abc"), None);
-        assert_eq!(http_status("with HTTP 999"), None);
+        let mut no_status = ArkError::model("model request failed ...");
+        no_status.upstream_status = None;
+        let response = failure(&no_status, 10, "https://x.local/v1".into(), "sk-secret");
+        assert_eq!(response.status, None);
     }
 
     #[test]
@@ -237,9 +216,9 @@ mod tests {
     #[test]
     fn a_non_2xx_body_is_truncated_and_scrubbed() {
         let body = format!("{} sk-secret-tail", "x".repeat(900));
-        let error =
-            ArkError::model("model request failed for p m at https://x.local/v1 with HTTP 401")
-                .with_detail(body);
+        let error = ArkError::model("model request failed for p m at https://x.local/v1")
+            .with_upstream_status(401)
+            .with_detail(body);
         let response = failure(&error, 3, "https://x.local/v1".into(), "sk-secret-tail");
         assert_eq!(response.status, Some(401));
         assert!(
@@ -258,8 +237,8 @@ mod tests {
 
     #[test]
     fn an_error_without_a_body_still_explains_itself() {
-        let error =
-            ArkError::model("model request failed for p m at https://x.local/v1 with HTTP 500");
+        let error = ArkError::model("model request failed for p m at https://x.local/v1")
+            .with_upstream_status(500);
         let response = failure(&error, 3, "https://x.local/v1".into(), "");
         assert!(
             response.message.contains("no response body"),
