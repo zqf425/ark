@@ -149,4 +149,7 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
 打开对应会话)、全局开关、节奏摘要纯函数、i18n 中英资源与回归测试(web 136 用例全绿,
 typecheck 与硬规则通过)。
 
-尚未实现:端到端真实模型验收(发布验收承接)。
+端到端真实模型验收:API 与运行时层已于 2026-11-02 完成(一次性 `at` 任务到点自动建线程并
+以真实模型完成回合,`last_run`/`history` 投影正确,见
+[发布收尾与真实环境验收](release-readiness.md) 验收记录);设置页 GUI 的真实浏览器验收未执行
+(本机为 macOS,Windows 交付路径不可执行),由发布验收继续承接。
