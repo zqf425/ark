@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { describeError } from '../../../shared/api/error-describe'
 import { translateNow } from '../../../shared/i18n/current'
 import type { ChildRunListResponse } from '../../../shared/contracts'
@@ -19,11 +19,51 @@ export function ChildRunsPanel({ threadId }: { threadId: string }): JSX.Element 
   const toast = useToast()
   const [data, setData] = useState<ChildRunListResponse | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const refresh = (): void => { void listChildRuns(threadId).then(setData).catch((error) => toast.push('error', t('canvas.childRuns.loadFailed'), describe(error))) }
+  /**
+   * Which thread the rows and the newest list request belong to. Bookkeeping,
+   * never render input: the panel stays mounted across thread switches while its
+   * rows are per-thread, so "these rows are A's" has to be an explicit fact.
+   */
+  const [rowsFor, setRowsFor] = useState(threadId)
+  const latestLoad = useRef<{ threadId: string; ticket: number }>({ threadId, ticket: 0 })
+
+  // Switching threads drops the previous thread's rows in the same commit, and
+  // the thread change in `latestLoad` invalidates every request still in flight
+  // for it.
+  if (rowsFor !== threadId) {
+    setRowsFor(threadId)
+    setData(null)
+    setBusy(null)
+    latestLoad.current = { threadId, ticket: latestLoad.current.ticket + 1 }
+  }
+
+  /**
+   * One list request. A response paints only while it is still the newest
+   * request for the thread on screen: the effect load and a post-action
+   * `refresh()` can otherwise resolve out of order, and the previous thread's
+   * rows must never reappear over the current one.
+   */
+  const load = (signal?: AbortSignal, onError?: (error: unknown) => void): void => {
+    const ticket = latestLoad.current.ticket + 1
+    latestLoad.current = { threadId, ticket }
+    const isCurrent = (): boolean => !signal?.aborted && latestLoad.current.threadId === threadId && latestLoad.current.ticket === ticket
+    void listChildRuns(threadId, signal).then((next) => {
+      if (!isCurrent()) return
+      setData(next)
+    }).catch((error: unknown) => {
+      if (!isCurrent()) return
+      setData(null)
+      onError?.(error)
+    })
+  }
+
+  const refresh = (): void => {
+    load(undefined, (error) => toast.push('error', t('canvas.childRuns.loadFailed'), describe(error)))
+  }
 
   useEffect(() => {
     const controller = new AbortController()
-    void listChildRuns(threadId, controller.signal).then(setData).catch(() => undefined)
+    load(controller.signal)
     return () => controller.abort()
   }, [threadId, childRunRevision])
 
