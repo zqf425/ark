@@ -2,6 +2,8 @@ import type {
   ArkErrorCode,
   ChildCompletionNotice,
   ItemId,
+  PendingApprovalView,
+  PendingUserInputView,
   ThreadId,
   ThreadItem,
   ThreadSummary,
@@ -23,23 +25,17 @@ export type ErrorLine = {
 /**
  * Gates are the "few control events" the renderer is still allowed to read
  * (design §7.10.3): they carry the id the user must answer with.
+ *
+ * Derived from the generated contract views so a field added on the Rust side
+ * fails `tsc` here instead of being silently dropped.
  */
-export type PendingApproval = {
-  approval_id: string
-  turn_id: TurnId
-  tool: string
-  summary: string
+export type PendingApproval = PendingApprovalView & {
   status: 'pending' | 'approved' | 'rejected'
-  requested_at: string
 }
 
-export type PendingUserInput = {
-  request_id: string
-  turn_id: TurnId
-  prompt: string
+export type PendingUserInput = PendingUserInputView & {
   status: 'pending' | 'answered'
   answer?: string
-  requested_at: string
 }
 
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'

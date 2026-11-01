@@ -6,6 +6,7 @@
  * under `features/<x>/api` compose these primitives.
  */
 import type { ArkErrorCode } from '../contracts'
+import { ARK_ERROR_CODES } from '../contracts'
 import { translateNow } from '../i18n/current'
 
 const TOKEN_STORAGE_KEY = 'ark_token'
@@ -103,7 +104,13 @@ export async function toApiError(response: Response): Promise<ApiError> {
   }
   if (raw && typeof raw === 'object') {
     const body = raw as { code?: unknown; message?: unknown; detail?: unknown }
-    const code = typeof body.code === 'string' ? (body.code as ArkErrorCode) : 'unknown'
+    // An unknown code must not masquerade as a legal enum member: the wire is
+    // Rust-owned, so a string outside the generated union is a version skew
+    // the caller should see as 'unknown'.
+    const code =
+      typeof body.code === 'string' && ARK_ERROR_CODES.has(body.code)
+        ? (body.code as ArkErrorCode)
+        : 'unknown'
     const message = typeof body.message === 'string' ? body.message : fallback
     const detail = typeof body.detail === 'string' ? body.detail : undefined
     return new ApiError({ status: response.status, code, message, ...(detail ? { detail } : {}) })
