@@ -6,7 +6,8 @@
 //! runtime aborts/steers through it — and a trait would force the executor to
 //! downcast or bridge-copy between two objects wrapping one signal.
 
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
 
@@ -145,10 +146,50 @@ mod tests {
             .await
             .is_err());
     }
-}
 
-use std::collections::VecDeque;
-use std::sync::Mutex;
+    #[test]
+    fn drains_in_arrival_order() {
+        let queue = SteerQueue::new();
+        assert!(queue.push("first"));
+        assert!(queue.push("second"));
+        assert_eq!(queue.drain(), vec!["first", "second"]);
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn blank_text_is_rejected() {
+        let queue = SteerQueue::new();
+        assert!(!queue.push("   "));
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn a_full_queue_reports_instead_of_dropping_silently() {
+        let queue = SteerQueue::with_capacity(1);
+        assert!(queue.push("a"));
+        assert!(!queue.push("b"), "the caller must learn the queue is full");
+        assert_eq!(queue.len(), 1);
+    }
+
+    #[test]
+    fn concurrent_pushes_all_survive() {
+        let queue = std::sync::Arc::new(SteerQueue::with_capacity(64));
+        let mut handles = Vec::new();
+        for index in 0..8 {
+            let queue = std::sync::Arc::clone(&queue);
+            handles.push(std::thread::spawn(move || {
+                for round in 0..4 {
+                    queue.push(format!("{index}-{round}"));
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(queue.len(), 32);
+        assert_eq!(queue.drain().len(), 32);
+    }
+}
 
 /// A bounded queue of steering texts for one turn.
 ///
@@ -211,53 +252,5 @@ impl SteerQueue {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-}
-
-#[cfg(test)]
-mod steer_tests {
-    use super::*;
-
-    #[test]
-    fn drains_in_arrival_order() {
-        let queue = SteerQueue::new();
-        assert!(queue.push("first"));
-        assert!(queue.push("second"));
-        assert_eq!(queue.drain(), vec!["first", "second"]);
-        assert!(queue.is_empty());
-    }
-
-    #[test]
-    fn blank_text_is_rejected() {
-        let queue = SteerQueue::new();
-        assert!(!queue.push("   "));
-        assert!(queue.is_empty());
-    }
-
-    #[test]
-    fn a_full_queue_reports_instead_of_dropping_silently() {
-        let queue = SteerQueue::with_capacity(1);
-        assert!(queue.push("a"));
-        assert!(!queue.push("b"), "the caller must learn the queue is full");
-        assert_eq!(queue.len(), 1);
-    }
-
-    #[test]
-    fn concurrent_pushes_all_survive() {
-        let queue = std::sync::Arc::new(SteerQueue::with_capacity(64));
-        let mut handles = Vec::new();
-        for index in 0..8 {
-            let queue = std::sync::Arc::clone(&queue);
-            handles.push(std::thread::spawn(move || {
-                for round in 0..4 {
-                    queue.push(format!("{index}-{round}"));
-                }
-            }));
-        }
-        for handle in handles {
-            handle.join().unwrap();
-        }
-        assert_eq!(queue.len(), 32);
-        assert_eq!(queue.drain().len(), 32);
     }
 }

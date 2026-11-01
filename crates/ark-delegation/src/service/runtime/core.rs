@@ -212,7 +212,7 @@ impl RuntimeCore {
                     return Err(err);
                 }
             },
-            _ = async { cancel_for_wait.cancelled().await } => {
+            _ = cancel_for_wait.cancelled() => {
                 self.lock_handles().remove(&child);
                 let aborted = self
                     .finish(

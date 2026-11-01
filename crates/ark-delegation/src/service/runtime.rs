@@ -59,6 +59,9 @@ pub trait ChildTurnExecutor: Send + Sync {
 pub struct RunningChild {
     pub child_id: ChildId,
     pub parent_thread_id: ThreadId,
+    /// Same object the child reactor awaits: the runtime trips it, the reactor
+    /// only reads it. Nothing inside the reactor may call `cancel()`, or an
+    /// in-turn abort would surface as a runtime-requested cancellation here.
     cancel: Arc<CancelToken>,
     steer: Arc<SteerQueue>,
 }
