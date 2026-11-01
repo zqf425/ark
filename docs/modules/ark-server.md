@@ -101,9 +101,9 @@
 它只拥有**循环**与**结果折叠**,节奏数学仍在 `ark-schedule`:
 
 - `spawn` 先 `reconcile` 再进入 tick 循环,`TICK_INTERVAL` 为 30 秒;headless `run` 经同一装配
-  也会启动循环,一次性回合期间到期的任务同样触发。
-  已知边界:`config.schedules.enabled` 关闭时 `reconcile` 与 tick 一同空转,上个进程崩溃遗留的
-  `running` 标记在开关重新打开前不会收敛,设置页会一直显示运行中。循环退出有两条路径:
+  也会启动循环,一次性回合期间到期的任务同样触发。总开关只门控触发(`tick`/`run_now`),
+  `reconcile` 的修复(`running`→`aborted`、misfire→`skipped`)不受开关影响——否则开关关闭期间
+  崩溃遗留的 `running` 会一直在设置页显示运行中。循环退出有两条路径:
   `/v1/shutdown` 的广播,以及 `Ctrl-C`/drain 只置标志位的路径——后者靠每轮循环顶部的
   `is_shutting_down()` 检查收敛,最多晚一个 tick,不需要额外的唤醒通道。
 - `tick` 把每个任务分类为 `NotDue`/`Due`/`Misfire`(`MISFIRE_GRACE_SECS` 为 300 秒)。

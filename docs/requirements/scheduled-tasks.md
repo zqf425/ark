@@ -59,8 +59,8 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
 
 1. 调度循环随 arkd serve 与 headless `run` 启动(经同一 `wiring::build` 装配,一次性 headless
    回合期间到期的任务同样会触发),tick 间隔 30s;单次 tick 串行执行所有到期任务(不并发,v1)。
-   已知边界:`config.schedules.enabled` 关闭时 `reconcile` 与 tick 一同空转,上个进程崩溃遗留的
-   `running` 标记在开关重新打开前不会收敛,设置页会一直显示运行中。
+   不变式:总开关 `config.schedules.enabled` 只门控**触发**(`tick`/`run_now`),不门控**修复**——
+   `reconcile` 的崩溃遗留收敛(`running`→`aborted`、misfire→`skipped`)不受开关影响,启动时一律执行。
 2. 到期判定:`enabled && next_run_at <= now`;执行后立刻按节奏计算下一次 `next_run_at`
    (interval 从本次执行完成时刻起算,与 smart-ark 一致)。
 3. **执行 = 新线程 + 真实回合**:复用 `start_turn` 的注册/冲突/文本上限/workspace_gate 全部
