@@ -18,6 +18,13 @@ pub enum ArkErrorCode {
     StoreFailure,
     NotImplemented,
     InternalError,
+    /// Declared MIME contradicts the bytes actually uploaded.
+    MimeMismatch,
+    /// The attachment is referenced by a thread event stream, so deleting it
+    /// would break a replayable association.
+    AttachmentInUse,
+    /// A turn referenced an attachment that was never associated with its thread.
+    AttachmentNotAssociated,
 }
 
 impl ArkErrorCode {
@@ -35,6 +42,9 @@ impl ArkErrorCode {
             ArkErrorCode::StoreFailure => 500,
             ArkErrorCode::NotImplemented => 501,
             ArkErrorCode::InternalError => 500,
+            ArkErrorCode::MimeMismatch => 422,
+            ArkErrorCode::AttachmentInUse => 409,
+            ArkErrorCode::AttachmentNotAssociated => 404,
         }
     }
 }

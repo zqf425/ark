@@ -141,6 +141,9 @@ pub(crate) async fn load_detail(
         items,
         child_ids,
         child_completions,
+        // Projected from this thread's own log, so a resume and a plain read
+        // cannot disagree about which attachments the thread may reference.
+        attachment_ids: crate::service::thread_attachment_ids(state, thread_id).await?,
         runtime: meta.runtime,
         runtime_snapshot: project_runtime_snapshot(
             state.turns.active_for(thread_id),

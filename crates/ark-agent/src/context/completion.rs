@@ -235,6 +235,7 @@ mod delivery_bound_tests {
             turn_id: TurnId::new(),
             timestamp: Utc::now(),
             auto_continuation: true,
+            attachment_ids: Vec::new(),
         }
     }
 
@@ -262,6 +263,7 @@ mod delivery_bound_tests {
                 turn_id: TurnId::new(),
                 timestamp: Utc::now(),
                 auto_continuation: false,
+                attachment_ids: Vec::new(),
             },
         ];
         assert_eq!(*auto_delivery_attempts(&events).get("n1").unwrap(), 0);

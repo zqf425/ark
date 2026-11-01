@@ -27,6 +27,17 @@
 所以崩溃留下的临时文件或已删除条目不会被暴露。`AttachmentId` 是 UUID newtype，文件路径只由该
 服务端生成 ID 组成，绝不拼接客户端路径。
 
+上传时同时计算 SHA-256 并写入元数据的 `sha256` 字段；该字段仅用于完整性与后续去重，路径仍是
+UUID（不做内容寻址，避免迁移）。声明了 `mime_type` 的上传会拿前 16 字节做魔法数一致性校验，
+覆盖 png/jpeg/gif/webp/pdf，不匹配返回 `mime_mismatch`；未声明或无法识别的类型跳过该校验。
+
+**关联不进存储**: 线程与附件的授权关系**只**由线程事件流中的 `attachment_associated` 事件表达，
+不新增第二张关联表。`WriterState::attachment_events` 提供只包含该事件的窄投影，
+`SessionStore::replay_attachment_events` 将其暴露给边界层，重启后回放即可恢复同一授权集合。压缩时
+这些事件被当作必须保留的锚点（`retention_safe_keep_last`），否则一次容量压缩会静默丢授权。
+`diagnostics` 接收调用方投影出的关联集合，带 `orphan_count`（已存活 30 天以上且无关联的条目数，
+仅上报，不自动回收）。
+
 ```text
 data/threads/<thread>/
 ├── thread.json                 # 线程元数据

@@ -25,9 +25,13 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(crate::api::handlers::health::health))
         .with_state(state.clone());
 
-    let protected = protected_routes().merge(attachment_routes(&state)).layer(
-        axum::middleware::from_fn_with_state(state.clone(), require_token),
-    );
+    let protected = protected_routes()
+        .merge(attachment_routes(&state))
+        .merge(thread_attachment_routes())
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_token,
+        ));
 
     open.merge(protected)
         .layer(desktop_cors())
@@ -61,7 +65,8 @@ fn attachment_routes(state: &AppState) -> Router<AppState> {
     upload
         .route(
             "/v1/attachments/{id}",
-            get(crate::api::handlers::attachments::get),
+            get(crate::api::handlers::attachments::get)
+                .delete(crate::api::handlers::attachments::remove),
         )
         .route(
             "/v1/attachments/{id}/content",
@@ -71,6 +76,18 @@ fn attachment_routes(state: &AppState) -> Router<AppState> {
             "/v1/attachments/diagnostics",
             get(crate::api::handlers::attachments::diagnostics),
         )
+}
+
+/// Thread-scoped attachment routes.
+///
+/// Association is the authorization edge for later turns, so it is mounted on
+/// the thread path: the URL itself states which thread gains the permission,
+/// and the handler cannot be talked into authorizing a different one.
+fn thread_attachment_routes() -> Router<AppState> {
+    Router::new().route(
+        "/v1/threads/{id}/attachments",
+        post(crate::api::handlers::attachments::associate),
+    )
 }
 
 /// Allow only the native shell origins to call the loopback runtime directly.

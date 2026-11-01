@@ -43,6 +43,9 @@ pub enum WriterCmd {
     InteractionEvents {
         reply: oneshot::Sender<Vec<RuntimeEvent>>,
     },
+    AttachmentEvents {
+        reply: oneshot::Sender<Vec<RuntimeEvent>>,
+    },
     Events {
         reply: oneshot::Sender<Vec<RuntimeEvent>>,
     },
@@ -130,6 +133,13 @@ impl WriterHandle {
     pub async fn interaction_events(&self) -> Result<Vec<RuntimeEvent>> {
         let (reply, rx) = oneshot::channel();
         self.send(WriterCmd::InteractionEvents { reply })?;
+        rx.await.map_err(|_| self.closed())
+    }
+
+    /// Reads only attachment association records from this writer.
+    pub async fn attachment_events(&self) -> Result<Vec<RuntimeEvent>> {
+        let (reply, rx) = oneshot::channel();
+        self.send(WriterCmd::AttachmentEvents { reply })?;
         rx.await.map_err(|_| self.closed())
     }
 
@@ -222,6 +232,9 @@ async fn run(mut state: WriterState, mut rx: mpsc::Receiver<WriterCmd>) {
             }
             WriterCmd::InteractionEvents { reply } => {
                 let _ = reply.send(state.interaction_events());
+            }
+            WriterCmd::AttachmentEvents { reply } => {
+                let _ = reply.send(state.attachment_events());
             }
             WriterCmd::Events { reply } => {
                 let _ = reply.send(state.events().to_vec());

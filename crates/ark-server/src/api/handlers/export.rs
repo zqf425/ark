@@ -142,6 +142,7 @@ mod tests {
                     turn_id: ark_common::TurnId::new(),
                     timestamp: Utc::now(),
                     auto_continuation: false,
+                    attachment_ids: Vec::new(),
                 },
             )
             .await

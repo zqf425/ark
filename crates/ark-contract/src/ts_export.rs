@@ -22,9 +22,10 @@ use ts_rs::TS;
 
 use crate::item::{ItemKind, ToolPayload};
 use crate::{
-    ApplyResult, AttachmentDiagnostics, AttachmentEntry, AttachmentUploadRequest,
-    AttachmentUploadResponse, CapabilitiesResponse, ChildCompletionNotice, ChildRunActionResult,
-    ChildRunAggregates, ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
+    ApplyResult, AttachmentAssociationRequest, AttachmentAssociationResponse,
+    AttachmentDiagnostics, AttachmentEntry, AttachmentUploadRequest, AttachmentUploadResponse,
+    CapabilitiesResponse, ChildCompletionNotice, ChildRunActionResult, ChildRunAggregates,
+    ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
     CreateMemoryRequest, CreateThreadRequest, EventKind, FieldPath, FilePreview, GoalRequest,
     HealthResponse, ItemStatus, LlmRound, LlmRoundError, LlmRoundsResponse, McpServerEntry,
     McpServerListResponse, McpServerTestResponse, McpServerView, McpTransportKind,
@@ -114,6 +115,8 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     AttachmentUploadRequest::export_all_to(dir)?;
     AttachmentUploadResponse::export_all_to(dir)?;
     AttachmentDiagnostics::export_all_to(dir)?;
+    AttachmentAssociationRequest::export_all_to(dir)?;
+    AttachmentAssociationResponse::export_all_to(dir)?;
 
     // ---- long-term memory ----
     MemoryEntry::export_all_to(dir)?;

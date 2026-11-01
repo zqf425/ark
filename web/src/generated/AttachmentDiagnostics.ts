@@ -3,4 +3,9 @@
 /**
  * Storage usage returned by `GET /v1/attachments/diagnostics`.
  */
-export type AttachmentDiagnostics = { storage_path: string, entry_count: number, total_bytes: number, };
+export type AttachmentDiagnostics = { storage_path: string, entry_count: number, total_bytes: number, 
+/**
+ * Surviving attachments that no thread associated and that are older than
+ * the orphan threshold. Reported only; automatic collection is undecided.
+ */
+orphan_count: number, };

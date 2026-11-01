@@ -228,6 +228,7 @@ mod tests {
                 turn_id: retained_turn,
                 timestamp: Utc::now(),
                 auto_continuation: false,
+                attachment_ids: Vec::new(),
             },
             RuntimeEvent::ItemCreated {
                 seq: 0,
@@ -250,6 +251,7 @@ mod tests {
                 turn_id: discarded_turn,
                 timestamp: Utc::now(),
                 auto_continuation: false,
+                attachment_ids: Vec::new(),
             },
             RuntimeEvent::ItemCreated {
                 seq: 0,

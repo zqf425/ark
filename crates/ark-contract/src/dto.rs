@@ -143,6 +143,13 @@ pub struct ThreadDetail {
     pub child_ids: Vec<ark_common::ChildId>,
     #[serde(default)]
     pub child_completions: Vec<ChildCompletionNotice>,
+    /// Attachments authorized for this thread, projected from
+    /// `attachment_associated` events.
+    ///
+    /// A projection, not a second store: replay after a restart reproduces the
+    /// same set, and a rewind that drops the association event drops the entry.
+    #[serde(default)]
+    pub attachment_ids: Vec<ark_common::AttachmentId>,
     /// Stored per-thread overrides, exactly as `PATCH` merged them last time.
     ///
     /// Omitted fields mean no override is stored for that field, so the next
@@ -186,10 +193,17 @@ pub struct PendingUserInputView {
 }
 
 /// `POST /v1/threads/{id}/turns`.
-#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+///
+/// `attachment_ids` is optional and additive. The runtime validates that every
+/// id was already associated with *this* thread before the turn starts; the
+/// first phase records which attachments the turn referenced and does not send
+/// bytes to the model (multimodal delivery is a separate phase).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct TurnRequest {
     pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachment_ids: Vec<ark_common::AttachmentId>,
 }
 
 /// `POST /v1/threads/{id}/rewind`.

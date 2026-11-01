@@ -44,6 +44,7 @@ pub(crate) fn turn_started(thread: ThreadId, turn: TurnId, seq: u64) -> RuntimeE
         turn_id: turn,
         timestamp: chrono::Utc::now(),
         auto_continuation: false,
+        attachment_ids: Vec::new(),
     }
 }
 

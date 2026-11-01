@@ -248,7 +248,7 @@ impl ModelClient for OnceToolModel {
 async fn request_user_input_full_chain_registers_answers_and_backfills() {
     let gates = Arc::new(TrackingGates::default());
     let events = crate::exec::TurnEvents::new(ThreadId::new(), TurnId::new());
-    let writer = Arc::new(MemoryWriter::for_turn(events));
+    let writer = Arc::new(MemoryWriter::for_turn(events.clone()));
     let mut reactor = Reactor::new(ReactorConfig {
         model: Arc::new(OnceToolModel::new(
             "request_user_input",
@@ -297,7 +297,7 @@ async fn request_user_input_full_chain_registers_answers_and_backfills() {
 async fn plain_bash_call_still_dispatches_normally() {
     let gates = Arc::new(TrackingGates::default());
     let events = crate::exec::TurnEvents::new(ThreadId::new(), TurnId::new());
-    let writer = Arc::new(MemoryWriter::for_turn(events));
+    let writer = Arc::new(MemoryWriter::for_turn(events.clone()));
     let mut reactor = Reactor::new(ReactorConfig {
         model: Arc::new(OnceToolModel::new(
             "bash",

@@ -60,7 +60,10 @@ pub async fn review(
     let changes: WorkspaceChangesResponse = workbench::changes(&events);
     let prompt = review_prompt(&changes, focus.as_deref());
 
-    start_turn(&state, thread_id, prompt).await
+    // A review is a system-composed turn: its prompt already is the whole
+    // request, so it references no user attachment even when the thread has
+    // some associated.
+    start_turn(&state, thread_id, prompt, Vec::new()).await
 }
 
 /// Compose the bounded review instruction from the change projection.

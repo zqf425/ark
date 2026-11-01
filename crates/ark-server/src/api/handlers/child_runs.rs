@@ -375,6 +375,9 @@ pub async fn thread(
         items,
         child_ids: Vec::new(),
         child_completions: Vec::new(),
+        // A child run reads its own thread log, so this mirrors the parent
+        // detail projection instead of inventing a second authorization rule.
+        attachment_ids: crate::service::thread_attachment_ids(&state, thread_id).await?,
         runtime: meta.runtime,
         runtime_snapshot: ark_contract::ThreadRuntimeSnapshot::default(),
     }))

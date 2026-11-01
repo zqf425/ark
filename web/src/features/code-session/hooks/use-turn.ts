@@ -40,7 +40,10 @@ export function useTurn(threadId: string | null): TurnApi {
       setSending(true)
       setCommandError(null)
       try {
-        await startTurn(threadId, { text: trimmed })
+        // The first phase never sends attachment bytes to the model, so a plain
+        // message carries an empty set; the field stays explicit because the
+        // generated type marks it required.
+        await startTurn(threadId, { text: trimmed, attachment_ids: [] })
         return true
       } catch (error) {
         setCommandError(describe(error))

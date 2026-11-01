@@ -219,6 +219,12 @@ impl SessionStore for FileSessionStore {
         writer.interaction_events().await
     }
 
+    async fn replay_attachment_events(&self, thread: ThreadId) -> Result<Vec<RuntimeEvent>> {
+        let paths = self.resolve_paths(thread);
+        let writer = self.registry.writer_for(thread, &paths)?;
+        writer.attachment_events().await
+    }
+
     async fn highest_seq(&self, thread: ThreadId) -> Result<u64> {
         let paths = self.resolve_paths(thread);
         let writer = self.registry.writer_for(thread, &paths)?;

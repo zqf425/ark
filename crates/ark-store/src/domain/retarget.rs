@@ -43,6 +43,7 @@ mod tests {
             turn_id: turn,
             timestamp: now,
             auto_continuation: false,
+            attachment_ids: Vec::new(),
         };
         let retargeted = retarget_event(&event, target);
         assert_eq!(retargeted.thread_id(), target);

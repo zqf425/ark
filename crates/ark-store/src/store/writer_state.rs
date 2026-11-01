@@ -204,11 +204,24 @@ impl WriterState {
             .collect()
     }
 
+    /// Attachment association entries only, in durable log order.
+    ///
+    /// Thread detail, the turn-start authorization check and the delete guard all
+    /// need exactly this vocabulary. A narrow projection keeps those reads
+    /// proportional to the number of associations instead of the transcript.
+    pub fn attachment_events(&self) -> Vec<RuntimeEvent> {
+        self.events
+            .iter()
+            .filter(|event| matches!(event, RuntimeEvent::AttachmentAssociated { .. }))
+            .cloned()
+            .collect()
+    }
+
     /// Fold the oldest events into a declared hole, keeping `keep_last` recent.
     ///
     /// Returns the last folded `seq`, i.e. where the hole ends.
     pub fn compact(&mut self, keep_last: usize) -> Result<Option<u64>> {
-        let keep_last = self.completion_safe_keep_last(keep_last);
+        let keep_last = self.retention_safe_keep_last(keep_last);
         let planned = plan_compaction(&self.events, keep_last, "capacity")?;
         let Some((body, marker)) = planned else {
             return Ok(None);
@@ -317,12 +330,18 @@ impl WriterState {
         !running.is_empty()
     }
 
-    /// Increases the requested retained suffix when completion semantics need
-    /// an earlier boundary. An acknowledgement preceding a duplicate
-    /// completion must stay with that duplicate; otherwise a later replay
-    /// would turn an already-consumed notification back into an unacknowledged
-    /// one.
-    fn completion_safe_keep_last(&self, keep_last: usize) -> usize {
+    /// Increases the requested retained suffix when completion or attachment
+    /// semantics need an earlier boundary. An acknowledgement preceding a
+    /// duplicate completion must stay with that duplicate; otherwise a later
+    /// replay would turn an already-consumed notification back into an
+    /// unacknowledged one.
+    ///
+    /// Attachment associations are pinned for the same reason: compaction
+    /// rewrites the log without the folded prefix, so a folded
+    /// `attachment_associated` would silently revoke an authorization that the
+    /// design treats as replay-authoritative. Associations are rare and small,
+    /// so keeping them all costs far less than losing one.
+    fn retention_safe_keep_last(&self, keep_last: usize) -> usize {
         let acknowledgements: HashMap<&str, usize> = self
             .events
             .iter()
@@ -339,13 +358,16 @@ impl WriterState {
             });
         let mut cut = self.events.len().saturating_sub(keep_last.max(1));
         for (index, event) in self.events.iter().enumerate() {
-            if let RuntimeEvent::ChildCompleted {
-                notification_id, ..
-            } = event
-            {
-                if !acknowledgements.contains_key(notification_id.as_str()) {
-                    cut = cut.min(index);
+            match event {
+                RuntimeEvent::ChildCompleted {
+                    notification_id, ..
+                } => {
+                    if !acknowledgements.contains_key(notification_id.as_str()) {
+                        cut = cut.min(index);
+                    }
                 }
+                RuntimeEvent::AttachmentAssociated { .. } => cut = cut.min(index),
+                _ => {}
             }
         }
 
@@ -544,6 +566,7 @@ mod tests {
                 turn_id: turn,
                 timestamp: Utc::now(),
                 auto_continuation: false,
+                attachment_ids: Vec::new(),
             })
             .unwrap();
         state
@@ -625,6 +648,7 @@ mod tests {
                 turn_id: turn,
                 timestamp: Utc::now(),
                 auto_continuation: false,
+                attachment_ids: Vec::new(),
             })
             .unwrap();
 

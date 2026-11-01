@@ -582,12 +582,16 @@ impl TurnRunner for AgentTurnRunner {
         ));
         // Auto-continuations are marked on the durable `turn_started` event so
         // the per-notification delivery-attempt accounting survives restarts.
+        // The attachment ids ride the same record: the route already proved they
+        // are associated with this thread, and recording them is the audit trail
+        // that makes "which turn referenced this file" replayable.
         let events = if is_auto {
             TurnEvents::auto_continuation(job.thread_id, job.turn_id)
         } else {
             TurnEvents::new(job.thread_id, job.turn_id)
-        };
-        let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events));
+        }
+        .with_attachments(job.attachment_ids);
+        let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events.clone()));
         let tools: Arc<dyn AgentToolRunner> = Arc::new(ToolRunnerAdapter {
             inner: Arc::clone(&self.tools),
             workspace: workspace.clone(),
@@ -1354,6 +1358,7 @@ mod tests {
                     turn_id: turn,
                     timestamp: Utc::now(),
                     auto_continuation: false,
+                    attachment_ids: Vec::new(),
                 },
             )
             .await

@@ -6,4 +6,4 @@
  * The renderer must never hand-maintain a second union of these values, so the
  * enum is the single source of truth for both the wire payload and the UI.
  */
-export type ArkErrorCode = "validation_error" | "not_found" | "unauthorized" | "conflict" | "model_request_failed" | "tool_execution_failed" | "runtime_unavailable" | "store_failure" | "not_implemented" | "internal_error";
+export type ArkErrorCode = "validation_error" | "not_found" | "unauthorized" | "conflict" | "model_request_failed" | "tool_execution_failed" | "runtime_unavailable" | "store_failure" | "not_implemented" | "internal_error" | "mime_mismatch" | "attachment_in_use" | "attachment_not_associated";

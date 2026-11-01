@@ -390,6 +390,9 @@ async fn start_if_eligible(
         source: TurnSource::AutoContinuation,
         cancel,
         steering: registration.steering,
+        // A continuation is system-origin: it consumes a child-completion
+        // inbox, not a user message, so it never references attachments.
+        attachment_ids: Vec::new(),
     };
     crate::api::handlers::turns::spawn_turn(state.clone(), job);
     false

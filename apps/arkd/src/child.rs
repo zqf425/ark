@@ -208,7 +208,7 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
         let thread_id = ThreadId::from_uuid(ctx.child_id.as_uuid());
         let turn_id = TurnId::new();
         let events = TurnEvents::new(thread_id, turn_id);
-        let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events));
+        let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events.clone()));
 
         let cancel = ark_agent::CancelToken::new();
         let cancel_bridge = spawn_cancel_bridge(Arc::clone(&ctx.cancel), cancel.clone());

@@ -14,6 +14,10 @@
 `AppState`；大小上限使用存储 crate 的 `DEFAULT_MAX_ATTACHMENT_BYTES`。组合根不解析上传内容或决定
 附件路径。
 
+回合启动时，组合根把 `TurnJob.attachment_ids`（已由边界层按 `attachment_associated` 事件校验过）
+交给 `TurnEvents::with_attachments`，只写入 `turn_started` 作审计：附件字节从未进入模型种子，
+多模态传递留待第二期。关联回放不经过组合根——它由 `SessionStore` 的事件投影提供。
+
 ## 子代理装配
 
 child executor 在此复用同一个 `ark-agent::Reactor`，并桥接 cancel/steer、工具集和会话 writer。

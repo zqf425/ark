@@ -453,6 +453,7 @@ impl Harness {
                     turn_id: TurnId::new(),
                     timestamp: Utc::now(),
                     auto_continuation: true,
+                    attachment_ids: Vec::new(),
                 },
             )
             .await
@@ -469,6 +470,7 @@ impl Harness {
                     turn_id: TurnId::new(),
                     timestamp: Utc::now(),
                     auto_continuation: false,
+                    attachment_ids: Vec::new(),
                 },
             )
             .await

@@ -561,6 +561,7 @@ mod tests {
                 turn_id: turn,
                 timestamp: now,
                 auto_continuation: false,
+                attachment_ids: Vec::new(),
             },
             RuntimeEvent::Error {
                 seq: 2,

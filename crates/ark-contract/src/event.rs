@@ -71,6 +71,7 @@ pub enum EventKind {
     ChildActivity,
     ChildCompleted,
     ChildCompletionAcknowledged,
+    AttachmentAssociated,
 }
 
 impl EventKind {
@@ -123,6 +124,7 @@ impl EventKind {
             EventKind::ChildActivity => "child_activity",
             EventKind::ChildCompleted => "child_completed",
             EventKind::ChildCompletionAcknowledged => "child_completion_acknowledged",
+            EventKind::AttachmentAssociated => "attachment_associated",
         }
     }
 }
@@ -197,6 +199,14 @@ pub enum RuntimeEvent {
         /// readable; delivery-attempt accounting depends on it surviving.
         #[serde(default, skip_serializing_if = "is_false")]
         auto_continuation: bool,
+        /// Attachments this turn referenced, already authorized against the
+        /// thread by `attachment_associated` events.
+        ///
+        /// First phase records usage only: the ids are validated and journaled
+        /// but never turned into model content. Additive with a serde default so
+        /// logs written before this field existed stay readable.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachment_ids: Vec<ark_common::AttachmentId>,
     },
     TurnCompleted {
         #[ts(as = "f64")]
@@ -445,6 +455,21 @@ pub enum RuntimeEvent {
         notification_id: String,
     },
 
+    /// An attachment was authorized for one thread.
+    ///
+    /// The event log is the authoritative association source: the metadata store
+    /// keeps no second association table, so a replay after a restart restores
+    /// exactly the authorizations that were granted. Duplicate association is
+    /// absorbed here rather than by a separate projection: a thread that already
+    /// holds the association appends nothing.
+    AttachmentAssociated {
+        #[ts(as = "f64")]
+        seq: u64,
+        thread_id: ThreadId,
+        timestamp: DateTime<Utc>,
+        attachment_id: ark_common::AttachmentId,
+    },
+
     // ---- diagnostics ----
     Error {
         #[ts(as = "f64")]
@@ -573,7 +598,8 @@ impl RuntimeEvent {
             | RuntimeEvent::CompactionCompleted { seq, .. }
             | RuntimeEvent::ChildActivity { seq, .. }
             | RuntimeEvent::ChildCompleted { seq, .. }
-            | RuntimeEvent::ChildCompletionAcknowledged { seq, .. } => *seq,
+            | RuntimeEvent::ChildCompletionAcknowledged { seq, .. }
+            | RuntimeEvent::AttachmentAssociated { seq, .. } => *seq,
         }
     }
 
@@ -612,7 +638,8 @@ impl RuntimeEvent {
             | RuntimeEvent::CompactionCompleted { thread_id, .. }
             | RuntimeEvent::ChildActivity { thread_id, .. }
             | RuntimeEvent::ChildCompleted { thread_id, .. }
-            | RuntimeEvent::ChildCompletionAcknowledged { thread_id, .. } => *thread_id,
+            | RuntimeEvent::ChildCompletionAcknowledged { thread_id, .. }
+            | RuntimeEvent::AttachmentAssociated { thread_id, .. } => *thread_id,
         }
     }
 
@@ -654,6 +681,7 @@ impl RuntimeEvent {
             RuntimeEvent::ChildCompletionAcknowledged { .. } => {
                 EventKind::ChildCompletionAcknowledged
             }
+            RuntimeEvent::AttachmentAssociated { .. } => EventKind::AttachmentAssociated,
         }
     }
 
@@ -700,6 +728,7 @@ impl RuntimeEvent {
                 turn_id,
                 timestamp,
                 auto_continuation,
+                attachment_ids,
                 ..
             } => RuntimeEvent::TurnStarted {
                 seq,
@@ -707,6 +736,7 @@ impl RuntimeEvent {
                 turn_id,
                 timestamp,
                 auto_continuation,
+                attachment_ids,
             },
             RuntimeEvent::TurnCompleted {
                 thread_id,
@@ -1122,6 +1152,17 @@ impl RuntimeEvent {
                 timestamp,
                 notification_id,
             },
+            RuntimeEvent::AttachmentAssociated {
+                thread_id,
+                timestamp,
+                attachment_id,
+                ..
+            } => RuntimeEvent::AttachmentAssociated {
+                seq,
+                thread_id,
+                timestamp,
+                attachment_id,
+            },
         }
     }
 
@@ -1160,7 +1201,8 @@ impl RuntimeEvent {
             | RuntimeEvent::CompactionCompleted { timestamp, .. }
             | RuntimeEvent::ChildActivity { timestamp, .. }
             | RuntimeEvent::ChildCompleted { timestamp, .. }
-            | RuntimeEvent::ChildCompletionAcknowledged { timestamp, .. } => *timestamp,
+            | RuntimeEvent::ChildCompletionAcknowledged { timestamp, .. }
+            | RuntimeEvent::AttachmentAssociated { timestamp, .. } => *timestamp,
         }
     }
 }
@@ -1202,6 +1244,7 @@ mod tests {
             turn_id: ark_common::TurnId::new(),
             timestamp: Utc::now(),
             auto_continuation: false,
+            attachment_ids: Vec::new(),
         };
         assert_eq!(event.with_seq(42).seq(), 42);
     }

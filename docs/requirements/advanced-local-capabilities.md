@@ -1,7 +1,7 @@
 # 附件、PTY 与 Studio 浏览器自动化边界
 
-> 状态：附件基础存储与 HTTP 读取已实现；**附件生命周期 v2 首期已批准待实施**（见下），第二期
-> 多模态传递随后实施。PTY 与 Studio 浏览器自动化仍为已批准设计边界，未批准实现。
+> 状态：附件基础存储与 HTTP 读取已实现；**附件生命周期 v2 首期已实施**（2026-11-01，见下），第二期
+> 多模态传递仍待实施。PTY 与 Studio 浏览器自动化仍为已批准设计边界，未批准实现。
 
 ## 附件上下文
 
@@ -9,8 +9,8 @@
 使用 JSON Base64，上传路由的 body 限额覆盖 Base64 膨胀和 JSON 余量，超限以结构化校验错误返回，字节
 不会写入 JSON 元数据、JSONL 或 SSE。服务端生成 UUID 并以其构造文件路径，因此 web 不能读取任意路径。
 内容读取以 `nosniff` 和安全文件名的附件下载响应防止用户声明的 MIME 在应用源内被内联执行。上传/finalize
-分离、线程/turn 授权、哈希、MIME+magic-byte 校验、GC、删除路由和模型多模态传递仍待决；agent 在这些授权
-与 adapter 边界落定前不得把未授权附件传给模型。
+分离与自动 GC 策略仍待决。**线程/turn 授权、哈希、MIME+magic-byte 校验与删除路由已由 v2 首期
+落地（见下）**；模型多模态传递仍待第二期，因此 agent 在第二期落定前不得把任何附件字节传给模型。
 
 ### 附件生命周期 v2（2026-11-01 批准，分两期实施）
 
@@ -50,6 +50,13 @@
 
 两期都覆盖：授权拒绝、跨线程越权（关联校验即边界）、路径/凭据不泄露（下载响应沿用 nosniff）、
 重启后关联可回放（事件为权威源）、真实端到端验证；改 wire 时执行 TS 生成检查。
+
+**首期落地情况**：`AttachmentEntry.sha256`、`AttachmentAssociated` 事件、
+`POST /v1/threads/{thread_id}/attachments`、`TurnRequest.attachment_ids`、
+`DELETE /v1/attachments/{id}` 与 `orphan_count` 均已实现，测试见
+`crates/ark-server/tests/attachment_lifecycle.rs` 与 `crates/ark-store/tests/attachments.rs`。
+回合启动只把授权的 `attachment_ids` 记入 `turn_started` 作审计，模型种子仍不含任何附件内容；
+多模态传递留待第二期。
 
 ## PTY
 

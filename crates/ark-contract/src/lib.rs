@@ -21,7 +21,8 @@ pub mod item;
 pub mod ts_export;
 
 pub use attachment::{
-    AttachmentDiagnostics, AttachmentEntry, AttachmentUploadRequest, AttachmentUploadResponse,
+    AttachmentAssociationRequest, AttachmentAssociationResponse, AttachmentDiagnostics,
+    AttachmentEntry, AttachmentUploadRequest, AttachmentUploadResponse,
 };
 pub use base::{
     CreateMemoryRequest, McpServerEntry, McpServerListResponse, McpServerTestResponse,

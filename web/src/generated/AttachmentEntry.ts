@@ -4,4 +4,12 @@ import type { AttachmentId } from "./AttachmentId";
 /**
  * Immutable metadata returned for one uploaded attachment.
  */
-export type AttachmentEntry = { id: AttachmentId, original_filename: string, byte_size: number, mime_type?: string, created_at: string, preview_text?: string, };
+export type AttachmentEntry = { id: AttachmentId, original_filename: string, byte_size: number, mime_type?: string, created_at: string, preview_text?: string, 
+/**
+ * Lowercase hex SHA-256 of the stored bytes, computed at upload.
+ *
+ * Integrity and future deduplication only: storage stays UUID-addressed so
+ * no existing path has to migrate. `#[serde(default)]` keeps metadata
+ * written before this field existed readable (empty = not recorded).
+ */
+sha256: string, };

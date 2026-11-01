@@ -122,8 +122,11 @@ impl SessionWriter for MemoryWriter {
     }
 
     async fn finish(&self, outcome: &TurnOutcome) -> Result<RuntimeEvent> {
+        // Borrow, do not move: the constructor is owned by the writer and now
+        // carries the turn's attachment ids, so it is no longer `Copy`.
         let events = self
             .events_ctor
+            .as_ref()
             .expect("MemoryWriter::for_turn is required to write terminals");
         let event = match outcome {
             TurnOutcome::Completed => events.turn_completed(),
@@ -157,7 +160,7 @@ mod tests {
     #[tokio::test]
     async fn memory_writer_assigns_increasing_seqs() {
         let events = turn();
-        let writer = MemoryWriter::for_turn(events);
+        let writer = MemoryWriter::for_turn(events.clone());
         let first = writer.append(events.turn_started()).await.unwrap();
         let second = writer
             .append(events.text_delta(ark_common::ItemId::new(), "hi"))
@@ -185,7 +188,7 @@ mod tests {
     #[tokio::test]
     async fn last_returns_the_newest_event() {
         let events = turn();
-        let writer = MemoryWriter::for_turn(events);
+        let writer = MemoryWriter::for_turn(events.clone());
         writer.append(events.turn_started()).await.unwrap();
         assert_eq!(writer.last().unwrap().kind(), EventKind::TurnStarted);
     }

@@ -61,6 +61,12 @@ pub struct TurnJob {
     /// The active turn's bounded correction queue. The registry creates it
     /// before the worker starts, so `/steer` and the reactor share one handle.
     pub steering: Arc<SteerQueue>,
+    /// Attachments this turn may reference, already authorized against the
+    /// thread's association events by the route before the job is registered.
+    ///
+    /// The first phase only records them on `turn_started`: nothing here is
+    /// resolved to bytes, so none of it can reach the model seed yet.
+    pub attachment_ids: Vec<ark_common::AttachmentId>,
 }
 
 /// The handles created atomically with a newly accepted turn.
@@ -501,6 +507,10 @@ impl AppState {
                 turn_id,
                 timestamp: Utc::now(),
                 auto_continuation,
+                // The runner failed before it could journal its own start, so no
+                // attachment list was ever recorded for this turn. Reporting an
+                // empty set is honest: this turn referenced nothing.
+                attachment_ids: Vec::new(),
             };
             if let Err(err) = self.store.append_event(thread_id, started).await {
                 tracing::warn!(

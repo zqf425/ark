@@ -379,6 +379,7 @@ mod tests {
                 turn_id: turn_a,
                 timestamp: at(0),
                 auto_continuation: false,
+                attachment_ids: Vec::new(),
             },
             RuntimeEvent::Usage {
                 seq: 2,
@@ -393,6 +394,7 @@ mod tests {
                 turn_id: turn_b,
                 timestamp: at(20),
                 auto_continuation: false,
+                attachment_ids: Vec::new(),
             },
             RuntimeEvent::Usage {
                 seq: 4,
@@ -426,6 +428,7 @@ mod tests {
                 turn_id: turn,
                 timestamp: at(0),
                 auto_continuation: false,
+                attachment_ids: Vec::new(),
             },
             // An error while the first model call is still in flight.
             RuntimeEvent::Error {
@@ -490,6 +493,7 @@ mod tests {
             turn_id: turn,
             timestamp: at(0),
             auto_continuation: false,
+            attachment_ids: Vec::new(),
         }];
         assert!(derive_rounds(&events, None).is_empty());
     }
@@ -531,6 +535,7 @@ mod tests {
                     turn_id: turn,
                     timestamp: Utc::now(),
                     auto_continuation: false,
+                    attachment_ids: Vec::new(),
                 },
             )
             .await
@@ -608,6 +613,7 @@ mod tests {
                         turn_id: turn,
                         timestamp: at(round_no as i64 * 100),
                         auto_continuation: false,
+                        attachment_ids: Vec::new(),
                     },
                 )
                 .await

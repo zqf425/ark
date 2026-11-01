@@ -15,5 +15,17 @@ export const ERROR_MESSAGES = {
   'error.hint.runtime_unavailable': ['运行时不可用', 'The runtime is unavailable'],
   'error.hint.store_failure': ['会话存储失败', 'Session storage failed'],
   'error.hint.not_implemented': ['运行时尚未实现该能力', 'The runtime does not implement this yet'],
-  'error.hint.internal_error': ['运行时内部错误', 'Internal runtime error']
+  'error.hint.internal_error': ['运行时内部错误', 'Internal runtime error'],
+  'error.hint.mime_mismatch': [
+    '附件内容与声明的 MIME 类型不符',
+    'The attachment bytes do not match the declared MIME type'
+  ],
+  'error.hint.attachment_in_use': [
+    '附件已被线程关联，不能删除',
+    'The attachment is associated with a thread and cannot be deleted'
+  ],
+  'error.hint.attachment_not_associated': [
+    '附件未关联到当前线程，请先关联',
+    'The attachment is not associated with this thread; associate it first'
+  ]
 } as const

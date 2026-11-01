@@ -4,18 +4,24 @@
 //! write is constructed here, so the field set and the `seq = 0` convention
 //! ("the writer assigns it") live in exactly one place.
 
-use ark_common::{ItemId, ThreadId, TurnId, Usage};
+use ark_common::{AttachmentId, ItemId, ThreadId, TurnId, Usage};
 use ark_contract::{RuntimeEvent, ThreadItem};
 use chrono::Utc;
 
 /// Namespace of event constructors for one `(thread, turn)` pair.
-#[derive(Debug, Clone, Copy)]
+///
+/// Carries the attachments the turn is allowed to reference so `turn_started`
+/// can record them. Not `Copy` for that reason: the id list is owned per turn.
+#[derive(Debug, Clone)]
 pub struct TurnEvents {
     pub thread_id: ThreadId,
     pub turn_id: TurnId,
     /// Marks the `turn_started` event as supervisor-scheduled, so the
     /// auto-continuation delivery-attempt accounting survives restarts.
     auto_continuation: bool,
+    /// Attachments already associated with the thread. The first phase only
+    /// records them on `turn_started`; they never reach the model seed.
+    attachment_ids: Vec<AttachmentId>,
 }
 
 impl TurnEvents {
@@ -24,6 +30,7 @@ impl TurnEvents {
             thread_id,
             turn_id,
             auto_continuation: false,
+            attachment_ids: Vec::new(),
         }
     }
 
@@ -34,7 +41,14 @@ impl TurnEvents {
             thread_id,
             turn_id,
             auto_continuation: true,
+            attachment_ids: Vec::new(),
         }
+    }
+
+    /// Attach the authorized attachment ids to this turn's `turn_started`.
+    pub fn with_attachments(mut self, attachment_ids: Vec<AttachmentId>) -> Self {
+        self.attachment_ids = attachment_ids;
+        self
     }
 
     /// Sequence numbers are assigned by the session writer, never by producers.
@@ -47,6 +61,7 @@ impl TurnEvents {
             turn_id: self.turn_id,
             timestamp: Utc::now(),
             auto_continuation: self.auto_continuation,
+            attachment_ids: self.attachment_ids.clone(),
         }
     }
 

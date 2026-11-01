@@ -177,6 +177,13 @@ pub trait SessionStore: Send + Sync {
     /// refresh without cloning ordinary transcript events into a second view.
     async fn replay_interaction_events(&self, thread: ThreadId) -> Result<Vec<RuntimeEvent>>;
 
+    /// Replay only attachment association records for a thread.
+    ///
+    /// Association lives exclusively in the durable event log, so the three
+    /// readers (thread detail, turn-start authorization, delete guard) all go
+    /// through this narrow projection instead of scanning a transcript.
+    async fn replay_attachment_events(&self, thread: ThreadId) -> Result<Vec<RuntimeEvent>>;
+
     /// Highest durable `seq` for the thread (0 when the log is empty).
     async fn highest_seq(&self, thread: ThreadId) -> Result<u64>;
 

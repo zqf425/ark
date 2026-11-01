@@ -1,5 +1,7 @@
 //! Attachment persistence boundary.
 
+use std::collections::HashSet;
+
 use ark_common::{AttachmentId, Result};
 use ark_contract::{AttachmentDiagnostics, AttachmentEntry};
 
@@ -30,5 +32,10 @@ pub trait AttachmentStore: Send + Sync {
     fn delete(&self, id: AttachmentId) -> Result<()>;
 
     /// Return the current persistent attachment-store usage.
-    fn diagnostics(&self) -> Result<AttachmentDiagnostics>;
+    ///
+    /// `associated` is supplied by the caller because thread associations live in
+    /// the durable event log, which only `ark-server` can read: the store owns
+    /// bytes, never threads. `orphan_count` counts surviving entries that are
+    /// absent from this set and older than the orphan threshold.
+    fn diagnostics(&self, associated: &HashSet<AttachmentId>) -> Result<AttachmentDiagnostics>;
 }

@@ -3,7 +3,10 @@
 use std::str::FromStr;
 
 use ark_common::{ArkErrorCode, AttachmentId};
-use ark_contract::{AttachmentUploadRequest, AttachmentUploadResponse};
+use ark_contract::{
+    AttachmentAssociationRequest, AttachmentAssociationResponse, AttachmentUploadRequest,
+    AttachmentUploadResponse, RuntimeEvent,
+};
 use ark_ports::AttachmentUpload;
 use axum::body::Body;
 use axum::extract::rejection::JsonRejection;
@@ -12,6 +15,7 @@ use axum::http::{header, HeaderValue, Response, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use base64::Engine;
+use chrono::Utc;
 
 use crate::api::error::ApiError;
 use crate::state::AppState;
@@ -99,7 +103,78 @@ pub async fn content(
 pub async fn diagnostics(
     State(state): State<AppState>,
 ) -> Result<Json<ark_contract::AttachmentDiagnostics>, ApiError> {
-    Ok(Json(attachment_store(&state)?.diagnostics()?))
+    // Association lives in the thread event logs, which only this crate can
+    // read, so the set is projected here and handed to the byte store.
+    let associated = crate::service::associated_attachment_ids(&state).await?;
+    Ok(Json(attachment_store(&state)?.diagnostics(&associated)?))
+}
+
+/// `POST /v1/threads/{thread_id}/attachments`.
+///
+/// Establishes the authorization edge a later turn relies on. Idempotent by
+/// construction: the event log is the authority, so a pair that is already
+/// associated appends nothing and the call still answers the same entry.
+pub async fn associate(
+    State(state): State<AppState>,
+    Path(raw_thread): Path<String>,
+    request: Result<Json<AttachmentAssociationRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<AttachmentAssociationResponse>), ApiError> {
+    let thread_id = crate::api::handlers::threads::parse_thread(&raw_thread)?;
+    let store = attachment_store(&state)?;
+    let Json(request) = request.map_err(|_| {
+        ApiError::new(
+            ArkErrorCode::ValidationError,
+            "invalid attachment association request",
+        )
+    })?;
+    // The attachment must exist before it can be authorized, and an unknown
+    // thread must not gain an event stream just to hold an association.
+    state.store.get_thread(thread_id).await?;
+    let attachment = store.get(request.attachment_id)?;
+    let already = crate::service::thread_attachment_ids(&state, thread_id)
+        .await?
+        .contains(&attachment.id);
+    if !already {
+        let event = RuntimeEvent::AttachmentAssociated {
+            seq: 0,
+            thread_id,
+            timestamp: Utc::now(),
+            attachment_id: attachment.id,
+        };
+        state.store.append_event(thread_id, event).await?;
+    }
+    Ok((
+        StatusCode::CREATED,
+        Json(AttachmentAssociationResponse { attachment }),
+    ))
+}
+
+/// `DELETE /v1/attachments/{id}`.
+///
+/// Deleting bytes that a thread still references would leave a replayable
+/// authorization pointing at nothing, so an attached id is refused. Unbinding
+/// is deliberately absent from this phase: the design answers 409 instead of
+/// inventing a detach route.
+pub async fn remove(
+    State(state): State<AppState>,
+    Path(raw_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let id = parse_id(&raw_id)?;
+    let store = attachment_store(&state)?;
+    store.get(id)?;
+    if crate::service::associated_attachment_ids(&state)
+        .await?
+        .contains(&id)
+    {
+        return Err(ApiError::new(
+            ArkErrorCode::AttachmentInUse,
+            format!("attachment {id} is associated with a thread and cannot be deleted"),
+        ));
+    }
+    store.delete(id)?;
+    // 200 rather than 204: the brief's acceptance check asserts a successful
+    // delete by status, and the response carries no body either way.
+    Ok(StatusCode::OK)
 }
 
 fn attachment_store(

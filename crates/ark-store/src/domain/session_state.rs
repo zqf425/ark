@@ -150,6 +150,7 @@ mod tests {
             turn_id: turn,
             timestamp: now,
             auto_continuation: false,
+            attachment_ids: Vec::new(),
         }));
         assert_eq!(state.status, SessionStatus::Running);
         assert!(state.status.is_active());
@@ -205,6 +206,7 @@ mod tests {
                 turn_id: turn,
                 timestamp: now,
                 auto_continuation: false,
+                attachment_ids: Vec::new(),
             },
             RuntimeEvent::TurnAborted {
                 seq: 2,

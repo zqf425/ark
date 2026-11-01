@@ -25,7 +25,7 @@ pub async fn start(
     Json(body): Json<TurnRequest>,
 ) -> Result<(StatusCode, Json<TurnSummary>), ApiError> {
     let thread_id = parse_thread(&id)?;
-    start_turn(&state, thread_id, body.text).await
+    start_turn(&state, thread_id, body.text, body.attachment_ids).await
 }
 
 /// Shared turn-start core: validate the text, register the turn, spawn the
@@ -38,6 +38,7 @@ pub(crate) async fn start_turn(
     state: &AppState,
     thread_id: ThreadId,
     raw_text: String,
+    requested_attachments: Vec<ark_common::AttachmentId>,
 ) -> Result<(StatusCode, Json<TurnSummary>), ApiError> {
     if raw_text.len() > MAX_TURN_TEXT_BYTES {
         return Err(ApiError::new(
@@ -58,6 +59,11 @@ pub(crate) async fn start_turn(
     // wins by cancelling a pending debounce before registering this turn.
     let _workspace_guard = state.workspace_gate.lock().await;
     state.store.get_thread(thread_id).await?;
+    // Authorize before registering: a rejected attachment must not leave a
+    // registered turn behind, and the check compares against this thread's own
+    // association events only.
+    let attachment_ids =
+        crate::service::authorize_turn_attachments(state, thread_id, requested_attachments).await?;
     let Some(registration) = state.turns.try_register(thread_id, turn_id, cancel.clone()) else {
         let running = state
             .turns
@@ -76,6 +82,7 @@ pub(crate) async fn start_turn(
         source: TurnSource::User(text),
         cancel,
         steering: registration.steering,
+        attachment_ids,
     };
     spawn_turn(state.clone(), job);
     Ok((StatusCode::ACCEPTED, Json(registration.summary)))
@@ -390,7 +397,10 @@ mod tests {
         let error = start(
             State(state),
             Path(thread.thread_id.to_string()),
-            Json(TurnRequest { text }),
+            Json(TurnRequest {
+                text,
+                attachment_ids: Vec::new(),
+            }),
         )
         .await
         .expect_err("oversized text must be rejected");
@@ -532,6 +542,7 @@ mod tests {
                 source: TurnSource::AutoContinuation,
                 cancel,
                 steering: registration.steering,
+                attachment_ids: Vec::new(),
             },
         );
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
