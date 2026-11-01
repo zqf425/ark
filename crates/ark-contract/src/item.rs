@@ -24,6 +24,18 @@ pub enum ItemKind {
     Notice,
 }
 
+/// Structural marker for system-generated item families that a renderer or a
+/// projection must recognize without parsing their text. Text prefixes are not
+/// identity: a user can type any prefix, so matching on it would let user input
+/// masquerade as generated state (or hide real checkpoints after a render-format
+/// change).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemMarker {
+    /// Rendered context checkpoint produced by compaction (`ark-agent`).
+    ContextCheckpoint,
+}
+
 /// Lifecycle of an item. Streaming text keeps `Streaming` until the turn or the
 /// item terminates, so the renderer can show a caret without extra inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
@@ -72,7 +84,14 @@ pub struct ThreadItem {
     pub tool: Option<ToolPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub marker: Option<ItemMarker>,
 }
+
+/// Text prefix rendered by `ark-agent`'s checkpoint family. Kept only as the
+/// legacy fallback for notice items persisted before `marker` existed; new
+/// code must match on [`ThreadItem::marker`].
+pub const CONTEXT_CHECKPOINT_PREFIX: &str = "[context checkpoint";
 
 impl ThreadItem {
     pub fn new(turn_id: TurnId, kind: ItemKind) -> Self {
@@ -85,7 +104,30 @@ impl ThreadItem {
             text: None,
             tool: None,
             detail: None,
+            marker: None,
         }
+    }
+
+    pub fn with_marker(mut self, marker: ItemMarker) -> Self {
+        self.marker = Some(marker);
+        self
+    }
+
+    /// Whether this item carries a rendered context checkpoint.
+    ///
+    /// Matches the structural marker first; notice items persisted before the
+    /// marker existed are recognized by their text prefix. The prefix fallback
+    /// applies to every marker-less item, so it must stay gated on
+    /// [`ItemKind::Notice`]: a user message can open with the same text, and a
+    /// user message is never a checkpoint.
+    pub fn is_context_checkpoint(&self) -> bool {
+        self.kind == ItemKind::Notice
+            && (self.marker == Some(ItemMarker::ContextCheckpoint)
+                || (self.marker.is_none()
+                    && self
+                        .text
+                        .as_deref()
+                        .is_some_and(|text| text.starts_with(CONTEXT_CHECKPOINT_PREFIX))))
     }
 
     pub fn with_text(mut self, text: impl Into<String>) -> Self {
@@ -128,5 +170,41 @@ mod tests {
         let json = serde_json::to_value(&item).unwrap();
         assert_eq!(json["kind"], "tool_call");
         assert_eq!(json["status"], "completed");
+    }
+}
+
+#[cfg(test)]
+mod marker_tests {
+    use super::*;
+
+    #[test]
+    fn a_marked_notice_is_a_checkpoint() {
+        let item = ThreadItem::new(TurnId::new(), ItemKind::Notice)
+            .with_text("[context checkpoint]\nGoal: x")
+            .with_marker(ItemMarker::ContextCheckpoint);
+        assert!(item.is_context_checkpoint());
+    }
+
+    #[test]
+    fn a_pre_marker_notice_is_recognized_by_its_prefix() {
+        let item = ThreadItem::new(TurnId::new(), ItemKind::Notice)
+            .with_text("[context checkpoint: truncated]\nGoal: x");
+        assert!(item.is_context_checkpoint());
+    }
+
+    #[test]
+    fn a_user_message_is_never_a_checkpoint_even_with_the_prefix() {
+        // The regression this marker exists for: the prefix is text a user can
+        // type, so the fallback must not escape the Notice kind.
+        let item = ThreadItem::new(TurnId::new(), ItemKind::UserMessage)
+            .with_text("[context checkpoint] 我手打的")
+            .completed();
+        assert!(!item.is_context_checkpoint());
+    }
+
+    #[test]
+    fn a_notice_without_marker_or_prefix_is_not_a_checkpoint() {
+        let item = ThreadItem::new(TurnId::new(), ItemKind::Notice).with_text("普通通知");
+        assert!(!item.is_context_checkpoint());
     }
 }

@@ -16,6 +16,7 @@ impl Reactor {
             .map_or(0, |text| text.chars().count() as u32);
         let item = ThreadItem::new(self.events.turn_id, ItemKind::Notice)
             .with_text(checkpoint.expect("removed context has a checkpoint"))
+            .with_marker(ark_contract::item::ItemMarker::ContextCheckpoint)
             .completed();
         self.writer.append(self.events.item_created(item)).await?;
         self.machine.note_compaction(removed);

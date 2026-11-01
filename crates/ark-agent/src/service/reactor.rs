@@ -23,6 +23,7 @@ use ark_ports::{
 };
 use tokio::sync::mpsc;
 
+use crate::context::checkpoint::is_generated_checkpoint;
 use crate::context::{HistoryHygiene, TokenEstimator};
 use crate::domain::action::{Action, DispatchPlan, SyntheticResult, TurnOutcome};
 use crate::domain::input::{ApprovalAsk, InputKind, TurnInput, UserInputAsk};
@@ -450,6 +451,9 @@ impl Reactor {
                 text: Some(item.text),
                 tool: None,
                 detail: None,
+                // StreamItem only buffers assistant/reasoning text, which never
+                // carries a marker.
+                marker: None,
             };
             self.writer
                 .append(self.events.item_completed(completed))
@@ -536,10 +540,6 @@ impl Reactor {
             .map_err(|err| ArkError::internal(err.to_string()))?;
         Ok(outcome)
     }
-}
-
-fn is_generated_checkpoint(message: &ModelMessage) -> bool {
-    TokenEstimator::is_system(message) && message.content.starts_with("[context checkpoint")
 }
 
 /// A streamed render item kept until its model round reaches a terminal edge.
