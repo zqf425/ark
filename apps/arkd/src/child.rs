@@ -5,15 +5,11 @@
 //! thread id, with its own event log (`threads/<parent>/children/<child>/`), its
 //! own cancel token and its own steering queue.
 //!
-//! # Why the bridges exist
-//!
-//! `ark-delegation` hands the executor its control handles as `dyn CancelHandle`
-//! / `dyn SteerHandle`, because that crate may not depend on `ark-agent`. The
-//! reactor, in turn, needs the concrete `CancelToken` / `SteerQueue` it awaits and
-//! drains. This module is the only place both shapes meet, so the two adapters
-//! live here rather than leaking either type across the boundary.
-//!
 //! # What it deliberately does not do
+//!
+//! The delegation runtime hands the executor the same concrete
+//! `ark-ports::CancelToken` / `SteerQueue` the reactor awaits and drains, so no
+//! adapter or polling bridge is needed between the two shapes.
 //!
 //! It never writes a run record, never decides whether a spawn is allowed, and
 //! never reports usage it did not observe. Budget, records and activity events
@@ -22,7 +18,6 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use ark_agent::{
     EventSinkWriter, ModelSeed, Reactor, ReactorConfig, ToolCallRequest, TurnEvents, TurnLimits,
@@ -34,51 +29,17 @@ use ark_contract::{item::ItemKind, RuntimeEvent};
 use ark_delegation::{ChildTurnContext, ChildTurnExecutor, ChildTurnReport, ChildTurnStatus};
 use ark_obs::UsageRecorder;
 use ark_ports::{
-    CancelHandle, EventSink, ModelClient, SandboxPolicy, SessionStore, SteerHandle, ToolOutput,
-    ToolRegistryPort,
+    EventSink, ModelClient, SandboxPolicy, SessionStore, ToolOutput, ToolRegistryPort,
 };
 use ark_tool::{RegistryToolRunner, ToolRegistry};
 
 use crate::model;
 use crate::workspace::WorkspaceRoots;
 
-/// How often the bridges look for a signal from the delegation runtime.
-///
-/// Abort and steering are human-paced actions, so a 50 ms worst-case latency is
-/// invisible while keeping both bridges lock-free and allocation-free on the hot
-/// path. Neither loop runs a model round, so they cannot stall a turn.
-const BRIDGE_TICK: Duration = Duration::from_millis(50);
-
 /// Resolve a child override against its parent setting. A `None` child value is
 /// intentionally not a reset: only an explicit value changes inherited state.
 fn child_setting<T>(child: Option<T>, parent: Option<T>) -> Option<T> {
     child.or(parent)
-}
-
-/// Owns bridge tasks so panic unwinding cannot detach permanent polling loops.
-struct BridgeTasks {
-    handles: Vec<tokio::task::JoinHandle<()>>,
-}
-
-impl BridgeTasks {
-    fn new(handles: Vec<tokio::task::JoinHandle<()>>) -> Self {
-        Self { handles }
-    }
-
-    async fn shutdown(mut self) {
-        for handle in self.handles.drain(..) {
-            handle.abort();
-            let _ = handle.await;
-        }
-    }
-}
-
-impl Drop for BridgeTasks {
-    fn drop(&mut self) {
-        for handle in &self.handles {
-            handle.abort();
-        }
-    }
 }
 
 /// Runs one child turn with the real reactor.
@@ -210,11 +171,8 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
         let events = TurnEvents::new(thread_id, turn_id);
         let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events.clone()));
 
-        let cancel = ark_agent::CancelToken::new();
-        let cancel_bridge = spawn_cancel_bridge(Arc::clone(&ctx.cancel), cancel.clone());
-        let steer = Arc::new(ark_agent::exec::steer::SteerQueue::new());
-        let steer_bridge = spawn_steer_bridge(Arc::clone(&ctx.steer), Arc::clone(&steer));
-        let bridges = BridgeTasks::new(vec![cancel_bridge, steer_bridge]);
+        let cancel = Arc::clone(&ctx.cancel);
+        let steer = Arc::clone(&ctx.steer);
 
         // Child defaults are the parent thread's effective runtime settings.
         // Explicit child values win, and process defaults are used only when the
@@ -315,7 +273,7 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             gates: Arc::new(ark_agent::AllowAllGates),
             sandbox,
             events,
-            cancel: cancel.clone(),
+            cancel: (*cancel).clone(),
             seed: ModelSeed {
                 messages: seed_messages,
                 tools: self.tool_schemas.clone(),
@@ -328,11 +286,6 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
         .with_steering(steer);
         reactor.push_user(ctx.prompt.clone());
         let outcome = reactor.run().await;
-
-        // Both adapters otherwise poll forever after a normally completed or
-        // failed reactor run. Aborting and awaiting them leaves no child task
-        // behind before report construction performs any further async work.
-        bridges.shutdown().await;
 
         // Real counters only: the reactor folds every provider sample into its
         // machine, so the report cannot invent tokens.
@@ -499,47 +452,6 @@ impl ark_agent::ToolRunner for ChildToolRunner {
     }
 }
 
-/// Forward `cancel` from the delegation runtime into the reactor's token.
-fn spawn_cancel_bridge(
-    source: Arc<dyn CancelHandle>,
-    target: ark_agent::CancelToken,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        loop {
-            if target.is_cancelled() {
-                return;
-            }
-            if source.is_cancelled() {
-                target.cancel();
-                return;
-            }
-            tokio::time::sleep(BRIDGE_TICK).await;
-        }
-    })
-}
-
-/// Forward queued corrections from the delegation runtime into the reactor's
-/// queue. Ordering is preserved because the source hands them out in arrival
-/// order and this loop pushes them in that same order.
-fn spawn_steer_bridge(
-    source: Arc<dyn SteerHandle>,
-    target: Arc<ark_agent::exec::steer::SteerQueue>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        loop {
-            for text in source.drain() {
-                // A full target queue drops the correction; the runtime already
-                // bounded the source with the same capacity, so this only happens
-                // if the reactor is behind by a full queue.
-                if !target.push(text) {
-                    tracing::warn!("child steering queue full; correction dropped");
-                }
-            }
-            tokio::time::sleep(BRIDGE_TICK).await;
-        }
-    })
-}
-
 /// Live sub-agent policy, read from the config snapshot on every spawn.
 ///
 /// `subagents` is a `Hot` field (design §7.15), so a Settings change must apply
@@ -574,10 +486,6 @@ pub const DEFAULT_MAX_QUEUED: u32 = 20;
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Mutex;
-
     use super::*;
     use ark_ports::SubagentPolicySource;
 
@@ -600,41 +508,6 @@ mod tests {
         );
     }
 
-    #[derive(Default)]
-    struct TestCancelHandle {
-        cancelled: AtomicBool,
-    }
-
-    impl CancelHandle for TestCancelHandle {
-        fn cancel(&self) {
-            self.cancelled.store(true, Ordering::Release);
-        }
-
-        fn is_cancelled(&self) -> bool {
-            self.cancelled.load(Ordering::Acquire)
-        }
-    }
-
-    #[derive(Default)]
-    struct TestSteerHandle {
-        pending: Mutex<VecDeque<String>>,
-    }
-
-    impl SteerHandle for TestSteerHandle {
-        fn push(&self, text: &str) -> bool {
-            self.pending.lock().unwrap().push_back(text.to_string());
-            true
-        }
-
-        fn len(&self) -> usize {
-            self.pending.lock().unwrap().len()
-        }
-
-        fn drain(&self) -> Vec<String> {
-            self.pending.lock().unwrap().drain(..).collect()
-        }
-    }
-
     fn policy_for(enabled: bool, max_concurrency: u32) -> ark_ports::SubagentPolicy {
         let config = RuntimeConfig {
             subagents: ark_contract::SubagentSettings {
@@ -646,75 +519,6 @@ mod tests {
         };
         let store = Arc::new(ark_config::ConfigStore::new(config));
         ConfigSubagentPolicy::new(store).policy()
-    }
-
-    #[tokio::test]
-    async fn cancel_bridge_forwards_runtime_cancel_and_can_be_joined() {
-        let source = Arc::new(TestCancelHandle::default());
-        let target = ark_agent::CancelToken::new();
-        let bridge = spawn_cancel_bridge(source.clone(), target.clone());
-
-        source.cancel();
-        tokio::time::timeout(BRIDGE_TICK * 3, async {
-            while !target.is_cancelled() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("runtime cancellation should reach the reactor");
-
-        bridge
-            .await
-            .expect("cancel bridge should exit after forwarding");
-    }
-
-    #[tokio::test]
-    async fn steer_bridge_drains_in_order_and_can_be_stopped() {
-        let source = Arc::new(TestSteerHandle::default());
-        source.push("first");
-        source.push("second");
-        let target = Arc::new(ark_agent::exec::steer::SteerQueue::new());
-        let bridge = spawn_steer_bridge(source, Arc::clone(&target));
-
-        tokio::time::timeout(BRIDGE_TICK * 3, async {
-            while target.len() < 2 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("steering should reach the reactor queue");
-        assert_eq!(target.drain(), vec!["first", "second"]);
-
-        bridge.abort();
-        assert!(bridge.await.unwrap_err().is_cancelled());
-    }
-
-    #[tokio::test]
-    async fn dropping_bridge_tasks_aborts_pollers_during_unwind() {
-        struct DropProbe(Arc<AtomicBool>);
-
-        impl Drop for DropProbe {
-            fn drop(&mut self) {
-                self.0.store(true, Ordering::Release);
-            }
-        }
-
-        let dropped = Arc::new(AtomicBool::new(false));
-        let probe = DropProbe(Arc::clone(&dropped));
-        let handle = tokio::spawn(async move {
-            let _probe = probe;
-            std::future::pending::<()>().await;
-        });
-        tokio::task::yield_now().await;
-
-        drop(BridgeTasks::new(vec![handle]));
-        tokio::time::timeout(BRIDGE_TICK * 3, async {
-            while !dropped.load(Ordering::Acquire) {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("dropping the RAII owner must abort and drop every bridge future");
     }
 
     #[test]

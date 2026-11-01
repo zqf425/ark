@@ -1,22 +1,20 @@
-//! Boundary seams the reactor needs, owned by this crate (not by `ark-ports`).
+//! Boundary seams the reactor needs, implemented by `arkd`'s wiring /
+//! `ark-store` / `ark-tool`. Nothing in this module performs I/O on its own
+//! except the deliberately in-memory test doubles.
 //!
-//! Everything here is either a cancellation primitive or a trait implemented by
-//! `arkd`'s wiring / `ark-store` / `ark-tool`. Nothing in this module performs
-//! I/O on its own except the deliberately in-memory test doubles.
+//! The cancellation token and the steering queue used to live here; they moved
+//! to `ark-ports` (re-exported at this crate's root) because the delegation
+//! runtime must name the same concrete types without depending on `ark-agent`.
 
-pub mod cancel;
 pub mod events;
 pub mod gate;
 pub mod journal;
-pub mod steer;
 pub mod tool_runner;
 
-pub use cancel::CancelToken;
 pub use events::TurnEvents;
 pub use gate::{
     AllowAllGates, ApprovalReply, ApprovalRequest, DenyAllGates, GateBroker, GateFuture,
     UserInputRequest,
 };
 pub use journal::{EventSinkWriter, MemoryWriter, SessionWriter};
-pub use steer::SteerQueue;
 pub use tool_runner::{MapToolRunner, ToolRunner};

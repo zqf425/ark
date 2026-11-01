@@ -36,6 +36,7 @@ pub mod exec;
 pub mod policy;
 pub mod service;
 
+pub use ark_ports::{CancelToken, SteerQueue};
 pub use context::{
     auto_delivery_attempts, consecutive_auto_model_request_failures, CompletionInbox,
     ContextCheckpoint, HistoryHygiene, HygieneReport, TokenEstimator, MAX_AUTO_DELIVERY_ATTEMPTS,
@@ -45,9 +46,8 @@ pub use domain::{
     ToolCallRequest, ToolExecution, TurnInput, TurnLimits, TurnOutcome, TurnState,
 };
 pub use exec::{
-    AllowAllGates, ApprovalReply, ApprovalRequest, CancelToken, DenyAllGates, EventSinkWriter,
-    GateBroker, GateFuture, MemoryWriter, SessionWriter, SteerQueue, ToolRunner, TurnEvents,
-    UserInputRequest,
+    AllowAllGates, ApprovalReply, ApprovalRequest, DenyAllGates, EventSinkWriter, GateBroker,
+    GateFuture, MemoryWriter, SessionWriter, ToolRunner, TurnEvents, UserInputRequest,
 };
 pub use policy::{
     AccessKind, BudgetVerdict, ParallelPolicy, StormBreaker, StormReport, SuppressedCall,

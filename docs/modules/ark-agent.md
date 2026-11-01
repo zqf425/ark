@@ -12,7 +12,8 @@
 `Completed`/`Failed`/`Aborted`。`step(state, input) -> Action` 保持纯逻辑，`Reactor`
 是唯一把 action 转为 I/O 的位置。
 
-取消由自研 `CancelToken`（基于 `tokio::sync::watch`，刻意不引入 tokio-util 依赖）与 `select!` 完成；
+取消由 `CancelToken`（基于 `tokio::sync::watch`，实现随控制原语下沉在 `ark-ports`、由本 crate 根
+re-export，刻意不引入 tokio-util 依赖）与 `select!` 完成；
 任何退出路径都必须写终态并清理活动注册，不得留下“磁盘记录 running 但任务已丢失”的状态。
 
 ## 关键约束
