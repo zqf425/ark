@@ -23,13 +23,62 @@ pub enum Command {
 /// `arkd run` options: one turn, streamed to stdout, then exit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunArgs {
-    /// The single user prompt for the turn.
+    /// The single user prompt for the turn; empty in review mode.
     pub prompt: String,
+    /// Review preset (requirements/review-preset.md); mutually exclusive with
+    /// a positional prompt.
+    pub review: Option<ReviewTarget>,
     /// Listen port; `0` probes a free ephemeral port.
     pub port: u16,
     pub data_dir: PathBuf,
     pub auth_token: Option<String>,
     pub workspace: PathBuf,
+}
+
+/// What a review turn looks at (requirements/review-preset.md §1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReviewTarget {
+    /// Everything relative to `HEAD` (staged and unstaged).
+    Uncommitted,
+    /// Merge-base diff against a base branch, PR style.
+    Base(String),
+    /// One commit's own diff.
+    Commit(String),
+}
+
+impl ReviewTarget {
+    /// Parse a `--review` value; the label is also what the prompt shows.
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim() {
+            "uncommitted" => Ok(Self::Uncommitted),
+            other => {
+                if let Some(base) = other.strip_prefix("base:") {
+                    if base.trim().is_empty() {
+                        return Err("`--review base:<branch>` needs a branch name".into());
+                    }
+                    return Ok(Self::Base(base.trim().to_string()));
+                }
+                if let Some(commit) = other.strip_prefix("commit:") {
+                    if commit.trim().is_empty() {
+                        return Err("`--review commit:<sha>` needs a revision".into());
+                    }
+                    return Ok(Self::Commit(commit.trim().to_string()));
+                }
+                Err(format!(
+                    "unknown review target `{other}` (expected `uncommitted`, `base:<branch>` or `commit:<sha>`)"
+                ))
+            }
+        }
+    }
+
+    /// Stable label shown in the review prompt.
+    pub fn label(&self) -> String {
+        match self {
+            Self::Uncommitted => "uncommitted changes".to_string(),
+            Self::Base(branch) => format!("base branch `{branch}`"),
+            Self::Commit(rev) => format!("commit `{rev}`"),
+        }
+    }
 }
 
 /// `arkd serve` options.
@@ -99,6 +148,7 @@ where
 fn parse_run(args: Vec<String>) -> Result<Command, String> {
     let mut run = RunArgs {
         prompt: String::new(),
+        review: None,
         port: 0,
         data_dir: default_data_dir(),
         auth_token: None,
@@ -124,6 +174,10 @@ fn parse_run(args: Vec<String>) -> Result<Command, String> {
             "--auth-token" => {
                 run.auth_token = Some(iter.next().ok_or("--auth-token requires a value")?);
             }
+            "--review" => {
+                let raw = iter.next().ok_or("--review requires a target")?;
+                run.review = Some(ReviewTarget::parse(&raw)?);
+            }
             "--help" | "-h" => return Ok(Command::Help),
             other if other.starts_with('-') => {
                 return Err(format!("unknown flag `{other}` for `run`"));
@@ -137,8 +191,15 @@ fn parse_run(args: Vec<String>) -> Result<Command, String> {
         );
     }
     run.prompt = positional.pop().unwrap_or_default();
+    if run.review.is_some() {
+        // A review has its own prompt; a positional prompt is a conflict.
+        if !run.prompt.trim().is_empty() {
+            return Err("--review and a prompt argument are mutually exclusive".into());
+        }
+        return Ok(Command::Run(run));
+    }
     if run.prompt.trim().is_empty() {
-        return Err("run requires a prompt argument".into());
+        return Err("run requires a prompt argument (or --review <target>)".into());
     }
     Ok(Command::Run(run))
 }
@@ -181,6 +242,7 @@ arkd - smart-ark runtime
 USAGE:
     arkd serve [--port <p>] [--data-dir <dir>] [--workspace <dir>] [--auth-token <t>]
     arkd run [PROMPT] [--port <p>] [--data-dir <dir>] [--workspace <dir>] [--auth-token <t>]
+    arkd run --review <uncommitted|base:<branch>|commit:<sha>> [--workspace <dir>] [...]
     arkd help
     arkd version
 
@@ -245,6 +307,29 @@ mod tests {
         assert!(parse(["run", "a", "b"]).is_err());
         assert!(parse(["run", "x", "--nope"]).is_err());
         assert!(parse(["run", "x", "--port"]).is_err());
+    }
+
+    #[test]
+    fn review_targets_parse_and_conflict_with_a_prompt() {
+        match parse(["run", "--review", "uncommitted"]).unwrap() {
+            Command::Run(args) => assert_eq!(args.review, Some(ReviewTarget::Uncommitted)),
+            other => panic!("expected run, got {other:?}"),
+        }
+        match parse(["run", "--review", "base:origin/main"]).unwrap() {
+            Command::Run(args) => {
+                assert_eq!(args.review, Some(ReviewTarget::Base("origin/main".into())))
+            }
+            other => panic!("expected run, got {other:?}"),
+        }
+        match parse(["run", "--review", "commit:abc123"]).unwrap() {
+            Command::Run(args) => {
+                assert_eq!(args.review, Some(ReviewTarget::Commit("abc123".into())))
+            }
+            other => panic!("expected run, got {other:?}"),
+        }
+        assert!(parse(["run", "--review", "base:"]).is_err());
+        assert!(parse(["run", "--review", "everything"]).is_err());
+        assert!(parse(["run", "--review", "uncommitted", "also a prompt"]).is_err());
     }
 
     #[test]

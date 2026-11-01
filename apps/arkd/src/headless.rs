@@ -7,6 +7,7 @@
 //! authorization, gates and event semantics are then identical to the web
 //! client by construction.
 
+use std::path::Path;
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -134,6 +135,30 @@ async fn one_turn(args: &RunArgs, addr: std::net::SocketAddr) -> Result<(), Fail
         .ok_or_else(|| Failure::Startup("thread response has no id".into()))?
         .to_string();
 
+    // A review pins the thread to `strict` autonomy: with nobody answering
+    // approval gates, writes and shell become unreachable, which is what makes
+    // the review findings-only (requirements/review-preset.md §2). The prompt
+    // is the review instruction carrying the target diff.
+    let turn_text = match &args.review {
+        Some(target) => {
+            let diff = compute_diff(target, &args.workspace)?;
+            let pinned = client
+                .patch(format!("{base}/v1/threads/{thread_id}"))
+                .json(&json!({ "runtime": { "autonomy": "strict" } }))
+                .send()
+                .await
+                .map_err(startup_of("autonomy pin failed"))?;
+            if !pinned.status().is_success() {
+                return Err(Failure::Startup(format!(
+                    "autonomy pin returned {}",
+                    pinned.status()
+                )));
+            }
+            review_prompt(&target.label(), &diff)
+        }
+        None => args.prompt.clone(),
+    };
+
     let detail: Value = client
         .get(format!("{base}/v1/threads/{thread_id}"))
         .send()
@@ -146,7 +171,7 @@ async fn one_turn(args: &RunArgs, addr: std::net::SocketAddr) -> Result<(), Fail
 
     let started = client
         .post(format!("{base}/v1/threads/{thread_id}/turns"))
-        .json(&json!({ "text": args.prompt }))
+        .json(&json!({ "text": turn_text }))
         .send()
         .await
         .map_err(startup_of("turn start failed"))?;
@@ -162,6 +187,89 @@ async fn one_turn(args: &RunArgs, addr: std::net::SocketAddr) -> Result<(), Fail
 
 fn startup_of(what: &'static str) -> impl Fn(reqwest::Error) -> Failure {
     move |err| Failure::Startup(format!("{what}: {err}"))
+}
+
+/// Cap on the diff handed to the model, matching the tool-output budget.
+const REVIEW_DIFF_CAP_BYTES: usize = 64 * 1024;
+
+/// Compute the diff a review turn looks at, in the workspace.
+///
+/// Plain `git` CLI, run to completion with captured output; a missing repo or
+/// an unknown revision is a startup failure, not a turn.
+fn compute_diff(target: &crate::cli::ReviewTarget, workspace: &Path) -> Result<String, Failure> {
+    use crate::cli::ReviewTarget;
+    let commands: Vec<Vec<String>> = match target {
+        ReviewTarget::Uncommitted => vec![git_args(["diff", "HEAD"])],
+        ReviewTarget::Base(branch) => {
+            // PR-style: everything on HEAD since it diverged from the base.
+            let merge_base =
+                git_capture(workspace, git_args(["merge-base", branch.as_str(), "HEAD"]))?;
+            vec![git_args(["diff", &merge_base])]
+        }
+        ReviewTarget::Commit(rev) => vec![git_args(["diff", &format!("{rev}~1"), rev])],
+    };
+    let mut combined = String::new();
+    for args in commands {
+        let output = git_run(workspace, &args)?;
+        if !combined.is_empty() {
+            combined.push('\n');
+        }
+        combined.push_str(&output);
+    }
+    if combined.trim().is_empty() {
+        return Err(Failure::Startup(format!(
+            "no diff found for {}",
+            target.label()
+        )));
+    }
+    if combined.len() <= REVIEW_DIFF_CAP_BYTES {
+        return Ok(combined);
+    }
+    let mut end = REVIEW_DIFF_CAP_BYTES;
+    while end > 0 && !combined.is_char_boundary(end) {
+        end -= 1;
+    }
+    combined.truncate(end);
+    combined.push_str("\n[diff truncated]\n");
+    Ok(combined)
+}
+
+fn git_args<const N: usize>(args: [&str; N]) -> Vec<String> {
+    args.iter().map(|arg| (*arg).to_string()).collect()
+}
+
+fn git_run(workspace: &Path, args: &[String]) -> Result<String, Failure> {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(workspace)
+        .output()
+        .map_err(|err| Failure::Startup(format!("git {} failed: {err}", args.join(" "))))?;
+    if !output.status.success() {
+        return Err(Failure::Startup(format!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn git_capture(workspace: &Path, args: Vec<String>) -> Result<String, Failure> {
+    git_run(workspace, &args).map(|out| out.trim().to_string())
+}
+
+/// The model-visible instruction for one review turn.
+fn review_prompt(label: &str, diff: &str) -> String {
+    format!(
+        "You are performing a read-only code review of the {label}. \
+Report findings only; do not modify any file. \
+Classify each finding as P0 (correctness or security, must fix), \
+P1 (likely bug or clear defect) or P2 (polish). \
+Cite the file and line for every finding. \
+If there are no findings, say so explicitly.\n\
+Below is the diff under review:\n\
+```diff\n{diff}```"
+    )
 }
 
 async fn wait_for_health(client: &reqwest::Client, base: &str) -> Result<(), Failure> {
@@ -267,6 +375,7 @@ fn handle_frame(frame: &str) -> Result<Option<Result<(), Failure>>, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::ReviewTarget;
 
     #[test]
     fn sse_frames_are_parsed_for_deltas_and_terminals() {
@@ -322,5 +431,92 @@ mod tests {
         assert!(port > 0);
         // The explicit port wins unchanged.
         assert_eq!(probe_port(19_999).unwrap(), 19_999);
+    }
+
+    /// One temp git repo: one committed file plus one uncommitted edit.
+    fn git_repo(tag: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir_in(std::env::temp_dir()).expect("temp dir");
+        std::fs::create_dir_all(dir.path().join(tag)).unwrap();
+        let workspace = dir.path().join(tag);
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&workspace)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@example")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@example")
+                .output()
+                .expect("git runs");
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        std::fs::write(workspace.join("a.txt"), "line one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "first"]);
+        (dir, workspace)
+    }
+
+    #[test]
+    fn uncommitted_diff_covers_the_working_tree_change() {
+        let (_dir, workspace) = git_repo("uncommitted");
+        std::fs::write(workspace.join("a.txt"), "line one\nline two\n").unwrap();
+        let diff = compute_diff(&ReviewTarget::Uncommitted, &workspace).unwrap();
+        assert!(diff.contains("+line two"), "got {diff}");
+        // An empty diff is a structured startup failure, not a turn.
+        assert!(compute_diff(
+            &ReviewTarget::Uncommitted,
+            workspace.parent().expect("parent")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn base_diff_uses_the_merge_base_and_commit_diff_one_revision() {
+        let (_dir, workspace) = git_repo("base");
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&workspace)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@example")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@example")
+                .output()
+                .expect("git runs")
+        };
+        std::fs::write(workspace.join("a.txt"), "changed on main\n").unwrap();
+        assert!(git(&["commit", "-aqm", "second"]).status.success());
+
+        let commit = String::from_utf8(git(&["rev-parse", "HEAD"]).stdout)
+            .unwrap()
+            .trim()
+            .to_string();
+        let diff = compute_diff(&ReviewTarget::Commit(commit), &workspace).unwrap();
+        assert!(diff.contains("-line one"));
+        assert!(diff.contains("+changed on main"));
+
+        // The first commit is the merge base of HEAD, so `base:<first>` sees
+        // the second commit's change.
+        let first = String::from_utf8(git(&["rev-parse", "HEAD~1"]).stdout)
+            .unwrap()
+            .trim()
+            .to_string();
+        let base_diff = compute_diff(&ReviewTarget::Base(first), &workspace).unwrap();
+        assert!(base_diff.contains("+changed on main"));
+    }
+
+    #[test]
+    fn the_review_prompt_carries_the_target_and_constraints() {
+        let prompt = review_prompt("uncommitted changes", "+line two");
+        assert!(prompt.contains("read-only code review"));
+        assert!(prompt.contains("do not modify any file"));
+        assert!(prompt.contains("P0"));
+        assert!(prompt.contains("uncommitted changes"));
+        assert!(prompt.contains("+line two"));
     }
 }
