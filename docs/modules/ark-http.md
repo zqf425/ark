@@ -7,9 +7,11 @@
 
 ## 安全与隔离
 
-- 请求按 `plugin_id + host` 校验 manifest allowlist、限流和熔断。
-- `Authorization`、`Host`、受保护 User-Agent 和 trace 头只能由宿主设置；插件仅引用
-  `CredentialRef`，不能读取明文。
+- 请求按 `plugin_id + host` 校验 manifest allowlist、限流与重试；熔断属计划能力，当前未实现，
+  不得宣称已交付。
+- `Authorization`、`Host` 与受保护 User-Agent 只能由宿主设置，插件仅引用 `CredentialRef`，不能读取
+  明文。trace 头的**值**允许插件合法 pass-through（`accept_or_mint` 采纳有效 `x-ark-trace-id`），
+  但线上写入该头只由宿主完成。
 - 重定向必须逐跳重新校验目标；日志只保留脱敏 URL、凭据标签和哈希前缀。
 - 不同插件的请求身份、配额与诊断相互隔离。
 - 不受限制的 allowlist 只能经 `HostAllowlist::allow_all` +

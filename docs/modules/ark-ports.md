@@ -18,6 +18,9 @@
 - `ark-agent` 只能依赖到本 crate，不得引用 `ark-store`、`ark-llm`、`ark-tool` 等实现。
 - `BackendProvider` 只表达用例、版本、执行、制品和结果等领域概念；不得引入具体平台字段。
 - `SessionStore::subscribe` 返回的 `SubscribeTicket` 必须保证 backlog、水位和 live 通道来自同一序列化临界区。
+  `EventSink::subscribe` 返回的 `Subscription` 三字段语义完全相同；存储实现把它委托给同一临界区，
+  它是发布侧（`EventSink`）自带的订阅缝，当前 SSE 边界统一走 `SessionStore::subscribe`。两条边界的
+  语义必须保持一致，任何水位/backlog 语义变更必须同时评估两者。
 - `SessionStore::replay_child_completion_events` 只返回 `child_completed` 与
   `child_completion_acknowledged`，供收件箱和线程详情投影使用；不得为此克隆完整转录事件历史。
 - `SessionStore::replay_interaction_events` 只返回 turn 起止与 approval/user-input 生命周期，供 detail 恢复

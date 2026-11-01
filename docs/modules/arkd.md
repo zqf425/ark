@@ -51,7 +51,10 @@ per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启
 `ReactorConfig`；不得回退为 `AllowAllGates`，否则审批和用户输入卡片会变成无法影响执行的装饰。
 
 每个父/子回合在开始时读取同一份 provider 配置：自定义 headers、temperature 和 max_tokens 传入
-`ModelSeed`，不会被设置页静默忽略。模型目录明确提供 context window 时，组合根将全局 compaction
+`ModelSeed`，不会被设置页静默忽略。模型与目录流量的 `reqwest::Client` 由组合根经
+`ark_http::transport_client`（同一 `HttpPolicy` 的代理/TLS 设置；SSE 流式响应不设 client 级总超时）
+注入 `HttpModelClient` 与 `ModelCatalogClient`，组合根不得为模型路径另建裸 client。
+模型目录明确提供 context window 时，组合根将全局 compaction
 threshold 收窄到可用输入空间（扣除用户明确设置的 max_tokens）；已运行回合继续使用创建时快照。
 
 工作区由组合根持有 canonical-root/generation 状态。父回合在 runner 入口捕获 lease，动态 prompt 和所有
@@ -80,6 +83,9 @@ UI catalog 由组合根创建唯一 `UiBus`：授予本构建实际具备的能�
 插件工具与外部 MCP server 的工具并入同一个 `mcp` 工具组：`mcp_tools` 先扩展 `plugins.tools()`，
 再一次性 `replace_group`。因此命名冲突（同名 `<provider>.<tool>`）是配置错误而不是静默覆盖，
 且插件注册失败时总线目录里本就不存在它的工具，无需额外过滤。
+MCP server 的运行时 upsert/delete 触发重发现时，`McpServerAdapter` 同样先合并插件工具的实时视图
+（`plugin_host::plugin_tools`，与启动装配共用同一转换函数）再整体替换该组——`replace_group` 接收
+整组列表，漏掉插件工具会把它们从模型工具表中挤掉直到重启。
 
 运行时自有的 `web_fetch` 工具（见 [web-fetch-tool 需求](../requirements/web-fetch-tool.md)）
 复用插件的 `HttpBus`：组合根在装配时以 `HostAllowlist::allow_all()` 注册 `ark.builtin.web`
@@ -107,6 +113,9 @@ egress 授权（该构造器对插件清单路径不可达），并把同一能�
 终态（Completed/Failed）条目将调用折叠进上一条 assistant 消息的 `tool_calls`（无文本时新建空内容
 assistant 行），后接一条截断到 16 KiB UTF-8 字节的 `ModelRole::Tool` 结果消息（Failed 条目结果内容为空
 兜底）；非终态（Streaming 等）条目不回放，投影顺序保持 durable items 的时间顺序。
+`Notice` 条目中前缀为 `[context checkpoint` 的（含 `: no structured facts extracted` 与 `: truncated`
+两个变体）回放为 system 消息；匹配必须覆盖整个前缀族，只匹配完整形式会静默丢失压缩回合之后的
+持久上下文。
 
 用户长期 memory 也走动态尾部：`run_turn` 在 skills 目录之后、completion inbox 之前，每回合重新读取
 `<data-dir>/memory.json` 并追加**至多一条** `[user memory]` system 消息（按 `created_at` 升序，拼接后

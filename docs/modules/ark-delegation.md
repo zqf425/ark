@@ -6,7 +6,8 @@
 它不拥有模型循环；`ChildTurnExecutor` 由 `arkd` 实现并复用 `ark-agent::Reactor`。
 
 子代理的运行上下文由父会话继承：工作空间、Provider、模型和权限默认采用父会话该轮生效的设置；
-`delegate_task` 明确给出的 Provider、模型或 `autonomy` 权限覆盖优先。工作空间不接受模型指定，
+`delegate_task` 明确给出的 Provider、模型或 `autonomy` 权限覆盖优先，但覆盖后的权限不得高于
+父线程生效权限（组合根校验，越权直接结构化报错）。工作空间不接受模型指定，
 始终由父工具上下文传入。显式权限覆盖会写入 child run 记录，以便恢复同一子代理时仍然生效。
 
 ## 分层上下文压缩

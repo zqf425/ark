@@ -8,7 +8,9 @@
 当前公开面包括线程/回合/子代理 DTO、运行时事件、渲染 item、能力目录、配置视图、provider 与
 skill 视图，以及插件宿主的只读报告（`PluginHostReport`、`PluginEntry`、`PluginDiagnosticView`）。
 后三者的贡献项（pages/panels/tools）由宿主从真正拥有它们的总线汇总，本 crate 只定义形状，不保
-平行清单。所有 GUI 字段使用 camelCase；既有查询参数保持既有命名，例如 `since_seq`。
+平行清单。wire 字段保持 Rust 既有的 snake_case 命名（生成的 TypeScript 同名，如 `thread_id`、
+`prompt_tokens`）；仅 child-runs 系列 DTO 使用 `rename_all = "camelCase"` 的既有例外，新增字段
+不得再引入新的命名风格。
 
 `TurnRequest.text` 的 UTF-8 字节数上限由 `MAX_TURN_TEXT_BYTES` 定义为 1 MiB；HTTP 边界在创建回合前执行该校验。
 
@@ -43,7 +45,8 @@ skill 视图，以及插件宿主的只读报告（`PluginHostReport`、`PluginE
 
 ## 类型生成
 
-- Rust 类型派生 `serde`、`schemars` 与 `ts-rs`；前端只导入 `web/src/generated/` 生成物。
+- Rust 类型派生 `serde` 与 `ts-rs`（JSON Schema 导出所需的 `schemars` 派生属计划，尚未引入）；
+  前端只导入 `web/src/generated/` 生成物。
 - 修改 wire 类型后运行 `cargo test -p ark-contract --lib ts_export`，再检查
   `git diff --exit-code web/src/generated`。
 - 新增根类型必须同时登记 `ts_export.rs` 的 `export_roots()` 与 `ROOT_NAMES`。
