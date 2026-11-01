@@ -6,7 +6,7 @@
 //! (version, whether a bearer token is configured). Execution is never proxied
 //! here: every tool points at the REST endpoint it describes.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::mcp_tools;
@@ -30,7 +30,7 @@ pub struct McpHttpBinding {
 
 /// How a caller authenticates. Typed because "Rust types are the only source of
 /// wire truth" applies to this document too, not just the contract DTOs.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct McpAuthInfo {
     /// Whether the runtime was started with `--auth-token`.
     pub required: bool,
@@ -119,6 +119,9 @@ mod tests {
             ("memory_", 5),
             ("attachment_", 6),
             ("child_run_", 8),
+            ("provider_", 6),
+            ("workspace_", 5),
+            ("mcp_server_", 4),
         ]
     }
 
@@ -130,7 +133,7 @@ mod tests {
         assert_eq!(json["version"], "9.9.9-test");
         assert_eq!(json["auth"]["required"], true);
         assert_eq!(json["auth"]["header"], "authorization");
-        assert!(json["tools"].as_array().expect("tools").len() >= 40);
+        assert!(json["tools"].as_array().expect("tools").len() >= 75);
     }
 
     #[test]

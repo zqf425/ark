@@ -33,6 +33,16 @@ fn thread_id() -> Value {
     json!({ "type": "string", "description": "Path parameter: thread id." })
 }
 
+/// Path parameter: provider id.
+fn provider_id() -> Value {
+    json!({ "type": "string", "description": "Path parameter: provider id." })
+}
+
+/// Path parameter: MCP server id.
+fn server_id() -> Value {
+    json!({ "type": "string", "description": "Path parameter: MCP server id." })
+}
+
 /// Schema for a body whose shape is owned by a `ark-contract` DTO: name the
 /// type (the generated TypeScript in `web/src/generated` mirrors it) instead of
 /// re-listing the fields.
@@ -60,19 +70,28 @@ fn local_body(type_name: &str) -> Value {
 
 pub(crate) fn tools() -> Vec<McpToolDoc> {
     let mut tools = Vec::new();
-    threads(&mut tools);
+    threads_lifecycle(&mut tools);
+    threads_history(&mut tools);
+    threads_insights(&mut tools);
+    threads_goal_todos(&mut tools);
     turns(&mut tools);
     gates(&mut tools);
     schedules(&mut tools);
     memory(&mut tools);
     attachments(&mut tools);
     child_runs(&mut tools);
-    platform(&mut tools);
+    platform_providers(&mut tools);
+    platform_workspace(&mut tools);
+    platform_mcp_servers(&mut tools);
+    platform_runtime(&mut tools);
+    platform_admin(&mut tools);
     tools
 }
 
-fn threads(tools: &mut Vec<McpToolDoc>) {
+/// Threads_lifecycle tools.
+fn threads_lifecycle(tools: &mut Vec<McpToolDoc>) {
     tools.extend([
+
         tool(
             "thread_list",
             "List threads: active first, then most recently updated. Absent `limit` lists everything.",
@@ -86,6 +105,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             }),
             &[],
         ),
+
         tool(
             "thread_create",
             "Create a thread. Returns 201 with the new thread summary.",
@@ -96,6 +116,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             }),
             &[],
         ),
+
         tool(
             "thread_get",
             "Read one thread in full: summary, items, child overview and runtime snapshot.",
@@ -104,6 +125,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": thread_id() }),
             &["id"],
         ),
+
         tool(
             "thread_update",
             "Rename, archive/unarchive, or override per-thread runtime (provider/model/autonomy). Absent fields keep stored values.",
@@ -115,6 +137,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             }),
             &["id"],
         ),
+
         tool(
             "thread_delete",
             "Delete the thread directory and its whole event log. Answers 409 while a turn is running; interrupt first.",
@@ -123,6 +146,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": thread_id() }),
             &["id"],
         ),
+
         tool(
             "thread_fork",
             "Fork the thread at the current durable watermark into a new thread. Returns 201 with the fork summary.",
@@ -131,6 +155,14 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": thread_id() }),
             &["id"],
         ),
+
+    ]);
+}
+
+/// Threads_history tools.
+fn threads_history(tools: &mut Vec<McpToolDoc>) {
+    tools.extend([
+
         tool(
             "thread_rewind",
             "Physically rewind: delete the target and everything after it, invalidate old SSE state. Provide `turn_id` or `seq`, never both.",
@@ -142,6 +174,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             }),
             &["id"],
         ),
+
         tool(
             "thread_compact",
             "Manually compact the thread context; returns the checkpoint text.",
@@ -150,6 +183,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": thread_id() }),
             &["id"],
         ),
+
         tool(
             "thread_export",
             "Export a deterministic, portable session JSON: metadata plus the ascending authoritative event log, no credentials or attachment payloads.",
@@ -158,6 +192,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": thread_id() }),
             &["id"],
         ),
+
         tool(
             "thread_review",
             "Start a code-review turn (202 + TurnSummary). The prompt is built from the thread's authoritative workspace-change projection.",
@@ -169,6 +204,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             }),
             &["id"],
         ),
+
         tool(
             "thread_events",
             "Subscribe to the thread event stream (SSE). Read `last_seq` from thread_get first and pass it as `since_seq` to avoid replaying history.",
@@ -180,6 +216,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             }),
             &["id"],
         ),
+
         tool(
             "thread_usage",
             "Project the thread's model usage and error attribution from authoritative usage events.",
@@ -192,6 +229,14 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             }),
             &["id"],
         ),
+
+    ]);
+}
+
+/// Threads_insights tools.
+fn threads_insights(tools: &mut Vec<McpToolDoc>) {
+    tools.extend([
+
         tool(
             "thread_skills",
             "List skills visible to this thread (global roots plus thread extras), with activation hints.",
@@ -200,6 +245,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": thread_id() }),
             &["id"],
         ),
+
         tool(
             "thread_skills_refresh",
             "Rescan the skills directories and refresh the thread view.",
@@ -208,6 +254,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": thread_id() }),
             &["id"],
         ),
+
         tool(
             "thread_plan",
             "Read the workbench Plan projection (goal + todos) from authoritative events.",
@@ -216,6 +263,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": thread_id() }),
             &["id"],
         ),
+
         tool(
             "thread_changes",
             "Read the thread's workspace change projection (from persisted tool output, never the disk directly).",
@@ -224,6 +272,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": thread_id() }),
             &["id"],
         ),
+
         tool(
             "thread_files",
             "Read the thread's persisted `read` tool file outputs.",
@@ -235,6 +284,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             }),
             &["id"],
         ),
+
         tool(
             "thread_terminal",
             "Read the thread's persisted `bash` tool terminal output.",
@@ -246,6 +296,14 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             }),
             &["id"],
         ),
+
+    ]);
+}
+
+/// Threads_goal_todos tools.
+fn threads_goal_todos(tools: &mut Vec<McpToolDoc>) {
+    tools.extend([
+
         tool(
             "thread_goal_get",
             "Read the thread goal (Plan projection).",
@@ -254,6 +312,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": thread_id() }),
             &["id"],
         ),
+
         tool(
             "thread_goal_set",
             "Write the thread goal (appends a GoalUpdated authoritative event). Empty text is a structured 400.",
@@ -265,6 +324,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             }),
             &["id", "goal"],
         ),
+
         tool(
             "thread_goal_clear",
             "Clear the thread goal (appends a GoalCleared event).",
@@ -273,6 +333,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": thread_id() }),
             &["id"],
         ),
+
         tool(
             "thread_todos_set",
             "Replace the thread todos wholesale (appends a TodosUpdated event; validated before the write).",
@@ -284,6 +345,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             }),
             &["id"],
         ),
+
         tool(
             "thread_todos_clear",
             "Clear the thread todos (appends a TodosCleared event).",
@@ -292,6 +354,7 @@ fn threads(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": thread_id() }),
             &["id"],
         ),
+
     ]);
 }
 
@@ -592,10 +655,10 @@ fn child_runs(tools: &mut Vec<McpToolDoc>) {
     ]);
 }
 
-fn platform(tools: &mut Vec<McpToolDoc>) {
-    let provider_id = || json!({ "type": "string", "description": "Path parameter: provider id." });
-    let server_id = || json!({ "type": "string", "description": "Path parameter: MCP server id." });
+/// Platform_providers tools.
+fn platform_providers(tools: &mut Vec<McpToolDoc>) {
     tools.extend([
+
         tool(
             "provider_list",
             "List model providers. API keys are only ever returned as presence flags and mask hints, never plaintext.",
@@ -604,6 +667,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             json!({}),
             &[],
         ),
+
         tool(
             "provider_upsert",
             "Insert or update a provider (empty api key/header keeps the stored secret); make_default=true also selects it as default.",
@@ -612,6 +676,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             json!({ "body": local_body("UpsertProviderBody = ProviderEntry flattened + make_default:boolean") }),
             &["body"],
         ),
+
         tool(
             "provider_test",
             "Probe provider connectivity (a saved id or an unsaved draft entry).",
@@ -620,6 +685,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             json!({ "body": dto_body("ProviderTestRequest (provider_id or entry)") }),
             &["body"],
         ),
+
         tool(
             "provider_models",
             "Query the provider model catalog (bounded, sorted, deduplicated; never echoes secrets or URLs carrying them).",
@@ -628,6 +694,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             json!({ "body": dto_body("ProviderModelCatalogRequest") }),
             &["body"],
         ),
+
         tool(
             "provider_delete",
             "Delete a provider; deleting the default clears the default.",
@@ -636,6 +703,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": provider_id() }),
             &["id"],
         ),
+
         tool(
             "provider_set_default",
             "Make an existing, enabled provider the default.",
@@ -644,6 +712,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             json!({ "id": provider_id() }),
             &["id"],
         ),
+
         tool(
             "skill_list",
             "List global skills (diagnostic view: loaded, duplicate slugs downgraded, available ids).",
@@ -652,78 +721,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             json!({}),
             &[],
         ),
-        tool(
-            "workspace_view",
-            "Read the active workspace view (canonical path and generation).",
-            "GET",
-            "/v1/workspace",
-            json!({}),
-            &[],
-        ),
-        tool(
-            "workspace_status",
-            "Read the workspace git status (each call is hard-capped at 3s so a wedged git cannot stall the request).",
-            "GET",
-            "/v1/workspace/status",
-            json!({}),
-            &[],
-        ),
-        tool(
-            "workspace_switch",
-            "Switch the active workspace. Answers 409 while a parent or child run is active; nothing is implicitly cancelled.",
-            "POST",
-            "/v1/workspace/switch",
-            json!({ "body": dto_body("SwitchWorkspaceRequest (path)") }),
-            &["body"],
-        ),
-        tool(
-            "workspace_diff",
-            "Read the workspace git diff (carries a generation; discard responses whose generation changed).",
-            "GET",
-            "/v1/workspace/diff",
-            json!({}),
-            &[],
-        ),
-        tool(
-            "workspace_validate",
-            "Validate that a directory exists and return its normalized path, without switching.",
-            "POST",
-            "/v1/workspace/validate",
-            json!({ "body": local_body("ValidateWorkspaceBody (path)") }),
-            &["body"],
-        ),
-        tool(
-            "mcp_server_list",
-            "List configured external MCP servers (safe read view: env/header values are never returned).",
-            "GET",
-            "/v1/mcp/servers",
-            json!({}),
-            &[],
-        ),
-        tool(
-            "mcp_server_upsert",
-            "Insert or update an external MCP server (stdio / streamable_http); success re-discovers tools and atomically replaces the `mcp` tool group.",
-            "POST",
-            "/v1/mcp/servers",
-            json!({ "body": dto_body("McpServerEntry (empty env/header keeps stored secrets)") }),
-            &["body"],
-        ),
-        tool(
-            "mcp_server_delete",
-            "Delete an external MCP server and drop its tools from the `mcp` group.",
-            "DELETE",
-            "/v1/mcp/servers/{id}",
-            json!({ "id": server_id() }),
-            &["id"],
-        ),
-        tool(
-            "mcp_server_test",
-            "Test an external MCP server connection without changing published tools.",
-            "POST",
-            "/v1/mcp/servers/{id}/test",
-            json!({ "id": server_id() }),
-            &["id"],
-        ),
+
         tool(
             "plugins_report",
             "Read the local plugin load report (loaded/failed/skipped/diagnostics/HTTP denials). Read-only.",
@@ -732,6 +730,109 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             json!({}),
             &[],
         ),
+
+    ]);
+}
+
+/// Platform_workspace tools.
+fn platform_workspace(tools: &mut Vec<McpToolDoc>) {
+    tools.extend([
+
+        tool(
+            "workspace_view",
+            "Read the active workspace view (canonical path and generation).",
+            "GET",
+            "/v1/workspace",
+            json!({}),
+            &[],
+        ),
+
+        tool(
+            "workspace_status",
+            "Read the workspace git status (each call is hard-capped at 3s so a wedged git cannot stall the request).",
+            "GET",
+            "/v1/workspace/status",
+            json!({}),
+            &[],
+        ),
+
+        tool(
+            "workspace_switch",
+            "Switch the active workspace. Answers 409 while a parent or child run is active; nothing is implicitly cancelled.",
+            "POST",
+            "/v1/workspace/switch",
+            json!({ "body": dto_body("SwitchWorkspaceRequest (path)") }),
+            &["body"],
+        ),
+
+        tool(
+            "workspace_diff",
+            "Read the workspace git diff (carries a generation; discard responses whose generation changed).",
+            "GET",
+            "/v1/workspace/diff",
+            json!({}),
+            &[],
+        ),
+
+        tool(
+            "workspace_validate",
+            "Validate that a directory exists and return its normalized path, without switching.",
+            "POST",
+            "/v1/workspace/validate",
+            json!({ "body": local_body("ValidateWorkspaceBody (path)") }),
+            &["body"],
+        ),
+
+    ]);
+}
+
+/// Platform_mcp_servers tools.
+fn platform_mcp_servers(tools: &mut Vec<McpToolDoc>) {
+    tools.extend([
+
+        tool(
+            "mcp_server_list",
+            "List configured external MCP servers (safe read view: env/header values are never returned).",
+            "GET",
+            "/v1/mcp/servers",
+            json!({}),
+            &[],
+        ),
+
+        tool(
+            "mcp_server_upsert",
+            "Insert or update an external MCP server (stdio / streamable_http); success re-discovers tools and atomically replaces the `mcp` tool group.",
+            "POST",
+            "/v1/mcp/servers",
+            json!({ "body": dto_body("McpServerEntry (empty env/header keeps stored secrets)") }),
+            &["body"],
+        ),
+
+        tool(
+            "mcp_server_delete",
+            "Delete an external MCP server and drop its tools from the `mcp` group.",
+            "DELETE",
+            "/v1/mcp/servers/{id}",
+            json!({ "id": server_id() }),
+            &["id"],
+        ),
+
+        tool(
+            "mcp_server_test",
+            "Test an external MCP server connection without changing published tools.",
+            "POST",
+            "/v1/mcp/servers/{id}/test",
+            json!({ "id": server_id() }),
+            &["id"],
+        ),
+
+    ]);
+}
+
+/// Platform_runtime tools.
+fn platform_runtime(tools: &mut Vec<McpToolDoc>) {
+    tools.extend([
+
         tool(
             "runtime_info",
             "Read runtime info (version, started_at, data dir).",
@@ -740,6 +841,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             json!({}),
             &[],
         ),
+
         tool(
             "runtime_tools",
             "List everything currently registered on the model tool table (builtins, plugin tools, external MCP tools).",
@@ -748,6 +850,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             json!({}),
             &[],
         ),
+
         tool(
             "runtime_capabilities",
             "Read the runtime capability catalog (tool/model_provider/ui_page/ui_panel plus the page catalog).",
@@ -756,6 +859,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             json!({}),
             &[],
         ),
+
         tool(
             "usage_total",
             "Read the process-wide model usage totals.",
@@ -764,46 +868,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             json!({}),
             &[],
         ),
-        tool(
-            "config_view",
-            "Read the runtime configuration view (validated snapshot and load diagnostics, no secrets).",
-            "GET",
-            "/v1/runtime/config",
-            json!({}),
-            &[],
-        ),
-        tool(
-            "config_apply",
-            "Apply a config patch. Fields classified `Restart` reject the whole patch; `Hot` fields take effect immediately.",
-            "POST",
-            "/v1/runtime/config",
-            json!({ "body": dto_body("ConfigPatch (optional overrides per config section)") }),
-            &["body"],
-        ),
-        tool(
-            "subagents_view",
-            "Read subagent settings (enabled / auto_continue / max_concurrency).",
-            "GET",
-            "/v1/subagents/config",
-            json!({}),
-            &[],
-        ),
-        tool(
-            "subagents_configure",
-            "Hot-update subagent settings (same ApplyResult semantics as config_apply).",
-            "POST",
-            "/v1/subagents/config",
-            json!({ "body": dto_body("SubagentSettings (auto_continue defaults to false and must be explicit opt-in)") }),
-            &["body"],
-        ),
-        tool(
-            "session_resume_thread",
-            "Resolve a legacy session id into the full thread detail (this runtime has exactly one durable session object: the thread).",
-            "POST",
-            "/v1/sessions/{id}/resume-thread",
-            json!({ "id": { "type": "string", "description": "Path parameter: session id (a thread id)." } }),
-            &["id"],
-        ),
+
         tool(
             "llm_rounds",
             "Diagnostic projection of every model round from authoritative usage events (no prompts, keys or user prose).",
@@ -816,6 +881,59 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             }),
             &[],
         ),
+
+    ]);
+}
+
+/// Platform_admin tools.
+fn platform_admin(tools: &mut Vec<McpToolDoc>) {
+    tools.extend([
+
+        tool(
+            "config_view",
+            "Read the runtime configuration view (validated snapshot and load diagnostics, no secrets).",
+            "GET",
+            "/v1/runtime/config",
+            json!({}),
+            &[],
+        ),
+
+        tool(
+            "config_apply",
+            "Apply a config patch. Fields classified `Restart` reject the whole patch; `Hot` fields take effect immediately.",
+            "POST",
+            "/v1/runtime/config",
+            json!({ "body": dto_body("ConfigPatch (optional overrides per config section)") }),
+            &["body"],
+        ),
+
+        tool(
+            "subagents_view",
+            "Read subagent settings (enabled / auto_continue / max_concurrency).",
+            "GET",
+            "/v1/subagents/config",
+            json!({}),
+            &[],
+        ),
+
+        tool(
+            "subagents_configure",
+            "Hot-update subagent settings (same ApplyResult semantics as config_apply).",
+            "POST",
+            "/v1/subagents/config",
+            json!({ "body": dto_body("SubagentSettings (auto_continue defaults to false and must be explicit opt-in)") }),
+            &["body"],
+        ),
+
+        tool(
+            "session_resume_thread",
+            "Resolve a legacy session id into the full thread detail (this runtime has exactly one durable session object: the thread).",
+            "POST",
+            "/v1/sessions/{id}/resume-thread",
+            json!({ "id": { "type": "string", "description": "Path parameter: session id (a thread id)." } }),
+            &["id"],
+        ),
+
         tool(
             "shutdown",
             "Request graceful shutdown: cancel active turns and pending continuations, converge every terminal state, then exit.",
@@ -824,6 +942,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             json!({}),
             &[],
         ),
+
     ]);
 }
 

@@ -97,7 +97,7 @@ async fn discovery_document_answers_without_a_token() {
     assert_eq!(json["server_name"], "arkd");
     assert_eq!(json["transport"], "http");
     assert_eq!(json["auth"]["required"], false);
-    assert!(json["tools"].as_array().expect("tools").len() >= 40);
+    assert!(json["tools"].as_array().expect("tools").len() >= 75);
     assert!(json["tools"][0]["http"]["method"].is_string());
     assert!(json["tools"][0]["http"]["path"].is_string());
 }
@@ -150,7 +150,7 @@ async fn discovery_stays_open_when_a_token_is_configured() {
 async fn every_advertised_tool_resolves_to_a_real_route() {
     let app = app();
     let catalog = mcp_info::server_info(false, "test").tools;
-    assert!(catalog.len() >= 40, "catalog must not silently shrink");
+    assert!(catalog.len() >= 75, "catalog must not silently shrink");
 
     // Format-valid ids: parsing must succeed so the request reaches the handler
     // (structured 4xx), never the router's bare 404.

@@ -11,7 +11,8 @@
   静态工具目录（`service/mcp_tools.rs`，每个工具带 name/description/inputSchema/http.method+http.path）
   经 `service/mcp_info.rs` 组装，`auth.required` 反映运行时是否配置了 token。它挂在免鉴权 open 路由组
   （与 `/health` 同层）——调用方必须先读到文档才知道如何鉴权。schema 只写路径参数与关键请求体字段，
-  契约 DTO 建模的请求体引用类型名而非逐字段抄写（`ark-contract` 是唯一真源）。集成测试对目录中每个
+  契约 DTO 建模的请求体引用类型名而非逐字段抄写（`ark-contract` 是唯一真源）；ark-server 路由
+  内部定义的个别请求体（如 `UpsertProviderBody`）如实标注为 server 本地类型，不指向契约生成物。集成测试对目录中每个
   `method+path` 发起真实请求，断言不落入路由级裸 404，防止目录与路由表漂移。
 - SSE 订阅调用 `SessionStore::subscribe`，取得同一临界区内的 backlog、水位和 live receiver。
 - 首帧：`GET /v1/threads/{id}/events` 在 backlog 为空时立即发送一个 `heartbeat` 控制帧，`seq` 取该次订阅的
