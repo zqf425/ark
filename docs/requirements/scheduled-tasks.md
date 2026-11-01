@@ -135,4 +135,8 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
   `Ctrl-C`/drain 这类只置标志位的关闭路径由 tick 顶部的 `is_shutting_down()` 收敛。
 - 测试:`cargo test -p ark-server --lib` 155 passed。
 
-尚未实现(需后续阶段):渲染层/设置页界面与 `web/src/generated` 契约导出校验、端到端真实模型验收。
+阶段 3(管理界面)已实现:设置页「定时任务」section(列表/启停/新建编辑/删除/立即运行/
+打开对应会话)、全局开关、节奏摘要纯函数、i18n 中英资源与回归测试(web 136 用例全绿,
+typecheck 与硬规则通过)。
+
+尚未实现:端到端真实模型验收(发布验收承接)。
