@@ -139,3 +139,16 @@ docs/
 - 审批状态读 `runtime_snapshot.pending_approvals`，不要假设 `approval_requested` 一发就能立刻
   resolve：实测存在注册窗口期，出现过 404 与 204 两种结果。
 - 轮询等待要有上限，并区分“还在编译”与“真卡死”：同时看日志增长与进程 CPU，不要只看日志大小。
+
+## 8. kun 检视与修复的模型约定
+
+用 kun（smart-ark 本地运行时，HTTP API）做代码检视或修复时，模型按以下优先级选择。供应商与
+模型必须在**创建线程时**指定（实测 turn 级 `providerId` 覆盖不生效，turn 会回落到线程默认通道）：
+
+1. 首选 workbuddy 供应商的 DeepSeek：创建线程时带 `providerId: "custom-provider-8"` 与
+   `model: "global:deepseek-v4.1-flash"`（workbuddy = `http://172.16.182.73:7863/v1`，
+   即 smart-ark 设置里名为 workbuddy 的供应商）；
+2. workbuddy 的模型池偶发 `no_healthy_account`（网关上游账号池临时不可用，稍后重试即可），
+   或 DeepSeek 通道异常时，临时改用同供应商的 `global:glm-5.3-flash`；
+3. 不要依赖 kun 实例默认网关（`t.100credit.cn`）的任何模型通道：该账户额度已耗尽，所有请求
+   都会因预扣费失败（`insufficient_user_quota`），实测覆盖 DeepSeek 与默认 GLM 全部通道。
