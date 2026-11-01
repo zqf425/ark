@@ -45,6 +45,11 @@ export function useThreadStream(threadId: ThreadId | null): void {
     // anyway, so a second notification in the same backlog must not queue one.
     let rebuildScheduled = false
     const displayedCompletions = new Set<string>()
+    // A load belongs to this thread only. Dropping the previous projection before
+    // the first await keeps A's items, turn states and approval/user-input gates
+    // off screen while B is loading, so nothing from A can still be answered in
+    // B's canvas. The watermark below still comes from B's own detail.
+    resetItems()
     setDetailStatus('loading')
 
     const run = async (): Promise<void> => {
@@ -96,6 +101,9 @@ export function useThreadStream(threadId: ThreadId | null): void {
         })
       } catch (error) {
         if (cancelled || controller.signal.aborted) return
+        // A failed load leaves nothing to show: keeping the previous thread's
+        // rows would present stale history under the new thread's error.
+        resetItems()
         setDetailStatus('error', describe(error))
       }
     }

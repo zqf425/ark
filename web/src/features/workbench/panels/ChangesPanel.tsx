@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { describeError } from '../../../shared/api/error-describe'
 import { translateNow } from '../../../shared/i18n/current'
-import type { WorkspaceChangesResponse, WorkspaceDiff, WorkspaceView } from '../../../shared/contracts'
+import type { ThreadId, WorkspaceChangesResponse, WorkspaceDiff, WorkspaceView } from '../../../shared/contracts'
 import { EmptyState } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../../code-session/state/store'
@@ -27,16 +27,52 @@ export function ChangesPanel(): JSX.Element {
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
   const [workspaceDraft, setWorkspaceDraft] = useState('')
   const [switching, setSwitching] = useState(false)
+  /**
+   * Which thread the rows and the newest changes request belong to.
+   * Bookkeeping, never render input: the panel stays mounted across thread
+   * switches while its rows are per-thread, so "these rows are A's" has to be an
+   * explicit fact.
+   */
+  const [rowsFor, setRowsFor] = useState<ThreadId | null>(threadId)
+  const latestLoad = useRef<{ threadId: ThreadId | null; ticket: number }>({ threadId, ticket: 0 })
 
-  useEffect(() => {
-    if (!threadId) return
-    const controller = new AbortController()
-    void getChanges(threadId, controller.signal).then((next) => {
+  // Switching threads drops the previous thread's rows in the same commit, and
+  // the thread change in `latestLoad` invalidates every request still in flight
+  // for it.
+  if (rowsFor !== threadId) {
+    setRowsFor(threadId)
+    setData(null)
+    setError(null)
+    latestLoad.current = { threadId, ticket: latestLoad.current.ticket + 1 }
+  }
+
+  /**
+   * One changes request. A response paints only while it is still the newest
+   * request for the thread on screen: a reload can otherwise resolve out of
+   * order, and the previous thread's rows must never reappear over the current
+   * one.
+   */
+  const load = (forThread: ThreadId, signal: AbortSignal): void => {
+    const ticket = latestLoad.current.ticket + 1
+    latestLoad.current = { threadId: forThread, ticket }
+    const isCurrent = (): boolean => !signal.aborted && latestLoad.current.threadId === forThread && latestLoad.current.ticket === ticket
+    void getChanges(forThread, signal).then((next) => {
+      if (!isCurrent()) return
       setData(next)
       setError(null)
     }).catch((reason) => {
-      if (!controller.signal.aborted) setError(describe(reason))
+      if (!isCurrent()) return
+      setData(null)
+      setError(describe(reason))
     })
+  }
+
+  useEffect(() => {
+    // A cleared selection is handled by the render-phase sync above, so there is
+    // nothing to load here.
+    if (!threadId) return
+    const controller = new AbortController()
+    load(threadId, controller.signal)
     return () => controller.abort()
   }, [threadId, lastSeq])
 
