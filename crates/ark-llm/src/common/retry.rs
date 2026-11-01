@@ -69,7 +69,7 @@ impl RetryPolicy {
     }
 
     /// Delay before attempt `attempt` (0-based: 0 is the delay after the first
-    /// failure). `attempt * base`, capped, floored for rate limiting.
+    /// failure). `base × 2^attempt`, capped, floored for rate limiting.
     pub fn delay(&self, attempt: u32, kind: FailureKind) -> Duration {
         let exponent = attempt.min(16);
         let scaled = self.base.saturating_mul(1u32 << exponent.min(16));
@@ -126,7 +126,10 @@ pub fn parse_retry_after(header: Option<&str>, now: std::time::SystemTime) -> Op
     Some(parsed.min(RETRY_AFTER_CAP))
 }
 
-/// Parse an IMF-fixdate / RFC 850 / asctime date as used by HTTP headers.
+/// Parse an HTTP-date `Retry-After` value. `parse_from_rfc2822` only accepts
+/// the IMF-fixdate form (`Sun, 06 Nov 1994 08:49:37 GMT`); the two legacy
+/// RFC 850 / asctime spellings fail to parse and the caller falls back to
+/// exponential backoff, which is safe (merely provider-unadvised).
 fn chrono_http_date(header: &str) -> Option<std::time::SystemTime> {
     use chrono::{DateTime, Utc};
     DateTime::parse_from_rfc2822(header)
@@ -145,7 +148,8 @@ pub fn jittered(delay: Duration, salt: u64) -> Duration {
     if millis == 0 {
         return delay;
     }
-    // SplitMix64: three lines, good diffusion, no dependency.
+    // SplitMix64-style finalizer variant: same no-dependency spirit, but the
+    // constants and rotations differ from the standard SplitMix64 mix.
     let mut z = salt.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(30);
     z ^= z >> 27;
     z = z.wrapping_mul(0xBF58_476D_C166_45C9).rotate_left(23);

@@ -39,9 +39,12 @@
 - 失败分类：`429` 为 `RateLimited`；`408/409/425/5xx` 与传输错误（连接/超时/请求构造外错误）
   为 `Transient`；其余 4xx 为 `Permanent`，永不重试。
 - 默认 `RetryPolicy`：初始请求 + 3 次重试（`max_attempts: 4`），指数退避基数 500ms，
-  上限 30s；`RateLimited` 另有 1s 下限，避免高频打网关。
+  上限 30s（抖动**前**的基数上限；±25% 抖动后实际可达约 37.5s，smart-ark 同样如此）；
+  `RateLimited` 另有 1s 下限，避免高频打网关。
 - **Retry-After 优先**（RFC 9110 §10.2.3）：`429`/`5xx` 响应带 `Retry-After`（秒数或 HTTP 日期）
-  时以该值为准，上限 30s——错误的网关配置不能把回合拖住几分钟。
+  时以该值为准，上限 30s（同样为抖动前基数，±25% 抖动后约 37.5s）——错误的网关配置不能把回合拖住几分钟。
+  秒数为 0 的 `Retry-After` 视为未提供，回退指数退避而非绕过 1s 限流下限（对齐 smart-ark
+  `computeRetryDelay` 仅采纳 >0 的 `retryAfterMs`）。
 - **抖动 ±25%**（`jittered`，SplitMix64 确定性伪随机，盐为墙钟纳秒 ⊕ 尝试序号）：并发回合
   撞到同一限流窗口时错开重试，不引入随机数依赖。
 - 每次重试前 `tracing::warn!` 记录 provider/model/失败类别/尝试序号/延迟，运行时可在日志

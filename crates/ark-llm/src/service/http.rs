@@ -124,8 +124,16 @@ impl ModelClient for HttpModelClient {
                             // A provider-supplied Retry-After overrides the
                             // backoff schedule (already capped by the parser);
                             // jitter desynchronises concurrent turns hitting
-                            // the same rate-limit window.
-                            let base = failure.retry_after.unwrap_or(next.next_delay);
+                            // the same rate-limit window. A zero value counts
+                            // as "not provided" — the same rule as smart-ark's
+                            // `computeRetryDelay`, which only adopts
+                            // `retryAfterMs` when it is > 0 — so
+                            // `Retry-After: 0` cannot bypass the rate-limit
+                            // floor and hammer the provider.
+                            let base = failure
+                                .retry_after
+                                .filter(|delay| !delay.is_zero())
+                                .unwrap_or(next.next_delay);
                             let delay = jittered(base, salt_for(state.failures));
                             tracing::warn!(
                                 provider = %self.config.provider_id,
@@ -436,18 +444,21 @@ mod tests {
         );
     }
 
-    /// A 429 with `Retry-After: 0` must be retried (the smart-ark-aligned
-    /// behaviour); the provider-advised zero delay keeps the test instant.
+    /// A 429 with `Retry-After: 1` must wait ≈1s (the provider-advised delay),
+    /// not the ≈1ms exponential fallback — and a `Retry-After: 0` must fall
+    /// back to the backoff schedule instead of bypassing `rate_limit_floor`
+    /// (same rule as smart-ark's `computeRetryDelay`: only adopt a value > 0).
     #[tokio::test]
     async fn rate_limited_response_is_retried_honouring_retry_after() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
+        use std::time::Instant;
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let server = std::thread::spawn(move || {
             let responses: [&[u8]; 2] = [
-                b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 14\r\nConnection: close\r\n\r\ndata: [DONE]\n\n",
             ];
             for response in responses {
@@ -461,12 +472,110 @@ mod tests {
             ProviderConfig::new("test", "test-model")
                 .with_base_url(format!("http://{address}"))
                 .with_api_key("test-key"),
-        );
+        )
+        .with_retry(RetryPolicy {
+            max_attempts: 4,
+            base: Duration::from_millis(1),
+            max_delay: Duration::from_secs(30),
+            rate_limit_floor: Duration::from_millis(1),
+        });
         let (sink, _drain) = mpsc::channel(1);
 
+        let started = Instant::now();
         let response = client.stream(request(), sink).await.unwrap();
+        let elapsed = started.elapsed();
+
         assert_eq!(response.text, "", "the [DONE]-only stream yields no text");
+        assert!(
+            elapsed >= Duration::from_millis(700),
+            "the retry must have waited the provider-advised ≈1s, took {elapsed:?}"
+        );
         server.join().unwrap();
+    }
+
+    /// A stream that published text and then breaks mid-flight must surface as
+    /// an error **without a second request**: retrying after the sink already
+    /// received deltas would duplicate text. The body uses chunked framing and
+    /// the server closes before the terminating chunk, so the truncation is a
+    /// decoder error (a bare EOF with no framing would read as a complete —
+    /// if sentinel-less — body instead).
+    #[tokio::test]
+    async fn a_failure_after_published_deltas_is_never_retried() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = {
+            let listener = listener.try_clone().unwrap();
+            std::thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 4_096];
+                let _ = socket.read(&mut request).unwrap();
+                // One text-delta chunk, then close without the terminating
+                // `0\r\n\r\n`: the stream breaks after content already
+                // reached the sink.
+                let frame = "data: {\"choices\":[{\"delta\":{\"content\":\"par\"}}]}\n\n";
+                let body = format!("{:x}\r\n{frame}\r\n", frame.len());
+                socket
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\n\
+                             Content-Type: text/event-stream\r\n\
+                             Transfer-Encoding: chunked\r\n\
+                             Connection: close\r\n\
+                             \r\n\
+                             {body}"
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
+                drop(socket);
+            })
+        };
+        // A tiny base keeps a hypothetical (regressed) retry inside the
+        // ~200ms accept-poll window below; the correct path never retries
+        // regardless of the policy.
+        let client = HttpModelClient::with_config(
+            ProviderConfig::new("test", "test-model")
+                .with_base_url(format!("http://{address}"))
+                .with_api_key("test-key"),
+        )
+        .with_retry(RetryPolicy {
+            max_attempts: 4,
+            base: Duration::from_millis(1),
+            max_delay: Duration::from_secs(30),
+            rate_limit_floor: Duration::from_millis(1),
+        });
+        let (sink, mut drain) = mpsc::channel(4);
+
+        let result = client.stream(request(), sink).await;
+        server.join().unwrap();
+
+        let error = result.expect_err("a truncated stream must fail");
+        assert!(error.to_string().contains("model stream broke"));
+
+        // The truncated delta was already published to the sink.
+        let chunk = drain.recv().await.expect("published chunk");
+        assert!(matches!(chunk, ModelChunk::TextDelta { .. }));
+
+        // No second request: poll `accept` instead of blocking on it, so a
+        // regression retries and fails this assertion in ~200ms.
+        listener
+            .set_nonblocking(true)
+            .expect("listener switched to polling");
+        let mut second_connection = false;
+        for _ in 0..20 {
+            if listener.accept().is_ok() {
+                second_connection = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            !second_connection,
+            "a published-then-broken stream must not trigger a retry request"
+        );
     }
 
     #[test]
