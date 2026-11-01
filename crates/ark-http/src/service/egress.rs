@@ -54,6 +54,30 @@ impl EgressRegistry {
         Ok(grant)
     }
 
+    /// Declare an egress grant with a pre-built allowlist.
+    ///
+    /// Only the composition root uses this, for the runtime's own builtin
+    /// egress (`ark.builtin.web`): [`Self::register`] cannot express an
+    /// unrestricted list, which is exactly what keeps plugin manifests strict.
+    pub fn register_grant(
+        &mut self,
+        plugin_id: &str,
+        version: &str,
+        allowlist: HostAllowlist,
+    ) -> Result<EgressGrant> {
+        validate_plugin_id(plugin_id)?;
+        if version.trim().is_empty() {
+            return Err(ArkError::validation("plugin version is empty"));
+        }
+        let grant = EgressGrant {
+            plugin_id: plugin_id.to_string(),
+            version: version.trim().to_string(),
+            allowlist,
+        };
+        self.grants.insert(plugin_id.to_string(), grant.clone());
+        Ok(grant)
+    }
+
     pub fn unregister(&mut self, plugin_id: &str) -> bool {
         self.grants.remove(plugin_id).is_some()
     }

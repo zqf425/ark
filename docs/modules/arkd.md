@@ -75,6 +75,11 @@ UI catalog 由组合根创建唯一 `UiBus`：授予本构建实际具备的能�
 再一次性 `replace_group`。因此命名冲突（同名 `<provider>.<tool>`）是配置错误而不是静默覆盖，
 且插件注册失败时总线目录里本就不存在它的工具，无需额外过滤。
 
+运行时自有的 `web_fetch` 工具（见 [web-fetch-tool 需求](../requirements/web-fetch-tool.md)）
+复用插件的 `HttpBus`：组合根在装配时以 `HostAllowlist::allow_all()` 注册 `ark.builtin.web`
+egress 授权（该构造器对插件清单路径不可达），并把同一能力注入父/子两个工具表的
+`ark_tool::web_tools`。内置出口的 SSRF 拒绝在工具层，本组合根不为它写任何分支逻辑。
+
 插件只在启动时装载一次（无热重载、无 per-plugin 开关），结果写入启动日志与
 `GET /v1/runtime/plugins`；后者通过 `BaseServices::with_plugins` 注入的 `ark_ports::PluginHostService`
 只读读取，组合根不缓存或重算报告。`Wiring` 持有 `PluginRuntime` 以保证句柄活到进程退出。

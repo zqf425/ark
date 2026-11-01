@@ -35,6 +35,12 @@ pub struct WriteArgs {
     pub content: String,
 }
 
+/// `web_fetch` — one public URL to fetch.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebFetchArgs {
+    pub url: String,
+}
+
 /// `edit` — exact text replacement.
 #[derive(Debug, Clone, Deserialize)]
 pub struct EditArgs {

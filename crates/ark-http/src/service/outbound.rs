@@ -106,6 +106,23 @@ impl HttpBus {
         registry.register(plugin_id, version, allow).map(|_| ())
     }
 
+    /// Declare an egress grant with a pre-built allowlist (builtin egress only;
+    /// see `EgressRegistry::register_grant`).
+    pub fn register_grant(
+        &self,
+        plugin_id: &str,
+        version: &str,
+        allowlist: crate::domain::HostAllowlist,
+    ) -> Result<()> {
+        let mut registry = self
+            .registry
+            .write()
+            .map_err(|_| ArkError::internal("egress registry poisoned"))?;
+        registry
+            .register_grant(plugin_id, version, allowlist)
+            .map(|_| ())
+    }
+
     pub fn unregister_plugin(&self, plugin_id: &str) -> bool {
         self.registry
             .write()

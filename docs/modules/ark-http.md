@@ -12,6 +12,11 @@
   `CredentialRef`，不能读取明文。
 - 重定向必须逐跳重新校验目标；日志只保留脱敏 URL、凭据标签和哈希前缀。
 - 不同插件的请求身份、配额与诊断相互隔离。
+- 不受限制的 allowlist 只能经 `HostAllowlist::allow_all` +
+  `EgressRegistry::register_grant` 由组合根为运行时自有出口（`ark.builtin.web`）构造；
+  `parse` 永远拒绝裸 `*`，因此插件清单不可能声明全放行。
+- 运行时自有出口的 SSRF 防线（拒绝私网/loopback 目标）由调用方工具层实现，本模块保持
+  字符串 allowlist 语义不变。
 
 ## 验证
 

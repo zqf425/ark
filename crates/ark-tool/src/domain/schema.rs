@@ -159,6 +159,15 @@ fn request_user_input_schema() -> serde_json::Value {
     )
 }
 
+fn web_fetch_schema() -> serde_json::Value {
+    object(
+        serde_json::json!({
+            "url": { "type": "string", "description": "Absolute https URL of a public web page" },
+        }),
+        &["url"],
+    )
+}
+
 macro_rules! static_schema {
     ($fn_name:ident, $builder:ident) => {
         pub fn $fn_name() -> &'static serde_json::Value {
@@ -177,6 +186,7 @@ static_schema!(grep, grep_schema);
 static_schema!(bash, bash_schema);
 static_schema!(delegate_task, delegate_task_schema);
 static_schema!(request_user_input, request_user_input_schema);
+static_schema!(web_fetch, web_fetch_schema);
 
 /// Schema for `name`, or `None` when it is not a builtin.
 pub fn schema_of(name: &str) -> Option<&'static serde_json::Value> {
@@ -189,6 +199,7 @@ pub fn schema_of(name: &str) -> Option<&'static serde_json::Value> {
         "ls" => Some(ls()),
         "read" => Some(read()),
         "request_user_input" => Some(request_user_input()),
+        "web_fetch" => Some(web_fetch()),
         "write" => Some(write()),
         _ => None,
     }

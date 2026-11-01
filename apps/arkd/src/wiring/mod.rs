@@ -176,6 +176,17 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     let plugin_mcp = Arc::new(ark_mcp::McpBus::default());
     let plugins = crate::plugin_host::assemble(&args.data_dir, &ui_bus, Arc::clone(&plugin_mcp))?;
 
+    // The runtime's own `web_fetch` tool shares the plugins' governed egress
+    // under its `ark.builtin.web` identity. The unrestricted allowlist is only
+    // constructible here (never through a plugin manifest); the per-request
+    // SSRF guard lives in the tool, and HTTPS-only plus size/timeout caps come
+    // from the shared HttpPolicy.
+    plugins.http().register_grant(
+        "ark.builtin.web",
+        env!("CARGO_PKG_VERSION"),
+        ark_http::HostAllowlist::allow_all(),
+    )?;
+
     // The provider table is the source of truth for the model client, so a
     // provider added through the GUI takes effect on the next turn instead of
     // requiring a restart. `model_providers` in config.json stays honoured as a
@@ -198,7 +209,10 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     //
     // Building the parent registry last is the only way to avoid a cycle: the
     // tool needs the runner, and the runner needs an executor that needs tools.
-    let child_tools = Arc::new(build_child_tools(Arc::clone(&skills))?);
+    let child_tools = Arc::new(build_child_tools(
+        Arc::clone(&skills),
+        Arc::clone(plugins.http()) as Arc<dyn ark_ports::HttpCapability>,
+    )?);
     let subagent_policy = Arc::new(crate::child::ConfigSubagentPolicy::new(Arc::clone(&config)));
 
     let child_executor = Arc::new(crate::child::ChildTurnExecutorImpl::new(
@@ -233,6 +247,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     let tools = Arc::new(build_tools(
         Arc::clone(&delegation) as Arc<dyn ark_ports::SubagentRunner>,
         Arc::clone(&skills),
+        Arc::clone(plugins.http()) as Arc<dyn ark_ports::HttpCapability>,
     )?);
     // One `mcp` group: external server adapters plus local plugin tools. Both
     // families are qualified `<provider>.<tool>`, so a collision is a real

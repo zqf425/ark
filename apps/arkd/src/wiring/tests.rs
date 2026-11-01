@@ -569,18 +569,23 @@ fn request_user_input_is_registered_for_both_agent_tool_sets() {
         ark_skills::SkillsConfig::default(),
         workspace.path().to_path_buf(),
     ));
-    let child_tools = build_child_tools(Arc::clone(&skills)).expect("child tools build");
+    // An inert capability is enough: registration only reads the catalogue.
+    let http: Arc<dyn ark_ports::HttpCapability> = Arc::new(InertHttp);
+    let child_tools =
+        build_child_tools(Arc::clone(&skills), Arc::clone(&http)).expect("child tools build");
     assert!(child_tools
         .names()
         .contains(&"request_user_input".to_string()));
+    assert!(child_tools.names().contains(&"web_fetch".to_string()));
 
     // The parent set adds `delegate_task` on top of the child set.
     let parent_tools =
-        build_tools(Arc::new(TestSubagentRunner), Arc::clone(&skills)).expect("tools build");
+        build_tools(Arc::new(TestSubagentRunner), Arc::clone(&skills), http).expect("tools build");
     let names = parent_tools.names();
     assert!(names.contains(&"request_user_input".to_string()));
     assert!(names.contains(&"bash".to_string()));
     assert!(names.contains(&"delegate_task".to_string()));
+    assert!(names.contains(&"web_fetch".to_string()));
 
     // The wire schema fixes the prompt contract: {prompt: string, required}.
     let schema = parent_tools
@@ -598,6 +603,20 @@ fn request_user_input_is_registered_for_both_agent_tool_sets() {
 /// Registry-shape stub: `build_tools` only needs the runner for the
 /// `delegate_task` tool; this test never runs a child.
 struct TestSubagentRunner;
+
+/// Capability stub for registration tests; `web_fetch` is never executed here.
+struct InertHttp;
+
+#[async_trait::async_trait]
+impl ark_ports::HttpCapability for InertHttp {
+    async fn request(
+        &self,
+        _plugin_id: &str,
+        _req: ark_ports::OutboundRequest,
+    ) -> ark_common::Result<ark_ports::OutboundResponse> {
+        Err(ark_common::ArkError::internal("not used in tests"))
+    }
+}
 
 #[async_trait::async_trait]
 impl ark_ports::SubagentRunner for TestSubagentRunner {

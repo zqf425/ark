@@ -18,6 +18,11 @@
 - `delegate_task` 只消费 `SubagentRunner` 端口，子任务工具集不含它。
 - `request_user_input` 是无法独立执行的门面工具：schema 为 `{"prompt": string, required}`，
   `execute` 返回结构化错误；生产执行路径永远不会走到它，因为 agent 在派发前拦截该调用并交给用户输入 gate。
+- `web_fetch`（需求见 [web-fetch-tool](../requirements/web-fetch-tool.md)）只消费注入的
+  `HttpCapability`，以 `ark.builtin.web` 身份走治理出口，自身不持有 HTTP client；SSRF 防线
+  （拒绝解析到 loopback/私有/链路本地地址的目标）在工具层，HTTPS-only、超时与大小上限来自
+  共享 `HttpPolicy`。父与子工具集都注册它；输出与 bash 同规按 64 KiB 截断，HTML 经内置
+  无依赖文本提取，非 2xx/二进制/失败都以结构化工具输出返回，不使回合失败。
 
 ## 验证
 
