@@ -183,7 +183,10 @@ export function ThreadStream({
       ) : null}
 
       <StreamFooter />
-      <Composer threadId={threadId} />
+      {/* Keyed by thread so switching sessions remounts the textarea: the
+          composer keeps its message locally, and an unkeyed one would carry
+          the previous thread's unsent draft (ready to be sent to the new one). */}
+      <Composer key={threadId ?? ''} threadId={threadId} />
     </section>
   )
 }
