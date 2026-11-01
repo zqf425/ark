@@ -80,6 +80,15 @@
   导出：仅含摘要元数据与升序 `seq` 的完整权威事件日志，不含导出时间戳、凭证、API key、header 或
   附件载荷；相同 store 状态两次导出字节一致。
 
+## 定时任务调度服务(计划)
+
+[定时任务需求](../requirements/scheduled-tasks.md) 批准后,`service/scheduler.rs` 将承载
+调度循环与执行编排:tick 到期扫描、经 `start_turn` 同一校验路径以任务 prompt 启动真实回合
+(线程 runtime 覆盖 `autonomy`,无人值守不等待 gate)、终态回写 `last_run` 与有界历史、
+shutdown 收敛。路由 `/v1/schedules`(CRUD + 立即运行)只解包 HTTP 并调用调度服务;调度域
+逻辑(归一化、next_run)位于 `ark-schedule`,存储经注入的 `ScheduleStore`。停机期间错过的
+触发不补跑,启动时直接推进到下一未来时点。
+
 ## 路由清单
 
 当前路由以 `src/api/routes.rs` 为准。新增或修改路由必须同步更新 wire DTO、接口测试、渲染层 client

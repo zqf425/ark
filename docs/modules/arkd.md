@@ -113,6 +113,13 @@ assistant 行），后接一条截断到 16 KiB UTF-8 字节的 `ModelRole::Tool
 按 UTF-8 字符数限 4096，超限整条丢弃最新条目并追加 truncated 尾注）。读取或解析失败只记 warn 并跳过注入，
 空 store 不注入，均不影响回合结果。
 
+## 定时任务装配(计划)
+
+组合根以同一 `data_dir` 创建 `ark_store::ScheduleFileStore`,注入 `ark_ports::ScheduleStore`;
+调度循环随 serve 启动、随全局 shutdown 收敛,执行直接复用注入的 `TurnRunner` 与 `start_turn`
+校验路径(与自动 continuation 同一先例),不新建第二执行通道。见
+[定时任务需求](../requirements/scheduled-tasks.md)。
+
 ## 验证
 
 装配变更至少执行 `cargo check -p arkd`；涉及运行时、存储或并发时执行 workspace 测试，并验证启动/停机

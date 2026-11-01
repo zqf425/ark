@@ -19,6 +19,12 @@
 - 启动时修复日志末尾半行并从权威日志重建派生数据；非末尾损坏不得静默掩盖。
 - `rewind` 采用**物理删除**：writer actor 在同一序列化点拒绝仍有未终结回合的日志、重写 `events.jsonl`，删除目标序号及之后的事件，随后从保留前缀重建 `items.jsonl` 与 `session.json`。它不使用逻辑截断；为让已连接 SSE 客户端丢弃旧投影，会追加一个序号绝不复用的 `thread_rewound` 通知事件。`rewinds.json` 保留已接受目标的幂等标记，因此后续压缩移除通知事件也不改变重复回退的成功语义。
 
+## 定时任务存储(计划)
+
+`<data_dir>/schedules.json` 由 `ScheduleFileStore` 持有:进程内 Mutex 串行读改写,先写同目录
+临时文件后 rename 原子替换(复用 `ark_common` 原子写工具);文件缺失或损坏按空任务表处理并
+记录告警,不阻断启动。任务与最近 10 条运行历史是本文件的真源,不进事件日志、不进 config。
+
 ## 目录与恢复
 
 全局附件存储位于 `<data_dir>/attachments/<attachment-id>`，其不可变元数据表位于
