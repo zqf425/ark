@@ -220,10 +220,32 @@ run2 发现的 P2/P3（未修复，记录为后续项）：
 >    或按平台断言。
 > 2. P3 `apps/arkd/src/wiring.rs` 1361 行，超出 800 行红线（历史存量），建议按装配段拆分。
 
+> 新功能真实模型校验轮（2026-11-01，master 7032e3d 前后分批合入；独立临时数据目录 +
+> 真实网关 `brgoup-precast: glm-5-3-flash`（openai_chat），`arkd run` 驱动，证据为
+> stdout 与临时目录 events.jsonl（已随临时目录删除，结论按下列可复现步骤成立））：
+>
+> - **web_fetch 通过**：模型在真实回合内 6 次调用该工具，2 次因沙箱 DNS 未能解析
+>   `example.com`（环境限制，非工具缺陷），1 次成功抓取 IANA 页面并以 `detail
+>   status=200 type=text/html` 落 `tool_call_finished`；模型如实区分"抓到的"与"未抓到的"。
+> - **hooks 通过**：pre_tool_use（`tools:["read"]`，exit 2）拦截 read，stderr 原文
+>   "reads are disabled by hook in this session" 进入模型上下文并以其回复引用，
+>   `tool_call_finished` 落 `detail=blocked_by_hook`；post_tool_use（`tools:["write"]`）
+>   stdout 以 `[post_tool_use hook]` 段落追加进 write 工具输出，事件可回放。
+> - **headless `arkd run` 通过**：上述两轮均由该入口完成（建线程 → 回合 → 流式输出 →
+>   exit 0/1），stdout 纯净（日志全走 stderr）。
+> - **review 预设通过并修复一个缺陷**：`--review uncommitted` 对预埋缺陷的新文件产出
+>   P0×2（越界 IndexError、未关闭文件句柄）+ P1×2（除零、隐式编码），带文件行号，exit 0。
+>   过程中发现 **P1 缺陷：`git diff HEAD` 不含未跟踪文件**，全新文件对审查不可见；
+>   修复 0e80fd5（`ls-files --others` + `git diff --no-index`，容忍 exit 1），单测
+>   `uncommitted_diff_includes_untracked_files` 覆盖，修复后真实复验通过。
+> - 测试设计备注：headless 无人值守下 `bash` 因默认 workspace_write 自治卡审批 gate,
+>   hooks 校验需选用无人值守工具（read/write）触发。
+
 仍未覆盖（延续原清单，不宣称通过）：
 
 - 语言/字号/主题的"保存失败提示"路径（保存成功路径 run3 已验）；
-- 附件 v2 第二期（模型多模态传递）；
+- 附件 v2 第二期（模型多模态传递）在真实网关下的多模态传递（二期代码与单测已实施，
+  未以真实图片走完整回合）；
 - Windows 桌面端整体复验（保持既有外部阻塞：端口 18791 被用户进程占用）。
 
 ## 完成条件
