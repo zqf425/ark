@@ -11,18 +11,29 @@
 
 use crate::domain::jsonrpc::{JsonRpcId, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use crate::service::transport::{McpTransport, TransportKind};
-use ark_common::{ArkError, ArkErrorCode, Result};
+use ark_common::{ArkError, ArkErrorCode, ProcessTree, Result};
 use async_trait::async_trait;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
 
+/// A spawned server process together with the process group it leads.
+///
+/// The two are kept in one value so the group handle is taken, reaped and
+/// disarmed by the same code path that owns the child. Dropping it (a transport
+/// dropped without `close` -- discovery failed, session cancelled) therefore
+/// tears the group down instead of leaving the server's own children running.
+struct ManagedChild {
+    child: Child,
+    tree: ProcessTree,
+}
+
 /// A running MCP server child process.
 pub struct StdioTransport {
     stdin: Mutex<ChildStdin>,
     stdout: Mutex<BufReader<ChildStdout>>,
-    child: Mutex<Option<Child>>,
+    child: Mutex<Option<ManagedChild>>,
     next_id: Mutex<i64>,
     closed: Mutex<bool>,
 }
@@ -46,6 +57,10 @@ impl StdioTransport {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .kill_on_drop(true);
+        // An MCP server is usually a launcher (`npx`, a language runtime) whose
+        // real work runs in descendants; `kill_on_drop` alone would signal the
+        // launcher and orphan them, keeping the stdout pipe open forever.
+        ark_common::process::isolate(command.as_std_mut());
         let mut child = command.spawn().map_err(|err| {
             ArkError::new(
                 ArkErrorCode::RuntimeUnavailable,
@@ -53,6 +68,9 @@ impl StdioTransport {
             )
             .with_detail("mcp_transport_spawn_failed")
         })?;
+        // Adopt before taking the pipes: the handle must exist while the child
+        // pid is still reserved, and the child id doubles as the group id.
+        let tree = ProcessTree::adopt(child.id());
         let stdin = child
             .stdin
             .take()
@@ -64,7 +82,7 @@ impl StdioTransport {
         Ok(Self {
             stdin: Mutex::new(stdin),
             stdout: Mutex::new(BufReader::new(stdout)),
-            child: Mutex::new(Some(child)),
+            child: Mutex::new(Some(ManagedChild { child, tree })),
             next_id: Mutex::new(1),
             closed: Mutex::new(false),
         })
@@ -175,11 +193,105 @@ impl McpTransport for StdioTransport {
             }
             *closed = true;
         }
-        let child = self.child.lock().await.take();
-        if let Some(mut child) = child {
-            let _ = child.start_kill();
+        let managed = self.child.lock().await.take();
+        if let Some(managed) = managed {
+            let ManagedChild { mut child, mut tree } = managed;
+            // Signal the group first, then reap. Children that outlived the
+            // server would otherwise keep the inherited stdout pipe open; the
+            // direct kill is the fallback for a group that already exited.
+            tree.kill_tree(|| {
+                let _ = child.start_kill();
+            });
             let _ = child.wait().await;
+            // Reaped: the pid (and group id) may now be reused by another
+            // process, so stop signalling on drop.
+            tree.disarm();
         }
         Ok(())
+    }
+}
+
+/// Process-tree teardown, Unix only. The assertion inspects signals, so on
+/// Windows the `taskkill /T /F` strategy documented in `ark_common::process`
+/// stays unverified here.
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::process::Command as StdCommand;
+    use std::time::{Duration, Instant};
+
+    /// Scratch directory for the pid file the server's child reports into.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ark-mcp-stdio-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        dir
+    }
+
+    /// A "server" that behaves like a real launcher: it starts a long-lived
+    /// child of its own and then waits, so killing only the launcher would leave
+    /// that child -- and the stdout pipe it inherited -- behind.
+    async fn spawn_with_grandchild(pid_file: &Path) -> StdioTransport {
+        let script = format!("sleep 30 & echo $! > {}; wait", pid_file.display());
+        let args = vec!["-c".to_string(), script];
+        StdioTransport::spawn("/bin/sh", &args)
+            .await
+            .expect("spawn the fake server")
+    }
+
+    async fn read_pid(path: &Path) -> u32 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(pid) = std::fs::read_to_string(path)
+                .ok()
+                .and_then(|text| text.trim().parse::<u32>().ok())
+            {
+                return pid;
+            }
+            assert!(Instant::now() < deadline, "child never reported a pid");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    fn is_alive(pid: u32) -> bool {
+        StdCommand::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
+    async fn wait_until_dead(pid: u32) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while is_alive(pid) {
+            assert!(
+                Instant::now() < deadline,
+                "server child {pid} outlived the teardown"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn close_kills_the_server_tree() {
+        let dir = scratch("close");
+        let pid_file = dir.join("child.pid");
+        let transport = spawn_with_grandchild(&pid_file).await;
+        let child = read_pid(&pid_file).await;
+        transport.close().await.expect("close the transport");
+        wait_until_dead(child).await;
+    }
+
+    #[tokio::test]
+    async fn dropping_the_transport_kills_the_server_tree() {
+        // Discovery failures and cancelled sessions drop the transport without
+        // ever calling `close`; that path must tear the group down too.
+        let dir = scratch("drop");
+        let pid_file = dir.join("child.pid");
+        let transport = spawn_with_grandchild(&pid_file).await;
+        let child = read_pid(&pid_file).await;
+        drop(transport);
+        wait_until_dead(child).await;
     }
 }

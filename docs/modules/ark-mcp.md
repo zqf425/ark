@@ -28,6 +28,11 @@
   以 validation 错误（detail `mcp_sse_unsupported`）拒绝并提示改用 `streamable_http`，SSE 客户端
   协议实现待独立需求设计，不得宣称已交付。
 - 外部写/敏感调用须执行 scope、grant 和宿主审批，调用方传入的 `confirm` 不能自证。
+- stdio transport 的服务器是进程树：spawn 前 `ark_common::process::isolate` 把它设为进程组组长，
+  spawn 后立即 `ProcessTree::adopt`，并与 `Child` 一起收在同一个 `ManagedChild` 里。`close()` 先发组
+  信号再 `wait` 回收，组已退出时回退 `start_kill`；没调用 `close()` 就 drop（发现失败、会话取消）同样
+  由该句柄的 drop 杀组。否则 `npx`/语言运行时拉起的真实 server 会活着并继续持有继承的 stdout 管道，
+  让读侧永远等不到 EOF。回收后必须 `disarm`，避免对已复用的 pid 发信号。
 
 ## 双向适配
 
@@ -50,6 +55,8 @@ MCP 设置的安全 read view 可返回 transport、command/url、args、allow-t
 覆盖三种 transport、catalog 同源、跨插件授权、敏感审批、递归拒绝和 handler/HTTP 行为一致性。
 `host_tool.rs` 另有单元测试固定宿主入口语义：名称取自总线命名空间、缺 schema 仍得到对象 schema、
 宿主调用无需可见性声明即可到达插件、插件卸载后总线错误降级为工具错误而不是 harness 失败。
+`stdio.rs` 的进程树回归（Unix）真实派生子进程并由假 server 报告其 pid：`close()` 后必须退出，
+直接 drop transport 也必须退出。Windows 的 `taskkill /T /F` 分支只有编译覆盖，需在 Windows 上单独验证。
 
 ## 当前状态
 

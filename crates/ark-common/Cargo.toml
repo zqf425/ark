@@ -11,3 +11,7 @@ chrono = { workspace = true }
 thiserror = { workspace = true }
 encoding_rs = { workspace = true }
 ts-rs = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+# Only `process` needs it, and only on Unix; other platforms have no groups.
+libc = { workspace = true }

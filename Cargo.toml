@@ -67,6 +67,8 @@ encoding_rs = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 ts-rs = { version = "11", features = ["chrono-impl", "serde-json-impl", "uuid-impl"] }
 tower-http = { version = "0.6", features = ["cors"] }
+# Process-group teardown (`ark_common::process`); consumers gate it on cfg(unix).
+libc = "0.2"
 
 [profile.dev]
 opt-level = 1

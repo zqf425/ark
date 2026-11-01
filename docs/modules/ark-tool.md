@@ -23,7 +23,17 @@
   （拒绝解析到 loopback/私有/链路本地地址的目标）在工具层，HTTPS-only、超时与大小上限来自
   共享 `HttpPolicy`。父与子工具集都注册它；输出与 bash 同规按 64 KiB 截断，HTML 经内置
   无依赖文本提取，非 2xx/二进制/失败都以结构化工具输出返回，不使回合失败。
+- `bash` 执行的是一个进程树而不是一个进程。spawn 前用 `ark_common::process::isolate` 把 shell 设为
+  进程组组长，spawn 后立即 `ProcessTree::adopt`；超时、回合取消（future 被 drop）都由该句柄发
+  `killpg(SIGKILL)` 杀掉整组，`kill_on_drop(true)` 仅作为直接子进程的兜底保留。这样
+  `sh -c 'server &'` 留下的后台进程不会继续持有继承来的 stdout/stderr 管道。成功回收后必须
+  `disarm`：pid 可能被复用，不能再发组信号。输出收集与超时语义不变（仍是
+  `timeout(wait_with_output)`，超时返回带 `timeout` detail 的结构化错误）。
 
 ## 验证
 
 内置工具覆盖权限拒绝、工作区越界、链接逃逸、截断、多字节文本、并发同路径写入和批准后执行。
+
+`bash` 另有 Unix 进程树回归：命令派生孙进程（`sleep 30 & echo $! > …; wait`）并记录其 pid，超时后
+孙进程必须退出；外层 `tokio::time::timeout` 取消调用时同样必须退出。Windows 的 `taskkill /T /F`
+分支只有编译覆盖，需在 Windows 上单独验证。

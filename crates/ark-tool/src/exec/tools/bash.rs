@@ -51,6 +51,10 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     sanitize_env(&mut command, ctx);
+    // A shell command is a tree, not a process: `sh -c 'server &'` leaves the
+    // server running, and `kill_on_drop` would only signal the shell. Marking
+    // the shell as a group leader is what makes a later teardown reach the rest.
+    ark_common::process::isolate(command.as_std_mut());
 
     let child = command.spawn().map_err(|err| {
         ark_common::ArkError::new(
@@ -58,17 +62,29 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
             format!("cannot start shell: {err}"),
         )
     })?;
+    // Adopt before awaiting: the child pid is the group id, and a reaped pid may
+    // already be reused by the time the wait finishes. While armed, dropping
+    // this guard (a cancelled turn drops the whole future) kills the group.
+    let mut tree = ark_common::process::ProcessTree::adopt(child.id());
     let output = match tokio::time::timeout(
         Duration::from_millis(timeout),
         child.wait_with_output(),
     )
     .await
     {
-        Ok(Ok(output)) => output,
+        Ok(Ok(output)) => {
+            // The child is reaped, so its pid and group id are up for reuse.
+            tree.disarm();
+            output
+        }
         Ok(Err(err)) => {
             return Ok(ToolOutput::err(format!("shell failed: {err}")));
         }
         Err(_) => {
+            // The expired future was dropped together with the child handle, so
+            // `kill_on_drop` already signalled the shell itself; the group
+            // signal is what reaches the commands it had started.
+            tree.kill_group();
             return Ok(with_detail(
                 ToolOutput::err(format!(
                     "command timed out after {timeout} ms and was killed"
@@ -202,5 +218,90 @@ mod tests {
         let arg = ToolArgs(serde_json::json!({ "command": "echo x", "cwd": "../.." }));
         let out = BashTool.execute(&ctx(&dir), arg).await.unwrap();
         assert!(!out.ok);
+    }
+}
+
+/// Process-tree teardown, Unix only: the assertion needs signal inspection and a
+/// shell whose grandchildren can be named. On Windows the platform strategy
+/// (`taskkill /T /F`) is documented in `ark_common::process` but cannot be
+/// asserted here.
+#[cfg(all(test, unix))]
+mod tree_tests {
+    use super::*;
+    use crate::exec::testsupport::{ctx, temp_workspace};
+    use std::path::{Path, PathBuf};
+    use std::process::Command as StdCommand;
+    use std::time::Instant;
+
+    /// Workspace plus the pid file the shell's background job reports into.
+    fn fixture(name: &str) -> (PathBuf, PathBuf) {
+        let dir = temp_workspace(name);
+        let pid_file = dir.join("grandchild.pid");
+        (dir, pid_file)
+    }
+
+    /// `sh -c` script whose backgrounded `sleep` is the grandchild under test.
+    fn forking_command(pid_file: &Path, timeout_ms: u64) -> ToolArgs {
+        ToolArgs(serde_json::json!({
+            "command": format!("sleep 30 & echo $! > {}; wait", pid_file.display()),
+            "timeout_ms": timeout_ms
+        }))
+    }
+
+    fn read_pid(path: &Path) -> u32 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(pid) = std::fs::read_to_string(path)
+                .ok()
+                .and_then(|text| text.trim().parse::<u32>().ok())
+            {
+                return pid;
+            }
+            assert!(Instant::now() < deadline, "grandchild never reported a pid");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn is_alive(pid: u32) -> bool {
+        StdCommand::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
+    fn wait_until_dead(pid: u32) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while is_alive(pid) {
+            assert!(
+                Instant::now() < deadline,
+                "grandchild {pid} outlived the teardown"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// A timeout must stop the whole tree, not just the shell.
+    #[tokio::test]
+    async fn timeout_kills_the_grandchild() {
+        let (dir, pid_file) = fixture("bash-tree-timeout");
+        let arg = forking_command(&pid_file, 500);
+        let out = BashTool.execute(&ctx(&dir), arg).await.unwrap();
+        assert!(!out.ok);
+        assert!(out.content.contains("timed out"), "got {}", out.content);
+        wait_until_dead(read_pid(&pid_file));
+    }
+
+    /// A cancelled call drops the future; the guard must still kill the tree.
+    #[tokio::test]
+    async fn cancelling_the_call_kills_the_grandchild() {
+        let (dir, pid_file) = fixture("bash-tree-cancel");
+        let arg = forking_command(&pid_file, 60_000);
+        // Bound to a `let`: the future borrows the context for its whole life.
+        let tool_ctx = ctx(&dir);
+        let call = BashTool.execute(&tool_ctx, arg);
+        let cancelled = tokio::time::timeout(Duration::from_millis(500), call).await;
+        assert!(cancelled.is_err(), "the call must still be running");
+        wait_until_dead(read_pid(&pid_file));
     }
 }

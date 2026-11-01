@@ -10,6 +10,7 @@ pub mod encoding;
 pub mod error;
 pub mod ids;
 pub mod path;
+pub mod process;
 pub mod text;
 pub mod usage;
 
@@ -20,4 +21,5 @@ pub use encoding::{
 };
 pub use error::{ArkError, ArkErrorCode, ArkErrorPayload, Result};
 pub use ids::{AttachmentId, ChildId, ItemId, RunId, ThreadId, TurnId};
+pub use process::{isolate, ProcessTree};
 pub use usage::Usage;
