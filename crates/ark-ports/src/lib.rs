@@ -4,6 +4,8 @@
 //! agent loop never learns about `reqwest`, SQLite, axum or a concrete provider.
 //! Implementations live in `arkd`'s wiring module; nothing here performs I/O.
 
+#![deny(clippy::all)]
+
 pub mod attachment;
 pub mod backend;
 pub mod base;

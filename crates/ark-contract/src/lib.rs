@@ -6,6 +6,8 @@
 //! client. Nothing here touches I/O, so the renderer-facing shapes can be
 //! code-generated from these types without dragging runtime code along.
 
+#![deny(clippy::all)]
+
 pub mod attachment;
 pub mod base;
 pub mod capability;

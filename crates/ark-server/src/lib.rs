@@ -4,6 +4,8 @@
 //! `ark-config` and `ark-store`; the composition root injects one
 //! [`state::AppState`] and the boundary never learns which provider is behind it.
 
+#![deny(clippy::all)]
+
 pub mod api;
 pub mod gates;
 pub mod service;

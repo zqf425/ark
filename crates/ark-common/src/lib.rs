@@ -4,6 +4,8 @@
 //! stable serialization helpers and byte-accurate text utilities. It owns no
 //! I/O and no async runtime, so every module here is unit-testable in isolation.
 
+#![deny(clippy::all)]
+
 pub mod encoding;
 pub mod error;
 pub mod ids;

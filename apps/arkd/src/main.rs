@@ -5,6 +5,8 @@
 //! `ark-server`. The startup line it prints is the address that is actually
 //! bound, so a smoke test never has to guess.
 
+#![deny(clippy::all)]
+
 mod base;
 mod child;
 mod cli;
