@@ -57,8 +57,9 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
 
 ### 调度与执行(ark-server service + arkd 装配)
 
-1. 调度循环随 arkd serve 与 headless `run` 启动(经同一 `wiring::build` 装配,一次性 headless
-   回合期间到期的任务同样会触发),tick 间隔 30s;单次 tick 串行执行所有到期任务(不并发,v1)。
+1. 调度循环仅随 `arkd serve` 启动(装配与启动分离:headless `run` 复用同一 `wiring::build`,
+   但不启动循环,一次性回合不会触发到期任务、不消耗模型预算),tick 间隔 30s;单次 tick 串行
+   执行所有到期任务(不并发,v1)。
    不变式:总开关 `config.schedules.enabled` 只门控**触发**(`tick`/`run_now`),不门控**修复**——
    `reconcile` 的崩溃遗留收敛(`running`→`aborted`、misfire→`skipped`)不受开关影响,启动时一律执行。
 2. 到期判定:`enabled && next_run_at <= now`;执行后立刻按节奏计算下一次 `next_run_at`

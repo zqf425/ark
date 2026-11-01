@@ -67,6 +67,9 @@ pub struct Wiring {
     pub config: Arc<ConfigStore>,
     pub usage: Arc<UsageRecorder>,
     pub model_label: String,
+    /// Scheduled-task orchestration. Injected here so `serve` can start the
+    /// loop; `run` holds it without starting anything.
+    pub schedules: Arc<ark_server::SchedulerService>,
     /// The local plugin host, kept alive for the process lifetime.
     ///
     /// Dropping it would run every plugin's `Registration::drop`, silently
@@ -334,9 +337,10 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     // Recover unacknowledged completions that were durable before this process
     // started (for example, a crash after `child_completed` but before debounce).
     ark_server::service::sync_auto_continue_policy(state.clone()).await;
-    // The loop is started last, once `state` is final: its first act is
-    // reconciliation, which must observe the same state every route will use.
-    schedules.spawn(state.clone());
+    // The loop is NOT started here: a one-shot headless `run` reuses this
+    // assembly and must not fire due schedules (or spend model budget) while
+    // executing a single turn. `serve` starts it after binding, via
+    // `Wiring::start_schedule_loop`.
 
     Ok(Wiring {
         state,
@@ -345,6 +349,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         config,
         usage,
         model_label,
+        schedules,
         plugins,
     })
 }
