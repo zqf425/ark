@@ -242,12 +242,38 @@ run2 发现的 P2/P3（未修复，记录为后续项）：
 > - 测试设计备注：headless 无人值守下 `bash` 因默认 workspace_write 自治卡审批 gate,
 >   hooks 校验需选用无人值守工具（read/write）触发。
 
+> macOS 真实模型补充验收（2026-11-02，arkd @ master 3bcf922，独立端口 18996 与独立数据目录
+> `.tmp/rt-verify2`，真实网关 `brgroup: glm-5-3-flash`，HTTP API 驱动，证据为权威 events
+> 与 `/v1/schedules` 投影，可按下列步骤复现）：
+>
+> - **启动清扫通过**：向数据目录预埋 `threads/t1/.thread.json.aaa-bbb.tmp` 与
+>   `.memory.json.ccc-ddd.tmp`（mtime 回拨至启动前），另置可见 `visible.tmp` 对照；
+>   `arkd serve` 启动后两个隐藏残留被删除、可见文件保留，`/health` 正常。对应实现
+>   f122fb1/ab18844（`sweep_temp_files`，5 分钟时效阈值，符号链接不进入不删除）。
+> - **定时任务端到端通过**（对应第 1 节清单新增条目的 API/运行时层；浏览器 GUI 未验）：
+>   `POST /v1/schedules` 创建一次性 `at` 任务（16:45:15Z 触发）；到点由调度循环自动建线程
+>   `76e7f94a` 并以真实模型完成回合（回复"验收通过"），`last_run.status=completed`、
+>   `message` 与 `thread_id` 落投影，`history` 入账，随后 next_run 清空（一次性语义）。
+> - **web_fetch 真实网络通过（附一条改进记录）**：SSRF 防线真实拒绝路径生效——
+>   `example.com` 在本网络不可解析，工具返回结构化错误（`ok=false`，回合不失败）；
+>   `text/plain`（`https://www.baidu.com/robots.txt`）全文返回；`text/html` 首页抓取
+>   `status=200` 但百度对 ark 的 `ark-plugin/...` UA 返回仅含脚本的降级壳页，文本提取
+>   按设计产出空正文，模型收到 "Tool ran without output or errors" 后无法区分
+>   "抓到空页"与"工具异常"。改进项（P2，未实施）：提取结果为空时应返回说明文字
+>   （如 "no extractable text"），避免把成功的空页伪装成静默无输出。
+> - **合并后全量回归通过**：`cargo test --workspace --exclude ark-desktop`
+>   1330 通过 / 0 失败（exit 0）；`cargo clippy -p ark-store --all-targets -- -D warnings`
+>   与 `cargo fmt --check` 通过。两分支改动经 kun（DeepSeek 通道）三轮检视，
+>   最终 P0=0、P1=0 后合入（2f4679a、3bcf922）。
+
 仍未覆盖（延续原清单，不宣称通过）：
 
 - 语言/字号/主题的"保存失败提示"路径（保存成功路径 run3 已验）；
 - 附件 v2 第二期（模型多模态传递）在真实网关下的多模态传递（二期代码与单测已实施，
   未以真实图片走完整回合）；
-- Windows 桌面端整体复验（保持既有外部阻塞：端口 18791 被用户进程占用）。
+- Windows 桌面端整体复验（保持既有外部阻塞：端口 18791 被用户进程占用）；
+- 定时任务设置页与新增功能在真实浏览器中的 GUI 验收（本机为 macOS，Windows 交付路径
+  不可执行；上述定时任务验收只覆盖 API 与运行时层）。
 
 ## 完成条件
 
