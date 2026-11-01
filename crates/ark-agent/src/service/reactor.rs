@@ -195,6 +195,14 @@ impl Reactor {
         self.history.push(ModelMessage::user(text));
     }
 
+    /// Append a fully built user message, e.g. one carrying multimodal image
+    /// parts from the composition root. The pending-text bookkeeping stays on
+    /// `content` so the existing round-start path is unchanged.
+    pub fn push_user_message(&mut self, message: ModelMessage) {
+        self.pending_user_message = Some(message.content.clone());
+        self.history.push(message);
+    }
+
     /// Run the turn. Returns the outcome actually recorded, never a guess.
     pub async fn run(&mut self) -> Result<TurnOutcome> {
         self.prepare().await?;

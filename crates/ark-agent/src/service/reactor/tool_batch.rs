@@ -131,6 +131,7 @@ impl Reactor {
         self.history.push(ModelMessage {
             role: ModelRole::Tool,
             content: execution.content.clone(),
+            images: Vec::new(),
             tool_call_id: Some(call.call_id.clone()),
             name: Some(call.tool.clone()),
             tool_calls: Vec::new(),

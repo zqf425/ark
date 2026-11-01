@@ -5,7 +5,7 @@
 //! ("the writer assigns it") live in exactly one place.
 
 use ark_common::{AttachmentId, ItemId, ThreadId, TurnId, Usage};
-use ark_contract::{RuntimeEvent, ThreadItem};
+use ark_contract::{RuntimeEvent, ThreadItem, TurnAttachmentOutcome};
 use chrono::Utc;
 
 /// Namespace of event constructors for one `(thread, turn)` pair.
@@ -19,9 +19,11 @@ pub struct TurnEvents {
     /// Marks the `turn_started` event as supervisor-scheduled, so the
     /// auto-continuation delivery-attempt accounting survives restarts.
     auto_continuation: bool,
-    /// Attachments already associated with the thread. The first phase only
-    /// records them on `turn_started`; they never reach the model seed.
+    /// Attachments already associated with the thread. Phase one records the
+    /// ids; phase two adds the per-attachment delivery outcome beside them.
     attachment_ids: Vec<AttachmentId>,
+    /// How each attachment reached (or did not reach) the model seed.
+    attachment_outcomes: Vec<TurnAttachmentOutcome>,
 }
 
 impl TurnEvents {
@@ -31,6 +33,7 @@ impl TurnEvents {
             turn_id,
             auto_continuation: false,
             attachment_ids: Vec::new(),
+            attachment_outcomes: Vec::new(),
         }
     }
 
@@ -42,12 +45,24 @@ impl TurnEvents {
             turn_id,
             auto_continuation: true,
             attachment_ids: Vec::new(),
+            attachment_outcomes: Vec::new(),
         }
     }
 
     /// Attach the authorized attachment ids to this turn's `turn_started`.
     pub fn with_attachments(mut self, attachment_ids: Vec<AttachmentId>) -> Self {
         self.attachment_ids = attachment_ids;
+        self
+    }
+
+    /// Record how each attachment was delivered to the model seed. Computed by
+    /// the composition root before the turn starts, so it lands on the same
+    /// `turn_started` record as the ids.
+    pub fn with_attachment_outcomes(
+        mut self,
+        attachment_outcomes: Vec<TurnAttachmentOutcome>,
+    ) -> Self {
+        self.attachment_outcomes = attachment_outcomes;
         self
     }
 
@@ -62,6 +77,7 @@ impl TurnEvents {
             timestamp: Utc::now(),
             auto_continuation: self.auto_continuation,
             attachment_ids: self.attachment_ids.clone(),
+            attachment_outcomes: self.attachment_outcomes.clone(),
         }
     }
 

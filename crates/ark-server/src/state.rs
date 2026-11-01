@@ -511,6 +511,7 @@ impl AppState {
                 // attachment list was ever recorded for this turn. Reporting an
                 // empty set is honest: this turn referenced nothing.
                 attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
             };
             if let Err(err) = self.store.append_event(thread_id, started).await {
                 tracing::warn!(

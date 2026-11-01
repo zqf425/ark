@@ -1,7 +1,8 @@
 # 附件、PTY 与 Studio 浏览器自动化边界
 
-> 状态：附件基础存储与 HTTP 读取已实现；**附件生命周期 v2 首期已实施**（2026-11-01，见下），第二期
-> 多模态传递仍待实施。PTY 与 Studio 浏览器自动化仍为已批准设计边界，未批准实现。
+> 状态：附件基础存储与 HTTP 读取已实现；**附件生命周期 v2 首期已实施**（2026-11-01，见下），
+> **第二期模型多模态传递已实施**（见「第二期落地情况」）。PTY 与 Studio 浏览器自动化仍为已批准
+> 设计边界，未批准实现。
 
 ## 附件上下文
 
@@ -10,7 +11,8 @@
 不会写入 JSON 元数据、JSONL 或 SSE。服务端生成 UUID 并以其构造文件路径，因此 web 不能读取任意路径。
 内容读取以 `nosniff` 和安全文件名的附件下载响应防止用户声明的 MIME 在应用源内被内联执行。上传/finalize
 分离与自动 GC 策略仍待决。**线程/turn 授权、哈希、MIME+magic-byte 校验与删除路由已由 v2 首期
-落地（见下）**；模型多模态传递仍待第二期，因此 agent 在第二期落定前不得把任何附件字节传给模型。
+落地（见下）**；**模型多模态传递已由第二期落地（见下）**：模型可见性仍以线程关联为前提，
+未关联的附件绝不进入任何模型上下文。
 
 ### 附件生命周期 v2（2026-11-01 批准，分两期实施）
 
@@ -55,8 +57,27 @@
 `POST /v1/threads/{thread_id}/attachments`、`TurnRequest.attachment_ids`、
 `DELETE /v1/attachments/{id}` 与 `orphan_count` 均已实现，测试见
 `crates/ark-server/tests/attachment_lifecycle.rs` 与 `crates/ark-store/tests/attachments.rs`。
-回合启动只把授权的 `attachment_ids` 记入 `turn_started` 作审计，模型种子仍不含任何附件内容；
-多模态传递留待第二期。
+
+**第二期落地情况**（设计要点 1–4 全部按批准语义实现，个别名词按现有代码落位）：
+
+- `ark_ports::ModelMessage` 增加 `images: Vec<ModelImage>`（`mime_type` + 裸 base64
+  `data`），serde default 且空时不序列化，旧 JSON 与纯文本消费者字节兼容；空 `content` 不发
+  空文本块。三个适配器各自序列化：openai_chat 为 `content: [{type:"text"},{type:"image_url",
+  image_url:{url:"data:<mime>;base64,<data>"}}]`，openai_responses 为 `input_text`/
+  `input_image` 部分，anthropic 为 `image` + `source.type=base64` block（共享 helper
+  `ark_llm::common::data_url`）。
+- 设计中的 "模型 profile 的 `messageParts` 声明" 落位为现有的模型目录字段
+  `supports_vision`（`ark-provider::ProviderStore::resolve_vision`，同 resolve 的选择规则）：
+  仅显式 `Some(true)` 传图，`None`（目录未报告）与 `Some(false)` 一律降级 preview_text，
+  不按模型名推断。
+- 组合根在回合种子构建时解析授权 id（`apps/arkd/src/attachment_seed.rs` 纯函数）：图片读字节
+  并以 base64 注入；非图片、降级、超预算、读取失败的附件以 `preview_text`（缺失时占位行）拼入
+  用户消息文本，随持久 UserMessage item 进入历史回放；agent 不接触文件系统。
+- 每回合图片总预算 20 MiB（`IMAGE_BUDGET_BYTES`），超预算图片按序跳过；每个附件的传递结果
+  （image/preview_text/degraded/skipped/unavailable + 原因）记录在 `turn_started` 新增的
+  `attachment_outcomes` 字段（wire 契约，TS 生成检查通过），单条审计可回放。
+- 单测：`apps/arkd/src/attachment_seed.rs`（预算/降级/跳过/失败路径）、三适配器序列化、
+  `resolve_vision` 选择规则；真实模型端到端验证由发布验收承接。
 
 ## PTY
 

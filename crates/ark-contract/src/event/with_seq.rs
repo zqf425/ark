@@ -49,6 +49,7 @@ impl RuntimeEvent {
                 timestamp,
                 auto_continuation,
                 attachment_ids,
+                attachment_outcomes,
                 ..
             } => RuntimeEvent::TurnStarted {
                 seq,
@@ -57,6 +58,7 @@ impl RuntimeEvent {
                 timestamp,
                 auto_continuation,
                 attachment_ids,
+                attachment_outcomes,
             },
             RuntimeEvent::TurnCompleted {
                 thread_id,

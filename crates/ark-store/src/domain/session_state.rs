@@ -151,6 +151,7 @@ mod tests {
             timestamp: now,
             auto_continuation: false,
             attachment_ids: Vec::new(),
+            attachment_outcomes: Vec::new(),
         }));
         assert_eq!(state.status, SessionStatus::Running);
         assert!(state.status.is_active());
@@ -207,6 +208,7 @@ mod tests {
                 timestamp: now,
                 auto_continuation: false,
                 attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
             },
             RuntimeEvent::TurnAborted {
                 seq: 2,

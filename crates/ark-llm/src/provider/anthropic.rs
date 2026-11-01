@@ -105,9 +105,31 @@ fn message_json(message: &ModelMessage) -> Value {
         }
         _ => json!({
             "role": "user",
-            "content": [{ "type": "text", "text": message.content }],
+            "content": user_content(message),
         }),
     }
+}
+
+/// Text plus, when present, base64 image blocks in Anthropic wire shape.
+///
+/// An empty text block is kept for text-only messages so the content array is
+/// never empty (the API rejects an empty content list).
+fn user_content(message: &ModelMessage) -> Vec<Value> {
+    let mut blocks = Vec::new();
+    if !message.content.is_empty() || message.images.is_empty() {
+        blocks.push(json!({ "type": "text", "text": message.content }));
+    }
+    blocks.extend(message.images.iter().map(|image| {
+        json!({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": image.mime_type,
+                "data": image.data,
+            },
+        })
+    }));
+    blocks
 }
 
 /// Streaming frame parser for this family.
@@ -313,6 +335,7 @@ mod tests {
             messages: vec![ModelMessage {
                 role: ModelRole::Tool,
                 content: "body".into(),
+                images: Vec::new(),
                 tool_call_id: Some("toolu_1".into()),
                 name: None,
                 tool_calls: Vec::new(),
@@ -469,5 +492,28 @@ mod tests {
             "content_block": {"type": "text", "text": "hello"}
         })));
         assert_eq!(events, vec![StreamEvent::Text("hello".into())]);
+    }
+
+    #[test]
+    fn images_serialize_as_base64_source_blocks() {
+        let mut message = ModelMessage::user("what is in this picture");
+        message.images.push(ark_ports::ModelImage {
+            mime_type: "image/png".into(),
+            data: "aGk=".into(),
+        });
+        let body = build_body(
+            &config(),
+            &ModelRequest {
+                messages: vec![message],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let content = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["source"]["type"], "base64");
+        assert_eq!(content[1]["source"]["media_type"], "image/png");
+        assert_eq!(content[1]["source"]["data"], "aGk=");
     }
 }

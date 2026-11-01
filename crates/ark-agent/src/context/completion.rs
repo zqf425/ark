@@ -236,6 +236,7 @@ mod delivery_bound_tests {
             timestamp: Utc::now(),
             auto_continuation: true,
             attachment_ids: Vec::new(),
+            attachment_outcomes: Vec::new(),
         }
     }
 
@@ -264,6 +265,7 @@ mod delivery_bound_tests {
                 timestamp: Utc::now(),
                 auto_continuation: false,
                 attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
             },
         ];
         assert_eq!(*auto_delivery_attempts(&events).get("n1").unwrap(), 0);

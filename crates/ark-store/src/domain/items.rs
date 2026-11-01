@@ -562,6 +562,7 @@ mod tests {
                 timestamp: now,
                 auto_continuation: false,
                 attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
             },
             RuntimeEvent::Error {
                 seq: 2,

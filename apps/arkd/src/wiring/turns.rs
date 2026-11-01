@@ -24,6 +24,9 @@ pub(super) struct AgentTurnRunner {
     /// Long-term memory document. Re-read once per turn so a memory the user
     /// just saved is visible to the very next turn without a restart.
     pub(super) memory: Arc<ark_store::MemoryFileStore>,
+    /// Attachment bytes. Only the composition root touches them: phase two
+    /// resolves authorized ids into model-seed parts here, never in the agent.
+    pub(super) attachments: Arc<dyn ark_ports::AttachmentStore>,
     /// Human gate broker shared with the HTTP command surface.
     pub(super) gates: Arc<dyn GateBroker>,
 }
@@ -262,6 +265,19 @@ impl TurnRunner for AgentTurnRunner {
             }
             None => self.roots.lease().canonical_root,
         };
+        // Attachment phase two: resolve the ids the route already authorized
+        // into seed parts *before* `turn_started` is written, so the delivery
+        // outcome rides the same durable record. Only an explicit
+        // catalog-reported `supports_vision` lets images through.
+        let vision = self
+            .providers
+            .resolve_vision(thread.runtime.provider_id.as_deref());
+        let attachments = crate::attachment_seed::resolve_attachments(
+            self.attachments.as_ref(),
+            &job.attachment_ids,
+            vision == Some(true),
+            crate::attachment_seed::IMAGE_BUDGET_BYTES,
+        );
         let snapshot = self.config.snapshot();
         let policy: Arc<dyn SandboxPolicy> = Arc::new(BuiltinSandboxPolicy::new(
             autonomy_from_override_or_default(thread.runtime.autonomy.as_deref(), &snapshot)?,
@@ -270,13 +286,15 @@ impl TurnRunner for AgentTurnRunner {
         // the per-notification delivery-attempt accounting survives restarts.
         // The attachment ids ride the same record: the route already proved they
         // are associated with this thread, and recording them is the audit trail
-        // that makes "which turn referenced this file" replayable.
+        // that makes "which turn referenced this file" replayable. Phase two
+        // adds the per-attachment delivery outcome beside them.
         let events = if is_auto {
             TurnEvents::auto_continuation(job.thread_id, job.turn_id)
         } else {
             TurnEvents::new(job.thread_id, job.turn_id)
         }
-        .with_attachments(job.attachment_ids);
+        .with_attachments(job.attachment_ids.clone())
+        .with_attachment_outcomes(attachments.outcomes.clone());
         let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events.clone()));
         let tools: Arc<dyn AgentToolRunner> = Arc::new(ToolRunnerAdapter {
             inner: Arc::clone(&self.tools),
@@ -344,7 +362,7 @@ impl TurnRunner for AgentTurnRunner {
         })
         .with_steering(job.steering);
         if let Some(text) = user_text {
-            reactor.push_user(text);
+            reactor.push_user_message(user_message_with_attachments(text, &attachments));
         }
         let outcome = reactor.run().await?;
         Ok(finish_parent_turn(
@@ -357,6 +375,26 @@ impl TurnRunner for AgentTurnRunner {
         )
         .await)
     }
+}
+
+/// Build the user message for one turn from the typed text and the resolved
+/// attachment seed.
+///
+/// Previews ride the message content so the durable item and the replayed
+/// history keep the same text the model saw; images ride the multimodal parts
+/// and are seed-time only (they are not projected into later history).
+pub(super) fn user_message_with_attachments(
+    text: String,
+    attachments: &crate::attachment_seed::AttachmentSeed,
+) -> ModelMessage {
+    let mut content = text;
+    if !attachments.preview.is_empty() {
+        content.push('\n');
+        content.push_str(&attachments.preview);
+    }
+    let mut message = ModelMessage::user(content);
+    message.images = attachments.images.clone();
+    message
 }
 
 /// Adapter from `ark-tool`'s runner to `ark-agent`'s `ToolRunner` trait.

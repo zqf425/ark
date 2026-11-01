@@ -21,6 +21,10 @@
   用 `tool_calls` 数组（arguments 为 JSON 字符串），anthropic 用 assistant content 的 `tool_use` block，
   openai responses 在 assistant 项后展开为独立 `function_call` 项。旧 JSON 无该字段时行为不变；
   `repair_messages` 的孤立 tool 结果丢弃规则继续生效。
+- 用户消息的 `images`（`ark_ports::ModelImage`，mime + 裸 base64）同样按 family 序列化：openai chat 为
+  `content: [{type:"text"},{type:"image_url",image_url:{url}}]` 部分（data URL 由共享的
+  `common::data_url` 构造），openai responses 为 `input_text`/`input_image`，anthropic 为
+  `image` + `source.type=base64` block。`images` 为空时 wire 形状与纯文本消息逐字节一致。
 
 ## 验证
 

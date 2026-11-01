@@ -567,6 +567,7 @@ mod tests {
                 timestamp: Utc::now(),
                 auto_continuation: false,
                 attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
             })
             .unwrap();
         state
@@ -649,6 +650,7 @@ mod tests {
                 timestamp: Utc::now(),
                 auto_continuation: false,
                 attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
             })
             .unwrap();
 

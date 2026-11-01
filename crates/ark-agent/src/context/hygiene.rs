@@ -169,6 +169,7 @@ mod tests {
         ModelMessage {
             role: ModelRole::Tool,
             content: content.to_string(),
+            images: Vec::new(),
             tool_call_id: call_id.map(str::to_string),
             name: None,
             tool_calls: Vec::new(),

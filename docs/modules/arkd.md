@@ -15,8 +15,13 @@
 附件路径。
 
 回合启动时，组合根把 `TurnJob.attachment_ids`（已由边界层按 `attachment_associated` 事件校验过）
-交给 `TurnEvents::with_attachments`，只写入 `turn_started` 作审计：附件字节从未进入模型种子，
-多模态传递留待第二期。关联回放不经过组合根——它由 `SessionStore` 的事件投影提供。
+交给 `TurnEvents::with_attachments` 写入 `turn_started` 作审计。附件 v2 第二期起，组合根另以
+`attachment_seed::resolve_attachments`（纯函数，唯一决策点）在种子构建时解析这些 id：图片仅当
+provider 的模型目录显式声明 `supports_vision`（`ProviderStore::resolve_vision`，`None` 视为未声明）
+才读字节并以 base64 注入 `ModelMessage.images`；非图片/降级/超预算（每回合 20 MiB）/
+读取失败的附件以 `preview_text` 拼入用户消息文本，随持久 item 进入历史回放。每个附件的传递结果
+记入 `turn_started.attachment_outcomes`。agent 不读取文件系统；坏附件不得使回合失败。
+关联回放不经过组合根——它由 `SessionStore` 的事件投影提供。
 
 ## 子代理装配
 

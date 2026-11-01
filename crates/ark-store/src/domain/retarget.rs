@@ -44,6 +44,7 @@ mod tests {
             timestamp: now,
             auto_continuation: false,
             attachment_ids: Vec::new(),
+            attachment_outcomes: Vec::new(),
         };
         let retargeted = retarget_event(&event, target);
         assert_eq!(retargeted.thread_id(), target);
