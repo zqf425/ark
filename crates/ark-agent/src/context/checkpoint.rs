@@ -177,7 +177,7 @@ fn identifiers_in(text: &str) -> Vec<String> {
         })
 }
 
-fn is_generated_checkpoint(message: &ModelMessage) -> bool {
+pub(crate) fn is_generated_checkpoint(message: &ModelMessage) -> bool {
     message.role == ModelRole::System && message.content.starts_with("[context checkpoint")
 }
 

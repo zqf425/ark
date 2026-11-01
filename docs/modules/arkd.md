@@ -114,9 +114,9 @@ egress 授权（该构造器对插件清单路径不可达），并把同一能�
 assistant 行），后接一条截断到 16 KiB UTF-8 字节的 `ModelRole::Tool` 结果消息（Failed 条目结果内容为空
 兜底）；非终态（Streaming 等）条目不回放，投影顺序保持 durable items 的时间顺序。
 带 `ContextCheckpoint` 标记（`ThreadItem::marker`，ark-contract 定义）的 `Notice` 条目回放为 system
-消息；判定经 `ThreadItem::is_context_checkpoint`，它同时以 `[context checkpoint` 前缀兜底识别
-marker 出现之前持久化的历史条目（含 `: no structured facts extracted` 与 `: truncated` 两个变体）。
-不得改回裸前缀匹配：用户消息文本可以伪造任意前缀，改渲染格式也会让历史识别静默失效。
+消息；判定经 `ThreadItem::is_context_checkpoint`，它同时以 `[context checkpoint` 前缀兜底识别 marker 出现之前持久化的 Notice 条目（含 `: no structured
+facts extracted` 与 `: truncated` 两个变体）。判定 gated 在 `Notice` kind 上：用户消息可以打出任意
+前缀，永远不算检查点；也不得改回裸前缀匹配，改渲染格式同样会让历史识别静默失效。
 
 用户长期 memory 也走动态尾部：`run_turn` 在 skills 目录之后、completion inbox 之前，每回合重新读取
 `<data-dir>/memory.json` 并追加**至多一条** `[user memory]` system 消息（按 `created_at` 升序，拼接后

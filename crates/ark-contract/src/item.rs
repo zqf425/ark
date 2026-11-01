@@ -89,8 +89,8 @@ pub struct ThreadItem {
 }
 
 /// Text prefix rendered by `ark-agent`'s checkpoint family. Kept only as the
-/// legacy fallback for items persisted before `marker` existed; new code must
-/// match on [`ThreadItem::marker`] instead.
+/// legacy fallback for notice items persisted before `marker` existed; new
+/// code must match on [`ThreadItem::marker`].
 pub const CONTEXT_CHECKPOINT_PREFIX: &str = "[context checkpoint";
 
 impl ThreadItem {
@@ -115,16 +115,19 @@ impl ThreadItem {
 
     /// Whether this item carries a rendered context checkpoint.
     ///
-    /// Matches the structural marker first; items persisted before the marker
-    /// existed are recognized by their text prefix, which is safe here because
-    /// the fallback only widens to *older* logs, never to user input.
+    /// Matches the structural marker first; notice items persisted before the
+    /// marker existed are recognized by their text prefix. The prefix fallback
+    /// applies to every marker-less item, so it must stay gated on
+    /// [`ItemKind::Notice`]: a user message can open with the same text, and a
+    /// user message is never a checkpoint.
     pub fn is_context_checkpoint(&self) -> bool {
-        self.marker == Some(ItemMarker::ContextCheckpoint)
-            || (self.marker.is_none()
-                && self
-                    .text
-                    .as_deref()
-                    .is_some_and(|text| text.starts_with(CONTEXT_CHECKPOINT_PREFIX)))
+        self.kind == ItemKind::Notice
+            && (self.marker == Some(ItemMarker::ContextCheckpoint)
+                || (self.marker.is_none()
+                    && self
+                        .text
+                        .as_deref()
+                        .is_some_and(|text| text.starts_with(CONTEXT_CHECKPOINT_PREFIX))))
     }
 
     pub fn with_text(mut self, text: impl Into<String>) -> Self {
@@ -167,5 +170,41 @@ mod tests {
         let json = serde_json::to_value(&item).unwrap();
         assert_eq!(json["kind"], "tool_call");
         assert_eq!(json["status"], "completed");
+    }
+}
+
+#[cfg(test)]
+mod marker_tests {
+    use super::*;
+
+    #[test]
+    fn a_marked_notice_is_a_checkpoint() {
+        let item = ThreadItem::new(TurnId::new(), ItemKind::Notice)
+            .with_text("[context checkpoint]\nGoal: x")
+            .with_marker(ItemMarker::ContextCheckpoint);
+        assert!(item.is_context_checkpoint());
+    }
+
+    #[test]
+    fn a_pre_marker_notice_is_recognized_by_its_prefix() {
+        let item = ThreadItem::new(TurnId::new(), ItemKind::Notice)
+            .with_text("[context checkpoint: truncated]\nGoal: x");
+        assert!(item.is_context_checkpoint());
+    }
+
+    #[test]
+    fn a_user_message_is_never_a_checkpoint_even_with_the_prefix() {
+        // The regression this marker exists for: the prefix is text a user can
+        // type, so the fallback must not escape the Notice kind.
+        let item = ThreadItem::new(TurnId::new(), ItemKind::UserMessage)
+            .with_text("[context checkpoint] 我手打的")
+            .completed();
+        assert!(!item.is_context_checkpoint());
+    }
+
+    #[test]
+    fn a_notice_without_marker_or_prefix_is_not_a_checkpoint() {
+        let item = ThreadItem::new(TurnId::new(), ItemKind::Notice).with_text("普通通知");
+        assert!(!item.is_context_checkpoint());
     }
 }

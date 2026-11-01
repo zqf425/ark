@@ -252,7 +252,9 @@ pub async fn compact(
     let thread_id = parse_thread(&id)?;
     match crate::service::ensure_checkpoint(&state.store, thread_id).await? {
         crate::service::CompactionOutcome::Existing(existing) => Ok(Json(
-            serde_json::json!({ "thread_id": thread_id, "checkpoint": existing.text }),
+            // Checkpoint items are always written with text; the default only
+            // guards the wire contract against a `null` slipping through.
+            serde_json::json!({ "thread_id": thread_id, "checkpoint": existing.text.unwrap_or_default() }),
         )),
         crate::service::CompactionOutcome::Created {
             turn_id,
