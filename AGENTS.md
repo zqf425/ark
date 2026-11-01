@@ -48,7 +48,7 @@ docs/
 
 ## 4. 代码与契约
 
-- 单文件不超过 800 行，单函数不超过 80 行；`lib.rs` 仅精确 `pub use`，禁止 `pub use *`。
+- 单文件不超过 1000 行，单函数不超过 80 行；`lib.rs` 仅精确 `pub use`，禁止 `pub use *`。
 - 全仓维持 `#![deny(clippy::all)]`；注释解释原因和约束，不复述代码。
 - 新增内容默认 ASCII；Windows 下需精确字节的文本必须 UTF-8 无 BOM。
 - Rust 类型是 wire 数据唯一真源。修改 `ark-contract` 后运行：
