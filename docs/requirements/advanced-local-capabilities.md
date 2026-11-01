@@ -79,6 +79,21 @@
 - 单测：`apps/arkd/src/attachment_seed.rs`（预算/降级/跳过/失败路径）、三适配器序列化、
   `resolve_vision` 选择规则；真实模型端到端验证由发布验收承接。
 
+**第三期候选：PDF 等文档多模态（2026-11-01 评估，待决，暂不实施）**
+
+对标结论与评估（对比 Claude Code / Codex / Gemini 的 PDF 输入）：
+
+1. wire 层面没有跨 provider 的统一 PDF 表示：anthropic 有原生 `document` base64 block,
+   openai_chat 的 chat-completions content 只有 `text`/`image_url` 两类部分（OpenAI 的 PDF
+   走 Responses API 的 file 输入）。强行加 `document` 部分会在不支持该部分的 openai 兼容
+   网关上把回合打坏，违反"不做平台特例、不为想象中的需求演进契约"的边界。
+2. 现有降级路径（非图片附件以 `preview_text` 注入 + `nosniff` 下载）已经可用；用户感知的
+   缺口实际是"PDF 的文本能被模型读到"，那是**文本提取**问题，不是 wire 契约问题。最小可行
+   路径是为附件/工具链增加纯 Rust 的 PDF 文本层提取（提取后走既有 preview_text 或文件读取
+   路径），无需动 `ModelMessage` 契约。
+3. 决策：不做第三期 wire 演进；如后续确有需求，先立项"PDF 文本提取"（零契约改动），仅在
+   明确支持 `document` block 的 provider 生态出现后再评估原生传递。
+
 ## PTY
 
 PTY 不是 bash 工具的输入框。应新增受 sandbox/approval 约束的 `PtySupervisor` port、session id、输入/resize/
