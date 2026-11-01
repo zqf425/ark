@@ -1,3 +1,27 @@
+import type { ArkErrorCode } from '../../generated'
+
+/**
+ * Every code the generated contract declares. `ArkErrorCode` is a plain union
+ * (ts-rs emits no runtime list), so the set is spelled here and pinned by
+ * `error-codes.test.ts`; adding a Rust variant without updating it fails the
+ * test instead of lying through an `as` cast.
+ */
+export const ARK_ERROR_CODES: ReadonlySet<string> = new Set<ArkErrorCode>([
+  'validation_error',
+  'not_found',
+  'unauthorized',
+  'conflict',
+  'model_request_failed',
+  'tool_execution_failed',
+  'runtime_unavailable',
+  'store_failure',
+  'not_implemented',
+  'internal_error',
+  'mime_mismatch',
+  'attachment_in_use',
+  'attachment_not_associated'
+])
+
 export type {
   ApplyResult,
   ArkErrorCode,
@@ -77,7 +101,9 @@ export type {
   WorkspaceDiffFile,
   WorkspaceDiff,
   WorkspaceStatus,
-  WorkspaceValidateResponse
+  WorkspaceValidateResponse,
+  RewindRequest,
+  RewindResponse
 } from '../../generated'
 export type {
   EndpointFormat,

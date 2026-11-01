@@ -8,7 +8,7 @@
  * of them is terminal; the whole thread is only rewindable while no turn is
  * live, because the server answers 409 for a thread with a running turn.
  */
-import type { RewindRequest, RewindResponse } from '../../../generated'
+import type { RewindRequest, RewindResponse } from '../../../shared/contracts'
 import type { ThreadId, TurnId, TurnState } from '../../../shared/contracts'
 import type { ItemsSnapshot } from '../state/types'
 
