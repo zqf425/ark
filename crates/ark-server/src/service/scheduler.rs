@@ -291,9 +291,9 @@ impl SchedulerService {
                 continue;
             };
             match self.begin(state, task).await {
-                Ok((task, thread_id)) => {
+                Ok((task, thread_id, started_at)) => {
                     started += 1;
-                    let _ = self.drive(state, task, thread_id).await;
+                    let _ = self.drive(state, task, thread_id, started_at).await;
                 }
                 Err(err) => {
                     tracing::warn!(error = %err.message, "cannot start a scheduled run");
@@ -327,7 +327,7 @@ impl SchedulerService {
                 format!("scheduled task `{id}` is already running"),
             ));
         };
-        let (task, thread_id) = match self.begin(state, task).await {
+        let (task, thread_id, started_at) = match self.begin(state, task).await {
             Ok(started) => started,
             // `guard` drops on this path, releasing the slot a failed start
             // never got to use.
@@ -337,7 +337,7 @@ impl SchedulerService {
         let state = state.clone();
         tokio::spawn(async move {
             let _guard = guard;
-            let _ = service.drive(&state, task, thread_id).await;
+            let _ = service.drive(&state, task, thread_id, started_at).await;
         });
         self.store.get(id)
     }
@@ -352,7 +352,7 @@ impl SchedulerService {
         &self,
         state: &AppState,
         mut task: ScheduledTask,
-    ) -> Result<(ScheduledTask, ThreadId)> {
+    ) -> Result<(ScheduledTask, ThreadId, DateTime<Utc>)> {
         let thread = crate::api::handlers::threads::create_thread(state, &task.title)
             .await
             .map_err(|error| error.0)?;
@@ -379,15 +379,18 @@ impl SchedulerService {
         // a log of outcomes, so writing `running` into it would leave one stale
         // line behind for every completed run - two entries where the document
         // promises one run.
+        // The terminal record reuses this instant, so `last_run` keeps the real
+        // start of the run instead of a zero-length interval.
+        let started_at = Utc::now();
         task.last_run = Some(ScheduledRunRecord {
             status: RunStatus::Running,
             message: String::new(),
             thread_id: Some(thread.thread_id),
-            started_at: Utc::now(),
+            started_at,
             finished_at: None,
         });
         self.persist(task.clone(), "cannot persist the running marker");
-        Ok((task, thread.thread_id))
+        Ok((task, thread.thread_id, started_at))
     }
 
     /// Start the turn and write its terminal state back onto the task.
@@ -400,6 +403,7 @@ impl SchedulerService {
         state: &AppState,
         mut task: ScheduledTask,
         thread_id: ThreadId,
+        started_at: DateTime<Utc>,
     ) -> ScheduledTask {
         let outcome = match crate::api::handlers::turns::start_turn(
             state,
@@ -422,6 +426,7 @@ impl SchedulerService {
                     RunStatus::Completed,
                     run_summary(state, thread_id).await,
                     thread_id,
+                    started_at,
                 ),
                 "aborted" => terminal_record(
                     RunStatus::Aborted,
@@ -430,6 +435,7 @@ impl SchedulerService {
                         .clone()
                         .unwrap_or_else(|| "scheduled run was aborted".to_string()),
                     thread_id,
+                    started_at,
                 ),
                 other => terminal_record(
                     RunStatus::Failed,
@@ -438,9 +444,10 @@ impl SchedulerService {
                         .clone()
                         .unwrap_or_else(|| format!("scheduled run ended as `{other}`")),
                     thread_id,
+                    started_at,
                 ),
             },
-            Err(message) => terminal_record(RunStatus::Failed, message, thread_id),
+            Err(message) => terminal_record(RunStatus::Failed, message, thread_id, started_at),
         };
 
         record_run(&mut task, record);
@@ -538,14 +545,18 @@ fn skipped_record(reason: &str, at: DateTime<Utc>) -> ScheduledRunRecord {
     }
 }
 
-fn terminal_record(status: RunStatus, message: String, thread_id: ThreadId) -> ScheduledRunRecord {
-    let now = Utc::now();
+fn terminal_record(
+    status: RunStatus,
+    message: String,
+    thread_id: ThreadId,
+    started_at: DateTime<Utc>,
+) -> ScheduledRunRecord {
     ScheduledRunRecord {
         status,
         message: truncate_utf8(message.trim(), RUN_SUMMARY_MAX_BYTES).to_string(),
         thread_id: Some(thread_id),
-        started_at: now,
-        finished_at: Some(now),
+        started_at,
+        finished_at: Some(Utc::now()),
     }
 }
 
