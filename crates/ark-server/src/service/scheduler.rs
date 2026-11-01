@@ -327,6 +327,14 @@ impl SchedulerService {
             ));
         }
         let task = self.store.get(id)?;
+        // Aligned with tick (`classify` treats a disabled task as `NotDue`):
+        // a task the user turned off must not be startable by hand either.
+        if !task.enabled {
+            return Err(ArkError::new(
+                ArkErrorCode::Conflict,
+                format!("scheduled task `{id}` is disabled; enable it before running it manually"),
+            ));
+        }
         // Claim before creating anything: `is_running` alone would let a tick
         // claim the same task between this check and the thread insert, and the
         // losing side would have already created a thread nobody owns.
@@ -979,6 +987,47 @@ mod tests {
         assert!(
             !harness.service.is_running(&seeded.id),
             "the slot is released"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_now_rejects_a_disabled_task_until_it_is_enabled_again() {
+        let harness = Harness::new(true, false, None);
+        let mut seeded = harness.seed(due_task(60));
+        seeded.enabled = false;
+        harness
+            .service
+            .store()
+            .replace(seeded.clone())
+            .expect("disable");
+
+        let error = harness
+            .service
+            .run_now(&harness.state, &seeded.id)
+            .await
+            .expect_err("a disabled task is not manually runnable");
+        assert_eq!(error.code, ArkErrorCode::Conflict);
+        assert!(
+            error.message.contains("disabled"),
+            "the error explains the task must be enabled first"
+        );
+        assert!(harness.stored(&seeded.id).last_run.is_none());
+
+        // Once the user re-enables the task, run_now goes through.
+        seeded.enabled = true;
+        harness
+            .service
+            .store()
+            .replace(seeded.clone())
+            .expect("enable");
+        let started = harness
+            .service
+            .run_now(&harness.state, &seeded.id)
+            .await
+            .expect("the enabled task runs");
+        assert_eq!(
+            started.last_run.as_ref().map(|record| record.status),
+            Some(RunStatus::Running)
         );
     }
 
