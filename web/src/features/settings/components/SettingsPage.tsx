@@ -16,6 +16,7 @@ import { SubagentSection } from './SubagentSection'
 import { ProvidersSection } from './ProvidersSection'
 import { McpSection } from './McpSection'
 import { SkillsSection } from './SkillsSection'
+import { ScheduleSection } from './ScheduleSection'
 import { SETTINGS_SECTIONS, type SettingsSectionId } from './settings-navigation'
 import '../settings.css'
 import '../settings-agent.css'
@@ -62,6 +63,12 @@ export function SettingsPage(): JSX.Element {
         return (
           <ErrorBoundary label={t('settings.boundary.skills')}>
             <SkillsSection />
+          </ErrorBoundary>
+        )
+      case 'schedules':
+        return (
+          <ErrorBoundary label={t('settings.boundary.schedules')}>
+            <ScheduleSection settings={settings} />
           </ErrorBoundary>
         )
     }

@@ -28,6 +28,8 @@ export const SETTINGS_CORE_MESSAGES = {
   'settings.nav.providers.detail': ['模型目录与凭据', 'Model catalog and credentials'],
   'settings.nav.integrations.label': ['集成', 'Integrations'],
   'settings.nav.integrations.detail': ['MCP 工具服务', 'MCP tool services'],
+  'settings.nav.schedules.label': ['定时任务', 'Scheduled tasks'],
+  'settings.nav.schedules.detail': ['提示词与触发节奏', 'Prompts and cadences'],
   'settings.nav.skills.label': ['Skills', 'Skills'],
   'settings.nav.skills.detail': ['已发现的能力', 'Discovered capabilities'],
 
@@ -37,5 +39,6 @@ export const SETTINGS_CORE_MESSAGES = {
   'settings.boundary.subagents': ['子 agent 设置崩溃', 'Subagent settings crashed'],
   'settings.boundary.providers': ['供应商设置崩溃', 'Provider settings crashed'],
   'settings.boundary.mcp': ['MCP 设置崩溃', 'MCP settings crashed'],
+  'settings.boundary.schedules': ['定时任务设置崩溃', 'Scheduled-task settings crashed'],
   'settings.boundary.skills': ['Skills 设置崩溃', 'Skills settings crashed']
 } as const

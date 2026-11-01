@@ -69,7 +69,7 @@
 独立 `plugin-code-ui` 尚未成为当前 workspace 模块。其未来迁移必须先建立需求设计，不能借桌面外壳绕过
 `ark-ui` 注册总线。
 
-## 定时任务管理(计划)
+## 定时任务管理
 
 设置页「定时任务」section(需求见 [scheduled-tasks](../requirements/scheduled-tasks.md)):
 只消费 `/v1/schedules` 的生成契约类型;节奏编辑、启停、立即运行与最近结果展示;全部文案走

@@ -9,15 +9,18 @@ import { ApiError } from '../../../shared/api/client'
 import { translateNow } from '../../../shared/i18n/current'
 import { errorHintKey } from '../../../shared/api/error-describe'
 
-/** A write attempt: either the typed payload, or the backend's own message. */
-export type Outcome<T> = { ok: true; value: T } | { ok: false; message: string; hint?: string }
+/**
+ * `status` is kept so a caller can tell the documented refusals apart (409 for a
+ * run already in flight) without pattern-matching the server's sentence.
+ */
+export type Outcome<T> = { ok: true; value: T } | { ok: false; message: string; hint?: string; status?: number }
 
 /** `ApiError.message` is authoritative; `hint` only adds route-level context. */
-export function describeApiError(error: unknown): { message: string; hint?: string } {
+export function describeApiError(error: unknown): { message: string; hint?: string; status?: number } {
   if (error instanceof ApiError) {
     const key = errorHintKey(error.code)
     // `unknown` has no taxonomy entry, so the raw status is the only honest hint.
-    return { message: error.message, hint: key ? translateNow(key) : `HTTP ${error.status}` }
+    return { message: error.message, hint: key ? translateNow(key) : `HTTP ${error.status}`, status: error.status }
   }
   if (error instanceof Error) return { message: error.message }
   return { message: String(error) }
@@ -29,7 +32,7 @@ export async function attempt<T>(run: () => Promise<T>): Promise<Outcome<T>> {
     return { ok: true, value: await run() }
   } catch (error) {
     const described = describeApiError(error)
-    return { ok: false, message: described.message, ...(described.hint ? { hint: described.hint } : {}) }
+    return { ok: false, message: described.message, ...(described.hint ? { hint: described.hint } : {}), ...(described.status ? { status: described.status } : {}) }
   }
 }
 
