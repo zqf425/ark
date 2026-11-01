@@ -24,7 +24,10 @@ const HINT_KEYS: Record<ArkErrorCode, MessageKey> = {
   runtime_unavailable: 'error.hint.runtime_unavailable',
   store_failure: 'error.hint.store_failure',
   not_implemented: 'error.hint.not_implemented',
-  internal_error: 'error.hint.internal_error'
+  internal_error: 'error.hint.internal_error',
+  mime_mismatch: 'error.hint.mime_mismatch',
+  attachment_in_use: 'error.hint.attachment_in_use',
+  attachment_not_associated: 'error.hint.attachment_not_associated'
 }
 
 /** `null` means "no taxonomy entry": the caller falls back to the raw status. */
