@@ -194,7 +194,15 @@ mod tests {
 
     #[test]
     fn absolute_path_outside_the_root_is_rejected() {
-        assert!(resolve(&root(), "C:/Windows/System32/drivers/etc/hosts").is_err());
+        // Windows treats a drive-letter path as absolute; on Unix the equivalent
+        // absolute-outside-root input is a leading-slash path (a `C:/...` string
+        // would be relative there and resolve inside the root).
+        let outside = if cfg!(windows) {
+            "C:/Windows/System32/drivers/etc/hosts"
+        } else {
+            "/etc/hosts"
+        };
+        assert!(resolve(&root(), outside).is_err());
     }
 
     #[test]
@@ -224,7 +232,15 @@ mod tests {
 
     #[test]
     fn sibling_with_a_shared_prefix_is_rejected() {
-        assert!(resolve(&root(), "D:/ws/project-evil/a.txt").is_err());
+        if cfg!(windows) {
+            assert!(resolve(&root(), "D:/ws/project-evil/a.txt").is_err());
+        } else {
+            // `D:/ws/project` is a relative path on Unix, so the sibling case
+            // needs a real absolute root to keep the shared-prefix intent.
+            let dir = temp_dir("sibling");
+            assert!(resolve(&dir, &format!("{}-evil/a.txt", dir.display())).is_err());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     #[test]

@@ -170,9 +170,16 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_kills_the_child() {
+        // `ping -n` is Windows-only syntax; on Unix a usage-error exit would
+        // bypass the timeout path entirely, so sleep plays the long-running child.
+        let long_running = if cfg!(windows) {
+            "ping -n 30 127.0.0.1"
+        } else {
+            "sleep 30"
+        };
         let dir = temp_workspace("bash-timeout");
         let arg = ToolArgs(serde_json::json!({
-            "command": "ping -n 30 127.0.0.1",
+            "command": long_running,
             "timeout_ms": 200
         }));
         let started = std::time::Instant::now();
