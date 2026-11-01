@@ -172,7 +172,7 @@ impl SchedulerService {
         }
         let service = Arc::clone(self);
         tokio::spawn(async move {
-            service.reconcile(&state).await;
+            service.reconcile().await;
             let mut shutdown = state.shutdown_receiver();
             loop {
                 // Two shutdown paths reach a running loop: `/v1/shutdown`
@@ -199,10 +199,13 @@ impl SchedulerService {
     /// pointed at was already aborted by the turn-recovery pass), and a trigger
     /// that passed while the process was down becomes `skipped` with a new
     /// future `next_run_at`.
-    pub async fn reconcile(&self, state: &AppState) {
-        if !state.config.snapshot().schedules.enabled {
-            return;
-        }
+    ///
+    /// Repair deliberately ignores the `schedules.enabled` switch: the switch
+    /// gates *triggering* (tick / run_now), never repair. Gating repair too
+    /// would leave a crash's `running` marker stuck on screen until the user
+    /// re-enabled schedules — the settings page would lie for an unbounded
+    /// time about a run that no longer exists.
+    pub async fn reconcile(&self) {
         let tasks = match self.store.list() {
             Ok(tasks) => tasks,
             Err(err) => {
@@ -1015,7 +1018,7 @@ mod tests {
         );
         let seeded = harness.seed(seeded);
 
-        harness.service.reconcile(&harness.state).await;
+        harness.service.reconcile().await;
 
         let stored = harness.stored(&seeded.id);
         assert_eq!(
@@ -1036,6 +1039,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reconcile_repairs_even_while_schedules_are_disabled() {
+        // The switch gates triggering, not repair: with schedules disabled, a
+        // crash's `running` marker must still settle instead of sticking on
+        // screen until the user re-enables the feature.
+        let harness = Harness::new(false, false, None);
+        let mut seeded = due_task(0);
+        record_run(
+            &mut seeded,
+            ScheduledRunRecord {
+                status: RunStatus::Running,
+                message: String::new(),
+                thread_id: None,
+                started_at: Utc::now(),
+                finished_at: None,
+            },
+        );
+        let seeded = harness.seed(seeded);
+
+        harness.service.reconcile().await;
+
+        let stored = harness.stored(&seeded.id);
+        assert_eq!(
+            stored.last_run.as_ref().map(|record| record.status),
+            Some(RunStatus::Aborted)
+        );
+        // Repair never triggers: no run may start while the switch is off.
+        assert!(harness
+            .runner
+            .prompts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn reconcile_records_the_missed_trigger_even_while_schedules_are_disabled() {
+        // The other half of "repair ignores the switch": a trigger that went
+        // stale while the process was down is honestly recorded as `skipped`
+        // (and rescheduled) even though no run may ever start.
+        let harness = Harness::new(false, false, None);
+        let before = due_task(10 * 60);
+        let seeded = harness.seed(before.clone());
+
+        harness.service.reconcile().await;
+
+        let stored = harness.stored(&seeded.id);
+        assert_eq!(
+            stored.last_run.as_ref().map(|record| record.status),
+            Some(RunStatus::Skipped)
+        );
+        // The stale trigger is rescheduled into the future, not left behind.
+        assert_ne!(stored.next_run_at, before.next_run_at);
+        assert!(harness
+            .runner
+            .prompts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty());
+    }
+
+    #[tokio::test]
     async fn reconcile_settles_the_crash_then_records_the_missed_trigger() {
         let harness = Harness::new(true, false, None);
         let mut seeded = due_task(6 * 60);
@@ -1051,7 +1115,7 @@ mod tests {
         );
         let seeded = harness.seed(seeded);
 
-        harness.service.reconcile(&harness.state).await;
+        harness.service.reconcile().await;
 
         // Two repairs, two outcomes, oldest first: the run that never finished,
         // then the trigger that passed while the process was down.
