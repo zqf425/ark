@@ -42,10 +42,23 @@
   主任务层级，必须退为状态详情或提示信息。
 - 设置页的分类导航是 `web` 内本地状态，只决定既有 section 的可见性；每个 section 仍独立持有既有 hook，
   不把 provider、MCP 或 runtime 配置逻辑回流到 Code 会话状态或 `ark-agent`。
-- 用户可见文本通过 `web/src/shared/i18n/` 的消息键与中英文资源提供；新增 UI 不得硬编码文案。语言、字号和
-  主题是 renderer-only 偏好，默认 `zh-CN`/中号/跟随系统，保存于当前浏览器的 localStorage 并即时更新根 `lang`
-  属性及字号、主题 token；选择“跟随系统”时监听 `prefers-color-scheme` 的变化并即时重新解析浅/深色主题。
-  它们不属于 Rust wire 契约或运行时配置，不能通过设置 API 写入。
+- 用户可见文本通过 `web/src/shared/i18n/` 的消息键与中英文资源提供；新增 UI 不得硬编码文案。
+  该目录已按域拆分为 `catalogs/*`（`common`、`errors`、`session`、`thread-list`、`workbench`、
+  `session-canvas`、`settings-*`，当前共 11 个文件、537 个键）：每个 catalog 输出一张
+  `键 -> [zh-CN, en-US]` 表，`messages.ts` 只做聚合并导出 `translate` 与由它推导的 `MessageKey`，
+  所以拼错的键是编译错误而不是静默英文回落。新文案加到对应域文件，不新建巨型 `messages.ts`。
+- 非 React 代码（reducer、formatter、API 结果映射）不能调 `useI18n`，也不能直接写文案：
+  `I18nProvider` 在语言变更时把当前 locale 发布到 `current.ts`，这些调用点用 `translateNow` 读取。
+  组件仍用 context 的 `t`，以便语言切换时重渲染；`translateNow` 只是非 React 场景的回落。
+- 错误文案由 `shared/api/error-describe.ts` 的 `describeError` 统一拼装：本地化的是错误 **code** 的短提示
+  （`error.hint.<code>`），运行时返回的 `message` 保持原文，两者用 `common.hintSeparator` 连接。
+  调用方不得自行拼 `提示：message` 或另建一份 code→文案表；未知 code 回退到 `HTTP <status>`。
+- `catalog-completeness.test.ts` 是静态双语守卫：逐个键检查中英两列非空、英文列不含 CJK、英文列不是
+  中文的逐字复制、同键占位符集合一致、`translate` 对每个键都非空，并校验主要前缀与每个错误 code 都有
+  本地化提示。
+- 语言、字号和主题是 renderer-only 偏好，默认 `zh-CN`/中号/跟随系统，保存于当前浏览器的 localStorage
+  并即时更新根 `lang` 属性及字号、主题 token；选择“跟随系统”时监听 `prefers-color-scheme` 的变化并即时
+  重新解析浅/深色主题。它们不属于 Rust wire 契约或运行时配置，不能通过设置 API 写入。
 
 ## 桌面宿主边界
 

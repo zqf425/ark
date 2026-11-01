@@ -34,11 +34,16 @@
   registry 后才返回 future，resolved 事件仍由 reactor 在实际消费回复后写入。future 自带 Drop 守卫，
   按（id, generation）移除自己的注册：取消/丢弃清理自身，且同 id 重新注册后旧守卫不会误删新注册。
 - `GET /v1/threads/{id}` 把 active `TurnRegistry` entry、interaction 窄事件投影和 live gate id 三者取交集
-  写入 `ThreadDetail.runtime`；历史 gate 或已移除 waiter 不得出现在可操作快照中。
+  写入 `ThreadDetail.runtime_snapshot`；`ThreadDetail.runtime` 只携带已持久化的每线程覆盖值。历史 gate 或
+  已移除 waiter 不得出现在可操作快照中。
 - workbench 的 Plan、Changes、File、Terminal 投影均在 `service/workbench.rs`，handler 只读取权威事件并
   调用该纯函数；File 不直接访问磁盘，而是返回已持久化的 `read` 工具输出。
 - provider model catalog 路由只转发 `ProviderService::models`，不读取、记录或回显 api key/header；具体
   限时、限体积和元数据规范化留在 `ark-llm` / `ark-provider`。
+- `GET /v1/runtime/plugins` 只转发 `BaseServices::plugins`（`PluginHostService::report`）的
+  `PluginHostReport`；handler 不读插件 registry、不重新解释字段。插件服务未装配时返回
+  `runtime_unavailable`/503，因为空列表会与“确实没有插件”混淆。该路由只读：没有
+  enable/disable/reload，插件只在启动时装载一次。
 - `GET /v1/runtime/capabilities` 返回 `ark-contract` 的 `CapabilitiesResponse`。能力按宿主归属分别派生：
   `tool` 来自工具注册表、`model_provider` 来自 provider 表（handler 合成），`ui_page`/`ui_panel` 来自
   `BaseServices::ui` 的注册结果。handler 与组合根都不得保留平行能力清单或第二份导航表。未装配
@@ -80,13 +85,25 @@
 当前路由以 `src/api/routes.rs` 为准。新增或修改路由必须同步更新 wire DTO、接口测试、渲染层 client
 和对应需求设计；不在本文维护第二份易漂移的完整路由表。
 
-附件路由为 `POST /v1/attachments`、`GET /v1/attachments/{id}`、
-`GET /v1/attachments/{id}/content` 与 `GET /v1/attachments/diagnostics`。上传采用 JSON Base64；
+附件路由为 `POST /v1/attachments`、`GET /v1/attachments/{id}`、`DELETE /v1/attachments/{id}`、
+`GET /v1/attachments/{id}/content`、`GET /v1/attachments/diagnostics`，以及线程侧的关联入口
+`POST /v1/threads/{id}/attachments`。上传采用 JSON Base64；
 handler 在解码前按存储端口的最大字节数限制编码长度，超限或非法 Base64 返回结构化 400。仅上传路由
 以 `DefaultBodyLimit` 放宽至 Base64 编码上限加 64 KiB JSON 余量，并把提取阶段的超限映射为同一结构化
-校验错误；其它 API 路由仍保留框架默认限制。内容下载设置持久化 MIME（无效或缺失时为
+校验错误；其它 API 路由仍保留框架默认限制。字节签名与声明 MIME 不符时存储层返回
+`mime_mismatch`/422；未声明或无法识别的 MIME 不被拒绝。内容下载设置持久化 MIME（无效或缺失时为
 `application/octet-stream`）、精确 `content-length`、`X-Content-Type-Options: nosniff`，以及采用仅
 ASCII 安全文件名的 `Content-Disposition: attachment`；非 UUID、缺元数据或缺字节文件统一为 404。
+
+关联路由挂在线程路径下是刻意设计：URL 本身就声明了是哪个线程获得授权，handler 无法被诱导去授权别的
+线程。关联先确认线程与附件都存在；同一对已关联时不追加事件，仍返回 201。关联结果只由持久化的
+`attachment_associated` 事件表达，不新增关联表。`DELETE /v1/attachments/{id}` 在该 id 被任一线程关联时
+返回 `attachment_in_use`/409 且不删字节；未关联时删除字节并返回 200。本期不提供解绑路由。
+
+`service/attachment_auth.rs` 是三个读方共用的唯一折叠点：`thread_attachment_ids`（线程详情与回合起点
+授权）、`associated_attachment_ids`（删除守卫与 `orphan_count`）和 `authorize_turn_attachments`（回合
+引用校验）。最后者只在附件已关联到**本线程**时放行；未关联（包括存在但属于其它线程）统一返回
+`attachment_not_associated`/404，不用错误码泄露 id 是否存在，也不因重复传参写入重复事件。
 
 工作区路由只经 `WorkspaceService` 读取 active view、执行 switch 和取得 diff。切换时将 parent
 `TurnRegistry` 与 active child 数相加；非零即返回 `Conflict`/409，不能隐式取消。diff 响应带

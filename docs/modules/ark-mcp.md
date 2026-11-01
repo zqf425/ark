@@ -12,6 +12,17 @@
   会重新发现并替换该组，重复名称以明确冲突返回，连接失败不阻断其他 server 或进程启动。
 - cross-plugin 调用必须由 caller 的 `mcp.consume` 显式声明；调用链携带 trace，限制深度为 3，
   并拒绝循环和等待图死锁。
+- `service/host_tool.rs` 的 `PluginTool` 是模型侧适配器：它把总线已发布的 `<plugin_id>.<tool>` 变成
+  agent loop 可见的 `Tool`，自身不重复任何规则。构造期用 `validate_plugin_id` 与 `ensure_local` 拒绝
+  非法或自带命名空间的名称，使坏 manifest 在加载期失败，而不是等模型第一次调用才暴露；非对象 schema
+  归一为 `{"type":"object","properties":{}}`。`Tool::name`/`schema` 要求 `'static`，两者在构造时各
+  leak 一次，以保证注册后的 schema 字节不再变化、不破坏提示缓存前缀。
+- 宿主入口不是插件：agent loop 代表用户调用插件工具，没有 `mcp.consume` 可声明，因此走
+  `McpBus::dispatch_from_host` 而非插件间 `dispatch`。该入口只跳过 consume 授权，`caller` 记为
+  `HOST_CALLER = "host.runtime"`（合法插件 id 不可能取该值，无法冒充，仅用于让 trace 显示调用从何处
+  进入总线）；工具必须已注册，命名空间、深度与循环守卫照旧。宿主不是等待图上的插件节点，所以这个
+  入口不登记等待边；嵌套的 plugin→plugin 调用仍按 `dispatch` 登记并检测死锁。把工具发布给模型因此
+  不会扩大插件彼此的可达范围。
 - stdio 与 streamable HTTP 是已实现的 transport adapter；领域服务不因协议不同而复制实现。SSE
   仅在契约中保留类型（`McpTransportKind::Sse` 与 `SseTransport` skeleton）：服务端在建立会话前
   以 validation 错误（detail `mcp_sse_unsupported`）拒绝并提示改用 `streamable_http`，SSE 客户端
@@ -37,6 +48,8 @@ MCP 设置的安全 read view 可返回 transport、command/url、args、allow-t
 
 区分深度超限、调用环、等待图死锁、未声明消费、重复工具名和 grant 拒绝，便于调用方恢复。测试至少
 覆盖三种 transport、catalog 同源、跨插件授权、敏感审批、递归拒绝和 handler/HTTP 行为一致性。
+`host_tool.rs` 另有单元测试固定宿主入口语义：名称取自总线命名空间、缺 schema 仍得到对象 schema、
+宿主调用无需可见性声明即可到达插件、插件卸载后总线错误降级为工具错误而不是 harness 失败。
 
 ## 当前状态
 
