@@ -9,4 +9,4 @@ export type ChildRunActionResult = { id: ChildId,
 /**
  * Echo of the new state: `aborted`, `running`, ...
  */
-status?: string, ok?: boolean, deleted?: boolean, resumeCount?: number, };
+status?: string, ok?: boolean, deleted?: boolean, resume_count?: number, };

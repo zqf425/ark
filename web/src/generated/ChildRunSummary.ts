@@ -7,12 +7,12 @@ import type { Usage } from "./Usage";
 /**
  * One row of `GET /v1/child-runs` and the body of `GET /v1/child-runs/{id}`.
  */
-export type ChildRunSummary = { id: ChildId, parentThreadId: ThreadId, parentTurnId: TurnId, label: string, 
+export type ChildRunSummary = { id: ChildId, parent_thread_id: ThreadId, parent_turn_id: TurnId, label: string, 
 /**
  * `queued` | `running` | `completed` | `failed` | `aborted`.
  */
-status: string, summary?: string, error?: string, model?: string, providerId?: string, autonomy?: string, 
+status: string, summary?: string, error?: string, model?: string, provider_id?: string, autonomy?: string, 
 /**
  * Real counters the child reported; absent when it never reached a model.
  */
-usage?: Usage, toolInvocations?: number, resumeCount?: number, createdAt: string, endedAt?: string, };
+usage?: Usage, tool_invocations?: number, resume_count?: number, created_at: string, ended_at?: string, };

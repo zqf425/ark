@@ -27,11 +27,11 @@ const THREAD_B = '00000000-0000-0000-0000-00000000000b'
 function child(label: string): ChildRunSummary {
   return {
     id: '00000000-0000-0000-0000-0000000000c1',
-    parentThreadId: THREAD_A,
-    parentTurnId: '00000000-0000-0000-0000-0000000000t1',
+    parent_thread_id: THREAD_A,
+    parent_turn_id: '00000000-0000-0000-0000-0000000000t1',
     label,
     status: 'running',
-    createdAt: '2026-10-28T00:00:00Z'
+    created_at: '2026-10-28T00:00:00Z'
   }
 }
 
@@ -39,14 +39,14 @@ function response(label: string): ChildRunListResponse {
   return {
     enabled: true,
     active: 1,
-    childRuns: [child(label)],
+    child_runs: [child(label)],
     aggregates: {
       queued: 0,
       running: 1,
       completed: 0,
       failed: 0,
       aborted: 0,
-      toolInvocations: 0,
+      tool_invocations: 0,
       usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
     }
   }

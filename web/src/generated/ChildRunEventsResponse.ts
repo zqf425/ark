@@ -4,4 +4,4 @@ import type { RuntimeEvent } from "./RuntimeEvent";
 /**
  * `GET /v1/child-runs/{id}/events` — incremental transcript polling.
  */
-export type ChildRunEventsResponse = { events: Array<RuntimeEvent>, highestSeq: number, };
+export type ChildRunEventsResponse = { events: Array<RuntimeEvent>, highest_seq: number, };
