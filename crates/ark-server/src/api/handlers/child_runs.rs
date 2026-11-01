@@ -8,7 +8,9 @@
 //!
 //! Two shape decisions are worth stating:
 //!
-//! * `parentThreadId` is **required** on every single-child route. A child id is
+//! * the `parentThreadId` *query parameter* (its name is the documented HTTP
+//!   surface, distinct from the snake_case JSON bodies) is **required** on every
+//!   single-child route. A child id is
 //!   a UUID and a leaked one must not be enough to read another thread's
 //!   transcript, so ownership is always re-checked against the parent's run log.
 //! * a record is folded to its **latest** entry. `children/runs.jsonl` is

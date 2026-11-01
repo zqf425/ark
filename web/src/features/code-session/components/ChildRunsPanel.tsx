@@ -67,12 +67,12 @@ export function ChildRunsPanel({ threadId }: { threadId: string }): JSX.Element 
     return () => controller.abort()
   }, [threadId, childRunRevision])
 
-  if (!data || data.childRuns.length === 0) return null
+  if (!data || data.child_runs.length === 0) return null
   const run = async (key: string, action: () => Promise<unknown>): Promise<void> => {
     setBusy(key)
     try { await action(); refresh() } catch (error) { toast.push('error', t('canvas.childRuns.actionFailed'), describe(error)) } finally { setBusy(null) }
   }
-  return <section className="ark-childruns"><header><strong>{t('canvas.childRuns.title')}</strong><span>{t('canvas.childRuns.active', { count: data.active })}</span></header>{data.childRuns.map((child) => {
+  return <section className="ark-childruns"><header><strong>{t('canvas.childRuns.title')}</strong><span>{t('canvas.childRuns.active', { count: data.active })}</span></header>{data.child_runs.map((child) => {
     const active = child.status === 'queued' || child.status === 'running'
     const resumable = child.status === 'failed' || child.status === 'aborted'
     const meta = childRunMeta(child)

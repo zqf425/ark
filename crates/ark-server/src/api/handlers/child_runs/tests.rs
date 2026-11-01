@@ -162,16 +162,16 @@ fn a_summary_payload_carries_the_child_identity_and_real_usage() {
 }
 
 #[test]
-fn the_summary_serializes_to_the_field_names_the_renderer_parses() {
-    // The renderer reads `ChildRunRecordJson` (camelCase). A snake_case payload
-    // would silently blank the sub-agent panel, so the wire shape is asserted.
+fn the_summary_serializes_with_the_workspace_wire_naming() {
+    // The whole contract is snake_case, child runs included; the renderer
+    // consumes generated types, so a drift here is a TS compile error too.
     let parent = ThreadId::new();
     let child = ChildId::new();
     let summary = summary_of_record(&record(parent, child, child_status::COMPLETED, 1));
     let json = serde_json::to_value(&summary).unwrap();
-    assert!(json.get("parentThreadId").is_some(), "{json}");
-    assert!(json.get("parentTurnId").is_some(), "{json}");
-    assert!(json.get("createdAt").is_some(), "{json}");
+    assert!(json.get("parent_thread_id").is_some(), "{json}");
+    assert!(json.get("parent_turn_id").is_some(), "{json}");
+    assert!(json.get("created_at").is_some(), "{json}");
     assert_eq!(json["id"], serde_json::json!(child.to_string()));
-    assert!(json.get("parent_thread_id").is_none());
+    assert!(json.get("parentThreadId").is_none());
 }

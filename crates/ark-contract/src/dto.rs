@@ -564,14 +564,13 @@ pub struct ThreadExport {
 // Child runs (design §7.8 / appendix A)
 // ---------------------------------------------------------------------------
 //
-// Field names are camelCase because the renderer already parses these payloads
-// (`ChildRunRecordJson` in `src/renderer/src/agent/types.ts`). Changing them here
-// without changing the renderer silently blanks the sub-agent panel.
+// Wire naming is snake_case everywhere, including the child-run family below:
+// the renderer consumes generated types, so a rename here is a compile error on
+// the TS side instead of a silently blanked panel.
 
 /// One row of `GET /v1/child-runs` and the body of `GET /v1/child-runs/{id}`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
-#[serde(rename_all = "camelCase")]
 pub struct ChildRunSummary {
     pub id: ark_common::ChildId,
     pub parent_thread_id: ThreadId,
@@ -605,7 +604,6 @@ pub struct ChildRunSummary {
 /// Per-status counts plus the children's folded usage.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
-#[serde(rename_all = "camelCase")]
 pub struct ChildRunAggregates {
     #[ts(as = "f64")]
     pub queued: u32,
@@ -627,7 +625,6 @@ pub struct ChildRunAggregates {
 /// `GET /v1/child-runs`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
-#[serde(rename_all = "camelCase")]
 pub struct ChildRunListResponse {
     pub enabled: bool,
     /// Children holding a concurrency slot right now.
@@ -656,7 +653,6 @@ pub struct ResumeChildRequest {
 /// guess whether the call did anything.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
-#[serde(rename_all = "camelCase")]
 pub struct ChildRunActionResult {
     pub id: ark_common::ChildId,
     /// Echo of the new state: `aborted`, `running`, ...
@@ -673,7 +669,6 @@ pub struct ChildRunActionResult {
 /// `GET /v1/child-runs/{id}/events` — incremental transcript polling.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
-#[serde(rename_all = "camelCase")]
 pub struct ChildRunEventsResponse {
     pub events: Vec<crate::event::RuntimeEvent>,
     #[ts(as = "f64")]
@@ -685,15 +680,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn child_run_aggregates_use_camel_case_on_the_wire() {
+    fn child_run_aggregates_use_snake_case_on_the_wire() {
         let payload = serde_json::to_value(ChildRunAggregates {
             tool_invocations: 3,
             ..ChildRunAggregates::default()
         })
         .unwrap();
 
-        assert_eq!(payload.get("toolInvocations"), Some(&serde_json::json!(3)));
-        assert!(payload.get("tool_invocations").is_none());
+        assert_eq!(payload.get("tool_invocations"), Some(&serde_json::json!(3)));
+        assert!(payload.get("toolInvocations").is_none());
     }
 
     #[test]

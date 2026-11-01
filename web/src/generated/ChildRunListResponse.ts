@@ -9,4 +9,4 @@ export type ChildRunListResponse = { enabled: boolean,
 /**
  * Children holding a concurrency slot right now.
  */
-active: number, childRuns: Array<ChildRunSummary>, aggregates: ChildRunAggregates, };
+active: number, child_runs: Array<ChildRunSummary>, aggregates: ChildRunAggregates, };
