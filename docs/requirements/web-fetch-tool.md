@@ -1,7 +1,7 @@
 # 内置 web_fetch 工具
 
-> 状态:**已批准计划**。本文批准后其"设计"节即构成验收标准;实施完成时更新为已实现并记录
-> 落地情况。前置:整体架构 §3(能力集中治理)与 [ark-http 模块设计](../modules/ark-http.md)。
+> 状态:**已实现**(离线可测部分;真实网络抓取由发布验收承接)。设计节即实现语义,落地情况
+> 见文末。前置:整体架构 §3(能力集中治理)与 [ark-http 模块设计](../modules/ark-http.md)。
 
 ## 背景与目标
 
@@ -51,3 +51,21 @@
 - 装配:父/子工具表都含 `web_fetch`;egress 授权在启动时注册;`GET /v1/runtime/tools` 出现新行。
 - 沙箱:三种自治模式下 `web_fetch` 的决策与 ReadOnly 基线一致。
 - 真实网络抓取由发布验收承接(本需求只覆盖离线可测路径)。
+
+## 落地情况
+
+设计要点 1–6 全部按批准语义实现(commit 8ab8ca3):
+
+- 工具实现于 `crates/ark-tool/src/exec/tools/web_fetch.rs`,实现 `ark_ports::Tool`,schema
+  为 `{ "url": string }`;`TOOL_METAS` 含 `web_fetch` 行,baseline `ReadOnly`
+  (`crates/ark-tool/src/domain/meta.rs`)。
+- 注册:组合根经 `ark_tool::web_tools(http)` 注册,父工具表(`apps/arkd/src/wiring/tools.rs`
+  的 `parent_tools`)与子工具表(`child_tools`)都含 `web_fetch`,装配测试
+  `apps/arkd/src/wiring/tests.rs` 断言两侧均注册。
+- 出口治理:组合根以 `ark_http::HostAllowlist::allow_all()` 注册 egress 授权
+  (`apps/arkd/src/wiring/mod.rs`),工具自身不持有 HTTP client,逻辑调用方 id 为
+  `ark.builtin.web`;`HostAllowlist::parse(["*"])` 仍拒绝,插件清单不可能声明。
+- SSRF 防线、HTML 文本提取、64 KiB 截断、非 2xx/二进制/网络错误的结构化失败输出均在工具内
+  实现,单测以假 `HttpCapability` 覆盖私网/loopback/链路本地拒绝、文本提取、非 2xx、二进制
+  拒绝与截断,无真实网络依赖。
+- 真实网络抓取的端到端验证由 [发布收尾与真实环境验收](release-readiness.md) 承接。
