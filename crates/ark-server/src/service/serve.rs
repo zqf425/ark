@@ -4,6 +4,11 @@
 //! bound address *before* the accept loop starts: a smoke test then never races
 //! the listener, and the startup line it prints is the truth.
 
+//!
+//! The `crate::api` reference below is the service layer's only structural
+//! dependency: binding a listener requires the router table. It carries no
+//! business rule and is not a layering inversion like the ones this module
+//! tree removed.
 use std::net::SocketAddr;
 use std::time::Duration;
 

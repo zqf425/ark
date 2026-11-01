@@ -2,7 +2,7 @@
 //!
 //! The service owns the *loop* and the *fold*, never the cadence maths: when a
 //! task is due comes from `ark_schedule`, what a run is comes from
-//! `crate::api::handlers::turns::start_turn`, and this module only decides when
+//! `crate::service::turns::start_turn`, and this module only decides when
 //! to ask and what to write back.
 //!
 //! Three rules shape the code below:
@@ -370,9 +370,7 @@ impl SchedulerService {
         state: &AppState,
         mut task: ScheduledTask,
     ) -> Result<(ScheduledTask, ThreadId, DateTime<Utc>)> {
-        let thread = crate::api::handlers::threads::create_thread(state, &task.title)
-            .await
-            .map_err(|error| error.0)?;
+        let thread = crate::service::threads::create_thread(state, &task.title).await?;
         // A scheduled run is unattended by default: `unattended` is what makes
         // the sandbox policy stop asking a human who is not there. The task's
         // own override wins when it names one.
@@ -422,20 +420,16 @@ impl SchedulerService {
         thread_id: ThreadId,
         started_at: DateTime<Utc>,
     ) -> ScheduledTask {
-        let outcome = match crate::api::handlers::turns::start_turn(
-            state,
-            thread_id,
-            task.prompt.clone(),
-            Vec::new(),
-        )
-        .await
-        {
-            Ok((_, response)) => {
-                let turn_id = response.0.turn_id;
-                await_turn(state, turn_id).await
-            }
-            Err(error) => Err(error.payload().message),
-        };
+        let outcome =
+            match crate::service::start_turn(state, thread_id, task.prompt.clone(), Vec::new())
+                .await
+            {
+                Ok(summary) => {
+                    let turn_id = summary.turn_id;
+                    await_turn(state, turn_id).await
+                }
+                Err(error) => Err(error.message),
+            };
 
         let record = match outcome {
             Ok(summary) => match summary.state.as_str() {

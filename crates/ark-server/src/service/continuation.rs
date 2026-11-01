@@ -394,7 +394,7 @@ async fn start_if_eligible(
         // inbox, not a user message, so it never references attachments.
         attachment_ids: Vec::new(),
     };
-    crate::api::handlers::turns::spawn_turn(state.clone(), job);
+    crate::service::turns::spawn_turn(state.clone(), job);
     false
 }
 

@@ -17,7 +17,7 @@ use axum::Json;
 
 use crate::api::error::ApiError;
 use crate::api::handlers::threads::parse_thread;
-use crate::api::handlers::turns::start_turn;
+use crate::service::start_turn;
 use crate::service::workbench;
 use crate::state::AppState;
 
@@ -63,7 +63,8 @@ pub async fn review(
     // A review is a system-composed turn: its prompt already is the whole
     // request, so it references no user attachment even when the thread has
     // some associated.
-    start_turn(&state, thread_id, prompt, Vec::new()).await
+    let summary = start_turn(&state, thread_id, prompt, Vec::new()).await?;
+    Ok((StatusCode::ACCEPTED, Json(summary)))
 }
 
 /// Compose the bounded review instruction from the change projection.

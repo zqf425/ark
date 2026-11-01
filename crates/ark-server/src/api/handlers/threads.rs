@@ -15,10 +15,10 @@ use ark_contract::{
     RuntimeEvent, ThreadDetail, ThreadListQuery, ThreadRuntimeSnapshot, ThreadSummary,
     UpdateThreadRequest, THREAD_PAGE_MAX_LIMIT,
 };
-use ark_ports::ThreadMeta;
 use std::collections::HashSet;
 
 use crate::api::error::ApiError;
+use crate::service::summary_of;
 use crate::state::AppState;
 
 /// Placeholder title when the client sends none.
@@ -80,33 +80,8 @@ pub async fn create(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| DEFAULT_TITLE.to_string());
-    let summary = create_thread(&state, &title).await?;
+    let summary = crate::service::threads::create_thread(&state, &title).await?;
     Ok((StatusCode::CREATED, Json(summary)))
-}
-
-/// Create a thread and publish its `thread_created` event.
-///
-/// Shared by `POST /v1/threads` and the scheduler's run path so both produce the
-/// same two records in the same order. A scheduled run that skipped the event
-/// would create a thread an attached SSE client never learns about, which is the
-/// one difference the renderer cannot compensate for.
-pub(crate) async fn create_thread(
-    state: &AppState,
-    title: &str,
-) -> Result<ThreadSummary, ApiError> {
-    let meta = state.store.create_thread(title).await?;
-    // Publish the creation so an SSE client attached to the new thread sees it
-    // without a special case in the stream handler.
-    let event = RuntimeEvent::ThreadCreated {
-        seq: 0,
-        thread_id: meta.thread_id,
-        timestamp: Utc::now(),
-        title: meta.title.clone(),
-    };
-    state.store.append_event(meta.thread_id, event).await?;
-    let mut summary = summary_of(&meta);
-    summary.last_seq = state.store.highest_seq(meta.thread_id).await.ok();
-    Ok(summary)
 }
 
 /// `GET /v1/threads/{id}`.
@@ -322,18 +297,6 @@ pub fn parse_thread(raw: &str) -> Result<ThreadId, ApiError> {
             format!("`{raw}` is not a valid thread id: {err}"),
         )
     })
-}
-
-/// Map stored metadata onto the wire shape.
-pub fn summary_of(meta: &ThreadMeta) -> ThreadSummary {
-    ThreadSummary {
-        thread_id: meta.thread_id,
-        title: meta.title.clone(),
-        created_at: meta.created_at,
-        updated_at: meta.updated_at,
-        last_seq: None,
-        archived: meta.archived,
-    }
 }
 
 /// Keeps the newest distinct child completion cards within the bounded detail response.
