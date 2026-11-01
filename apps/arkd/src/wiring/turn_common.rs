@@ -48,7 +48,9 @@ pub(crate) fn skill_tail(
 /// `explicit` (a per-session override) wins over `inherited` (the parent's
 /// effective workspace); `fallback` is the process lease/current root. A
 /// `None` explicit value is intentionally not a reset: only an explicit value
-/// changes inherited state.
+/// changes inherited state. The `fallback` path is validated too: a lease root
+/// that vanished mid-session fails the turn up front instead of failing every
+/// tool call later.
 pub(crate) fn resolve_workspace(
     explicit: Option<&Path>,
     inherited: Option<PathBuf>,
@@ -219,22 +221,41 @@ pub(crate) fn build_reactor(spec: ReactorSpec) -> Reactor {
     .with_steering(spec.steering)
 }
 
+/// Who the child is, appended to the shared prefix before the skill tail.
+pub(crate) const CHILD_ROLE_LINE: &str =
+    "You are a child run. Finish the delegated task and answer with the result. \
+     You cannot delegate further.";
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The prompt-cache invariant's only home is this one builder: both turn
-    /// paths call it, so their static prefixes are byte-identical by
-    /// construction. Pin the shape so a per-path "quick fix" cannot fork it.
+    /// The prompt-cache invariant: the child's static prefix must be the
+    /// parent's static prefix, byte for byte. Both paths build theirs from
+    /// [`seed_prefix`]; this test composes both the way the two call sites do
+    /// and asserts the shared leading window. If a path stops routing its
+    /// prefix through the shared builder, update this test *and* ask why the
+    /// builder stopped being enough.
     #[test]
-    fn the_seed_prefix_is_one_shared_builder() {
+    fn the_child_prefix_extends_the_parent_prefix_byte_for_byte() {
         let workspace = std::path::Path::new("/tmp/ark");
-        let messages = seed_prefix(workspace);
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].content, SYSTEM_PROMPT);
+        // Parent path: seed_prefix, then history and the dynamic tail.
+        let mut parent = seed_prefix(workspace);
+        parent.push(ModelMessage::system("history message one"));
+        parent.push(ModelMessage::system("[skill instructions]\nfallback"));
+        // Child path: seed_prefix, then the role line and the skill tail.
+        let mut child = seed_prefix(workspace);
+        child.push(ModelMessage::system(CHILD_ROLE_LINE));
+        child.push(ModelMessage::system("[skill instructions]\nfallback"));
+
         assert_eq!(
-            messages[1].content,
-            format!("workspace root: {}", workspace.display())
+            child[..2],
+            parent[..2],
+            "the shared prompt-cache window diverged"
         );
+        // The first divergence is exactly the role line vs the first history
+        // message: nothing else may differ before the dynamic tail.
+        assert_ne!(child[2].content, parent[2].content);
+        assert_eq!(child[2].content, CHILD_ROLE_LINE);
     }
 }
