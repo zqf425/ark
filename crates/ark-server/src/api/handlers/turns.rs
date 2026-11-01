@@ -217,6 +217,36 @@ mod tests {
         )
     }
 
+    #[tokio::test]
+    async fn an_attachment_outside_the_thread_answers_attachment_not_associated() {
+        // The boundary deliberately answers 404 instead of "not yours": the
+        // code must not become a probe for which attachment ids exist.
+        let dir = test_dir();
+        let temp = dir.path().to_path_buf();
+        let app_state = state(&temp, Arc::new(CountingRunner(AtomicUsize::new(0))));
+        let thread = app_state
+            .store
+            .create_thread("attachments")
+            .await
+            .expect("thread");
+
+        let error = crate::service::turns::start_turn(
+            &app_state,
+            thread.thread_id,
+            "using an unassociated attachment".to_string(),
+            vec![ark_common::AttachmentId::new()],
+        )
+        .await
+        .expect_err("an unassociated attachment must refuse the turn");
+        assert_eq!(
+            error.code,
+            ark_common::ArkErrorCode::AttachmentNotAssociated
+        );
+        assert_eq!(error.code.http_status(), 404);
+        // Refusal happens before registration: the thread stays idle.
+        assert!(app_state.turns.active_for(thread.thread_id).is_none());
+    }
+
     #[test]
     fn invalid_turn_ids_are_validation_errors() {
         assert_eq!(

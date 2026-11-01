@@ -428,7 +428,7 @@ impl SchedulerService {
                     let turn_id = summary.turn_id;
                     await_turn(state, turn_id).await
                 }
-                Err(error) => Err(error.payload().message),
+                Err(error) => Err(error.message),
             };
 
         let record = match outcome {
