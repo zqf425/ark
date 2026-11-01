@@ -73,6 +73,12 @@ async fn serve(args: ServeArgs) -> ExitCode {
     println!("arkd listening on {}", handle.addr());
     println!("arkd data dir {}", args.data_dir.display());
     println!("arkd workspace {}", args.workspace.display());
+    // The scheduled-task loop starts last, once `state` is final and the
+    // listener is bound: its first act is reconciliation, which must observe
+    // the same state every route will use. A one-shot `run` never reaches
+    // this, so headless turns cannot fire due schedules behind the user's
+    // back.
+    wiring.schedules.spawn(wiring.state.clone());
     println!("arkd model {}", wiring.model_label);
     println!("arkd tools {}", wiring.tools.names().join(","));
     println!("arkd config version {}", wiring.config.version());

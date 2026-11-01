@@ -100,8 +100,8 @@
 [定时任务需求](../requirements/scheduled-tasks.md) 的「调度与执行」落在 `service/scheduler.rs`,
 它只拥有**循环**与**结果折叠**,节奏数学仍在 `ark-schedule`:
 
-- `spawn` 先 `reconcile` 再进入 tick 循环,`TICK_INTERVAL` 为 30 秒;headless `run` 经同一装配
-  也会启动循环,一次性回合期间到期的任务同样触发。总开关只门控触发(`tick`/`run_now`),
+- `spawn` 先 `reconcile` 再进入 tick 循环,`TICK_INTERVAL` 为 30 秒;循环由 `serve` 在监听绑定后
+  启动,headless `run` 不启动它。总开关只门控触发(`tick`/`run_now`),
   `reconcile` 的修复(`running`→`aborted`、misfire→`skipped`)不受开关影响——否则开关关闭期间
   崩溃遗留的 `running` 会一直在设置页显示运行中。循环退出有两条路径:
   `/v1/shutdown` 的广播,以及 `Ctrl-C`/drain 只置标志位的路径——后者靠每轮循环顶部的
