@@ -33,6 +33,12 @@
    链路本地 / 未指定地址的目标(IP 字面量直接判;域名先经 DNS 解析再判)。`http://` 由
    HttpPolicy 的 `allow_insecure_http=false` 拒绝。已知局限(如实记录):DNS 解析与实际连接
    之间存在 TOCTOU 窗口,与插件路径同级接受;彻底解法(DNS 分层解析/连接时校验)留待后续。
+   **重定向缺口(如实记录)**:工具只对首个 URL 做 SSRF 校验;后续 3xx 由 ark-http 的
+   `deliver_hops` 逐跳跟进(HttpPolicy 默认 `follow_redirects:true`、最多 5 跳),每跳
+   `guard_target` 只校验 scheme 与 allowlist,ark-http 全 crate 没有 loopback/私有/链路本地
+   IP 校验,而 web 身份的 allowlist 是 `allow_all()`——公网页面 302 到
+   `https://169.254.169.254/...` 会被跟随。与 TOCTOU 局限同级接受;彻底解法(每一跳重新做
+   SSRF 校验)留待后续。因此不宣称 SSRF 防线已完整实现。
 4. **沙箱分类**:`TOOL_METAS` 新增 `web_fetch` 行,baseline `ReadOnly`——它不写工作区;
    Strict 自治下仍需人工批准,Unattended 下随全目录放行。注册表、沙箱策略与
    `GET /v1/runtime/tools` 三方继续读同一张表。
@@ -60,12 +66,13 @@
   为 `{ "url": string }`;`TOOL_METAS` 含 `web_fetch` 行,baseline `ReadOnly`
   (`crates/ark-tool/src/domain/meta.rs`)。
 - 注册:组合根经 `ark_tool::web_tools(http)` 注册,父工具表(`apps/arkd/src/wiring/tools.rs`
-  的 `parent_tools`)与子工具表(`child_tools`)都含 `web_fetch`,装配测试
+  的 `build_tools`)与子工具表(`build_child_tools`)都含 `web_fetch`,装配测试
   `apps/arkd/src/wiring/tests.rs` 断言两侧均注册。
 - 出口治理:组合根以 `ark_http::HostAllowlist::allow_all()` 注册 egress 授权
   (`apps/arkd/src/wiring/mod.rs`),工具自身不持有 HTTP client,逻辑调用方 id 为
   `ark.builtin.web`;`HostAllowlist::parse(["*"])` 仍拒绝,插件清单不可能声明。
-- SSRF 防线、HTML 文本提取、64 KiB 截断、非 2xx/二进制/网络错误的结构化失败输出均在工具内
-  实现,单测以假 `HttpCapability` 覆盖私网/loopback/链路本地拒绝、文本提取、非 2xx、二进制
-  拒绝与截断,无真实网络依赖。
+- SSRF 防线(首个 URL)、HTML 文本提取、64 KiB 截断、非 2xx/二进制/网络错误的结构化失败输出
+  均在工具内实现,单测以假 `HttpCapability` 覆盖私网/loopback/链路本地拒绝、文本提取、非 2xx、
+  二进制拒绝与截断,无真实网络依赖。已知局限(见设计第 3 点):重定向跳转不重做 SSRF 校验
+  (ark-http 无私有/链路本地 IP 校验),TOCTOU 窗口仍在;两者均留待后续。
 - 真实网络抓取的端到端验证由 [发布收尾与真实环境验收](release-readiness.md) 承接。
