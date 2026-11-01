@@ -28,7 +28,8 @@ use ark_contract::{
 use ark_ports::{child_status, ChildRunRecord, SubagentRegistry, SubagentRequest, SubagentRunner};
 
 use crate::api::error::ApiError;
-use crate::api::handlers::threads::{parse_thread, summary_of};
+use crate::api::handlers::threads::parse_thread;
+use crate::service::summary_of;
 use crate::state::AppState;
 
 /// Query shared by the list route.

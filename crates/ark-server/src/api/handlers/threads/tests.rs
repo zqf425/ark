@@ -4,7 +4,9 @@ use super::*;
 use ark_common::{ChildId, TurnId};
 use ark_config::{ConfigStore, RuntimeConfig};
 use ark_obs::UsageRecorder;
-use ark_ports::{BaseServices, ModelEndpoint, ProviderService, SessionStore, ToolRegistryPort};
+use ark_ports::{
+    BaseServices, ModelEndpoint, ProviderService, SessionStore, ThreadMeta, ToolRegistryPort,
+};
 use ark_store::{FileSessionStore, StoreConfig};
 use axum::extract::{Path, State};
 

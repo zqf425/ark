@@ -9,17 +9,16 @@
 
 use std::collections::HashSet;
 
-use ark_common::{AttachmentId, ThreadId};
+use ark_common::{ArkError, ArkErrorCode, AttachmentId, Result, ThreadId};
 use ark_contract::RuntimeEvent;
 
-use crate::api::error::ApiError;
 use crate::state::AppState;
 
 /// Attachment ids one thread has authorized, in durable log order.
 pub async fn thread_attachment_ids(
     state: &AppState,
     thread_id: ThreadId,
-) -> Result<Vec<AttachmentId>, ApiError> {
+) -> Result<Vec<AttachmentId>> {
     let events = state.store.replay_attachment_events(thread_id).await?;
     Ok(attachment_ids(&events))
 }
@@ -28,9 +27,7 @@ pub async fn thread_attachment_ids(
 ///
 /// Used by the delete guard and by `orphan_count`: an id associated anywhere is
 /// in use, so it neither may be deleted nor counts as an orphan.
-pub async fn associated_attachment_ids(
-    state: &AppState,
-) -> Result<HashSet<AttachmentId>, ApiError> {
+pub async fn associated_attachment_ids(state: &AppState) -> Result<HashSet<AttachmentId>> {
     let mut ids = HashSet::new();
     for meta in state.store.list_threads().await? {
         ids.extend(thread_attachment_ids(state, meta.thread_id).await?);
@@ -65,7 +62,7 @@ pub async fn authorize_turn_attachments(
     state: &AppState,
     thread_id: ThreadId,
     requested: Vec<AttachmentId>,
-) -> Result<Vec<AttachmentId>, ApiError> {
+) -> Result<Vec<AttachmentId>> {
     if requested.is_empty() {
         return Ok(Vec::new());
     }
@@ -73,8 +70,8 @@ pub async fn authorize_turn_attachments(
     let mut allowed: Vec<AttachmentId> = Vec::new();
     for id in requested {
         if !associated.contains(&id) {
-            return Err(ApiError::new(
-                ark_common::ArkErrorCode::AttachmentNotAssociated,
+            return Err(ArkError::new(
+                ArkErrorCode::AttachmentNotAssociated,
                 format!("attachment {id} is not associated with thread {thread_id}"),
             ));
         }
