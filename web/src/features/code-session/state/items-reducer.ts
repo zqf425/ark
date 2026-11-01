@@ -313,8 +313,15 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       draft.childRunRevision += 1
       return commitDraft(draft)
 
-    default:
+    default: {
+      // The wire union is Rust-owned and may grow ahead of this renderer; an
+      // unrecognized event is dropped from the projection, but never silently:
+      // a version skew should be visible in the console during development.
+      if (import.meta.env.DEV) {
+        console.warn(`[ark] unhandled runtime event kind: ${String(event.kind)}`)
+      }
       return commitDraft(draft)
+    }
   }
 }
 
