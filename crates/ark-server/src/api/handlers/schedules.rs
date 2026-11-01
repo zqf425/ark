@@ -28,7 +28,9 @@ use crate::state::AppState;
 ///
 /// Ordering is the store's (most recently updated first), so the settings page
 /// shows "what changed lately" without sorting a second time.
-pub async fn list(State(state): State<AppState>) -> Result<Json<ScheduledTaskListResponse>, ApiError> {
+pub async fn list(
+    State(state): State<AppState>,
+) -> Result<Json<ScheduledTaskListResponse>, ApiError> {
     let service = state.schedule_service()?;
     let tasks = service.store().list()?;
     Ok(Json(ScheduledTaskListResponse { tasks }))
@@ -186,10 +188,7 @@ mod tests {
         .expect("apply update");
 
         assert!(!updated.enabled);
-        assert_eq!(
-            updated.next_run_at, "",
-            "a disabled task is not scheduled"
-        );
+        assert_eq!(updated.next_run_at, "", "a disabled task is not scheduled");
         assert_eq!(updated.id, task.id);
         assert_eq!(updated.created_at, task.created_at);
     }
@@ -197,7 +196,10 @@ mod tests {
     #[tokio::test]
     async fn deleting_a_missing_task_is_not_found() {
         let (_dir, service) = service();
-        let error = service.store().delete("sch_missing").expect_err("must be absent");
+        let error = service
+            .store()
+            .delete("sch_missing")
+            .expect_err("must be absent");
         assert_eq!(error.code, ark_common::ArkErrorCode::NotFound);
     }
 }

@@ -409,7 +409,10 @@ mod tests {
         let now = at_local(2026, 11, 1, 8, 0);
         let written = apply_next_run_at(&mut daily, now);
         assert_eq!(written, daily.next_run_at);
-        assert_eq!(parse_stored_next_run(&written), Some(at_local(2026, 11, 1, 9, 0)));
+        assert_eq!(
+            parse_stored_next_run(&written),
+            Some(at_local(2026, 11, 1, 9, 0))
+        );
 
         daily.enabled = false;
         apply_next_run_at(&mut daily, now);

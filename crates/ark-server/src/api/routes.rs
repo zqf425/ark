@@ -23,6 +23,9 @@ use crate::state::AppState;
 pub fn router(state: AppState) -> Router {
     let open = Router::new()
         .route("/health", get(crate::api::handlers::health::health))
+        // MCP discovery document (requirements/mcp-server-surface.md). Mounted
+        // beside `/health`: a caller must read it to learn how to authenticate.
+        .route("/v1/mcp-info", get(crate::api::handlers::mcp_info::info))
         .with_state(state.clone());
 
     let protected = protected_routes()
