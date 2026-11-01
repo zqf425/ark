@@ -5,8 +5,9 @@
  * response straight back into state instead of re-fetching. `active` is the
  * provider the loop is actually using; `default` is only the configured one.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type {
+  LoadStatus,
   ProviderListResponse,
   ProviderModelCatalogRequest,
   ProviderModelCatalogResponse,
@@ -16,8 +17,8 @@ import type {
   ProviderView
 } from '../../../shared/contracts'
 import { deleteProvider, listProviderModels, listProviders, setDefaultProvider, testProvider, upsertProvider } from '../api/providers-api'
+import { useMounted } from '../../../shared/api/use-mounted'
 import { attempt, describeApiError, type Outcome } from '../api/outcome'
-import type { LoadStatus } from './use-settings'
 
 export type ProvidersApi = {
   providers: ProviderView[]
@@ -42,14 +43,7 @@ export function useProviders(): ProvidersApi {
   const [status, setStatus] = useState<LoadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const mounted = useRef(true)
-
-  useEffect(() => {
-    mounted.current = true
-    return () => {
-      mounted.current = false
-    }
-  }, [])
+  const mounted = useMounted()
 
   const apply = useCallback((response: ProviderListResponse) => {
     setProviders(response.providers ?? [])

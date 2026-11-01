@@ -6,13 +6,13 @@
  * result (not an error) so the sections can show `restart_required` verbatim.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ApplyResult, ConfigPatch, RuntimeConfigView, WorkspaceStatus, WorkspaceValidateResponse } from '../../../shared/contracts'
+import type {
+  LoadStatus, ApplyResult, ConfigPatch, RuntimeConfigView, WorkspaceStatus, WorkspaceValidateResponse } from '../../../shared/contracts'
 import { getRuntimeConfig, patchRuntimeConfig } from '../api/settings-api'
 import { getWorkspaceStatus, validateWorkspace } from '../api/workspace-api'
+import { useMounted } from '../../../shared/api/use-mounted'
 import { attempt, describeApiError, type Outcome } from '../api/outcome'
 import { isLatestWorkspaceProbe } from './workspace-probe-guard'
-
-export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 export type SettingsApi = {
   config: RuntimeConfigView | null
@@ -29,14 +29,7 @@ export function useSettings(): SettingsApi {
   const [status, setStatus] = useState<LoadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
-  const mounted = useRef(true)
-
-  useEffect(() => {
-    mounted.current = true
-    return () => {
-      mounted.current = false
-    }
-  }, [])
+  const mounted = useMounted()
 
   const refresh = useCallback(async () => {
     setStatus((prev) => (prev === 'ready' ? prev : 'loading'))
@@ -93,14 +86,14 @@ export function useWorkspaceProbe(): WorkspaceProbeApi {
   const [status, setStatus] = useState<WorkspaceStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const mounted = useRef(true)
+  const probeMounted = useMounted()
   const probeSequence = useRef(0)
   const activeProbe = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    mounted.current = true
+    probeMounted.current = true
     return () => {
-      mounted.current = false
+      probeMounted.current = false
       activeProbe.current?.abort()
     }
   }, [])
@@ -121,21 +114,21 @@ export function useWorkspaceProbe(): WorkspaceProbeApi {
     setLoading(true)
     try {
       const next = await getWorkspaceStatus(trimmed, controller.signal)
-      if (!mounted.current || controller.signal.aborted || !isLatestWorkspaceProbe(probeSequence.current, request)) return
+      if (!probeMounted.current || controller.signal.aborted || !isLatestWorkspaceProbe(probeSequence.current, request)) return
       setStatus(next)
       setError(null)
     } catch (thrown) {
-      if (!mounted.current || controller.signal.aborted || !isLatestWorkspaceProbe(probeSequence.current, request)) return
+      if (!probeMounted.current || controller.signal.aborted || !isLatestWorkspaceProbe(probeSequence.current, request)) return
       setStatus(null)
       setError(describeApiError(thrown).message)
     } finally {
-      if (mounted.current && isLatestWorkspaceProbe(probeSequence.current, request)) setLoading(false)
+      if (probeMounted.current && isLatestWorkspaceProbe(probeSequence.current, request)) setLoading(false)
     }
   }, [])
 
   const validate = useCallback(async (path: string) => {
     const outcome = await attempt(() => validateWorkspace(path.trim()))
-    if (outcome.ok && mounted.current) {
+    if (outcome.ok && probeMounted.current) {
       // A successful validation is the cheapest moment to refresh the probe.
       void probe(path)
     }
