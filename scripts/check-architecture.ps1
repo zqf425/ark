@@ -8,8 +8,7 @@ $exceptions = [System.Collections.Generic.HashSet[string]]::new([string[]]@(
     'crates/ark-delegation/src/service/runtime.rs',
     'crates/ark-delegation/src/service/runtime/tests.rs',
     'crates/ark-provider/src/service/store.rs',
-    'crates/ark-agent/src/service/reactor.rs',
-    'apps/arkd/src/wiring.rs'
+    'crates/ark-agent/src/service/reactor.rs'
 ))
 $violations = [System.Collections.Generic.List[string]]::new()
 

@@ -9,7 +9,8 @@
     "build": "tauri build --config src-tauri/tauri.release.conf.json",
     "build:web": "node scripts/build-web.mjs",
     "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
-    "test": "node --test scripts/*.test.mjs"
+    "test": "node --test scripts/*.test.mjs",
+    "icons": "tauri icon src-tauri/icons/ark.svg"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.2"
