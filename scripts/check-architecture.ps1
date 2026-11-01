@@ -4,12 +4,9 @@ param()
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $exceptions = [System.Collections.Generic.HashSet[string]]::new([string[]]@(
-    'crates/ark-contract/src/event.rs',
-    'crates/ark-delegation/src/service/runtime.rs',
     'crates/ark-delegation/src/service/runtime/tests.rs',
     'crates/ark-provider/src/service/store.rs',
-    'crates/ark-agent/src/service/reactor.rs',
-    'apps/arkd/src/wiring.rs'
+    'crates/ark-agent/src/service/reactor.rs'
 ))
 $violations = [System.Collections.Generic.List[string]]::new()
 

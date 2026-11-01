@@ -36,6 +36,13 @@ Tauri 2.12 及其 shell plugin 的最低 Rust 版本为 1.90，因此 `ark-deskt
 外壳不向 JavaScript 暴露 shell 命令。它只从 Rust 调用 Tauri 的 shell plugin 启动固定的 `arkd` 命令，因此
 Web UI 不能借桌面能力执行任意程序。
 
+## 图标资产
+
+`src-tauri/icons/` 下的全部图标由 `npm run icons`（即 `tauri icon src-tauri/icons/ark.svg`）从唯一源
+`ark.svg` 生成，生成物整体入库、不走 ignore：它们是构建的必需输入，`tauri-codegen` 在非 Windows
+target 会按 `bundle.icon` 找第一个 `.png` 条目（找不到就回退硬编码 `icons/icon.png` 并直接 panic）。
+禁止手工编辑或单独替换某个生成图标；换图标时改 `ark.svg` 后重新执行 `npm run icons`。
+
 ## 验证
 
 - `node --test apps/ark-desktop/scripts/desktop-layout.test.mjs` 验证根 `npm run dev`、Tauri 与 Vite 编排配置。
