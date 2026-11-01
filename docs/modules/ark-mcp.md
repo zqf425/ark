@@ -60,5 +60,7 @@ MCP 设置的安全 read view 可返回 transport、command/url、args、allow-t
 
 ## 当前状态
 
-总线、传输和命名空间已是当前模块职责；完整对外 server 路由、全套 grant UI 与所有应用工具
-仍应以实际实现为准，不能因早期方案存在而宣称已交付。
+总线、传输和命名空间已是当前模块职责。外部工具对 ark 原子能力的发现与调用以描述式
+`GET /v1/mcp-info`（[mcp-server-surface 需求](../requirements/mcp-server-surface.md)，实现在
+`ark-server`）交付；本 crate 的 MCP JSON-RPC 协议服务端（stdio 子进程或 streamable-HTTP 握手）
+与全套 grant UI 仍属计划，不能因早期方案存在而宣称已交付。
