@@ -15,8 +15,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use ark_agent::exec::journal::EventSinkWriter;
-use ark_agent::exec::tool_runner::ToolRunner as AgentToolRunner;
+use ark_agent::EventSinkWriter;
+use ark_agent::ToolRunner as AgentToolRunner;
 use ark_agent::{
     CancelToken, CompletionInbox, GateBroker, ModelSeed, Reactor, ReactorConfig, SteerQueue,
     ToolCallRequest, TurnEvents, TurnLimits, TurnMachine, TurnOutcome,

@@ -26,9 +26,9 @@ pub mod service;
 pub use config::{HttpPolicy, RateLimitPolicy, RetryPolicy};
 pub use domain::{
     fingerprint, header_digest, host_of, is_reserved_header, is_valid_trace_id, mint_trace_id,
-    next_hop, parse_reference, parse_target, redact_url, sanitize_headers, user_agent,
+    next_hop, parse_reference, parse_target, sanitize_headers, sanitize_url_for_log, user_agent,
     validate_plugin_id, CredentialRef, Hop, HostAllowlist, HostPattern, HttpDenialReason,
-    HttpDiagnostic, HttpDiagnosticSink, MemoryDiagnostics,
+    HttpDiagnostic, HttpDiagnosticSink, InMemoryDiagnosticSink,
 };
 pub use service::{
     denial_reason, prepare, transport_client, CredentialVault, EgressGrant, EgressRegistry,

@@ -104,7 +104,7 @@ pub fn host_of(url: &Url) -> String {
 }
 
 /// Strip query values, userinfo and fragments before anything is logged.
-pub fn redact_url(url: &Url) -> String {
+pub fn sanitize_url_for_log(url: &Url) -> String {
     let mut clone = url.clone();
     let _ = clone.set_username("");
     let _ = clone.set_password(None);
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn redaction_hides_query_values() {
         let url = parse_target("https://api.example.com/v1/issue?token=abc123&q=x").unwrap();
-        let redacted = redact_url(&url);
+        let redacted = sanitize_url_for_log(&url);
         assert!(!redacted.contains("abc123"));
         assert!(redacted.contains("token=***"));
         assert_eq!(host_of(&url), "api.example.com");

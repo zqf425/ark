@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ark_common::Result;
-use ark_http::{CredentialVault, HttpBus, HttpPolicy, MemoryDiagnostics};
+use ark_http::{CredentialVault, HttpBus, HttpPolicy, InMemoryDiagnosticSink};
 use ark_mcp::{McpBus, PluginTool};
 use ark_plugin::{load_host, HostHandles, PluginHost};
 use ark_ports::services::LogRecord;
@@ -124,7 +124,7 @@ pub fn assemble(data_dir: &Path, ui_bus: &Arc<UiBus>, mcp: Arc<McpBus>) -> Resul
     let root = data_dir.join(PLUGINS_DIR);
     std::fs::create_dir_all(&root)?;
 
-    let http_diagnostics = Arc::new(MemoryDiagnostics::new(HTTP_DIAGNOSTIC_CAPACITY));
+    let http_diagnostics = Arc::new(InMemoryDiagnosticSink::new(HTTP_DIAGNOSTIC_CAPACITY));
     let vault = Arc::new(CredentialVault::new());
     let http_bus = Arc::new(HttpBus::new(
         HttpPolicy::default(),

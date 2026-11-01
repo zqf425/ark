@@ -25,7 +25,7 @@ use crate::service::registry::{
 };
 use ark_common::Result;
 use ark_contract::{PluginDiagnosticView, PluginEntry, PluginHostReport};
-use ark_http::{HttpBus, MemoryDiagnostics};
+use ark_http::{HttpBus, InMemoryDiagnosticSink};
 use ark_mcp::McpBus;
 use ark_ports::HttpCapability;
 use std::collections::BTreeMap;
@@ -36,7 +36,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 pub struct PluginHost {
     registry: Mutex<PluginRegistry>,
     diagnostics: Arc<MemoryPluginDiagnostics>,
-    http_diagnostics: Arc<MemoryDiagnostics>,
+    http_diagnostics: Arc<InMemoryDiagnosticSink>,
     http: Arc<HttpBus>,
     mcp: Option<Arc<McpBus>>,
     report: LoadReport,
@@ -62,7 +62,7 @@ pub fn load_host(
     root: &Path,
     handles: HostHandles,
     http: Arc<HttpBus>,
-    http_diagnostics: Arc<MemoryDiagnostics>,
+    http_diagnostics: Arc<InMemoryDiagnosticSink>,
 ) -> Result<PluginHost> {
     let (scanned, scan_diagnostics) = scan(root);
     let versions = versions_by_id(&scanned);

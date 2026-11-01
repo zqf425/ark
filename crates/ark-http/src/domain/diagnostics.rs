@@ -110,12 +110,12 @@ pub trait HttpDiagnosticSink: Send + Sync {
 
 /// Test/diagnostic-mode sink: keeps the last `capacity` records in memory.
 #[derive(Debug, Default)]
-pub struct MemoryDiagnostics {
+pub struct InMemoryDiagnosticSink {
     capacity: usize,
     records: Mutex<Vec<HttpDiagnostic>>,
 }
 
-impl MemoryDiagnostics {
+impl InMemoryDiagnosticSink {
     pub fn new(capacity: usize) -> Self {
         Self {
             capacity,
@@ -136,7 +136,7 @@ impl MemoryDiagnostics {
     }
 }
 
-impl HttpDiagnosticSink for MemoryDiagnostics {
+impl HttpDiagnosticSink for InMemoryDiagnosticSink {
     fn record(&self, diagnostic: HttpDiagnostic) {
         if let Ok(mut records) = self.records.lock() {
             records.push(diagnostic);
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn memory_sink_keeps_capacity() {
-        let sink = MemoryDiagnostics::new(2);
+        let sink = InMemoryDiagnosticSink::new(2);
         for i in 0..5 {
             sink.record(HttpDiagnostic::denied(
                 "p",

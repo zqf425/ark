@@ -6,14 +6,14 @@
 
 use super::*;
 use crate::domain::HostAllowlist;
-use crate::domain::MemoryDiagnostics;
+use crate::domain::InMemoryDiagnosticSink;
 use crate::service::prepare::prepare;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-fn bus(policy: HttpPolicy) -> (Arc<HttpBus>, Arc<MemoryDiagnostics>) {
-    let sink = Arc::new(MemoryDiagnostics::new(64));
+fn bus(policy: HttpPolicy) -> (Arc<HttpBus>, Arc<InMemoryDiagnosticSink>) {
+    let sink = Arc::new(InMemoryDiagnosticSink::new(64));
     let bus = HttpBus::new(policy, Arc::new(CredentialVault::new()), sink.clone()).unwrap();
     (Arc::new(bus), sink)
 }
@@ -254,7 +254,7 @@ fn credential_is_injected_but_never_logged() {
         plugin_id: "ark.example.jira".into(),
         host: prepared.host.clone(),
         method: prepared.method.clone(),
-        redacted_url: redact_url(&prepared.url),
+        redacted_url: sanitize_url_for_log(&prepared.url),
         reason: None,
         detail: Some(label),
         status: Some(200),

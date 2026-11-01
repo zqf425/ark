@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 use ark_common::text::truncate_utf8;
 use ark_common::{ArkError, ArkErrorCode};
 use ark_contract::ProviderTestResponse;
-use ark_llm::common::retry::RetryPolicy;
 use ark_llm::HttpModelClient;
+use ark_llm::RetryPolicy;
 use ark_ports::{ModelChunk, ModelClient, ModelMessage, ModelRequest};
 use tokio::sync::mpsc;
 
