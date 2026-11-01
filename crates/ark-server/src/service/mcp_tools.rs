@@ -45,6 +45,19 @@ fn dto_body(type_name: &str) -> Value {
     })
 }
 
+/// Schema for a body whose type lives in `ark-server` (route-local request
+/// shapes that are not part of the generated contract). The description must
+/// say so: a caller following the pointer to `web/src/generated` would find
+/// nothing.
+fn local_body(type_name: &str) -> Value {
+    json!({
+        "type": "object",
+        "description": format!(
+            "Body shape: `{type_name}`, defined in `ark-server` route handlers (not a contract DTO)."
+        )
+    })
+}
+
 pub(crate) fn tools() -> Vec<McpToolDoc> {
     let mut tools = Vec::new();
     threads(&mut tools);
@@ -596,7 +609,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             "Insert or update a provider (empty api key/header keeps the stored secret); make_default=true also selects it as default.",
             "POST",
             "/v1/runtime/providers",
-            json!({ "body": dto_body("UpsertProviderBody = ProviderEntry flattened + make_default:boolean") }),
+            json!({ "body": local_body("UpsertProviderBody = ProviderEntry flattened + make_default:boolean") }),
             &["body"],
         ),
         tool(
@@ -676,7 +689,7 @@ fn platform(tools: &mut Vec<McpToolDoc>) {
             "Validate that a directory exists and return its normalized path, without switching.",
             "POST",
             "/v1/workspace/validate",
-            json!({ "body": dto_body("ValidateWorkspaceBody (path)") }),
+            json!({ "body": local_body("ValidateWorkspaceBody (path)") }),
             &["body"],
         ),
         tool(

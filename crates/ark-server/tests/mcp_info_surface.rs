@@ -109,7 +109,10 @@ async fn discovery_stays_open_when_a_token_is_configured() {
         .tempdir()
         .expect("temp dir");
     let app = router(state(dir.path()).with_auth_token(Some("secret".to_string())));
+
+    // The document itself stays open...
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/v1/mcp-info")
@@ -125,6 +128,19 @@ async fn discovery_stays_open_when_a_token_is_configured() {
     let json: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
     assert_eq!(json["auth"]["required"], true);
     assert_eq!(json["auth"]["header"], "authorization");
+
+    // ...and `required: true` means what it says: a protected route refuses the
+    // same tokenless request the document just answered.
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/threads")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 /// Every advertised tool must resolve to a real route. Placeholder replacement

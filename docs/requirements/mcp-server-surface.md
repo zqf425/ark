@@ -57,6 +57,15 @@
 - 平台管理面（providers、skills、workspace、mcp servers、plugins、runtime info/tools/capabilities、
   config、subagents、sessions resume、debug llm-rounds、shutdown）。
 
+刻意不登记的路由（目录是"唯一工具目录"，排除必须留痕）：
+
+- `/v1/user-input/{id}`：`/v1/user-inputs/{id}` 的遗留兼容别名，目录只登记规范路径；
+- `/v1/child-runs/{child_id}/cleanup`：维护占位 stub（回答结构化 not_implemented），无能力可调；
+- `/v1/runtime/tuning`、`/v1/connector-env`、`/v1/runtime/model-providers`：milestone 未落地的
+  占位路由，同样只回答 not_implemented；
+- `GET /v1/threads/{id}/todos`（读）：todos 的读侧与 goal 共用 `thread_plan` 投影，目录以
+  `thread_plan` 承载读取、以 `thread_todos_set/clear` 承载写入。
+
 ## 非目标（一期不做，后续需求另立）
 
 - MCP JSON-RPC 协议服务端（stdio 子进程或 streamable-HTTP 的 initialize/tools/list 握手）：
@@ -67,9 +76,13 @@
 
 ## 验收与验证
 
-- 注册表单测：工具名唯一、`http.path` 均以 `/v1/` 开头、inputSchema 均为 object 且含
-  `properties`、method 属于 GET/POST/PATCH/DELETE。
+- 注册表单测：工具名唯一、`http.path` 均以 `/v1/` 开头、inputSchema 均为 object 且
+  "逐项列出 properties" 或 "引用 body 类型名"（`Body shape:` 前缀）二选一、
+  method 属于 GET/POST/PATCH/DELETE；按路由族设最小数量断言，防止整族静默缩水。
+  由 ark-server 内部类型建模的请求体（如 `UpsertProviderBody`）必须如实标注
+  "defined in ark-server, not a contract DTO"，不得指向契约生成物。
 - 路由一致性测试：对注册表中每个 `method+path`（占位符替换为格式合法的哑 id）发起真实请求，
   断言响应**不是**路由级 404（axum 未匹配返回空体 404；handler 级 404 返回结构化 JSON），
   防止目录与路由表漂移。
-- handler 测试：`/v1/mcp-info` 返回 200、`auth.required` 随 token 配置变化、`version` 为构建版本。
+- handler 测试：`/v1/mcp-info` 返回 200、`auth.required` 随 token 配置变化（且配置后受保护路由
+  对无 token 请求返回 401，语义闭环）、`version` 为构建版本。
