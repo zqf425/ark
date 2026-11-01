@@ -16,7 +16,7 @@ use ark_ports::{ModelChunk, ModelClient, ModelRequest, ModelResponse};
 use futures::StreamExt;
 use tokio::sync::mpsc;
 
-use crate::common::retry::{FailureKind, RetryPolicy, RetryState};
+use crate::common::retry::{jittered, parse_retry_after, FailureKind, RetryPolicy, RetryState};
 use crate::common::sse::SseParser;
 use crate::common::stream::StreamAccumulator;
 use crate::config::endpoint::ProviderConfig;
@@ -121,7 +121,30 @@ impl ModelClient for HttpModelClient {
                                 return Err(failure.error);
                             }
                             state = next;
-                            tokio::time::sleep(next.next_delay).await;
+                            // A provider-supplied Retry-After overrides the
+                            // backoff schedule (already capped by the parser);
+                            // jitter desynchronises concurrent turns hitting
+                            // the same rate-limit window. A zero value counts
+                            // as "not provided" — the same rule as smart-ark's
+                            // `computeRetryDelay`, which only adopts
+                            // `retryAfterMs` when it is > 0 — so
+                            // `Retry-After: 0` cannot bypass the rate-limit
+                            // floor and hammer the provider.
+                            let base = failure
+                                .retry_after
+                                .filter(|delay| !delay.is_zero())
+                                .unwrap_or(next.next_delay);
+                            let delay = jittered(base, salt_for(state.failures));
+                            tracing::warn!(
+                                provider = %self.config.provider_id,
+                                model = %self.config.model,
+                                kind = ?kind,
+                                attempt = state.failures,
+                                max_attempts = self.retry.max_attempts,
+                                delay_ms = delay.as_millis() as u64,
+                                "transient model request failure; retrying"
+                            );
+                            tokio::time::sleep(delay).await;
                         }
                         None => return Err(failure.error),
                     }
@@ -131,12 +154,24 @@ impl ModelClient for HttpModelClient {
     }
 }
 
+/// Salt for [`jittered`]: wall-clock nanos mixed with the attempt count, so
+/// concurrent turns on the same rate-limit window do not retry in lockstep.
+fn salt_for(failures: u32) -> u64 {
+    use std::time::SystemTime;
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64 ^ u64::from(failures).wrapping_mul(0x9E37_79B9_7F4A_7C15))
+        .unwrap_or(u64::from(failures))
+}
+
 /// A failed attempt plus what it already published.
 struct AttemptError {
     error: ArkError,
     kind: FailureKind,
     /// True once at least one chunk reached the sink.
     published: bool,
+    /// Provider-advised wait from a `Retry-After` header, already capped.
+    retry_after: Option<Duration>,
 }
 
 impl HttpModelClient {
@@ -161,6 +196,7 @@ impl HttpModelClient {
                 error,
                 kind: FailureKind::Permanent,
                 published: false,
+                retry_after: None,
             })?;
         let mut builder = self
             .client
@@ -181,13 +217,22 @@ impl HttpModelClient {
                 self.config.request_url()
             )),
             published: false,
+            retry_after: None,
         })?;
         let status = response.status();
         if status.is_success() {
             return Ok(response);
         }
-        // Read a bounded amount of the body so the message explains the 4xx/5xx
-        // without dumping a whole HTML error page into the log.
+        // Read the provider-advised wait before the body read consumes the
+        // response, then a bounded amount of the body so the message explains
+        // the 4xx/5xx without dumping a whole HTML error page into the log.
+        let retry_after = response
+            .headers()
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.to_string());
+        let retry_after = retry_after
+            .and_then(|value| parse_retry_after(Some(&value), std::time::SystemTime::now()));
         let text = response.text().await.unwrap_or_default();
         let summary = ark_common::text::truncate_utf8(&text, 512).to_string();
         Err(AttemptError {
@@ -204,6 +249,7 @@ impl HttpModelClient {
             )
             .with_detail(summary),
             published: false,
+            retry_after,
         })
     }
 
@@ -225,6 +271,8 @@ impl HttpModelClient {
                 error: ArkError::model(format!("model stream broke: {error}")),
                 kind: FailureKind::Transient,
                 published,
+                // Mid-stream there is no fresh Retry-After to read.
+                retry_after: None,
             })?;
             // SSE is UTF-8 text; a multi-byte codepoint split across chunks is
             // re-assembled because `from_utf8_lossy` would corrupt it. The
@@ -268,6 +316,7 @@ async fn forward(
                     error: ArkError::new(ArkErrorCode::RuntimeUnavailable, "model sink closed"),
                     kind: FailureKind::Permanent,
                     published: true,
+                    retry_after: None,
                 });
             }
         }
@@ -392,6 +441,140 @@ mod tests {
             received.matches("content-type: application/json").count(),
             1,
             "request contained duplicate content-type headers:\n{received}"
+        );
+    }
+
+    /// A 429 with `Retry-After: 1` must wait ≈1s (the provider-advised delay),
+    /// not the ≈1ms exponential fallback — and a `Retry-After: 0` must fall
+    /// back to the backoff schedule instead of bypassing `rate_limit_floor`
+    /// (same rule as smart-ark's `computeRetryDelay`: only adopt a value > 0).
+    #[tokio::test]
+    async fn rate_limited_response_is_retried_honouring_retry_after() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::time::Instant;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let responses: [&[u8]; 2] = [
+                b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 14\r\nConnection: close\r\n\r\ndata: [DONE]\n\n",
+            ];
+            for response in responses {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 4_096];
+                let _ = socket.read(&mut request).unwrap();
+                socket.write_all(response).unwrap();
+            }
+        });
+        let client = HttpModelClient::with_config(
+            ProviderConfig::new("test", "test-model")
+                .with_base_url(format!("http://{address}"))
+                .with_api_key("test-key"),
+        )
+        .with_retry(RetryPolicy {
+            max_attempts: 4,
+            base: Duration::from_millis(1),
+            max_delay: Duration::from_secs(30),
+            rate_limit_floor: Duration::from_millis(1),
+        });
+        let (sink, _drain) = mpsc::channel(1);
+
+        let started = Instant::now();
+        let response = client.stream(request(), sink).await.unwrap();
+        let elapsed = started.elapsed();
+
+        assert_eq!(response.text, "", "the [DONE]-only stream yields no text");
+        assert!(
+            elapsed >= Duration::from_millis(700),
+            "the retry must have waited the provider-advised ≈1s, took {elapsed:?}"
+        );
+        server.join().unwrap();
+    }
+
+    /// A stream that published text and then breaks mid-flight must surface as
+    /// an error **without a second request**: retrying after the sink already
+    /// received deltas would duplicate text. The body uses chunked framing and
+    /// the server closes before the terminating chunk, so the truncation is a
+    /// decoder error (a bare EOF with no framing would read as a complete —
+    /// if sentinel-less — body instead).
+    #[tokio::test]
+    async fn a_failure_after_published_deltas_is_never_retried() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = {
+            let listener = listener.try_clone().unwrap();
+            std::thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 4_096];
+                let _ = socket.read(&mut request).unwrap();
+                // One text-delta chunk, then close without the terminating
+                // `0\r\n\r\n`: the stream breaks after content already
+                // reached the sink.
+                let frame = "data: {\"choices\":[{\"delta\":{\"content\":\"par\"}}]}\n\n";
+                let body = format!("{:x}\r\n{frame}\r\n", frame.len());
+                socket
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\n\
+                             Content-Type: text/event-stream\r\n\
+                             Transfer-Encoding: chunked\r\n\
+                             Connection: close\r\n\
+                             \r\n\
+                             {body}"
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
+                drop(socket);
+            })
+        };
+        // A tiny base keeps a hypothetical (regressed) retry inside the
+        // ~200ms accept-poll window below; the correct path never retries
+        // regardless of the policy.
+        let client = HttpModelClient::with_config(
+            ProviderConfig::new("test", "test-model")
+                .with_base_url(format!("http://{address}"))
+                .with_api_key("test-key"),
+        )
+        .with_retry(RetryPolicy {
+            max_attempts: 4,
+            base: Duration::from_millis(1),
+            max_delay: Duration::from_secs(30),
+            rate_limit_floor: Duration::from_millis(1),
+        });
+        let (sink, mut drain) = mpsc::channel(4);
+
+        let result = client.stream(request(), sink).await;
+        server.join().unwrap();
+
+        let error = result.expect_err("a truncated stream must fail");
+        assert!(error.to_string().contains("model stream broke"));
+
+        // The truncated delta was already published to the sink.
+        let chunk = drain.recv().await.expect("published chunk");
+        assert!(matches!(chunk, ModelChunk::TextDelta { .. }));
+
+        // No second request: poll `accept` instead of blocking on it, so a
+        // regression retries and fails this assertion in ~200ms.
+        listener
+            .set_nonblocking(true)
+            .expect("listener switched to polling");
+        let mut second_connection = false;
+        for _ in 0..20 {
+            if listener.accept().is_ok() {
+                second_connection = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            !second_connection,
+            "a published-then-broken stream must not trigger a retry request"
         );
     }
 

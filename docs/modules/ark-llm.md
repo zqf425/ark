@@ -31,6 +31,26 @@
   `common::data_url` 构造），openai responses 为 `input_text`/`input_image`，anthropic 为
   `image` + `source.type=base64` block。`images` 为空时 wire 形状与纯文本消息逐字节一致。
 
+## 重试策略（common/retry.rs，唯一实现）
+
+`HttpModelClient::stream` 在**任何模型输出进入 sink 之前**对瞬时失败重试；已发布过增量的失败
+不重试（重放会复制文本）。对齐 smart-ark `compat-model-client` 的预算：
+
+- 失败分类：`429` 为 `RateLimited`；`408/409/425/5xx` 与传输错误（连接/超时/请求构造外错误）
+  为 `Transient`；其余 4xx 为 `Permanent`，永不重试。
+- 默认 `RetryPolicy`：初始请求 + 3 次重试（`max_attempts: 4`），指数退避基数 500ms，
+  上限 30s（抖动**前**的基数上限；±25% 抖动后实际可达约 37.5s，smart-ark 同样如此）；
+  `RateLimited` 另有 1s 下限，避免高频打网关。
+- **Retry-After 优先**（RFC 9110 §10.2.3）：`429`/`5xx` 响应带 `Retry-After`（秒数或 HTTP 日期）
+  时以该值为准，上限 30s（同样为抖动前基数，±25% 抖动后约 37.5s）——错误的网关配置不能把回合拖住几分钟。
+  秒数为 0 的 `Retry-After` 视为未提供，回退指数退避而非绕过 1s 限流下限（对齐 smart-ark
+  `computeRetryDelay` 仅采纳 >0 的 `retryAfterMs`）。
+- **抖动 ±25%**（`jittered`，SplitMix64 确定性伪随机，盐为墙钟纳秒 ⊕ 尝试序号）：并发回合
+  撞到同一限流窗口时错开重试，不引入随机数依赖。
+- 每次重试前 `tracing::warn!` 记录 provider/model/失败类别/尝试序号/延迟，运行时可在日志
+  观察 429 频次；本层无取消令牌，退避期间不可中断（回合中断在 reactor 层生效）。
+- 纯函数（`delay`/`should_retry`/`parse_retry_after`/`jittered`）与 HTTP 循环分离，全部单测覆盖。
+
 ## 验证
 
 每个协议族以录制 SSE fixture 覆盖正常分块、畸形帧、断流、重试和 usage 缺失；模拟客户端用于
