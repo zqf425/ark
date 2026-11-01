@@ -8,6 +8,7 @@ use ark_common::{ArkError, Result};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 /// Create the directory and every missing parent.
 pub fn ensure_dir(path: &Path) -> Result<()> {
@@ -142,8 +143,8 @@ fn temp_sibling(path: &Path) -> PathBuf {
     }
 }
 
-/// Whether `path` looks like a `write_atomic` temp sibling (`.{name}.{uuid}.tmp`
-/// or any hidden `*.tmp`, which also covers interrupted attachment uploads).
+/// Whether `path` looks like a `write_atomic` temp sibling (`.{name}.{uuid}.tmp`,
+/// i.e. any hidden `*.tmp`).
 fn is_atomic_temp(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -154,29 +155,65 @@ fn is_atomic_temp(path: &Path) -> bool {
 ///
 /// `write_atomic` renames its temp sibling into place, but a crash between
 /// create and rename leaves a hidden `*.tmp` behind forever. Called once at
-/// store open while the data-directory lock is held, so no concurrent writer
-/// can have a temp file in flight. Per-file removal errors are skipped rather
-/// than propagated: the sweep is hygiene, it must never block startup.
-/// Returns how many files were removed; a missing directory is not an error.
-pub fn sweep_temp_files(root: &Path) -> Result<usize> {
+/// store open while the data-directory lock is held, so no *ark* writer can
+/// have a temp file in flight. The lock says nothing about foreign processes:
+/// when `--data-dir` points into a shared directory another program may hold a
+/// hidden `*.tmp` open, so only files untouched for at least `min_age` are
+/// removed and freshly written ones are left alone. Symlinks are neither
+/// followed nor deleted, and unreadable directories, unreadable mtimes and
+/// per-file removal errors are skipped rather than propagated: the sweep is
+/// hygiene, it must never block startup. Returns how many files were removed;
+/// a missing directory is not an error.
+pub fn sweep_temp_files(root: &Path, min_age: Duration) -> Result<usize> {
     let mut removed = 0;
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
+        // An unreadable directory (foreign process, odd permissions) must not
+        // abort startup; skip it and keep sweeping what we can reach.
         let entries = match std::fs::read_dir(&dir) {
             Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(err) => return Err(io_error("sweep temp files", &dir, err)),
+            Err(_) => continue,
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
+            // `symlink_metadata` reports the link itself: a symlink to a
+            // directory is never entered (it could walk the sweep out of
+            // data_dir) and a symlink is never deleted either - only the
+            // real files the store itself writes are removed.
+            let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_dir() {
                 stack.push(path);
-            } else if is_atomic_temp(&path) && std::fs::remove_file(&path).is_ok() {
+            } else if !is_atomic_temp(&path) {
+                continue;
+            } else if !is_older_than(&meta, min_age) {
+                // Unreadable or too-fresh mtime: never guess, skip.
+                continue;
+            } else if let Err(err) = std::fs::remove_file(&path) {
+                tracing::debug!(path = %path.display(), error = %err,
+                    "startup sweep skipped a temp file it could not remove");
+            } else {
                 removed += 1;
             }
         }
     }
     Ok(removed)
+}
+
+/// Whether `meta`'s mtime is at least `min_age` in the past.
+fn is_older_than(meta: &std::fs::Metadata, min_age: Duration) -> bool {
+    let Ok(mtime) = meta.modified() else {
+        return false;
+    };
+    match SystemTime::now().duration_since(mtime) {
+        Ok(age) => age >= min_age,
+        // A future mtime is not crash residue; treat it as too fresh.
+        Err(_) => false,
+    }
 }
 
 fn io_error(action: &str, path: &Path, err: std::io::Error) -> ArkError {
@@ -219,22 +256,104 @@ mod tests {
         let dir = TempDir::new("fs-util-sweep");
         let nested = dir.path().join("threads/t1");
         std::fs::create_dir_all(&nested).unwrap();
-        std::fs::write(nested.join(".thread.json.abc-123.tmp"), b"residue").unwrap();
+        let residue = nested.join(".thread.json.abc-123.tmp");
+        std::fs::write(&residue, b"residue").unwrap();
         std::fs::write(dir.path().join(".partial.tmp"), b"partial").unwrap();
         std::fs::write(dir.path().join("data.json"), b"keep").unwrap();
         std::fs::write(dir.path().join("visible.tmp"), b"keep").unwrap();
-        let removed = sweep_temp_files(dir.path()).unwrap();
+        let removed = sweep_temp_files(dir.path(), Duration::ZERO).unwrap();
         assert_eq!(removed, 2);
         assert!(dir.path().join("data.json").is_file());
         assert!(dir.path().join("visible.tmp").is_file());
-        assert!(!nested.join(".thread.json.abc-123.tmp").exists());
+        assert!(!residue.exists());
         assert!(!dir.path().join(".partial.tmp").exists());
+    }
+
+    /// Backdate `path`'s mtime so the age threshold treats it as crash residue.
+    #[cfg(unix)]
+    fn set_mtime_to_yesterday(path: &Path) {
+        let yesterday = SystemTime::now() - Duration::from_secs(24 * 3600);
+        let file = std::fs::File::options().write(true).open(path).unwrap();
+        file.set_times(
+            std::fs::FileTimes::new()
+                .set_accessed(yesterday)
+                .set_modified(yesterday),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn sweep_spares_temp_files_younger_than_min_age() {
+        let dir = TempDir::new("fs-util-sweep-fresh");
+        let fresh = dir.path().join(".fresh.abc-123.tmp");
+        std::fs::write(&fresh, b"fresh").unwrap();
+        let removed = sweep_temp_files(dir.path(), Duration::from_secs(300)).unwrap();
+        assert_eq!(removed, 0, "a just-written file must survive the sweep");
+        assert!(fresh.exists());
+
+        set_mtime_to_yesterday(&fresh);
+        let removed = sweep_temp_files(dir.path(), Duration::from_secs(300)).unwrap();
+        assert_eq!(removed, 1);
+        assert!(!fresh.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sweep_never_descends_into_or_deletes_symlinks() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new("fs-util-sweep-symlink");
+        let outside = TempDir::new("fs-util-sweep-outside");
+        std::fs::create_dir_all(outside.path().join("nested")).unwrap();
+        std::fs::write(outside.path().join("nested/.foreign.abc.tmp"), b"keep").unwrap();
+        std::fs::write(outside.path().join(".foreign-file.abc.tmp"), b"keep").unwrap();
+        // A linked directory must not be entered ...
+        symlink(outside.path(), dir.path().join("linked-dir")).unwrap();
+        // ... and a linked temp file must not be deleted either.
+        symlink(
+            outside.path().join(".foreign-file.abc.tmp"),
+            dir.path().join(".linked.abc-123.tmp"),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join(".mine.abc-123.tmp"), b"mine").unwrap();
+        let removed = sweep_temp_files(dir.path(), Duration::ZERO).unwrap();
+        assert_eq!(removed, 1, "only the real in-place temp file is swept");
+        assert!(outside.path().join("nested/.foreign.abc.tmp").is_file());
+        assert!(outside.path().join(".foreign-file.abc.tmp").is_file());
+        assert!(dir.path().join(".linked.abc-123.tmp").exists());
+    }
+
+    /// A directory another process holds unreadable must not abort the sweep:
+    /// it is hygiene, and startup may never depend on it (review P0-1).
+    #[cfg(unix)]
+    #[test]
+    fn sweep_skips_unreadable_directory_without_failing() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("fs-util-sweep-locked");
+        let unreadable = dir.path().join("foreign");
+        std::fs::create_dir_all(&unreadable).unwrap();
+        std::fs::write(unreadable.join(".inside.abc-123.tmp"), b"stuck").unwrap();
+        let swept = dir.path().join(".outside.abc-123.tmp");
+        std::fs::write(&swept, b"outside").unwrap();
+        set_mtime_to_yesterday(&swept);
+
+        let original = std::fs::metadata(&unreadable).unwrap().permissions();
+        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let result = sweep_temp_files(dir.path(), Duration::ZERO);
+        // Best-effort restore: the TempDir cleanup only needs to unlink the
+        // directory, which works even if this restore fails.
+        let _ = std::fs::set_permissions(&unreadable, original);
+        result.unwrap();
+        assert!(!swept.exists(), "reachable residue is still swept");
+        assert!(unreadable.join(".inside.abc-123.tmp").is_file());
     }
 
     #[test]
     fn sweep_of_missing_directory_is_empty_success() {
         let dir = TempDir::new("fs-util-sweep-missing");
-        assert_eq!(sweep_temp_files(&dir.path().join("absent")).unwrap(), 0);
+        assert_eq!(
+            sweep_temp_files(&dir.path().join("absent"), Duration::ZERO).unwrap(),
+            0
+        );
     }
 
     #[test]

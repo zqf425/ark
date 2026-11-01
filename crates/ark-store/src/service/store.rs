@@ -22,6 +22,12 @@ use crate::store::index::{load_snapshot, save_snapshot, IndexEntry, ThreadIndex}
 use ark_common::{ArkError, Result, ThreadId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+/// Only crash residue (mtime older than this) is swept: the data-dir lock
+/// excludes ark writers, not foreign programs that may keep a hidden `*.tmp`
+/// open when `--data-dir` points into a shared directory.
+const SWEEP_MIN_FILE_AGE: Duration = Duration::from_secs(5 * 60);
 
 /// Directory-backed session store (design 7.4).
 pub struct FileSessionStore {
@@ -60,9 +66,11 @@ impl FileSessionStore {
         let paths = DataPaths::new(config.data_dir());
         ensure_dir(paths.root())?;
         let lock = DataLock::acquire(&paths.lock_file())?;
-        // The data-dir lock is held, so no other writer has a temp sibling in
-        // flight: crash residue from earlier runs can be swept unconditionally.
-        let swept = sweep_temp_files(paths.root())?;
+        // The data-dir lock is held, so no other ark writer has a temp sibling
+        // in flight; the age threshold additionally protects files a foreign
+        // program (shared data-dir) may still be writing. The sweep must never
+        // block startup, so it is infallible at this call site.
+        let swept = sweep_temp_files(paths.root(), SWEEP_MIN_FILE_AGE)?;
         if swept > 0 {
             diagnostics.record(StoreDiagnostic::new(
                 DiagnosticKind::TempFilesSwept,
@@ -406,17 +414,45 @@ pub(crate) mod tests {
         let dir = crate::store::tests::TempDir::new("store-temp-sweep");
         let nested = dir.path().join("threads/t1");
         std::fs::create_dir_all(&nested).unwrap();
-        std::fs::write(nested.join(".thread.json.abc-123.tmp"), b"residue").unwrap();
-        std::fs::write(dir.path().join(".memory.json.def-456.tmp"), b"residue").unwrap();
+        let residue = nested.join(".thread.json.abc-123.tmp");
+        std::fs::write(&residue, b"residue").unwrap();
+        let top = dir.path().join(".memory.json.def-456.tmp");
+        std::fs::write(&top, b"residue").unwrap();
+        // Production sweeps with an age threshold; pretend the files were
+        // left behind by a crashed run a day ago.
+        for path in [&residue, &top] {
+            let file = std::fs::File::options().write(true).open(path).unwrap();
+            let yesterday =
+                std::time::SystemTime::now() - std::time::Duration::from_secs(24 * 3600);
+            file.set_times(
+                std::fs::FileTimes::new()
+                    .set_accessed(yesterday)
+                    .set_modified(yesterday),
+            )
+            .unwrap();
+        }
         let diagnostics = Arc::new(MemoryDiagnostics::new());
         FileSessionStore::with_diagnostics(
             StoreConfig::new(dir.path()).with_limits(StoreLimits::for_tests()),
             diagnostics.clone(),
         )
         .unwrap();
-        assert!(!nested.join(".thread.json.abc-123.tmp").exists());
-        assert!(!dir.path().join(".memory.json.def-456.tmp").exists());
+        assert!(!residue.exists());
+        assert!(!top.exists());
         assert!(diagnostics.has(DiagnosticKind::TempFilesSwept));
+    }
+
+    #[tokio::test]
+    async fn open_without_residue_records_no_sweep_diagnostic() {
+        let dir = crate::store::tests::TempDir::new("store-temp-sweep-clean");
+        let diagnostics = Arc::new(MemoryDiagnostics::new());
+        FileSessionStore::with_diagnostics(
+            StoreConfig::new(dir.path()).with_limits(StoreLimits::for_tests()),
+            diagnostics.clone(),
+        )
+        .unwrap();
+        assert!(diagnostics.is_empty());
+        assert!(!diagnostics.has(DiagnosticKind::TempFilesSwept));
     }
 
     #[tokio::test]

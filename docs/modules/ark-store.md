@@ -40,11 +40,14 @@
 服务端生成 ID 组成，绝不拼接客户端路径。
 
 崩溃残留的临时文件由启动清扫回收：`FileSessionStore::with_diagnostics` 在取得数据目录锁之后、
-装载索引之前，对整个 `<data_dir>` 递归执行 `sweep_temp_files`（`store/fs_util.rs`），删除所有
-隐藏的 `*.tmp` 文件（原子写的 `.{name}.{uuid}.tmp` 兄弟文件与中断上传的 `.partial.tmp` 同规）。
-此时锁保证没有并发写者在途，清扫无条件安全；单个文件删除失败只跳过不阻断启动——清扫是卫生
-动作，不能反过来成为启动失败源。删除数大于零时经 `DiagnosticKind::temp_files_swept` 上报。
-非隐藏的 `*.tmp` 不是本仓原子写产物，一律不动。
+装载索引之前，对整个 `<data_dir>` 递归执行 `sweep_temp_files`（`store/fs_util.rs`），删除修改时间
+早于 5 分钟前的隐藏 `*.tmp` 文件（即原子写 `.{name}.{uuid}.tmp` 兄弟文件）。数据目录锁只排除本进程
+与其他 arkd 实例，排除不了 `--data-dir` 指向共享目录时其他程序正在写的隐藏 `*.tmp`，时效阈值就是
+为此保留的安全距离。可见名的 `*.tmp`（如 ark-config 的 `config.json.tmp`）不是本仓原子写产物，
+不在本清扫范围。目录不可读、符号链接、单个文件删除失败或 mtime 不可读都只跳过并记入
+`tracing::debug!`，不阻断启动——清扫是卫生动作，不能反过来成为启动失败源。删除数大于零时把该事实
+记录到诊断 sink（`DiagnosticKind::TempFilesSwept`）；生产路径 `FileSessionStore::open` 自建内存
+sink，arkd 侧目前没有消费者。
 
 上传时同时计算 SHA-256 并写入元数据的 `sha256` 字段；该字段仅用于完整性与后续去重，路径仍是
 UUID（不做内容寻址，避免迁移）。声明了 `mime_type` 的上传会拿前 16 字节做魔法数一致性校验，

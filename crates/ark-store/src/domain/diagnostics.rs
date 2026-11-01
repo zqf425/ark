@@ -146,6 +146,7 @@ mod tests {
     fn kinds_have_stable_snake_case_labels() {
         assert_eq!(DiagnosticKind::IndexRepaired.as_str(), "index_repaired");
         assert_eq!(DiagnosticKind::TailRepaired.as_str(), "tail_repaired");
+        assert_eq!(DiagnosticKind::TempFilesSwept.as_str(), "temp_files_swept");
     }
 
     #[test]
