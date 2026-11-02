@@ -8,8 +8,7 @@
 //!
 //! Two shape decisions are worth stating:
 //!
-//! * the `parentThreadId` *query parameter* (its name is the documented HTTP
-//!   surface, distinct from the snake_case JSON bodies) is **required** on every
+//! * the `parent_thread_id` *query parameter* is **required** on every
 //!   single-child route. A child id is
 //!   a UUID and a leaked one must not be enough to read another thread's
 //!   transcript, so ownership is always re-checked against the parent's run log.
@@ -36,7 +35,6 @@ use crate::state::AppState;
 
 /// Query shared by the list route.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ChildRunsQuery {
     /// Restrict the listing to one parent. Absent lists every known child.
     #[serde(default)]
@@ -47,14 +45,9 @@ pub struct ChildRunsQuery {
 }
 
 /// Query of the incremental transcript route.
-///
-/// `since_seq` keeps its **snake_case** wire name: the renderer and the old
-/// runtime both send `?since_seq=N`, and reading it as `sinceSeq` silently
-/// turned every incremental poll into a full replay from seq 0.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ChildEventsQuery {
-    #[serde(default, rename = "since_seq", alias = "sinceSeq")]
+    #[serde(default)]
     pub since_seq: Option<u64>,
     #[serde(default)]
     pub parent_thread_id: Option<String>,
@@ -94,7 +87,7 @@ fn require_parent(query: &ChildRunsQuery) -> Result<ThreadId, ApiError> {
     let Some(raw) = query.parent_thread_id.as_deref() else {
         return Err(ApiError::new(
             ArkErrorCode::ValidationError,
-            "parentThreadId is required for child-run access",
+            "parent_thread_id is required for child-run access",
         ));
     };
     parse_thread(raw)
@@ -397,7 +390,7 @@ pub async fn events(
         None => {
             return Err(ApiError::new(
                 ArkErrorCode::ValidationError,
-                "parentThreadId is required for child-run access",
+                "parent_thread_id is required for child-run access",
             ))
         }
     };

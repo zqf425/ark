@@ -157,7 +157,6 @@ pub struct ThreadDetail {
     #[serde(default)]
     pub runtime: ThreadRuntimeSettings,
     /// Process-local state that is not persisted with the session settings.
-    #[serde(default)]
     pub runtime_snapshot: ThreadRuntimeSnapshot,
 }
 
@@ -691,14 +690,4 @@ mod tests {
         assert!(payload.get("toolInvocations").is_none());
     }
 
-    #[test]
-    fn thread_detail_runtime_defaults_for_older_payloads() {
-        let detail: ThreadDetail = serde_json::from_value(serde_json::json!({
-            "summary": {"thread_id": ThreadId::new(), "title": "t", "created_at": Utc::now(), "updated_at": Utc::now(), "archived": false},
-            "items": [], "child_ids": [], "child_completions": []
-        }))
-        .unwrap();
-        assert!(detail.runtime_snapshot.active_turn.is_none());
-        assert!(detail.runtime_snapshot.pending_approvals.is_empty());
-    }
 }

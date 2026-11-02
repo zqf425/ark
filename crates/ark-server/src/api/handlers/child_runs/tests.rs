@@ -41,7 +41,7 @@ fn a_missing_parent_is_a_validation_error_not_a_guess() {
     // must fail loudly instead of reading every thread's children.
     let err = require_parent(&ChildRunsQuery::default()).unwrap_err();
     assert_eq!(err.0.code, ArkErrorCode::ValidationError);
-    assert!(err.0.message.contains("parentThreadId is required"));
+    assert!(err.0.message.contains("parent_thread_id is required"));
 }
 
 #[test]
