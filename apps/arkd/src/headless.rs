@@ -19,6 +19,9 @@ use crate::cli::RunArgs;
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
 /// SSE read idle cap: a turn whose stream stays silent this long is lost.
 const STREAM_TIMEOUT: Duration = Duration::from_secs(600);
+/// Server-side idle closes arrive at most once per `sse_idle_timeout_secs`
+/// (default 300s); dozens of resumes already cover many hours of review.
+const RESUME_LIMIT: u32 = 50;
 
 /// Exit codes of `arkd run`.
 const EXIT_COMPLETED: i32 = 0;
@@ -319,48 +322,66 @@ async fn wait_for_health(client: &reqwest::Client, base: &str) -> Result<(), Fai
 
 /// Consume the SSE stream, forwarding text deltas to stdout until a terminal
 /// event arrives.
+///
+/// The server closes an idle subscription after `sse_idle_timeout_secs` with an
+/// explicit `sse_idle_timeout` event — a long review turn thinking past that
+/// window is normal, so the stream is resumed from the last seen `id` instead
+/// of being reported as a failure. The replay protocol makes resumption lossless
+/// and duplicate-free: the server replays `(since_seq, watermark]` in order and
+/// only then attaches to live.
 async fn stream_turn(
     client: &reqwest::Client,
     base: &str,
     thread_id: &str,
     since_seq: u64,
 ) -> Result<(), Failure> {
-    let mut response = client
-        .get(format!("{base}/v1/threads/{thread_id}/events"))
-        .query(&[("since_seq", since_seq.to_string())])
-        .timeout(STREAM_TIMEOUT)
-        .send()
-        .await
-        .map_err(startup_of("event stream failed"))?;
-    if !response.status().is_success() {
-        return Err(Failure::Startup(format!(
-            "event stream returned {}",
-            response.status()
-        )));
-    }
-
-    let mut buffer = String::new();
-    loop {
-        let Some(chunk) = response
-            .chunk()
+    let mut since_seq = since_seq;
+    // Each resume waits a fresh `STREAM_TIMEOUT`; the cap only exists so a
+    // wedged runtime cannot keep this process alive forever.
+    for _ in 0..RESUME_LIMIT {
+        let mut response = client
+            .get(format!("{base}/v1/threads/{thread_id}/events"))
+            .query(&[("since_seq", since_seq.to_string())])
+            .timeout(STREAM_TIMEOUT)
+            .send()
             .await
-            .map_err(|err| Failure::Turn(format!("event stream broke: {err}")))?
-        else {
-            return Err(Failure::Turn(
-                "event stream ended without a terminal event".into(),
-            ));
-        };
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(index) = buffer.find("\n\n") {
-            let frame: String = buffer.drain(..index + 2).collect();
-            if let Some(outcome) = handle_frame(&frame)? {
-                // Flush so a piped consumer sees every byte as it streams.
-                use std::io::Write as _;
-                let _ = std::io::stdout().flush();
-                return outcome;
+            .map_err(startup_of("event stream failed"))?;
+        if !response.status().is_success() {
+            return Err(Failure::Startup(format!(
+                "event stream returned {}",
+                response.status()
+            )));
+        }
+
+        let mut buffer = String::new();
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    buffer.push_str(&String::from_utf8_lossy(&chunk));
+                    while let Some(index) = buffer.find("\n\n") {
+                        let frame: String = buffer.drain(..index + 2).collect();
+                        since_seq = frame
+                            .lines()
+                            .find_map(|line| line.strip_prefix("id: ")?.trim().parse().ok())
+                            .unwrap_or(since_seq);
+                        if let Some(outcome) = handle_frame(&frame)? {
+                            // Flush so a piped consumer sees every byte as it streams.
+                            use std::io::Write as _;
+                            let _ = std::io::stdout().flush();
+                            return outcome;
+                        }
+                    }
+                }
+                // The server closed the stream (idle timeout is the normal
+                // case): resume from the last seen seq.
+                Ok(None) => break,
+                Err(err) => return Err(Failure::Turn(format!("event stream broke: {err}"))),
             }
         }
     }
+    Err(Failure::Turn(
+        "event stream kept ending without a terminal event".into(),
+    ))
 }
 
 /// Handle one SSE frame; `Ok(Some(...))` ends the stream.
@@ -455,6 +476,14 @@ mod tests {
         assert!(handle_frame(frame).unwrap().is_none());
         assert!(handle_frame(": only a comment\n\n").unwrap().is_none());
         assert!(handle_frame("\n\n").unwrap().is_none());
+    }
+
+    #[test]
+    fn an_idle_timeout_frame_does_not_end_the_stream() {
+        // The server sends this right before closing an idle subscription; the
+        // caller must resume from the last `id`, never treat it as a terminal.
+        let frame = "id: 12\nevent: sse_idle_timeout\ndata: {\"kind\":\"sse_idle_timeout\",\"seq\":12,\"thread_id\":\"t\"}\n\n";
+        assert!(handle_frame(frame).unwrap().is_none());
     }
 
     #[test]

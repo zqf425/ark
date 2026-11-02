@@ -34,6 +34,10 @@ stdout,然后优雅停机退出。
    Ctrl-C 直接走 axum graceful shutdown + drain,不额外处理。
 5. **不做双实现**:SSE 帧解析只依赖 `event:`/`data:` 行与 `id:` 序号,不复刻任何后端语义;
    终态判定只认事件名,与 web 客户端同一规则(见 web 模块 §SSE)。
+6. **空闲断流重连**(2026-11-02):服务端在 `sse_idle_timeout_secs`(默认 300s)无事件后会发送
+   `sse_idle_timeout` 事件并关闭订阅;长检视回合的模型 thinking 超过该窗口是正常形态。headless
+   客户端按 SSE 契约从最后收到的 `id:` 序号重连续订(回放语义保证无损、无重复),不把服务端的
+   空闲断流当作回合失败;重连有上限,超限才报失败。
 
 ## 验收
 
