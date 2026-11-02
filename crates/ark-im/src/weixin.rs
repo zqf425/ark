@@ -43,7 +43,6 @@ use crate::{LoginPoll, LoginSession};
 const APP_ID: &str = "bot";
 const CLIENT_VERSION: u32 = (2 << 16) | (4 << 8) | 3; // openclaw-weixin 2.4.3
 const DEFAULT_BASE_URL: &str = "https://ilinkai.weixin.qq.com";
-const LONG_POLL_SECS: u64 = 35;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(40);
 const REST_TIMEOUT: Duration = Duration::from_secs(15);
 const QR_BOT_TYPE: &str = "3";
