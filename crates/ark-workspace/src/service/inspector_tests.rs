@@ -228,6 +228,58 @@ fn staged_patch_is_per_file_not_the_whole_group_diff() {
 }
 
 #[test]
+fn binary_file_is_flagged_and_omits_patch() {
+    if !git_available() {
+        eprintln!("skipping: git is not on PATH (mark #[ignore] on such a machine)");
+        return;
+    }
+    let fixture = TempDir::new("diff-binary");
+    init_repo(fixture.path());
+    // A NUL byte makes git report the file as binary.
+    std::fs::write(fixture.path().join("img.bin"), b"PNG\x00\x01\x02data\n")
+        .expect("write binary file");
+    git(fixture.path(), &["add", "img.bin"]);
+
+    let diff = WorkspaceInspector::new()
+        .diff(fixture.path())
+        .expect("git diff");
+
+    assert_eq!(diff.staged.len(), 1);
+    assert!(diff.staged[0].binary, "binary segment must set the flag");
+    assert!(
+        diff.staged[0].patch.is_none(),
+        "binary file carries no patch text"
+    );
+}
+
+#[test]
+fn non_ascii_path_patch_is_attributed() {
+    if !git_available() {
+        eprintln!("skipping: git is not on PATH (mark #[ignore] on such a machine)");
+        return;
+    }
+    let fixture = TempDir::new("diff-nonascii");
+    init_repo(fixture.path());
+    std::fs::write(fixture.path().join("中文说明.md"), "内容\n").expect("write non-ascii file");
+    git(fixture.path(), &["add", "中文说明.md"]);
+
+    let diff = WorkspaceInspector::new()
+        .diff(fixture.path())
+        .expect("git diff");
+
+    assert_eq!(diff.staged.len(), 1);
+    assert_eq!(diff.staged[0].path, "中文说明.md");
+    let patch = diff.staged[0]
+        .patch
+        .as_deref()
+        .expect("non-ascii path must match its segment");
+    assert!(
+        patch.contains("+++ b/中文说明.md"),
+        "own header present: {patch}"
+    );
+}
+
+#[test]
 fn deleted_file_patch_is_keyed_by_the_old_path() {
     if !git_available() {
         eprintln!("skipping: git is not on PATH (mark #[ignore] on such a machine)");

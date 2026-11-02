@@ -137,6 +137,8 @@ impl WorkspaceInspector {
         attach_patch(
             &canonical,
             &[
+                "-c",
+                "core.quotePath=false",
                 "diff",
                 "--cached",
                 "--no-ext-diff",
@@ -150,7 +152,14 @@ impl WorkspaceInspector {
         let mut unstaged = std::mem::take(&mut diff.unstaged);
         attach_patch(
             &canonical,
-            &["diff", "--no-ext-diff", "--no-textconv", "--no-color"],
+            &[
+                "-c",
+                "core.quotePath=false",
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-color",
+            ],
             &mut unstaged,
             &mut diff,
         );
@@ -271,6 +280,9 @@ fn attach_patch(
     let segments = split_patch_segments(&patch);
     let mut assigned_bytes = 0usize;
     for file in files.iter_mut() {
+        // The byte cap truncates the group output, not a single segment, so a
+        // missing/short segment for one row still means "output was cut".
+        file.truncated = truncated;
         let Some(segment) = segments.iter().find(|segment| segment.path == file.path) else {
             continue;
         };
@@ -278,7 +290,6 @@ fn attach_patch(
             segment.text.contains("Binary files ") || segment.text.contains("GIT binary patch");
         file.binary = binary;
         file.patch = (!binary).then(|| segment.text.clone());
-        file.truncated = truncated;
         assigned_bytes += segment.text.len();
     }
     diff.patch_bytes += assigned_bytes as u64;
@@ -290,41 +301,79 @@ struct PatchSegment {
     text: String,
 }
 
-/// Split group `git diff` output into per-file segments at `diff --git `
-/// boundaries.
+/// Split group `git diff` output into per-file segments.
 ///
-/// The key path prefers `+++ b/<path>` (present for every content change),
-/// then `rename to ` (a pure rename has no content hunk), then `--- a/<path>`
-/// (deletions, where `+++` is `/dev/null`). Segments without a recognizable
-/// path are dropped: they cannot be attributed to any file row.
+/// Boundaries are lines *starting* with `diff --git ` (a content line can
+/// contain that substring mid-hunk). The key path prefers `+++ b/<path>`
+/// (every content change), then `--- a/<path>` (deletions, `+++` is
+/// `/dev/null`), then the b-side of the `diff --git a/X b/Y` header itself —
+/// that last fallback is what attributes binary-only segments, which carry no
+/// `---`/`+++` pair at all. The caller runs git with `core.quotePath=false`,
+/// so non-ASCII paths arrive raw; `unquote_path` only handles the c-style
+/// quoting git still applies to control characters and embedded quotes.
 fn split_patch_segments(patch: &str) -> Vec<PatchSegment> {
+    let lines: Vec<&str> = patch.split_inclusive('\n').collect();
+    let mut bounds: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.starts_with("diff --git "))
+        .map(|(idx, _)| idx)
+        .collect();
+    bounds.push(lines.len());
+
     let mut segments = Vec::new();
-    for chunk in patch.split("diff --git ") {
-        if chunk.is_empty() {
+    for window in bounds.windows(2) {
+        let (start, end) = (window[0], window[1]);
+        if start == end {
             continue;
         }
-        let text = format!("diff --git {chunk}");
-        let mut path: Option<String> = None;
-        for line in text.lines() {
-            if let Some(rest) = line
-                .strip_prefix("+++ b/")
-                .or_else(|| line.strip_prefix("rename to "))
-            {
-                path = Some(unquote_path(rest).to_string());
-                break;
-            }
-            if let Some(rest) = line.strip_prefix("--- a/") {
-                path = Some(unquote_path(rest).to_string());
-            }
-        }
-        if let Some(path) = path {
+        let text = lines[start..end].concat();
+        if let Some(path) = segment_path(&lines[start..end]) {
             segments.push(PatchSegment { path, text });
         }
     }
     segments
 }
 
-/// Git quotes paths containing spaces or non-ASCII in diff headers.
+/// Attribute one segment to a file path, preferring the most specific header.
+fn segment_path(segment: &[&str]) -> Option<String> {
+    let mut fallback: Option<String> = None;
+    for line in segment {
+        let line = line.trim_end();
+        if let Some(rest) = line.strip_prefix("+++ b/") {
+            return Some(unquote_path(rest).to_string());
+        }
+        if fallback.is_none() {
+            if let Some(rest) = line.strip_prefix("--- a/") {
+                fallback = Some(unquote_path(rest).to_string());
+            } else if let Some(path) = diff_git_header_path(line) {
+                fallback = Some(path);
+            }
+        }
+    }
+    fallback
+}
+
+/// `diff --git a/<old> b/<new>`: for identical paths pick the reading where
+/// both sides match (spaces in a path make the line ambiguous); renames fall
+/// back to the b-side after the last ` b/` separator.
+fn diff_git_header_path(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("diff --git a/")?;
+    let mut search_from = 0;
+    while let Some(offset) = rest[search_from..].find(" b/") {
+        let at = search_from + offset;
+        let (old, new) = (&rest[..at], &rest[at + 3..]);
+        if old == new {
+            return Some(unquote_path(old).to_string());
+        }
+        search_from = at + 1;
+    }
+    let at = rest.rfind(" b/")?;
+    Some(unquote_path(&rest[at + 3..]).to_string())
+}
+
+/// Git still c-quotes control characters and embedded quotes in diff headers
+/// even with `core.quotePath=false`; strip that wrapper.
 fn unquote_path(path: &str) -> &str {
     let trimmed = path.trim_end();
     trimmed
