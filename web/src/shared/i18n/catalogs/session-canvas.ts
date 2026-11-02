@@ -108,5 +108,20 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.childRuns.steerPrompt': ['补充给子代理的指令', 'Instructions to add to the subagent'],
   'canvas.childRuns.loadFailed': ['读取子代理失败', 'Failed to read subagents'],
   'canvas.childRuns.actionFailed': ['子代理操作失败', 'The subagent action failed'],
-  'canvas.childRuns.completedToast': ['子代理「{label}」{status}', 'Subagent "{label}" {status}']
+  'canvas.childRuns.completedToast': ['子代理「{label}」{status}', 'Subagent "{label}" {status}'],
+
+  'canvas.composer.attach': ['附件', 'Attach'],
+  'canvas.composer.attachUploading': ['上传中…', 'Uploading…'],
+  'canvas.composer.attachmentTooLarge': ['「{name}」超出大小上限', '"{name}" exceeds the size limit'],
+  'canvas.composer.attachmentRemove': ['移除附件 {name}', 'Remove attachment {name}'],
+  'canvas.composer.attachmentsAria': ['已添加附件', 'Added attachments'],
+  'canvas.composer.queue': ['排队', 'Queue'],
+  'canvas.composer.queuedChip': ['#{index} 排队', '#{index} queued'],
+  'canvas.composer.queuedRemove': ['移除排队消息 #{index}', 'Remove queued message #{index}'],
+  'canvas.composer.queuedAria': ['排队中的消息，回合结束后按顺序发送', 'Queued messages; sent in order when the turn ends'],
+  'canvas.composer.skills': ['技能', 'Skills'],
+  'canvas.composer.skillsAria': ['可指定的技能', 'Skills to mention'],
+  'canvas.composer.skillsLoading': ['技能加载中…', 'Loading skills…'],
+  'canvas.composer.skillsEmpty': ['没有可用技能。', 'No skills available.'],
+  'canvas.composer.skillsHint': ['点击插入 /id，消息中提及即激活该技能。', 'Click to insert /id; mentioning it in the message activates the skill.']
 } as const

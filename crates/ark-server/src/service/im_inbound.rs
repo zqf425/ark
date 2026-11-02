@@ -345,6 +345,7 @@ impl super::im::ImService {
             provider_id: ctx.channel.provider_id.clone(),
             model: ctx.channel.model.clone(),
             autonomy: Some(channel_autonomy(&ctx.channel)),
+            reasoning_effort: None,
         };
         if let Err(err) = state
             .store

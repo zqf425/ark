@@ -83,6 +83,7 @@ impl ProviderService for Providers {
             custom_endpoint: None,
             max_tokens: None,
             temperature: None,
+            reasoning_effort: None,
         })
     }
 }

@@ -111,6 +111,16 @@ export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.
             {modelOptions.map((id) => <option key={id} value={id} />)}
           </datalist>
         </label>
+        <label>
+          {t('session.runtime.reasoning')}
+          <select value={runtime.reasoning_effort ?? ''} onChange={(event) => setRuntime({ ...runtime, reasoning_effort: event.target.value || undefined })}>
+            <option value="">{t('session.runtime.reasoning.unset')}</option>
+            <option value="low">{t('session.runtime.reasoning.low')}</option>
+            <option value="medium">{t('session.runtime.reasoning.medium')}</option>
+            <option value="high">{t('session.runtime.reasoning.high')}</option>
+            <option value="off">{t('session.runtime.reasoning.off')}</option>
+          </select>
+        </label>
         <label>{t('session.runtime.autonomy')}<select value={runtime.autonomy ?? defaultAutonomy} onChange={(event) => setRuntime({ ...runtime, autonomy: event.target.value })}><option value="strict">{t('session.runtime.strict')}</option><option value="workspace_write">{t('session.runtime.workspaceWrite')}</option><option value="unattended">{t('session.runtime.unattended')}</option></select></label>
         <Button size="sm" variant="primary" disabled={saving || !canSaveRuntime(loadedFor, threadId)} onClick={() => void save()}>{t('session.runtime.save')}</Button>
         <Button size="sm" disabled={compacting} onClick={() => void compact()}>{t('session.context.compact')}</Button>

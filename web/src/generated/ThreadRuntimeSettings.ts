@@ -11,4 +11,9 @@
  * overrides without reading `thread.json`. A field omitted from the response
  * means "no override stored", never "the global default is stored here".
  */
-export type ThreadRuntimeSettings = { workspace?: string, provider_id?: string, model?: string, autonomy?: string, };
+export type ThreadRuntimeSettings = { workspace?: string, provider_id?: string, model?: string, autonomy?: string, 
+/**
+ * Reasoning-effort override for the next turn: `off` | `low` | `medium` |
+ * `high`. Empty means unset, like the other override fields.
+ */
+reasoning_effort?: string, };

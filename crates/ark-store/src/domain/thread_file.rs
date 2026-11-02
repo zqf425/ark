@@ -32,6 +32,8 @@ pub struct ThreadFile {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autonomy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 impl ThreadFile {
@@ -48,6 +50,7 @@ impl ThreadFile {
             provider_id: None,
             model: None,
             autonomy: None,
+            reasoning_effort: None,
         }
     }
 
@@ -73,6 +76,7 @@ impl ThreadFile {
                 provider_id: self.provider_id.clone(),
                 model: self.model.clone(),
                 autonomy: self.autonomy.clone(),
+                reasoning_effort: self.reasoning_effort.clone(),
             },
         }
     }
@@ -89,6 +93,7 @@ impl ThreadFile {
             provider_id: None,
             model: None,
             autonomy: None,
+            reasoning_effort: None,
         }
     }
 
@@ -106,6 +111,7 @@ impl ThreadFile {
             provider_id: self.provider_id.clone(),
             model: self.model.clone(),
             autonomy: self.autonomy.clone(),
+            reasoning_effort: self.reasoning_effort.clone(),
         }
     }
 }

@@ -80,6 +80,10 @@ pub struct ProviderConfig {
     pub max_tokens: Option<u32>,
     #[serde(default)]
     pub temperature: Option<f32>,
+    /// Thread-level reasoning-effort override carried from the session runtime
+    /// settings; `None` when unset. See `ModelRequest::reasoning_effort`.
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     /// Additional provider-specific headers. Core auth and content headers are
     /// applied afterwards and cannot be overridden by this map.
     #[serde(default)]
@@ -101,6 +105,7 @@ impl ProviderConfig {
             custom_endpoint: None,
             max_tokens: None,
             temperature: None,
+            reasoning_effort: None,
             headers: BTreeMap::new(),
             context_window_tokens: None,
         }

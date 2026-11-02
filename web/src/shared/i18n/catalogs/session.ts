@@ -30,5 +30,12 @@ export const SESSION_MESSAGES = {
   'session.rewind.cancel': ['取消', 'Cancel'],
   'session.rewind.rewinding': ['回退中…', 'Rewinding…'],
   'session.rewind.failed': ['回退失败', 'Rewind failed'],
-  'session.rewind.done': ['已回退，会话已恢复到所选回合之前。', 'Rewound; the session now ends before the selected turn.']
+  'session.rewind.done': ['已回退，会话已恢复到所选回合之前。', 'Rewound; the session now ends before the selected turn.'],
+
+  'session.runtime.reasoning': ['推理强度', 'Reasoning effort'],
+  'session.runtime.reasoning.unset': ['未设置', 'Unset'],
+  'session.runtime.reasoning.off': ['关闭', 'Off'],
+  'session.runtime.reasoning.low': ['低', 'Low'],
+  'session.runtime.reasoning.medium': ['中', 'Medium'],
+  'session.runtime.reasoning.high': ['高', 'High']
 } as const

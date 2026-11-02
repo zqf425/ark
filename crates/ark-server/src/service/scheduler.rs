@@ -387,6 +387,7 @@ impl SchedulerService {
                     provider_id: task.provider_id.clone(),
                     model: task.model.clone(),
                     autonomy: Some(autonomy),
+                    reasoning_effort: None,
                 },
             )
             .await?;
