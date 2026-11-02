@@ -114,7 +114,9 @@ data/threads/<thread>/
 不阻断 arkd 启动；每回合 prompt 注入路径用 `read_json_file`，损坏文件上报为错误，由调用方
 （组合根的 memory seed）记录告警并跳过注入，不使回合失败。
 
-文本上限为 16 KiB UTF-8 字节；空文本、超限文本和未知 id 是结构化错误。模型 prompt 注入已实现：
+文本上限为 16 KiB UTF-8 字节；空文本、超限文本和未知 id 是结构化错误。PATCH 的 `source` 字段是
+双层 Option：键省略表示不修改，显式 `null` 是唯一的清空方式，字符串为覆盖——普通 `Option` 无法
+表达"清除"，会让已写入的 source 永久删不掉。模型 prompt 注入已实现：
 组合根每回合把 memory 渲染为**至多一条** `[user memory]` system 消息（见 arkd 设计）。自动抽取与
 检索仍属待决，当前不会暗中执行。
 

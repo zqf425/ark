@@ -48,8 +48,12 @@ pub struct UpdateMemoryRequest {
     pub text: Option<String>,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
+    /// Double option so one wire shape carries three intents: key omitted =
+    /// leave `source` untouched, explicit `null` = clear it, a string = set it.
+    /// A plain `Option` could never express "clear", which left a stored
+    /// source unremovable through the API.
     #[serde(default)]
-    pub source: Option<String>,
+    pub source: Option<Option<String>>,
 }
 
 /// `GET /v1/memory`.

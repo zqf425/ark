@@ -43,6 +43,59 @@ fn creates_updates_deletes_and_lists_memory_entries() {
 }
 
 #[test]
+fn update_source_distinguishes_clear_set_and_untouched() {
+    let dir = temp_data_dir("source-clear");
+    let store = MemoryFileStore::open(dir.path()).expect("open");
+
+    let created = store
+        .create(CreateMemoryRequest {
+            text: "entry with a source".to_string(),
+            tags: vec![],
+            source: Some("manual".to_string()),
+        })
+        .expect("create succeeds");
+
+    // `None` leaves the stored source untouched.
+    let untouched = store
+        .update(
+            &created.id,
+            UpdateMemoryRequest {
+                text: None,
+                tags: None,
+                source: None,
+            },
+        )
+        .expect("update succeeds");
+    assert_eq!(untouched.source.as_deref(), Some("manual"));
+
+    // `Some(Some(..))` overwrites.
+    let replaced = store
+        .update(
+            &created.id,
+            UpdateMemoryRequest {
+                text: None,
+                tags: None,
+                source: Some(Some("import".to_string())),
+            },
+        )
+        .expect("update succeeds");
+    assert_eq!(replaced.source.as_deref(), Some("import"));
+
+    // `Some(None)` is the only way to clear it.
+    let cleared = store
+        .update(
+            &created.id,
+            UpdateMemoryRequest {
+                text: None,
+                tags: None,
+                source: Some(None),
+            },
+        )
+        .expect("update succeeds");
+    assert_eq!(cleared.source, None);
+}
+
+#[test]
 fn empty_file_starts_empty_without_blocking_future_writes() {
     let dir = temp_data_dir("empty");
     let data_dir = dir.path();

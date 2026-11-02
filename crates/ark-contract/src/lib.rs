@@ -45,7 +45,7 @@ pub use capability::{
 pub use config::{
     ApplyResult, ConfigPatch, FieldPath, HookRule, HookSettings, ImSettings, ReloadClass,
     RuntimeConfigView, ScheduleSettings, SkillsSettings, SubagentSettings, TuningSettings,
-    SKILLS_EXTRA_DIR_MAX_CHARS, SKILLS_EXTRA_DIRS_MAX, SUBAGENT_CONCURRENCY_MAX,
+    SKILLS_EXTRA_DIRS_MAX, SKILLS_EXTRA_DIR_MAX_CHARS, SUBAGENT_CONCURRENCY_MAX,
     SUBAGENT_CONCURRENCY_MIN,
 };
 pub use dto::{

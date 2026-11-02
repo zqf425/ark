@@ -90,6 +90,8 @@
 设置页「记忆」section 消费 memory 路由的生成契约类型:列表、新增、编辑(text/tags/source)、删除与
 存储诊断。运行时按预算把全部条目注入每回合,UI 不提供逐条启用开关——删除即停止注入
 ([memory-store](../requirements/memory-store.md));text 的 16KiB 上限在前端按 UTF-8 字节校验。
+编辑时清空来源输入提交显式 `null`,这是 source 的唯一清空方式(键省略表示不修改,契约的双层
+Option 语义);与 secret 类字段"空=保留"的约定相反,此处"空=清除"。
 
 「Skills」section 在原只读列表之上提供发现配置(`skills.enabled` 总开关与 `extra_dirs` 额外根,
 上限与运行时一致);该配置为 Restart 类,保存成功后仍须提示重启生效,`restart_required` 原样展示。

@@ -46,9 +46,8 @@ use crate::{
     ThreadDetail, ThreadExport, ThreadItem, ThreadListQuery, ThreadRuntimeSettings,
     ThreadRuntimeSnapshot, ThreadSkillsResponse, ThreadSummary, ThreadUsageResponse, TodoEntry,
     TodoStatus, TodosRequest, TuningSettings, TurnRequest, TurnSummary, UiCatalog,
-    UpdateImChannelRequest,
-    UpdateMemoryRequest, UpdateScheduleRequest, UpdateThreadRequest, UsageResponse,
-    WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
+    UpdateImChannelRequest, UpdateMemoryRequest, UpdateScheduleRequest, UpdateThreadRequest,
+    UsageResponse, WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
     WorkspaceDiffFile, WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
 };
 use ark_common::{

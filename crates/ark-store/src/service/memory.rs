@@ -129,8 +129,10 @@ impl MemoryService for MemoryFileStore {
         if let Some(tags) = request.tags {
             entry.tags = tags;
         }
-        if request.source.is_some() {
-            entry.source = request.source;
+        // The outer option means "touched": `Some(None)` clears, `Some(Some)`
+        // sets, `None` leaves the field as it is.
+        if let Some(new_source) = request.source {
+            entry.source = new_source;
         }
         entry.updated_at = Utc::now();
         let updated = entry.clone();
