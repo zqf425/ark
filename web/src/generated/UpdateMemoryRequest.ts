@@ -9,5 +9,10 @@ export type UpdateMemoryRequest = { text?: string, tags?: Array<string>,
  * leave `source` untouched, explicit `null` = clear it, a string = set it.
  * A plain `Option` could never express "clear", which left a stored
  * source unremovable through the API.
+ *
+ * The custom deserializer is required, not cosmetic: serde's derived
+ * `Option` handling collapses an explicit JSON `null` into the outer
+ * `None` ("untouched") even for `Option<Option<T>>`, so without it the
+ * clear intent silently disappears at the HTTP boundary.
  */
 source?: string | null, };
