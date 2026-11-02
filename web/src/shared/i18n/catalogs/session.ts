@@ -39,7 +39,7 @@ export const SESSION_MESSAGES = {
   'session.runtime.reasoning.medium': ['中', 'Medium'],
   'session.runtime.reasoning.high': ['高', 'High'],
   'session.runtime.visionUnsupported': [
-    '当前模型未声明识图能力：图片附件不会发送给模型。',
-    'The selected model does not declare vision; image attachments will not reach it.'
+    '当前模型未声明识图能力：图片附件不会发送给模型。若模型确支持图片，可在供应商高级选项里勾选「支持识图」。',
+    'The selected model does not declare vision, so image attachments will not reach it. If it truly supports images, enable "supports vision" in the provider form.'
   ]
 } as const

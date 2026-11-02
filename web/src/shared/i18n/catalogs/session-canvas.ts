@@ -116,8 +116,8 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.composer.attachmentRemove': ['移除附件 {name}', 'Remove attachment {name}'],
   'canvas.composer.attachmentsAria': ['已添加附件', 'Added attachments'],
   'canvas.composer.imageVisionHint': [
-    '图片仅在模型声明识图能力时才会真正发送；未声明时模型只看到占位文本。',
-    'Images reach the model only when it declares vision; otherwise the model sees a placeholder.'
+    '图片仅在模型声明识图能力时才会真正发送（未声明时模型只看到占位）。可在设置→供应商→高级选项里声明「支持识图」。',
+    'Images reach the model only when it declares vision (placeholder otherwise). Declare it under Settings → Provider → Advanced.'
   ],
   'canvas.composer.attachLiveHint': ['回合进行中不支持添加附件；请排队消息，结束后再附。', 'Attachments cannot be added mid-turn; queue a message instead.'],
   'canvas.composer.queue': ['排队', 'Queue'],
