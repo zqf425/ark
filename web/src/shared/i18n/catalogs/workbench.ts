@@ -11,7 +11,6 @@ export const WORKBENCH_MESSAGES = {
 
   'workbench.layout.aria': ['布局控制', 'Layout controls'],
   'workbench.layout.resizeLeft': ['调整会话列表宽度', 'Resize the thread list'],
-  'workbench.layout.resizeRight': ['调整右侧面板宽度', 'Resize the right panel'],
   'workbench.layout.showThreads': ['显示会话', 'Show threads'],
   'workbench.layout.hideThreads': ['隐藏会话', 'Hide threads'],
   'workbench.layout.threads': ['会话', 'Threads'],

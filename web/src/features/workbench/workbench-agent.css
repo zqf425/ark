@@ -57,14 +57,3 @@
   padding: 8px 0;
   font-size: 11.5px;
 }
-
-@media (max-width: 1024px) {
-  .ark-shell .ark-col--left,
-  .ark-shell .ark-col--left + .ark-resizer {
-    display: none;
-  }
-
-  .ark-shell .ark-col--center {
-    min-width: 0;
-  }
-}

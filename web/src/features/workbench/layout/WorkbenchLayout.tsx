@@ -1,25 +1,23 @@
-import type { KeyboardEvent, ReactNode } from 'react'
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../../code-session/state/store'
-import { useRuntimeStatus } from '../../code-session/hooks/use-runtime-status'
+import { useRuntimeStatusLabels } from '../../code-session/hooks/use-runtime-status-labels'
 import { ViewSwitch } from '../components/ViewSwitch'
 import { resizerKeyDelta, usePanelResizer } from './use-panel-resizer'
 import '../workbench.css'
 
 /** A draggable 1px gutter that is also keyboard operable. */
 function Resizer({
-  side,
   width,
   setWidth
 }: {
-  side: 'left' | 'right'
   width: number
   setWidth: (width: number) => void
 }): JSX.Element {
   const { t } = useI18n()
-  const { onPointerDown } = usePanelResizer(side, width, setWidth)
+  const { onPointerDown } = usePanelResizer(width, setWidth)
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    const delta = resizerKeyDelta(event.key, side)
+    const delta = resizerKeyDelta(event.key)
     if (delta === null) return
     event.preventDefault()
     setWidth(width + delta)
@@ -30,7 +28,7 @@ function Resizer({
       className="ark-resizer"
       role="separator"
       aria-orientation="vertical"
-      aria-label={side === 'left' ? t('workbench.layout.resizeLeft') : t('workbench.layout.resizeRight')}
+      aria-label={t('workbench.layout.resizeLeft')}
       tabIndex={0}
       onPointerDown={onPointerDown}
       onKeyDown={onKeyDown}
@@ -48,37 +46,40 @@ export type WorkbenchLayoutProps = {
  * Conversation-first workbench, no global top bar: the thread rail is a
  * full-height sidebar whose footer carries the runtime status and the view
  * switch, and the context projection is a floating drawer over the canvas.
- * Widths stay local to the layout slice and never alter thread or runtime
- * state.
+ * The drawer stays mounted while hidden (`hidden` attribute, not conditional
+ * rendering) so panel drafts and server read models survive open/close.
  */
 export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): JSX.Element {
   const { t } = useI18n()
   const leftWidth = useCodeSessionStore((s) => s.leftWidth)
-  const rightWidth = useCodeSessionStore((s) => s.rightWidth)
-  const leftCollapsed = useCodeSessionStore((s) => s.leftCollapsed)
   const rightCollapsed = useCodeSessionStore((s) => s.rightCollapsed)
+  const leftCollapsed = useCodeSessionStore((s) => s.leftCollapsed)
   const setLeftWidth = useCodeSessionStore((s) => s.setLeftWidth)
   const toggleLeft = useCodeSessionStore((s) => s.toggleLeft)
   const toggleRight = useCodeSessionStore((s) => s.toggleRight)
 
-  // The sidebar footer owns liveness: the same store slices the old top bar
-  // read, rendered as one compact row instead of a full-width banner.
-  const online = useCodeSessionStore((s) => s.online)
-  const healthError = useCodeSessionStore((s) => s.healthError)
-  const { refresh } = useRuntimeStatus()
-  const onlineLabel =
-    online === 'online'
-      ? t('status.online.online')
-      : online === 'offline'
-        ? t('status.online.offline')
-        : t('status.online.unknown')
-  const refreshLabel = healthError ? t('status.refreshFailed', { error: healthError }) : t('status.refresh')
+  // The sidebar footer owns liveness: the same label mapping the settings top
+  // bar uses, rendered as one compact row instead of a full-width banner.
+  const { online, onlineLabel, refreshLabel, healthError, refresh } = useRuntimeStatusLabels()
+
+  // Drawer semantics: move focus in on open, close on Escape. Focus returns
+  // to the toggle through the browser's default after the drawer hides.
+  const drawerRef = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (rightCollapsed) return
+    drawerRef.current?.focus()
+    const onKey = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') toggleRight()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [rightCollapsed, toggleRight])
 
   return (
     <div className="ark-shell">
       <div
         className="ark-cols"
-        style={{ '--ark-left': `${leftWidth}px`, '--ark-right': `${rightWidth}px` } as React.CSSProperties}
+        style={{ '--ark-left': `${leftWidth}px` } as React.CSSProperties}
       >
         {leftCollapsed ? (
           <button
@@ -95,17 +96,21 @@ export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): 
             <div className="ark-col ark-col--left">
               {left}
               <footer className="ark-sidebar__foot">
-                <div
-                  className="ark-sidebar__status"
-                  role="status"
-                  aria-live="polite"
-                  aria-label={[onlineLabel, healthError].filter(Boolean).join(' ')}
-                >
-                  <span
-                    className={`ark-dot ark-dot--${online === 'online' ? 'ok' : online === 'offline' ? 'bad' : 'idle'}`}
-                    aria-hidden="true"
-                  />
-                  <span className="ark-sidebar__status-label">{onlineLabel}</span>
+                <div className="ark-sidebar__foot-row">
+                  <div
+                    className="ark-sidebar__status"
+                    role="status"
+                    aria-live="polite"
+                    aria-label={[onlineLabel, healthError]
+                      .filter(Boolean)
+                      .join(t('status.ariaSeparator'))}
+                  >
+                    <span
+                      className={`ark-dot ark-dot--${online === 'online' ? 'ok' : online === 'offline' ? 'bad' : 'idle'}`}
+                      aria-hidden="true"
+                    />
+                    <span className="ark-sidebar__status-label">{onlineLabel}</span>
+                  </div>
                   <button
                     type="button"
                     className="ark-sidebar__refresh"
@@ -119,7 +124,7 @@ export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): 
                 <ViewSwitch />
               </footer>
             </div>
-            <Resizer side="left" width={leftWidth} setWidth={setLeftWidth} />
+            <Resizer width={leftWidth} setWidth={setLeftWidth} />
           </>
         )}
 
@@ -129,7 +134,6 @@ export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): 
               <button
                 type="button"
                 className="ark-workbench-tools__btn"
-                aria-pressed={!leftCollapsed}
                 title={t('workbench.layout.hideThreads')}
                 aria-label={t('workbench.layout.hideThreads')}
                 onClick={toggleLeft}
@@ -140,7 +144,7 @@ export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): 
             <button
               type="button"
               className="ark-workbench-tools__btn"
-              aria-pressed={!rightCollapsed}
+              aria-expanded={!rightCollapsed}
               title={
                 rightCollapsed ? t('workbench.layout.openContext') : t('workbench.layout.closeContext')
               }
@@ -155,19 +159,24 @@ export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): 
           {center}
         </div>
 
-        {rightCollapsed ? null : (
-          <>
-            <button
-              type="button"
-              className="ark-drawer-scrim"
-              aria-label={t('workbench.layout.closeContext')}
-              onClick={toggleRight}
-            />
-            <aside className="ark-drawer" style={{ '--ark-right': `${rightWidth}px` } as React.CSSProperties}>
-              {right}
-            </aside>
-          </>
-        )}
+        <button
+          type="button"
+          className="ark-drawer-scrim"
+          hidden={rightCollapsed}
+          aria-label={t('workbench.layout.closeContext')}
+          onClick={toggleRight}
+        />
+        <aside
+          ref={drawerRef}
+          className="ark-drawer"
+          hidden={rightCollapsed}
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('workbench.layout.context')}
+          tabIndex={-1}
+        >
+          {right}
+        </aside>
       </div>
     </div>
   )

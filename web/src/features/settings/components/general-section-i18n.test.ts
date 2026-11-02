@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest'
 const GENERAL_SECTION = 'settings/components/GeneralSection.tsx'
 const SECTION_SHELL = 'settings/components/SectionShell.tsx'
 const RUNTIME_STATUS_BAR = 'code-session/components/RuntimeStatusBar.tsx'
-const COVERED = [GENERAL_SECTION, SECTION_SHELL, RUNTIME_STATUS_BAR]
+const RUNTIME_STATUS_LABELS = 'code-session/hooks/use-runtime-status-labels.ts'
+const COVERED = [GENERAL_SECTION, SECTION_SHELL, RUNTIME_STATUS_BAR, RUNTIME_STATUS_LABELS]
 
 const CJK = /[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]/
 
@@ -38,8 +39,13 @@ describe('general section and status bar copy', () => {
     expect(general).toContain("t('settings.general.logLevel.label')")
 
     const statusBar = stripComments(readComponent(RUNTIME_STATUS_BAR))
-    expect(statusBar).toContain("'status.online.unknown'")
+    // The online-wording mapping lives in the shared labels hook so the
+    // sidebar footer and the top bar cannot drift; the stream labels stay
+    // status-bar specific.
+    const statusLabels = stripComments(readComponent(RUNTIME_STATUS_LABELS))
+    expect(statusLabels).toContain("'status.online.unknown'")
+    expect(statusLabels).toContain("t('status.refresh')")
     expect(statusBar).toContain("'status.stream.closed'")
-    expect(statusBar).toContain("t('status.refresh')")
+    expect(statusBar).toContain('useRuntimeStatusLabels')
   })
 })
