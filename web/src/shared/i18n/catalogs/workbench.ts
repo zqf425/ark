@@ -57,6 +57,9 @@ export const WORKBENCH_MESSAGES = {
   'workbench.changes.untracked': ['未跟踪', 'Untracked'],
   'workbench.changes.truncatedFile': ['（已截断）', ' (truncated)'],
   'workbench.changes.binaryFile': ['（二进制）', ' (binary)'],
+  'workbench.changes.noPatch': ['无差异文本（二进制文件或超出上限）。', 'No patch text (binary file or over the size bound).'],
+
+  'workbench.diff.aria': ['文件行级差异', 'Line-level file diff'],
 
   'workbench.changesSummary.files': ['{count} 个文件', '{count} files'],
   'workbench.changesSummary.writes': ['{count} 个写入文件', '{count} written files'],

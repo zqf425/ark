@@ -79,3 +79,23 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.ark-workspace-diff__file > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.ark-workspace-diff__file > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ark-workspace-diff__file > summary::before {
+  content: '▸';
+  display: inline-block;
+  width: 1em;
+  color: var(--ark-text-faint);
+}
+
+.ark-workspace-diff__file[open] > summary::before {
+  content: '▾';
+}

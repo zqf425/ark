@@ -7,6 +7,7 @@ import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../../code-session/state/store'
 import { getChanges } from '../api/workbench-api'
 import { changesSummary } from './changes-summary'
+import { DiffView } from './DiffView'
 import { getWorkspaceDiff, getWorkspaceView, switchWorkspace } from '../../settings/api/workspace-api'
 import { workspaceDiffSummary } from './workspace-diff-summary'
 import './workspace-status.css'
@@ -175,11 +176,20 @@ export function ChangesPanel(): JSX.Element {
               <section key={label} className="ark-workspace-diff__group">
                 <h3>{label}</h3>
                 {files.map((file) => (
-                  <code key={`${file.status}:${file.path}`}>
-                    {file.status} {file.path}
-                    {file.truncated ? t('workbench.changes.truncatedFile') : ''}
-                    {file.binary ? t('workbench.changes.binaryFile') : ''}
-                  </code>
+                  <details key={`${file.status}:${file.path}`} className="ark-workspace-diff__file">
+                    <summary>
+                      <code>
+                        {file.status} {file.path}
+                        {file.truncated ? t('workbench.changes.truncatedFile') : ''}
+                        {file.binary ? t('workbench.changes.binaryFile') : ''}
+                      </code>
+                    </summary>
+                    {file.patch ? (
+                      <DiffView patch={file.patch} />
+                    ) : (
+                      <p className="ark-panel__hint ark-panel__hint--flush">{t('workbench.changes.noPatch')}</p>
+                    )}
+                  </details>
                 ))}
               </section>
             ))}

@@ -1,0 +1,40 @@
+/* Line-level diff view. Colors follow the workspace-status conventions:
+   theme tokens only, additions green, deletions red. */
+
+.ark-diff {
+  margin: 0.4em 0 0.6em;
+  overflow-x: auto;
+}
+
+.ark-diff__summary {
+  margin: 0 0 0.25em;
+  font-size: 0.85em;
+}
+
+.ark-diff__add { color: var(--ark-ok); }
+.ark-diff__del { color: var(--ark-error); }
+
+.ark-diff__table {
+  border-collapse: collapse;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  min-width: 100%;
+}
+
+.ark-diff__num {
+  color: var(--ark-text-faint);
+  text-align: right;
+  padding: 0 0.5em;
+  user-select: none;
+  white-space: nowrap;
+  border-right: 1px solid var(--ark-border);
+}
+
+.ark-diff__cell {
+  white-space: pre-wrap;
+  padding: 0 0.6em;
+}
+
+.ark-diff__line--add .ark-diff__cell { background: color-mix(in srgb, var(--ark-ok) 16%, transparent); }
+.ark-diff__line--remove .ark-diff__cell { background: color-mix(in srgb, var(--ark-error) 16%, transparent); }
+.ark-diff__line--meta .ark-diff__cell { color: var(--ark-text-faint); }
