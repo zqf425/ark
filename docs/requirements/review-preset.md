@@ -24,9 +24,9 @@ ark 的模型已有能力做代码审查,但缺少一个**明确目标 + 只读�
 2. **只读约束是运行时的,不是请求的**:建线程后立即 `PATCH /v1/threads/{id}` 将
    `runtime.autonomy` 设为 `strict`——该自治下所有写路径与 shell 都需要人工批准,而 headless
    无人应答,因此模型事实上无法修改工作区;审查指令同时明示 findings-only。两者缺一不可。
-3. **审查指令**(模型可见,英文,与工具描述同风格):要求只报告发现,不修改文件;每条发现
-   按 P0(正确性/安全,必须修)/P1(疑似缺陷)/P2(打磨)分级,引用文件与行号;没有发现时
-   明确说明。
+3. **审查指令**(模型可见,英文,与工具描述同风格):要求只报告发现,**禁止调用任何工具**
+   (strict 下工具调用会把无人值守回合永久停在审批 gate 上);每条发现按 P0(正确性/安全,
+   必须修)/P1(疑似缺陷)/P2(打磨)分级,引用文件与行号;没有发现时明确说明。
 4. **提示词必须自包含**(2026-11-02 补强):strict 下模型的任何工具调用都会把无人值守回合
    永久停在审批 gate 上(实测模型在审查中调用 `bash git status` 触发)。因此指令显式禁止
    调用工具,并由 CLI 预取 `git status --porcelain=v1` 与 `git log --oneline -5` 作为
@@ -42,7 +42,11 @@ ark 的模型已有能力做代码审查,但缺少一个**明确目标 + 只读�
 - CLI 解析:三种目标、非法目标、`--review` 与 prompt 互斥(单测)。
 - diff 计算:临时 git 仓库实测 uncommitted / base / commit 三种目标的命令输出与截断(单测,
   离线)。
-- 指令构建:prompt 包含目标标签、diff 与 findings-only 约束(单测)。
+- 指令构建:prompt 包含目标标签、diff、findings-only 与「禁用工具」约束、仓库快照段落
+  (单测);快照保留 `git status --porcelain` 首列状态码的前导空格,失败时写显式占位而非
+  空串(单测)。
+- **gate 有界退出**:headless 侧 `approval_requested`/`user_input_requested` 事件使回合
+  以结构化错误退出(exit 1),无人值守入口不再可能无限等待(单测)。
 - 真实模型下的审查质量由发布验收承接。
 
 ## 落地情况(2026-11-01)
@@ -59,3 +63,9 @@ ark 的模型已有能力做代码审查,但缺少一个**明确目标 + 只读�
 - **2026-11-02 自包含提示词补强**:真实模型(DeepSeek)在审查中调用 `bash git status`,
   strict 无人值守下审批 gate 永挂,回合无法收敛。修复:`review_prompt` 显式禁止工具调用,
   CLI 预取仓库快照(`repo_context`)并入提示词;单测同步(禁工具语句、快照段落)。
+- **2026-11-02 复跑证据**:补强后以 workbuddy `global:deepseek-v4.1-flash` 重跑
+  `arkd run --review uncommitted`:exit 0,零工具调用,结构化 findings 正常产出
+  (对三文件演示仓库正确给出两条 P2 观察并明确「无 P0/P1」)。
+- **2026-11-02 gate 有界退出**:headless 把 `approval_requested`/`user_input_requested`
+  视为不可收敛终态(exit 1,带 gate 摘要)——即使模型仍无视禁令调用工具,无人值守回合
+  也有结构上界,不再依赖提示词约定。快照 8 KiB 截断与失败占位同步落地。

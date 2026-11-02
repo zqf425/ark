@@ -256,13 +256,29 @@ fn compute_diff(target: &crate::cli::ReviewTarget, workspace: &Path) -> Result<S
     if combined.len() <= REVIEW_DIFF_CAP_BYTES {
         return Ok(combined);
     }
-    let mut end = REVIEW_DIFF_CAP_BYTES;
-    while end > 0 && !combined.is_char_boundary(end) {
-        end -= 1;
-    }
-    combined.truncate(end);
-    combined.push_str("\n[diff truncated]\n");
+    combined.truncate_on_char_boundary(REVIEW_DIFF_CAP_BYTES, "\n[diff truncated]\n");
     Ok(combined)
+}
+
+/// Cut `text` back to `cap` bytes without splitting a multi-byte character,
+/// then append `marker`. Shared by the diff and the repository snapshot so
+/// neither can silently blow the prompt budget.
+trait TruncateOnCharBoundary {
+    fn truncate_on_char_boundary(&mut self, cap: usize, marker: &str);
+}
+
+impl TruncateOnCharBoundary for String {
+    fn truncate_on_char_boundary(&mut self, cap: usize, marker: &str) {
+        if self.len() <= cap {
+            return;
+        }
+        let mut end = cap;
+        while end > 0 && !self.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.truncate(end);
+        self.push_str(marker);
+    }
 }
 
 fn git_args<const N: usize>(args: [&str; N]) -> Vec<String> {
@@ -303,12 +319,35 @@ fn git_capture(workspace: &Path, args: Vec<String>) -> Result<String, Failure> {
 /// Read-only repository snapshot embedded in the review prompt so the model
 /// never needs a shell: with the thread pinned to `strict`, a `bash` call
 /// parks the unattended turn on an approval gate that nobody can resolve
-/// (real review runs did exactly that with `git status`). Both commands are
-/// best-effort — a missing snapshot must not fail the review startup.
+/// (real review runs did exactly that with `git status`). Must be called
+/// **after** `compute_diff` succeeded — that call already proved the
+/// workspace is a usable git repository. Both commands are best-effort: a
+/// failure renders an explicit placeholder instead of an empty (clean-looking)
+/// snapshot.
 fn repo_context(workspace: &Path) -> String {
-    let status = git_capture(workspace, git_args(["status", "--porcelain=v1"])).unwrap_or_default();
-    let log = git_capture(workspace, git_args(["log", "--oneline", "-5"])).unwrap_or_default();
-    format!("git status --porcelain=v1:\n{status}\n\ngit log --oneline -5:\n{log}")
+    const SNAPSHOT_CAP_BYTES: usize = 8 * 1024;
+    let run = |args: &[&str]| -> String {
+        git_run(workspace, &git_args_copied(args))
+            .map(|out| {
+                // `trim_end` only: `git status --porcelain` lines start with a
+                // two-char status code whose first byte is a space for
+                // unstaged changes — a full `trim` would rewrite ` M` into
+                // `M` and mislabel the change as staged.
+                out.trim_end_matches('\n').to_string()
+            })
+            .unwrap_or_else(|_| "(unavailable)".to_string())
+    };
+    let mut snapshot = format!(
+        "git status --porcelain=v1:\n{}\n\ngit log --oneline -5:\n{}",
+        run(&["status", "--porcelain=v1"]),
+        run(&["log", "--oneline", "-5"]),
+    );
+    snapshot.truncate_on_char_boundary(SNAPSHOT_CAP_BYTES, "\n[snapshot truncated]\n");
+    snapshot
+}
+
+fn git_args_copied(args: &[&str]) -> Vec<String> {
+    args.iter().map(|arg| (*arg).to_string()).collect()
 }
 
 /// The model-visible instruction for one review turn.
@@ -316,7 +355,7 @@ fn review_prompt(label: &str, diff: &str, repo_context: &str) -> String {
     format!(
         "You are performing a read-only code review of the {label}. \
 Report findings only. Do not call any tool: the repository snapshot and the \
-diff below are the complete inputs, and this turn runs unattended, so a tool \
+diff below are the inputs you have, and this turn runs unattended, so a tool \
 call would stall it forever. \
 Classify each finding as P0 (correctness or security, must fix), \
 P1 (likely bug or clear defect) or P2 (polish). \
@@ -506,6 +545,18 @@ fn handle_frame(frame: &str) -> Result<Option<Result<(), Failure>>, Failure> {
         "turn_aborted" => {
             let reason = parsed["reason"].as_str().unwrap_or("aborted").to_string();
             Ok(Some(Err(Failure::Turn(reason))))
+        }
+        // An unattended run has no one to answer a gate: waiting would park the
+        // process until the runtime dies. Fail fast with the gate summary so
+        // CI sees *why* the turn cannot finish.
+        "approval_requested" | "user_input_requested" => {
+            let summary = parsed["summary"]
+                .as_str()
+                .or_else(|| parsed["prompt"].as_str())
+                .unwrap_or("unspecified");
+            Ok(Some(Err(Failure::Turn(format!(
+                "turn parked on an unresolvable gate ({event_kind}): {summary}"
+            )))))
         }
         _ => Ok(None),
     }
@@ -708,5 +759,40 @@ mod tests {
         assert!(prompt.contains("P0"));
         assert!(prompt.contains("uncommitted changes"));
         assert!(prompt.contains("+line two"));
+    }
+
+    #[test]
+    fn repo_context_keeps_the_porcelain_leading_space_and_degrades_explicitly() {
+        let repo = git_repo("repo-context");
+        let workspace = repo.1.clone();
+        std::fs::write(workspace.join("a.txt"), "first\nsecond\n").expect("write");
+        let context = repo_context(&workspace);
+        assert!(
+            context.contains(" M a.txt"),
+            "unstaged code is ` M`: {context}"
+        );
+        assert!(context.contains("git log --oneline -5:"));
+        // A non-git directory must degrade to explicit placeholders, not an
+        // empty (clean-looking) snapshot, and must not fail the review.
+        let plain = tempfile::tempdir_in(std::env::temp_dir()).expect("temp dir");
+        let context = repo_context(plain.path());
+        assert_eq!(
+            context.matches("(unavailable)").count(),
+            2,
+            "both commands marked unavailable: {context}"
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_gate_ends_the_unattended_stream() {
+        let frame = "id: 5\nevent: approval_requested\ndata: {\"kind\":\"approval_requested\",\"seq\":5,\"approval_id\":\"a1\",\"tool\":\"bash\",\"summary\":\"bash git status\"}\n\n";
+        let outcome = handle_frame(frame).unwrap().unwrap();
+        match outcome {
+            Err(Failure::Turn(message)) => {
+                assert!(message.contains("unresolvable gate"), "{message}");
+                assert!(message.contains("bash git status"), "{message}");
+            }
+            other => panic!("expected a turn failure, got {other:?}"),
+        }
     }
 }
