@@ -28,7 +28,13 @@ function parseExtraDirs(input: string): string[] {
 }
 
 /** The editable half: master switch plus extra scan roots. */
-function SkillsConfigCard({ settings }: { settings: SettingsApi }): JSX.Element | null {
+function SkillsConfigCard({
+  settings,
+  onSaved,
+}: {
+  settings: SettingsApi
+  onSaved: () => void
+}): JSX.Element | null {
   const { t } = useI18n()
   const toast = useToast()
   const { config, saving, save } = settings
@@ -62,6 +68,10 @@ function SkillsConfigCard({ settings }: { settings: SettingsApi }): JSX.Element 
       toast.push('error', t('settings.skills.rejected'), outcome.value.reason)
       return
     }
+    // The saved config is already live on the runtime, so re-read the skill
+    // list right away instead of leaving a stale listing under the success
+    // toast until the user clicks refresh.
+    onSaved()
     toast.push('success', t('settings.skills.saveSucceeded'), t('settings.skills.effectiveHint'))
   }
 
@@ -171,7 +181,7 @@ export function SkillsSection({ settings }: { settings: SettingsApi }): JSX.Elem
         </Button>
       }
     >
-      <SkillsConfigCard settings={settings} />
+      <SkillsConfigCard settings={settings} onSaved={() => void api.refresh()} />
 
       {api.roots.length > 0 ? (
         <div className="ark-card__meta">

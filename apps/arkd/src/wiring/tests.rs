@@ -674,3 +674,31 @@ async fn build_hands_out_the_schedule_handle_without_starting_the_loop() {
     let wiring = crate::wiring::build(&args).await.expect("runtime build");
     assert!(!wiring.schedules.is_started());
 }
+
+#[test]
+fn skills_config_source_reads_the_latest_snapshot() {
+    // The composition root injects this closure into `SkillRuntime`; a saved
+    // skills patch must be visible through it without rebuilding the runtime
+    // (skills is a `Hot` reload class).
+    let store = Arc::new(ConfigStore::new(RuntimeConfig::default()));
+    let source = skills_config_source(store.clone());
+    assert!(source().enabled);
+
+    let applied = store.apply(ark_contract::ConfigPatch {
+        skills: Some(ark_contract::SkillsSettings {
+            enabled: false,
+            extra_dirs: vec!["/tmp/extra-skills".into()],
+        }),
+        ..ark_contract::ConfigPatch::default()
+    });
+    assert!(
+        matches!(applied, ark_contract::ApplyResult::Applied { .. }),
+        "skills patch applies hot: {applied:?}"
+    );
+
+    let config = source();
+    assert!(!config.enabled);
+    assert!(config
+        .roots
+        .contains(&std::path::PathBuf::from("/tmp/extra-skills")));
+}

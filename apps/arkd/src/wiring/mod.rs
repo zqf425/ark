@@ -175,23 +175,10 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     // rescan without a restart. The workspace root is still captured once —
     // switching workspaces goes through its own HTTP surface and leases a new
     // root per turn.
-    let skills = {
-        let config = config.clone();
-        let config_source = Arc::new(move || {
-            let settings = config.snapshot().skills.clone();
-            let mut skill_roots = ark_skills::SkillsConfig::default().roots;
-            skill_roots.extend(settings.extra_dirs.iter().map(std::path::PathBuf::from));
-            ark_skills::SkillsConfig {
-                enabled: settings.enabled,
-                roots: skill_roots,
-                ..ark_skills::SkillsConfig::default()
-            }
-        });
-        Arc::new(ark_skills::SkillRuntime::new(
-            config_source,
-            roots.current(),
-        ))
-    };
+    let skills = Arc::new(ark_skills::SkillRuntime::new(
+        skills_config_source(config.clone()),
+        roots.current(),
+    ));
     let workspace = Arc::new(ark_workspace::WorkspaceInspector::new());
     let mcp = Arc::new(ark_mcp::McpServerRegistry::new(args.data_dir.clone()));
     let memory = Arc::new(ark_store::MemoryFileStore::open(&args.data_dir)?);
@@ -433,6 +420,23 @@ pub(crate) fn autonomy_from_override_or_default(
     config: &RuntimeConfig,
 ) -> ark_common::Result<Autonomy> {
     autonomy_from_override(value.or(Some(&config.default_autonomy)))
+}
+
+/// The live config source `SkillRuntime` re-reads on every scan/resolve.
+///
+/// Extracted from `build` so a test can assert that a saved skills patch is
+/// visible through the same closure the composition root injects.
+fn skills_config_source(config: Arc<ConfigStore>) -> ark_skills::ConfigSource {
+    Arc::new(move || {
+        let settings = config.snapshot().skills.clone();
+        let mut skill_roots = ark_skills::SkillsConfig::default().roots;
+        skill_roots.extend(settings.extra_dirs.iter().map(std::path::PathBuf::from));
+        ark_skills::SkillsConfig {
+            enabled: settings.enabled,
+            roots: skill_roots,
+            ..ark_skills::SkillsConfig::default()
+        }
+    })
 }
 
 #[cfg(test)]

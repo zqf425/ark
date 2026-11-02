@@ -38,6 +38,15 @@ struct Snapshot {
     validation_errors: Vec<SkillLoadWarning>,
 }
 
+/// Extra-root scan output for one thread view.
+#[derive(Debug, Default)]
+struct ThreadExtras {
+    skills: Vec<LoadedSkill>,
+    warnings: Vec<SkillLoadWarning>,
+    loaded_roots: Vec<PathBuf>,
+    configured_roots: Vec<PathBuf>,
+}
+
 /// Where the runtime reads its configuration from.
 ///
 /// The server passes a closure over the live config snapshot, so a saved
@@ -138,79 +147,23 @@ impl SkillRuntime {
         // `list`; extra roots are scanned per call already.
         self.rescan();
         let snapshot = self.read();
-        let mut extra_skills: Vec<LoadedSkill> = Vec::new();
-        let mut warnings: Vec<SkillLoadWarning> = Vec::new();
-        let mut loaded_roots: Vec<PathBuf> = Vec::new();
-        let mut configured_roots: Vec<PathBuf> = Vec::new();
-        for raw in thread_extra_roots {
-            let raw = raw.to_string_lossy().trim().to_string();
-            if raw.is_empty() {
-                continue;
-            }
-            let configured = self.resolve_extra_root(Path::new(&raw));
-            if configured_roots.iter().any(|seen| seen == &configured) {
-                continue;
-            }
-            configured_roots.push(configured.clone());
-            if !configured.is_dir() {
-                warnings.push(warning(
-                    &configured,
-                    format!(
-                        "extra skill root is not readable: {}",
-                        path_display(&configured)
-                    ),
-                ));
-                continue;
-            }
-            let outcome =
-                discovery::scan_roots(std::slice::from_ref(&configured), SkillSource::ThreadExtra);
-            // Validation errors and warnings both surface here: this view has a
-            // `warnings` list, so nothing found while loading extras is lost.
-            warnings.extend(outcome.warnings);
-            warnings.extend(outcome.validation_errors);
-            if outcome.skills.is_empty() {
-                if !warnings
-                    .iter()
-                    .any(|seen| seen.root == path_display(&configured))
-                {
-                    warnings.push(warning(
-                        &configured,
-                        format!(
-                            "no skill packages found in {} (expected skill.json or SKILL.md)",
-                            path_display(&configured)
-                        ),
-                    ));
-                }
-                continue;
-            }
-            loaded_roots.push(configured.clone());
-            for skill in outcome.skills {
-                if let Some(base) = snapshot.skills.iter().find(|base| base.id == skill.id) {
-                    warnings.push(warning(
-                        &skill.root,
-                        format!(
-                            "extra skill `{}` overrides base package at {}",
-                            skill.id,
-                            path_display(&base.root)
-                        ),
-                    ));
-                }
-                extra_skills.retain(|existing| existing.id != skill.id);
-                extra_skills.push(skill);
-            }
-        }
-        extra_skills.sort_by(|a, b| a.id.cmp(&b.id));
+        let extras = self.scan_thread_extras(thread_extra_roots, &snapshot.skills);
         ThreadSkillsResponse {
             enabled: true,
             base_roots: self.display_roots(&config),
-            extra_roots: configured_roots
+            extra_roots: extras
+                .configured_roots
                 .iter()
                 .map(|root| path_display(root))
                 .collect(),
-            loaded_extra_roots: loaded_roots.iter().map(|root| path_display(root)).collect(),
+            loaded_extra_roots: extras
+                .loaded_roots
+                .iter()
+                .map(|root| path_display(root))
+                .collect(),
             base_skills: snapshot.skills.iter().map(LoadedSkill::summary).collect(),
-            extra_skills: extra_skills.iter().map(LoadedSkill::summary).collect(),
-            warnings,
+            extra_skills: extras.skills.iter().map(LoadedSkill::summary).collect(),
+            warnings: extras.warnings,
             base_validation_errors: snapshot.validation_errors.clone(),
         }
     }
@@ -261,6 +214,87 @@ impl SkillRuntime {
     }
 
     // -- internals ---------------------------------------------------------
+
+    /// Scan a thread's extra roots against the base skills of the snapshot.
+    ///
+    /// A missing, unreadable, or empty root becomes a warning; the remaining
+    /// roots still load. An extra skill wins over a base skill with the same
+    /// id, and the shadowed base package is reported so nothing is replaced
+    /// silently.
+    fn scan_thread_extras(
+        &self,
+        thread_extra_roots: &[PathBuf],
+        base_skills: &[LoadedSkill],
+    ) -> ThreadExtras {
+        let mut extra_skills: Vec<LoadedSkill> = Vec::new();
+        let mut warnings: Vec<SkillLoadWarning> = Vec::new();
+        let mut loaded_roots: Vec<PathBuf> = Vec::new();
+        let mut configured_roots: Vec<PathBuf> = Vec::new();
+        for raw in thread_extra_roots {
+            let raw = raw.to_string_lossy().trim().to_string();
+            if raw.is_empty() {
+                continue;
+            }
+            let configured = self.resolve_extra_root(Path::new(&raw));
+            if configured_roots.iter().any(|seen| seen == &configured) {
+                continue;
+            }
+            configured_roots.push(configured.clone());
+            if !configured.is_dir() {
+                warnings.push(warning(
+                    &configured,
+                    format!(
+                        "extra skill root is not readable: {}",
+                        path_display(&configured)
+                    ),
+                ));
+                continue;
+            }
+            let outcome =
+                discovery::scan_roots(std::slice::from_ref(&configured), SkillSource::ThreadExtra);
+            // Validation errors and warnings both surface here: this view has a
+            // `warnings` list, so nothing found while loading extras is lost.
+            warnings.extend(outcome.warnings);
+            warnings.extend(outcome.validation_errors);
+            if outcome.skills.is_empty() {
+                if !warnings
+                    .iter()
+                    .any(|seen| seen.root == path_display(&configured))
+                {
+                    warnings.push(warning(
+                        &configured,
+                        format!(
+                            "no skill packages found in {} (expected skill.json or SKILL.md)",
+                            path_display(&configured)
+                        ),
+                    ));
+                }
+                continue;
+            }
+            loaded_roots.push(configured.clone());
+            for skill in outcome.skills {
+                if let Some(base) = base_skills.iter().find(|base| base.id == skill.id) {
+                    warnings.push(warning(
+                        &skill.root,
+                        format!(
+                            "extra skill `{}` overrides base package at {}",
+                            skill.id,
+                            path_display(&base.root)
+                        ),
+                    ));
+                }
+                extra_skills.retain(|existing| existing.id != skill.id);
+                extra_skills.push(skill);
+            }
+        }
+        extra_skills.sort_by(|a, b| a.id.cmp(&b.id));
+        ThreadExtras {
+            skills: extra_skills,
+            warnings,
+            loaded_roots,
+            configured_roots,
+        }
+    }
 
     /// Replace the snapshot with a fresh scan, so a directory created at
     /// runtime shows up without `POST /v1/threads/{id}/skills/refresh`.

@@ -155,6 +155,36 @@ mod tests {
     }
 
     #[test]
+    fn every_restart_class_patch_field_flows_through_restart_fields() {
+        // The rejection path consults `restart_fields`, not the table, so a
+        // new Restart-class patch field must be mapped there or it would be
+        // applied wholesale instead of rejected. An unknown name panics here
+        // to force the decision (the root cause of the skills regression:
+        // two hand-written lists drifting apart).
+        for (name, class) in FIELD_CLASSES {
+            if *class != ReloadClass::Restart {
+                continue;
+            }
+            match *name {
+                "port" => {
+                    let patch = ConfigPatch {
+                        port: Some(1),
+                        ..ConfigPatch::default()
+                    };
+                    assert_eq!(restart_fields(&patch), vec![FieldPath::new("port")]);
+                }
+                // `data_dir` has no patch field: it is fixed by the CLI at
+                // startup, so there is nothing for a patch to carry.
+                "data_dir" => {}
+                other => panic!(
+                    "Restart-class field `{other}` is not mapped in restart_fields; \
+                     extend it or reclassify the field"
+                ),
+            }
+        }
+    }
+
+    #[test]
     fn tuning_diff_names_nested_fields() {
         let old = TuningConfig::default();
         let mut new = old.clone();
