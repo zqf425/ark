@@ -33,6 +33,7 @@ use crate::exec::events::TurnEvents;
 use crate::exec::gate::{ApprovalRequest, GateBroker, UserInputRequest};
 use crate::exec::journal::SessionWriter;
 use crate::exec::tool_runner::ToolRunner;
+use crate::policy::budget::{BudgetVerdict, TurnBudget};
 use crate::service::machine::TurnMachine;
 use crate::service::step::step;
 use ark_ports::{CancelToken, SteerQueue};
@@ -217,7 +218,10 @@ impl Reactor {
         );
         loop {
             let action = step(self.machine.state(), &input);
-            let action = self.rescue_pending_steering(action).await?;
+            let action = match action {
+                Action::Finish { outcome } => self.rescue_pending_steering(outcome).await?,
+                other => other,
+            };
             self.machine
                 .enter(&action)
                 .map_err(|err| ArkError::internal(err.to_string()))?;
@@ -353,17 +357,20 @@ impl Reactor {
     /// the turn without another round — while the server has already answered
     /// 202 to the steer. Convert the finish into a zero-batch dispatch so the
     /// correction is journaled and the next round consumes it, still bounded by
-    /// the round budget. Interrupt and failure finishes keep aborting; a steer
-    /// must not resurrect a turn that is already failing or cancelled.
-    async fn rescue_pending_steering(&mut self, action: Action) -> Result<Action> {
-        let completing = matches!(
-            action,
-            Action::Finish {
-                outcome: TurnOutcome::Completed
-            }
-        );
-        if !completing || !self.has_pending_steering() {
-            return Ok(action);
+    /// the round budget. A cancelled or budget-exhausted turn keeps its original
+    /// finish instead: journaling the correction there would claim a message
+    /// the model never sees, because the rescue round would abort at the next
+    /// cancel check or fail the budget check after `turn_steered` was written.
+    async fn rescue_pending_steering(&mut self, outcome: TurnOutcome) -> Result<Action> {
+        if outcome != TurnOutcome::Completed
+            || !self.has_pending_steering()
+            || self.cancel.is_cancelled()
+            || !matches!(
+                TurnBudget::new(self.machine.limits()).check(&self.machine.progress()),
+                BudgetVerdict::Allow
+            )
+        {
+            return Ok(Action::Finish { outcome });
         }
         self.apply_steering().await?;
         Ok(Action::Dispatch(DispatchPlan::default()))
@@ -899,12 +906,11 @@ mod tests {
             "the rescued steer must drive one more round"
         );
         let recorded = writer.recorded();
-        assert!(
-            recorded
-                .iter()
-                .any(|event| matches!(event, RuntimeEvent::TurnSteered { .. })),
-            "turn_steered must be journaled"
-        );
+        let steered = recorded
+            .iter()
+            .filter(|event| matches!(event, RuntimeEvent::TurnSteered { .. }))
+            .count();
+        assert_eq!(steered, 1, "the correction is journaled exactly once");
         assert!(
             recorded.iter().any(|event| matches!(
                 event,
@@ -920,6 +926,72 @@ mod tests {
                 .any(|event| matches!(event, RuntimeEvent::TurnCompleted { .. })),
             "the turn still completes"
         );
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_finish_does_not_rescue_the_steering() {
+        let writer = Arc::new(MemoryWriter::new());
+        let queue = Arc::new(SteerQueue::new());
+        queue.push("late correction");
+        let mut reactor = reactor(writer.clone()).with_steering(queue);
+        reactor.cancel.cancel();
+
+        let action = reactor
+            .rescue_pending_steering(TurnOutcome::Completed)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            action,
+            Action::Finish {
+                outcome: TurnOutcome::Completed
+            }
+        ));
+        assert!(!writer
+            .recorded()
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::TurnSteered { .. })));
+    }
+
+    #[tokio::test]
+    async fn an_exhausted_budget_does_not_rescue_the_steering() {
+        let writer = Arc::new(MemoryWriter::new());
+        let queue = Arc::new(SteerQueue::new());
+        queue.push("late correction");
+        let events = TurnEvents::new(ThreadId::new(), TurnId::new());
+        let limits = crate::domain::TurnLimits {
+            max_rounds: 0,
+            ..crate::domain::TurnLimits::tiny()
+        };
+        let mut reactor = Reactor::new(ReactorConfig {
+            model: Arc::new(NoopModel),
+            tools: Arc::new(MapToolRunner::new()),
+            writer: Arc::clone(&writer) as Arc<dyn SessionWriter>,
+            gates: Arc::new(AllowAllGates),
+            sandbox: Arc::new(ReadOnlySandbox),
+            events,
+            cancel: CancelToken::new(),
+            seed: ModelSeed::default(),
+            machine: TurnMachine::new(limits),
+            chunk_buffer: 1,
+        })
+        .with_steering(queue);
+
+        let action = reactor
+            .rescue_pending_steering(TurnOutcome::Completed)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            action,
+            Action::Finish {
+                outcome: TurnOutcome::Completed
+            }
+        ));
+        assert!(!writer
+            .recorded()
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::TurnSteered { .. })));
     }
 
     #[tokio::test]
