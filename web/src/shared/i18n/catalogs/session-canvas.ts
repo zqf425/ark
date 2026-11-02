@@ -115,6 +115,7 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.composer.attachmentTooLarge': ['「{name}」超出大小上限', '"{name}" exceeds the size limit'],
   'canvas.composer.attachmentRemove': ['移除附件 {name}', 'Remove attachment {name}'],
   'canvas.composer.attachmentsAria': ['已添加附件', 'Added attachments'],
+  'canvas.composer.attachLiveHint': ['回合进行中不支持添加附件；请排队消息，结束后再附。', 'Attachments cannot be added mid-turn; queue a message instead.'],
   'canvas.composer.queue': ['排队', 'Queue'],
   'canvas.composer.queuedChip': ['#{index} 排队', '#{index} queued'],
   'canvas.composer.queuedRemove': ['移除排队消息 #{index}', 'Remove queued message #{index}'],
