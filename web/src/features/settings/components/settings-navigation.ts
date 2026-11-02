@@ -1,7 +1,7 @@
 /** Local settings-page navigation only. Runtime configuration remains in each section hook. */
 import type { MessageKey } from '../../../shared/i18n/messages'
 
-export type SettingsSectionId = 'general' | 'runtime' | 'providers' | 'integrations' | 'skills' | 'schedules'
+export type SettingsSectionId = 'general' | 'runtime' | 'providers' | 'integrations' | 'memory' | 'skills' | 'schedules'
 
 export type SettingsSection = {
   id: SettingsSectionId
@@ -14,6 +14,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'runtime', labelKey: 'settings.nav.runtime.label', detailKey: 'settings.nav.runtime.detail' },
   { id: 'providers', labelKey: 'settings.nav.providers.label', detailKey: 'settings.nav.providers.detail' },
   { id: 'integrations', labelKey: 'settings.nav.integrations.label', detailKey: 'settings.nav.integrations.detail' },
+  { id: 'memory', labelKey: 'settings.nav.memory.label', detailKey: 'settings.nav.memory.detail' },
   { id: 'schedules', labelKey: 'settings.nav.schedules.label', detailKey: 'settings.nav.schedules.detail' },
   { id: 'skills', labelKey: 'settings.nav.skills.label', detailKey: 'settings.nav.skills.detail' }
 ]
