@@ -28,6 +28,10 @@
   输出，浏览器不得直接读取工作区。子代理控制请求始终带父线程 query，不能只凭 child id 操作。
 - Changes 同时展示活动工作区的服务端受限 Git 投影（暂存、未暂存、未跟踪）；切换请求仅提交路径给
   `arkd`，运行中存在父回合或子代理时服务端拒绝切换。浏览器不读取目录、Git 或未跟踪文件内容。
+- 会话流 footer 展示线程用量与上下文水位：用量由权威 `usage` 事件逐条累加，打开线程时以
+  `GET /v1/threads/{id}/usage` 播种且只填充空通道（避免与实时事件重复计数）；上下文水位取最近一次
+  样本的 `prompt_tokens` 对 tuning `context_limit_tokens` 的占比，仅作展示，不参与运行时决策。
+  `compaction_completed` 以摘要形式显示最近一次压缩规模。
 - 设置页的 tuning、provider 与 MCP 都使用生成契约；API key、MCP env/header 值只写不回读，编辑时的空
   secret 字段表示保留，不表示删除。
 - 新增/编辑 provider 可显式查询模型目录，在用户选择后才把远端明确声明的 context window 与识图能力写入

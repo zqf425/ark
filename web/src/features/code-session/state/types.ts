@@ -24,6 +24,28 @@ export type ErrorLine = {
 }
 
 /**
+ * Per-thread usage projection, folded from the runtime's authoritative `usage`
+ * events. `lastPromptTokens` is the newest sample's prompt size — the closest
+ * client-side proxy for how full the context is; the limit itself comes from
+ * runtime tuning (`context_limit_tokens`).
+ */
+export type UsageAggregate = {
+  samples: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  costUsd: number | null
+  lastPromptTokens: number | null
+}
+
+/** Latest `compaction_completed` notice; diagnostics for the context meter. */
+export type CompactionNotice = {
+  removedItems: number
+  checkpointChars: number
+  seq: number
+}
+
+/**
  * Gates are the "few control events" the renderer is still allowed to read
  * (design §7.10.3): they carry the id the user must answer with.
  *
@@ -60,6 +82,10 @@ export type ItemsSnapshot = {
   rewindRevision: number
   /** `rewind_from_seq` of the newest notification; diagnostics only. */
   rewoundFromSeq: number | null
+  /** Aggregated `usage` events; null until the first sample or thread seed. */
+  usage: UsageAggregate | null
+  /** Newest compaction notice, cleared on rewind with the rest of the projection. */
+  lastCompaction: CompactionNotice | null
 }
 
 export type ThreadListSnapshot = {

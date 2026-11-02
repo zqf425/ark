@@ -161,6 +161,10 @@
   color: var(--ark-accent);
 }
 
+.ark-streamfooter__meta.is-warning {
+  color: var(--ark-warn);
+}
+
 .ark-streamfooter__error {
   color: var(--ark-error);
   overflow: hidden;

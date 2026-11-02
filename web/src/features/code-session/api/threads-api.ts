@@ -6,6 +6,7 @@ import type {
   ThreadDetail,
   ThreadId,
   ThreadSummary,
+  ThreadUsageResponse,
   TurnState,
   UpdateThreadRequest
 } from '../../../shared/contracts'
@@ -44,6 +45,11 @@ export function forkThread(threadId: ThreadId): Promise<ThreadSummary> {
 /** `POST /v1/threads/{id}/compact` — persist a context checkpoint. */
 export function compactThread(threadId: ThreadId): Promise<{ checkpoint: string }> {
   return post<{ checkpoint: string }>(`/v1/threads/${threadId}/compact`)
+}
+
+/** `GET /v1/threads/{id}/usage` — aggregate folded from the thread's usage events. */
+export function getThreadUsage(threadId: ThreadId, signal?: AbortSignal): Promise<ThreadUsageResponse> {
+  return get<ThreadUsageResponse>(`/v1/threads/${threadId}/usage`, signal ? { signal } : {})
 }
 
 export type { TurnState }

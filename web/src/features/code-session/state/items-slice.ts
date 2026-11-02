@@ -1,7 +1,8 @@
 import type { StateCreator } from 'zustand'
-import type { RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot } from '../../../shared/contracts'
+import type { RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot, ThreadUsageResponse } from '../../../shared/contracts'
 import type { StreamStatus } from '../api/events-api'
 import { applyEvent, emptyItemsState, markApprovalLocally, markUserInputLocally, seedFromItems } from './items-reducer'
+import { seedUsage } from './usage'
 import type { ChildCompletionNotice, ItemsSnapshot, LoadStatus } from './types'
 
 export type ItemsSlice = ItemsSnapshot & {
@@ -24,6 +25,8 @@ export type ItemsSlice = ItemsSnapshot & {
   setStreamStatus: (status: StreamStatus, error?: string | null) => void
   noteApprovalResolved: (approvalId: string, approved: boolean) => void
   noteUserInputAnswered: (requestId: string, answer: string) => void
+  /** Seed the usage aggregate from the thread usage endpoint (idempotent). */
+  noteThreadUsage: (usage: ThreadUsageResponse) => void
 }
 
 export const createItemsSlice: StateCreator<ItemsSlice, [], [], ItemsSlice> = (set, get) => ({
@@ -52,5 +55,7 @@ export const createItemsSlice: StateCreator<ItemsSlice, [], [], ItemsSlice> = (s
 
   noteApprovalResolved: (approvalId, approved) => set(markApprovalLocally(get(), approvalId, approved)),
 
-  noteUserInputAnswered: (requestId, answer) => set(markUserInputLocally(get(), requestId, answer))
+  noteUserInputAnswered: (requestId, answer) => set(markUserInputLocally(get(), requestId, answer)),
+
+  noteThreadUsage: (usage) => set(seedUsage(get(), usage))
 })

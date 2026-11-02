@@ -25,7 +25,8 @@ import {
   sameItemContent,
   type ItemsDraft
 } from './items-draft'
-import type { ChildCompletionNotice, ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
+import { foldUsage } from './usage'
+import type { ChildCompletionNotice, CompactionNotice, ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
 
 export function emptyItemsState(): ItemsSnapshot {
   return {
@@ -40,7 +41,9 @@ export function emptyItemsState(): ItemsSnapshot {
     childCompletions: {},
     childRunRevision: 0,
     rewindRevision: 0,
-    rewoundFromSeq: null
+    rewoundFromSeq: null,
+    usage: null,
+    lastCompaction: null
   }
 }
 
@@ -312,6 +315,20 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
     case 'child_activity':
       draft.childRunRevision += 1
       return commitDraft(draft)
+
+    case 'usage':
+      draft.usage = foldUsage(draft.usage, event.usage)
+      return commitDraft(draft)
+
+    case 'compaction_completed': {
+      const notice: CompactionNotice = {
+        removedItems: event.removed_items,
+        checkpointChars: event.checkpoint_chars,
+        seq: event.seq
+      }
+      draft.lastCompaction = notice
+      return commitDraft(draft)
+    }
 
     default: {
       // The wire union is Rust-owned and may grow ahead of this renderer; an

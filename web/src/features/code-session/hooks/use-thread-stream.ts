@@ -12,7 +12,7 @@ import { translateNow } from '../../../shared/i18n/current'
 import type { ThreadId } from '../../../shared/contracts'
 import { useToast } from '../../../shared/ui'
 import { subscribeThreadEvents } from '../api/events-api'
-import { getThread } from '../api/threads-api'
+import { getThread, getThreadUsage } from '../api/threads-api'
 import { childCompletionStatusKey } from '../child-completion-status'
 import { useCodeSessionStore } from '../state/store'
 
@@ -26,6 +26,7 @@ export function useThreadStream(threadId: ThreadId | null): void {
   const ingestEvent = useCodeSessionStore((s) => s.ingestEvent)
   const setDetailStatus = useCodeSessionStore((s) => s.setDetailStatus)
   const setStreamStatus = useCodeSessionStore((s) => s.setStreamStatus)
+  const noteThreadUsage = useCodeSessionStore((s) => s.noteThreadUsage)
   // A rewind physically truncates history; bumping this token re-runs the whole
   // load + subscribe sequence from the fresh detail watermark.
   const reloadToken = useCodeSessionStore((s) => s.reloadToken)
@@ -58,6 +59,16 @@ export function useThreadStream(threadId: ThreadId | null): void {
         if (cancelled) return
         const watermark = detail.summary.last_seq ?? 0
         seedItems(detail.items, watermark, detail.child_completions, detail.runtime_snapshot)
+
+        // Usage history is event-folded server-side, not part of the item
+        // stream; seed it once per load. Best effort: an unavailable counter
+        // must not block the canvas, and the reducer only fills an empty
+        // channel, so a live `usage` event can never be double counted.
+        void getThreadUsage(threadId, controller.signal)
+          .then((usage) => {
+            if (!cancelled) noteThreadUsage(usage)
+          })
+          .catch(() => {})
 
         await subscribeThreadEvents({
           threadId,
@@ -115,5 +126,5 @@ export function useThreadStream(threadId: ThreadId | null): void {
       controller.abort()
       setStreamStatus('closed')
     }
-  }, [threadId, reloadToken, ingestEvent, requestStreamReload, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
+  }, [threadId, reloadToken, ingestEvent, noteThreadUsage, requestStreamReload, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
 }

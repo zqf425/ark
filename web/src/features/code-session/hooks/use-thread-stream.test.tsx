@@ -11,15 +11,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ThreadDetail, ThreadItem } from '../../../shared/contracts'
 import { installBrowserStubs, mountWithProviders, settle, type ReactHarness } from '../../../shared/testing/react-harness'
-import { getThread } from '../api/threads-api'
+import { getThread, getThreadUsage } from '../api/threads-api'
 import { subscribeThreadEvents } from '../api/events-api'
 import { useCodeSessionStore } from '../state/store'
 import { useThreadStream } from './use-thread-stream'
 
-vi.mock('../api/threads-api', () => ({ getThread: vi.fn() }))
+vi.mock('../api/threads-api', () => ({ getThread: vi.fn(), getThreadUsage: vi.fn() }))
 vi.mock('../api/events-api', () => ({ subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined)) }))
 
 const getThreadMock = vi.mocked(getThread)
+const getThreadUsageMock = vi.mocked(getThreadUsage)
 const subscribeMock = vi.mocked(subscribeThreadEvents)
 
 const THREAD_A = '00000000-0000-0000-0000-00000000000a'
@@ -68,6 +69,9 @@ describe('useThreadStream thread ownership', () => {
   beforeEach(() => {
     installBrowserStubs()
     getThreadMock.mockReset()
+    getThreadUsageMock.mockReset()
+    // The usage seed is best effort; tests only assert the stream projection.
+    getThreadUsageMock.mockReturnValue(new Promise<never>(() => undefined))
     subscribeMock.mockClear()
     useCodeSessionStore.getState().resetItems()
   })
