@@ -395,6 +395,10 @@ fn catalog_config_from_connection(
 /// from the redacted list response. Empty/absent values therefore mean "not
 /// edited", not "erase the persisted value". A later explicit patch shape
 /// will carry a separate clear operation instead of making absence ambiguous.
+///
+/// `models` is deliberately absent from this list: the settings form holds the
+/// full inventory (seeded from the redacted view), so an edit expresses the
+/// complete new list and an empty list legitimately clears it.
 fn keep_omitted_edit_fields(
     mut candidate: ProviderEntry,
     previous: Option<&ProviderEntry>,

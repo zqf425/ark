@@ -9,19 +9,24 @@
 import { useState } from 'react'
 import { Button } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
-import { translateNow } from '../../../shared/i18n/current'
 import {
   ENDPOINT_FORMATS,
   type EndpointFormat,
   type ProviderEntry,
   type ProviderModelCatalogRequest,
   type ProviderModelCatalogResponse,
-  type ProviderModelSummary,
-  type ProviderView
+  type ProviderModelSummary
 } from '../../../shared/contracts'
 import { CheckField, Field, SelectField, TextField } from './Field'
-import { applyCatalogModel, buildCatalogRequest, catalogLabel, parseProviderHeaders } from './ProviderCatalog'
+import {
+  applyCatalogModel,
+  buildCatalogRequest,
+  catalogLabel,
+  mergeImportedModels
+} from './ProviderCatalog'
+import { ProviderModelImportDialog } from './ProviderModelImportDialog'
 import { Notice } from './SectionShell'
+import { buildEntry, type ProviderDraft } from './ProviderDraft'
 
 /**
  * Endpoint ids are wire values, so only the parenthesised path hint is prose;
@@ -31,117 +36,6 @@ const FORMAT_LABELS: Record<EndpointFormat, string> = {
   openai_chat: 'openai_chat (/chat/completions)',
   openai_responses: 'openai_responses (/responses)',
   anthropic_messages: 'anthropic_messages (/v1/messages)'
-}
-
-export type ProviderDraft = {
-  id: string
-  label: string
-  base_url: string
-  endpoint_format: EndpointFormat
-  model: string
-  api_key: string
-  enabled: boolean
-  headers_text: string
-  max_tokens: string
-  temperature: string
-  context_window_tokens: string
-  supports_vision: boolean | null
-}
-
-export function emptyDraft(): ProviderDraft {
-  return {
-    id: '',
-    label: '',
-    base_url: '',
-    endpoint_format: 'openai_chat',
-    model: '',
-    api_key: '',
-    enabled: true,
-    headers_text: '',
-    max_tokens: '',
-    temperature: '',
-    context_window_tokens: '',
-    supports_vision: null
-  }
-}
-
-export function draftFromView(view: ProviderView): ProviderDraft {
-  const format = (ENDPOINT_FORMATS as readonly string[]).includes(view.endpoint_format)
-    ? (view.endpoint_format as EndpointFormat)
-    : 'openai_chat'
-  return {
-    id: view.id,
-    label: view.label ?? '',
-    base_url: view.base_url,
-    endpoint_format: format,
-    model: view.model,
-    // Never prefilled: the runtime only ever reports a hint, not the key.
-    api_key: '',
-    enabled: view.enabled,
-    headers_text: '',
-    max_tokens: '',
-    temperature: '',
-    context_window_tokens: view.context_window_tokens?.toString() ?? '',
-    supports_vision: view.supports_vision ?? null
-  }
-}
-
-export type BuiltEntry = { ok: true; entry: ProviderEntry } | { ok: false; error: string }
-
-/** Validate locally, then map onto the wire shape. Numbers stay strings in the form. */
-export function buildEntry(draft: ProviderDraft, editing: boolean): BuiltEntry {
-  const id = draft.id.trim()
-  const baseUrl = draft.base_url.trim()
-  const model = draft.model.trim()
-  if (!id) return { ok: false, error: translateNow('settings.providerForm.error.idRequired') }
-  if (!baseUrl) return { ok: false, error: translateNow('settings.providerForm.error.baseUrlRequired') }
-  if (!model) return { ok: false, error: translateNow('settings.providerForm.error.modelRequired') }
-
-  const entry: ProviderEntry = {
-    id,
-    base_url: baseUrl,
-    endpoint_format: draft.endpoint_format,
-    model,
-    enabled: draft.enabled,
-    headers: {}
-  }
-  const label = draft.label.trim()
-  if (label) entry.label = label
-
-  const apiKey = draft.api_key.trim()
-  if (apiKey) entry.api_key = apiKey
-  else if (!editing) return { ok: false, error: translateNow('settings.providerForm.error.apiKeyRequired') }
-
-  const headers = parseProviderHeaders(draft.headers_text)
-  if (!headers.ok) return headers
-  entry.headers = headers.headers
-
-  if (draft.max_tokens.trim()) {
-    const parsed = Number(draft.max_tokens.trim())
-    if (!Number.isFinite(parsed) || parsed <= 0 || !Number.isInteger(parsed)) {
-      return { ok: false, error: translateNow('settings.providerForm.error.maxTokensPositive') }
-    }
-    entry.max_tokens = parsed
-  }
-
-  if (draft.temperature.trim()) {
-    const parsed = Number(draft.temperature.trim())
-    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 2) {
-      return { ok: false, error: translateNow('settings.providerForm.error.temperatureRange') }
-    }
-    entry.temperature = parsed
-  }
-
-  if (draft.context_window_tokens.trim()) {
-    const parsed = Number(draft.context_window_tokens.trim())
-    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-      return { ok: false, error: translateNow('settings.providerForm.error.contextWindowPositive') }
-    }
-    entry.context_window_tokens = parsed
-  }
-  if (draft.supports_vision !== null) entry.supports_vision = draft.supports_vision
-
-  return { ok: true, entry }
 }
 
 export type ProviderFormProps = {
@@ -162,6 +56,7 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
   const [error, setError] = useState<string | null>(null)
   const [catalog, setCatalog] = useState<ProviderModelSummary[]>([])
   const [catalogError, setCatalogError] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
 
   const patch = <K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]): void => {
     setDraft((current) => ({ ...current, [key]: value }))
@@ -248,6 +143,32 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
           placeholder={t('settings.providerForm.modelPlaceholder')}
           onChange={(value) => patch('model', value)}
         />
+        {draft.models.length > 0 ? (
+          <Field
+            label={t('settings.providerForm.inventoryLabel')}
+            htmlFor="provider-model-inventory"
+            hint={t('settings.providerForm.inventoryHint')}
+          >
+            <div id="provider-model-inventory" className="ark-settings__tools">
+              {draft.models.map((id) => (
+                <span key={id} className="ark-chip">
+                  {id}
+                  <button
+                    type="button"
+                    className="ark-importdialog__chip-remove"
+                    aria-label={t('settings.providerForm.inventoryRemove', { model: id })}
+                    disabled={busy}
+                    onClick={() =>
+                      setDraft((current) => ({ ...current, models: current.models.filter((seen) => seen !== id) }))
+                    }
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          </Field>
+        ) : null}
         {catalog.length > 0 ? (
           <Field
             label={t('settings.providerForm.catalogLabel')}
@@ -303,6 +224,9 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
         </button>
         <Button size="sm" disabled={busy} onClick={() => void discover()}>
           {busy ? t('settings.providerForm.querying') : t('settings.providerForm.queryModels')}
+        </Button>
+        <Button size="sm" disabled={busy} onClick={() => setImporting(true)}>
+          {t('settings.providerForm.importModels')}
         </Button>
       </div>
 
@@ -360,6 +284,18 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
             onChange={(value) => patch('supports_vision', value)}
           />
         </div>
+      ) : null}
+
+      {importing ? (
+        <ProviderModelImportDialog
+          catalog={catalog}
+          draft={draft}
+          onCancel={() => setImporting(false)}
+          onConfirm={(ids) => {
+            setDraft((current) => mergeImportedModels(current, ids))
+            setImporting(false)
+          }}
+        />
       ) : null}
 
       {error ? <Notice tone="error" title={t('settings.providerForm.validationFailed')}>{error}</Notice> : null}

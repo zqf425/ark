@@ -21,6 +21,7 @@ import { ScheduleSection } from './ScheduleSection'
 import { ImSection } from './ImSection'
 import { SETTINGS_SECTIONS, type SettingsSectionId } from './settings-navigation'
 import '../settings.css'
+import '../settings-import-dialog.css'
 import '../settings-agent.css'
 
 export function SettingsPage(): JSX.Element {

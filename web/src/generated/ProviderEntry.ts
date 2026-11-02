@@ -24,4 +24,11 @@ context_window_tokens?: number,
  * Whether the selected model accepts image input. `None` means unknown,
  * not false: generic model-list endpoints often do not publish modalities.
  */
-supports_vision?: boolean, };
+supports_vision?: boolean, 
+/**
+ * Model inventory imported from the provider catalog (or pasted in), one
+ * id each. `model` remains the default a turn uses when the thread does
+ * not override it; the inventory is what the session model picker offers.
+ * Normalized on save: trimmed, deduplicated, `model` itself removed.
+ */
+models: Array<string>, };
