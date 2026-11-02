@@ -6,6 +6,7 @@ export type SettingsSectionId =
   | 'runtime'
   | 'providers'
   | 'integrations'
+  | 'memory'
   | 'schedules'
   | 'im'
   | 'skills'
@@ -21,6 +22,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'runtime', labelKey: 'settings.nav.runtime.label', detailKey: 'settings.nav.runtime.detail' },
   { id: 'providers', labelKey: 'settings.nav.providers.label', detailKey: 'settings.nav.providers.detail' },
   { id: 'integrations', labelKey: 'settings.nav.integrations.label', detailKey: 'settings.nav.integrations.detail' },
+  { id: 'memory', labelKey: 'settings.nav.memory.label', detailKey: 'settings.nav.memory.detail' },
   { id: 'schedules', labelKey: 'settings.nav.schedules.label', detailKey: 'settings.nav.schedules.detail' },
   { id: 'im', labelKey: 'settings.nav.im.label', detailKey: 'settings.nav.im.detail' },
   { id: 'skills', labelKey: 'settings.nav.skills.label', detailKey: 'settings.nav.skills.detail' }

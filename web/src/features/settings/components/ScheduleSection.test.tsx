@@ -56,6 +56,7 @@ function config(enabled = true): RuntimeConfigView {
     log_level: 'info',
     default_autonomy: 'workspace_write',
     subagents: { enabled: true, max_concurrency: 2, auto_continue: false },
+    skills: { enabled: true, extra_dirs: [] },
     schedules: { enabled },
     im: { enabled: false },
     tuning: {
@@ -67,7 +68,9 @@ function config(enabled = true): RuntimeConfigView {
       keep_recent_messages: 20,
       chunk_buffer: 64,
       sse_heartbeat_secs: 15,
-      sse_idle_timeout_secs: 300
+      sse_idle_timeout_secs: 300,
+      tool_storm_window_size: 0,
+      max_parallel_tool_calls: 0
     }
   }
 }

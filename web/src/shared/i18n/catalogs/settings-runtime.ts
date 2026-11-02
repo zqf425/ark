@@ -38,6 +38,10 @@ export const SETTINGS_RUNTIME_MESSAGES = {
   'settings.tuning.field.sseHeartbeatSecs.hint': ['0 会按运行时最小间隔处理。', '0 falls back to the runtime minimum interval.'],
   'settings.tuning.field.sseIdleTimeoutSecs.label': ['SSE 空闲超时（秒）', 'SSE idle timeout (s)'],
   'settings.tuning.field.sseIdleTimeoutSecs.hint': ['0 表示不因空闲关闭。', '0 means idle never closes the stream.'],
+  'settings.tuning.field.toolStormWindowSize.label': ['工具风暴观察窗口（轮）', 'Tool-storm window (rounds)'],
+  'settings.tuning.field.toolStormWindowSize.hint': ['重复调用只统计最近 N 轮；0 表示统计整个回合。', 'Repeats count only the last N rounds; 0 counts the whole turn.'],
+  'settings.tuning.field.maxParallelToolCalls.label': ['单批并行工具数上限', 'Max parallel tool calls per batch'],
+  'settings.tuning.field.maxParallelToolCalls.hint': ['只读工具并发的上限；0 表示不限制。', 'Cap on concurrent read-only calls; 0 means unlimited.'],
 
   'settings.autonomy.label': ['默认权限', 'Default permissions'],
   'settings.autonomy.hint': ['未单独设置权限的会话在下一回合使用此权限。', 'Threads without an override use this on their next turn.'],

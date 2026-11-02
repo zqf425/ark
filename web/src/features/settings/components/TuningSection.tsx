@@ -33,7 +33,9 @@ const FIELDS: readonly TuningField[] = [
   { key: 'keep_recent_messages', labelKey: 'settings.tuning.field.keepRecentMessages.label', hintKey: 'settings.tuning.field.keepRecentMessages.hint', min: 1, max: 10_000 },
   { key: 'chunk_buffer', labelKey: 'settings.tuning.field.chunkBuffer.label', hintKey: 'settings.tuning.field.chunkBuffer.hint', min: 1, max: 4_096 },
   { key: 'sse_heartbeat_secs', labelKey: 'settings.tuning.field.sseHeartbeatSecs.label', hintKey: 'settings.tuning.field.sseHeartbeatSecs.hint', min: 0, max: 3_600 },
-  { key: 'sse_idle_timeout_secs', labelKey: 'settings.tuning.field.sseIdleTimeoutSecs.label', hintKey: 'settings.tuning.field.sseIdleTimeoutSecs.hint', min: 0, max: 86_400 }
+  { key: 'sse_idle_timeout_secs', labelKey: 'settings.tuning.field.sseIdleTimeoutSecs.label', hintKey: 'settings.tuning.field.sseIdleTimeoutSecs.hint', min: 0, max: 86_400 },
+  { key: 'tool_storm_window_size', labelKey: 'settings.tuning.field.toolStormWindowSize.label', hintKey: 'settings.tuning.field.toolStormWindowSize.hint', min: 0, max: 128 },
+  { key: 'max_parallel_tool_calls', labelKey: 'settings.tuning.field.maxParallelToolCalls.label', hintKey: 'settings.tuning.field.maxParallelToolCalls.hint', min: 0, max: 32 }
 ]
 
 function cloneTuning(value: TuningSettings): TuningSettings {

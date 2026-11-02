@@ -97,6 +97,8 @@ pub(crate) fn limits_for_turn(
         context_limit_tokens: model::context_limit_tokens(tuning.context_limit_tokens, provider),
         keep_recent_messages: tuning.keep_recent_messages.max(1),
         max_compactions: TurnLimits::default().max_compactions,
+        tool_storm_window_size: tuning.tool_storm_window_size,
+        max_parallel_tool_calls: tuning.max_parallel_tool_calls,
     }
 }
 

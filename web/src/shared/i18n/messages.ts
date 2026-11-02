@@ -14,6 +14,7 @@ import { SESSION_CANVAS_MESSAGES } from './catalogs/session-canvas'
 import { SETTINGS_CORE_MESSAGES } from './catalogs/settings-core'
 import { SETTINGS_GENERAL_MESSAGES } from './catalogs/settings-general'
 import { SETTINGS_INTEGRATIONS_MESSAGES } from './catalogs/settings-integrations'
+import { SETTINGS_MEMORY_MESSAGES } from './catalogs/settings-memory'
 import { SETTINGS_PROVIDERS_MESSAGES } from './catalogs/settings-providers'
 import { SETTINGS_RUNTIME_MESSAGES } from './catalogs/settings-runtime'
 import { SETTINGS_IM_MESSAGES } from './catalogs/settings-im'
@@ -29,6 +30,7 @@ export const MESSAGES = {
   ...SETTINGS_CORE_MESSAGES,
   ...SETTINGS_GENERAL_MESSAGES,
   ...SETTINGS_INTEGRATIONS_MESSAGES,
+  ...SETTINGS_MEMORY_MESSAGES,
   ...SETTINGS_PROVIDERS_MESSAGES,
   ...SETTINGS_RUNTIME_MESSAGES,
   ...SETTINGS_SCHEDULES_MESSAGES,

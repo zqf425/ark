@@ -51,7 +51,7 @@ export const SETTINGS_INTEGRATIONS_MESSAGES = {
   'settings.mcp.error.mapNotJson': ['{label} 不是合法 JSON', '{label} is not valid JSON'],
 
   'settings.skills.title': ['Skills', 'Skills'],
-  'settings.skills.desc': ['从配置的 root 发现；只读。', 'Discovered from the configured roots; read-only.'],
+  'settings.skills.desc': ['从配置的 root 发现；下方可调整发现配置。', 'Discovered from the configured roots; adjust the discovery config below.'],
   'settings.skills.loadFailed': ['加载 skills 失败', 'Failed to load skills'],
   'settings.skills.disabledTitle': ['skills 未启用', 'Skills are disabled'],
   'settings.skills.disabledHint': ['运行时未开启 skill 发现；启用后此处会列出已加载的 skill。', 'Skill discovery is off in the runtime; enable it to list the loaded skills here.'],
@@ -59,5 +59,18 @@ export const SETTINGS_INTEGRATIONS_MESSAGES = {
   'settings.skills.emptyHintRoots': ['已扫描 {count} 个 root。', 'Scanned {count} roots.'],
   'settings.skills.emptyHintNoRoots': ['未配置 skill root。', 'No skill root is configured.'],
   'settings.skills.validationFailed': ['加载失败 {count} 处', 'Failed to load in {count} places'],
-  'settings.skills.validationRow': ['{root}：{message}', '{root}: {message}']
+  'settings.skills.validationRow': ['{root}：{message}', '{root}: {message}'],
+
+  'settings.skills.configEnabled': ['启用技能发现', 'Enable skill discovery'],
+  'settings.skills.configEnabledHint': ['关闭后所有 skills 视图为空，模型收不到技能目录。', 'When off, every skills view is empty and the model receives no catalog.'],
+  'settings.skills.extraDirs': ['额外扫描目录（每行一个）', 'Extra scan roots (one per line)'],
+  'settings.skills.extraDirsHint': ['绝对路径或以 ~ 开头；最多 {max} 个。工作区内的 .agents/skills 与 skills 始终扫描。', 'Absolute or ~-prefixed paths; up to {max}. The workspace .agents/skills and skills directories are always scanned.'],
+  'settings.skills.extraDirsPlaceholder': ['/Users/me/my-skills', '/Users/me/my-skills'],
+  'settings.skills.extraDirsTooMany': ['额外目录超过 {max} 个上限', 'More than {max} extra roots'],
+  'settings.skills.saveFailed': ['保存技能配置失败', 'Failed to save the skills config'],
+  'settings.skills.saveSucceeded': ['技能配置已保存', 'Skills config saved'],
+  'settings.skills.rejected': ['配置被拒绝', 'Config rejected'],
+  'settings.skills.rejectedTitle': ['保存被拒绝', 'Save rejected'],
+  'settings.skills.reason': ['原因：{reason}', 'Reason: {reason}'],
+  'settings.skills.restartHint': ['技能配置在进程重启后生效（发现目录在启动时固化）。', 'Skills config takes effect after a process restart (discovery roots are fixed at startup).']
 } as const

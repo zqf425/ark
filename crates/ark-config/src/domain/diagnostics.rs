@@ -25,11 +25,15 @@ pub const CONFIG_KEYS: &[&str] = &[
     "hooks",
     "schedules",
     "im",
+    "skills",
     "tuning",
 ];
 
 /// Keys nested under `subagents`.
 pub const SUBAGENT_KEYS: &[&str] = &["enabled", "max_concurrency", "auto_continue"];
+
+/// Keys nested under `skills`.
+pub const SKILLS_KEYS: &[&str] = &["enabled", "extra_dirs"];
 
 /// Keys nested under `hooks`.
 pub const HOOK_KEYS: &[&str] = &["pre_tool_use", "post_tool_use"];
@@ -51,6 +55,8 @@ pub const TUNING_KEYS: &[&str] = &[
     "chunk_buffer",
     "sse_heartbeat_secs",
     "sse_idle_timeout_secs",
+    "tool_storm_window_size",
+    "max_parallel_tool_calls",
 ];
 
 /// Keys that fell back to a default and keys that were ignored, in table order.
@@ -103,8 +109,9 @@ pub fn diagnose(document: &Value) -> ConfigDiagnostics {
         // `hooks` is a purely additive optional section (requirements/hooks.md):
         // its absence is the normal state of every pre-hooks config file, so
         // reporting it as "kept its default" would warn on every existing
-        // deployment at startup. Unknown keys inside it are still named.
-        if *key != "hooks" && !object.contains_key(*key) {
+        // deployment at startup. `skills` is additive the same way. Unknown
+        // keys inside either are still named.
+        if *key != "hooks" && *key != "skills" && !object.contains_key(*key) {
             diagnostics.missing.push((*key).to_string());
         }
     }
@@ -114,6 +121,7 @@ pub fn diagnose(document: &Value) -> ConfigDiagnostics {
         }
     }
     diagnose_nested(object, "subagents", SUBAGENT_KEYS, &mut diagnostics);
+    diagnose_nested(object, "skills", SKILLS_KEYS, &mut diagnostics);
     diagnose_nested(object, "hooks", HOOK_KEYS, &mut diagnostics);
     diagnose_nested(object, "schedules", SCHEDULE_KEYS, &mut diagnostics);
     diagnose_nested(object, "im", IM_KEYS, &mut diagnostics);
@@ -172,6 +180,7 @@ mod tests {
 
         for (parent, keys) in [
             ("subagents", SUBAGENT_KEYS),
+            ("skills", SKILLS_KEYS),
             ("schedules", SCHEDULE_KEYS),
             ("im", IM_KEYS),
             ("tuning", TUNING_KEYS),
@@ -201,12 +210,12 @@ mod tests {
             "runtime": { "logLevel": "debug" }
         });
         let diagnostics = diagnose(&document);
-        // `hooks` absence is deliberately silent (additive optional section),
-        // so it is not expected in the missing report.
+        // `hooks` and `skills` absence is deliberately silent (additive optional
+        // sections), so neither is expected in the missing report.
         let expected_missing: Vec<&str> = CONFIG_KEYS
             .iter()
             .copied()
-            .filter(|key| *key != "hooks")
+            .filter(|key| *key != "hooks" && *key != "skills")
             .collect();
         assert_eq!(
             diagnostics.missing(),

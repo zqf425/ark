@@ -6,8 +6,9 @@
 //! value, so a rejected patch cannot leave the live snapshot half updated.
 
 use ark_contract::{
-    ConfigPatch, FieldPath, HookSettings, ImSettings, ScheduleSettings, SubagentSettings,
-    TuningSettings, SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
+    ConfigPatch, FieldPath, HookSettings, ImSettings, ScheduleSettings, SkillsSettings,
+    SubagentSettings, TuningSettings, SKILLS_EXTRA_DIR_MAX_CHARS, SKILLS_EXTRA_DIRS_MAX,
+    SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -37,6 +38,10 @@ pub struct TuningConfig {
     pub sse_heartbeat_secs: u64,
     /// SSE idle timeout before `sse_idle_timeout`, in seconds (0 disables).
     pub sse_idle_timeout_secs: u64,
+    /// Storm-breaker window in model rounds; 0 counts the whole turn.
+    pub tool_storm_window_size: u32,
+    /// Cap on concurrent calls inside one read-only batch; 0 means no cap.
+    pub max_parallel_tool_calls: u32,
 }
 
 impl Default for TuningConfig {
@@ -51,6 +56,8 @@ impl Default for TuningConfig {
             chunk_buffer: 64,
             sse_heartbeat_secs: 15,
             sse_idle_timeout_secs: 300,
+            tool_storm_window_size: 0,
+            max_parallel_tool_calls: 0,
         }
     }
 }
@@ -67,6 +74,8 @@ impl TuningConfig {
         self.chunk_buffer = self.chunk_buffer.clamp(1, 4_096);
         self.sse_heartbeat_secs = self.sse_heartbeat_secs.clamp(0, 3_600);
         self.sse_idle_timeout_secs = self.sse_idle_timeout_secs.clamp(0, 86_400);
+        self.tool_storm_window_size = self.tool_storm_window_size.clamp(0, 128);
+        self.max_parallel_tool_calls = self.max_parallel_tool_calls.clamp(0, 32);
         self
     }
 }
@@ -83,6 +92,8 @@ impl From<&TuningConfig> for TuningSettings {
             chunk_buffer: value.chunk_buffer,
             sse_heartbeat_secs: value.sse_heartbeat_secs,
             sse_idle_timeout_secs: value.sse_idle_timeout_secs,
+            tool_storm_window_size: value.tool_storm_window_size,
+            max_parallel_tool_calls: value.max_parallel_tool_calls,
         }
     }
 }
@@ -99,6 +110,8 @@ impl From<TuningSettings> for TuningConfig {
             chunk_buffer: value.chunk_buffer,
             sse_heartbeat_secs: value.sse_heartbeat_secs,
             sse_idle_timeout_secs: value.sse_idle_timeout_secs,
+            tool_storm_window_size: value.tool_storm_window_size,
+            max_parallel_tool_calls: value.max_parallel_tool_calls,
         }
     }
 }
@@ -123,6 +136,9 @@ pub struct RuntimeConfig {
     pub default_autonomy: String,
     /// Sub-agent switch and concurrency cap (design §7.8).
     pub subagents: SubagentSettings,
+    /// Skills discovery switch and extra scan roots (docs/modules/ark-skills.md).
+    /// Classed `Restart`: the skill runtime snapshots this at process start.
+    pub skills: SkillsSettings,
     /// Agent lifecycle hooks (requirements/hooks.md). Classed `Hot`: every tool
     /// call reads the live snapshot, so a patch applies to the very next call.
     pub hooks: HookSettings,
@@ -148,6 +164,7 @@ impl Default for RuntimeConfig {
             default_workspace: None,
             default_autonomy: "workspace_write".to_string(),
             subagents: SubagentSettings::default(),
+            skills: SkillsSettings::default(),
             hooks: HookSettings::default(),
             schedules: ScheduleSettings::default(),
             im: ImSettings::default(),
@@ -193,6 +210,7 @@ impl RuntimeConfig {
                 "subagents.max_concurrency must be between {SUBAGENT_CONCURRENCY_MIN} and {SUBAGENT_CONCURRENCY_MAX}"
             ));
         }
+        validate_skills(&self.skills)?;
         let tuning = self.tuning.clone().sanitized();
         if tuning != self.tuning {
             return Err("tuning contains an out-of-range value".to_string());
@@ -253,6 +271,23 @@ impl RuntimeConfig {
                 changed.push(FieldPath::new("subagents"));
             }
         }
+        if let Some(value) = &patch.skills {
+            // Trim before storing: validation and the skill runtime must see
+            // the same normalized strings, or a padded path could pass
+            // validation and then resolve as a workspace-relative root.
+            let normalized = SkillsSettings {
+                extra_dirs: value
+                    .extra_dirs
+                    .iter()
+                    .map(|dir| dir.trim().to_string())
+                    .collect(),
+                enabled: value.enabled,
+            };
+            if next.skills != normalized {
+                next.skills = normalized;
+                changed.push(FieldPath::new("skills"));
+            }
+        }
         if let Some(value) = &patch.hooks {
             if next.hooks != *value {
                 next.hooks = value.clone();
@@ -302,6 +337,42 @@ fn validate_hooks(hooks: &HookSettings) -> Result<(), String> {
     Ok(())
 }
 
+/// Skills scan-root bounds (docs/modules/ark-skills.md).
+///
+/// Entries must be absolute or `~`-prefixed: a workspace-relative root would
+/// silently change meaning when the workspace switches, which is exactly what
+/// this config surface exists to avoid. Validation runs on the *normalized*
+/// candidate, so stored values and checked values cannot diverge.
+fn validate_skills(skills: &SkillsSettings) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    for dir in &skills.extra_dirs {
+        let trimmed = dir.trim();
+        if trimmed.is_empty() {
+            return Err("skills.extra_dirs contains an empty path".to_string());
+        }
+        if trimmed.chars().count() > SKILLS_EXTRA_DIR_MAX_CHARS {
+            return Err(format!(
+                "skills.extra_dirs entry exceeds {SKILLS_EXTRA_DIR_MAX_CHARS} characters"
+            ));
+        }
+        let is_absolute = std::path::Path::new(trimmed).is_absolute();
+        if !is_absolute && !trimmed.starts_with('~') {
+            return Err(format!(
+                "skills.extra_dirs entry must be absolute or ~-prefixed: {trimmed}"
+            ));
+        }
+        if !seen.insert(trimmed.to_string()) {
+            return Err(format!("skills.extra_dirs contains a duplicate: {trimmed}"));
+        }
+    }
+    if skills.extra_dirs.len() > SKILLS_EXTRA_DIRS_MAX {
+        return Err(format!(
+            "skills.extra_dirs has more than {SKILLS_EXTRA_DIRS_MAX} entries"
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,6 +390,50 @@ mod tests {
         let mut config = RuntimeConfig::default();
         config.tuning.max_rounds = 0;
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn skills_extra_dirs_reject_relative_and_accept_absolute_or_home() {
+        let mut config = RuntimeConfig::default();
+        config.skills.extra_dirs = vec!["relative/dir".to_string()];
+        assert!(
+            config.validate().is_err(),
+            "a workspace-relative root must be rejected"
+        );
+
+        config.skills.extra_dirs = vec!["~/my-skills".to_string()];
+        assert!(config.validate().is_ok());
+        config.skills.extra_dirs = vec!["/tmp/my-skills".to_string()];
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn skills_patch_is_trimmed_before_it_is_stored() {
+        let config = RuntimeConfig::default();
+        let patch = ConfigPatch {
+            skills: Some(SkillsSettings {
+                enabled: true,
+                extra_dirs: vec!["  /tmp/skills  ".to_string(), "~/sk".to_string()],
+            }),
+            ..ConfigPatch::default()
+        };
+        let (next, changed) = config.candidate(&patch).expect("valid patch");
+        assert_eq!(changed, vec![FieldPath::new("skills")]);
+        assert_eq!(next.skills.extra_dirs, vec!["/tmp/skills", "~/sk"]);
+        assert!(next.validate().is_ok());
+    }
+
+    #[test]
+    fn padded_relative_skills_entry_is_rejected_even_though_trim_would_fix_it() {
+        let config = RuntimeConfig::default();
+        let patch = ConfigPatch {
+            skills: Some(SkillsSettings {
+                enabled: true,
+                extra_dirs: vec!["  relative  ".to_string()],
+            }),
+            ..ConfigPatch::default()
+        };
+        assert!(config.candidate(&patch).is_err());
     }
 
     #[test]

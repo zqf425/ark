@@ -7,4 +7,14 @@
  * typed makes the Rust contract generate the only renderer shape instead of
  * leaving the UI to recreate a loosely typed JSON object.
  */
-export type TuningSettings = { max_rounds: number, max_tokens: number, max_tool_calls: number, max_identical_calls: number, context_limit_tokens: number, keep_recent_messages: number, chunk_buffer: number, sse_heartbeat_secs: number, sse_idle_timeout_secs: number, };
+export type TuningSettings = { max_rounds: number, max_tokens: number, max_tool_calls: number, max_identical_calls: number, context_limit_tokens: number, keep_recent_messages: number, chunk_buffer: number, sse_heartbeat_secs: number, sse_idle_timeout_secs: number, 
+/**
+ * Sliding window, in model rounds, the identical-call counter looks at.
+ * `0` counts the whole turn — the historical behaviour.
+ */
+tool_storm_window_size: number, 
+/**
+ * Maximum tool calls executed concurrently inside one read-only batch.
+ * `0` means no cap — the historical behaviour.
+ */
+max_parallel_tool_calls: number, };

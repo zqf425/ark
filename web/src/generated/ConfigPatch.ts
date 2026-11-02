@@ -2,6 +2,7 @@
 import type { HookSettings } from "./HookSettings";
 import type { ImSettings } from "./ImSettings";
 import type { ScheduleSettings } from "./ScheduleSettings";
+import type { SkillsSettings } from "./SkillsSettings";
 import type { SubagentSettings } from "./SubagentSettings";
 import type { TuningSettings } from "./TuningSettings";
 import type { JsonValue } from "./serde_json/JsonValue";
@@ -24,6 +25,10 @@ default_autonomy?: string,
  * Sub-agent switch plus the concurrency cap.
  */
 subagents?: SubagentSettings, 
+/**
+ * Skills discovery switch and extra scan roots (docs/modules/ark-skills.md).
+ */
+skills?: SkillsSettings, 
 /**
  * Agent lifecycle hooks (requirements/hooks.md). Hot: the next tool call
  * reads the new snapshot.

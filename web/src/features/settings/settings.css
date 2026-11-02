@@ -200,6 +200,13 @@
   gap: 8px;
 }
 
+/* Vertical stack for a section's editable blocks (memory forms, skill config). */
+.ark-settings__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .ark-card {
   border: 1px solid var(--ark-border);
   border-radius: var(--ark-radius);
