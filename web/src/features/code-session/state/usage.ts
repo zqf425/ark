@@ -15,9 +15,10 @@ export function foldUsage(current: UsageAggregate | null, sample: Usage): UsageA
     promptTokens: (current?.promptTokens ?? 0) + sample.prompt_tokens,
     completionTokens: (current?.completionTokens ?? 0) + sample.completion_tokens,
     totalTokens: (current?.totalTokens ?? 0) + sample.total_tokens,
-    // A provider that omits cost keeps the aggregate costless; mixing a costed
-    // sample into a costless aggregate would present a partial sum as total.
-    costUsd: current?.costUsd != null && sample.cost_usd != null ? current.costUsd + sample.cost_usd : null,
+    // Cost sums whenever any side has it, and is null only when no sample ever
+    // carried one — the same `sum_opt_f` semantics as the Rust aggregate, so
+    // the footer never hides a cost the server would report.
+    costUsd: sample.cost_usd != null ? (current?.costUsd ?? 0) + sample.cost_usd : current?.costUsd ?? null,
     lastPromptTokens: sample.prompt_tokens
   }
 }
