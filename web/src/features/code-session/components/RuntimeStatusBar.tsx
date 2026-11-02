@@ -1,13 +1,7 @@
 import { useI18n, type MessageKey } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../state/store'
-import { useRuntimeStatus } from '../hooks/use-runtime-status'
+import { useRuntimeStatusLabels } from '../hooks/use-runtime-status-labels'
 import { ViewSwitch } from '../../workbench/components/ViewSwitch'
-
-const ONLINE_LABEL_KEYS: Record<'unknown' | 'online' | 'offline', MessageKey> = {
-  unknown: 'status.online.unknown',
-  online: 'status.online.online',
-  offline: 'status.online.offline'
-}
 
 const STREAM_LABEL_KEYS: Record<string, MessageKey> = {
   connecting: 'status.stream.connecting',
@@ -17,21 +11,18 @@ const STREAM_LABEL_KEYS: Record<string, MessageKey> = {
 }
 
 /**
- * Top status bar. Liveness and version come from the runtime
+ * Top status bar (settings view). Liveness and version come from the runtime
  * (`GET /health` + `GET /v1/runtime/info`), never from a build constant.
  * Every visible string is a catalog key so the bar follows the display language.
  */
 export function RuntimeStatusBar(): JSX.Element {
   const { t } = useI18n()
-  const online = useCodeSessionStore((s) => s.online)
-  const healthError = useCodeSessionStore((s) => s.healthError)
   const streamStatus = useCodeSessionStore((s) => s.streamStatus)
-  const { refresh } = useRuntimeStatus()
+  const healthError = useCodeSessionStore((s) => s.healthError)
+  const { online, onlineLabel, refreshLabel, refresh } = useRuntimeStatusLabels()
 
-  const onlineLabel = t(ONLINE_LABEL_KEYS[online])
   const streamKey = STREAM_LABEL_KEYS[streamStatus]
   const streamLabel = streamKey ? t(streamKey) : streamStatus
-  const refreshLabel = healthError ? t('status.refreshFailed', { error: healthError }) : t('status.refresh')
 
   return (
     <header className="ark-statusbar">

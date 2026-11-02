@@ -1,9 +1,10 @@
 /**
  * App composition (design §7.10.2).
  *
- * Two views share one top status bar: the Code workbench (default) and the
- * settings page. This file only wires panels to hooks and picks a view: no
- * fetch, no event interpretation, no styling decisions beyond layout slots.
+ * The Code workbench is chromeless: the sidebar footer carries status and the
+ * view switch. The settings view keeps a top bar with the same switch. This
+ * file only wires panels to hooks and picks a view: no fetch, no event
+ * interpretation, no styling decisions beyond layout slots.
  */
 import { useEffect } from 'react'
 import { ErrorBoundary } from './shared/ui'
@@ -45,7 +46,6 @@ export function App(): JSX.Element {
 
   return (
     <WorkbenchLayout
-      top={<RuntimeStatusBar />}
       left={
         <ErrorBoundary label={t('workbench.boundary.threadList')}>
           <ThreadListPanel />

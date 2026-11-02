@@ -102,14 +102,14 @@
 .ark-tool__output {
   margin: 0;
   padding: 6px 8px;
-  background: #07090c;
+  background: var(--ark-terminal-bg);
   border: 1px solid var(--ark-border);
   border-radius: 4px;
   max-height: 340px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  color: #b9c4d0;
+  color: var(--ark-terminal-text);
 }
 
 .ark-tool__note {
@@ -124,8 +124,8 @@
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  border: 1px solid #4a2429;
-  background: #1a1114;
+  border: 1px solid var(--ark-error);
+  background: var(--ark-error-wash);
   border-radius: var(--ark-radius);
   padding: 6px 8px;
 }
@@ -145,7 +145,7 @@
 
 .ark-errorrow__message {
   margin: 0;
-  color: #f0b8bc;
+  color: var(--ark-error-strong);
   font-family: var(--ark-mono);
   font-size: 12px;
   word-break: break-word;
