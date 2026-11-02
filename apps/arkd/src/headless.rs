@@ -17,11 +17,17 @@ use crate::cli::RunArgs;
 
 /// How long startup polling waits for `/health` before giving up.
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
-/// SSE read idle cap: a turn whose stream stays silent this long is lost.
+/// Read-idle cap applied to a *single* SSE chunk read (not the whole stream):
+/// the runtime sends keep-alive comments every `sse_heartbeat_secs`, so only a
+/// genuinely wedged stream stays silent this long. Hitting it resumes from the
+/// last seen seq instead of failing the turn.
 const STREAM_TIMEOUT: Duration = Duration::from_secs(600);
-/// Server-side idle closes arrive at most once per `sse_idle_timeout_secs`
-/// (default 300s); dozens of resumes already cover many hours of review.
+/// Consecutive resumes without a new event seq. Every resume that advances the
+/// seq resets the counter, so a long review that keeps producing events can run
+/// for hours; the cap only stops a wedged runtime from being polled forever.
 const RESUME_LIMIT: u32 = 50;
+/// Pause between resumes so an instantly-closing runtime is polled, not hot-looped.
+const RESUME_PAUSE: Duration = Duration::from_millis(100);
 
 /// Exit codes of `arkd run`.
 const EXIT_COMPLETED: i32 = 0;
@@ -328,7 +334,9 @@ async fn wait_for_health(client: &reqwest::Client, base: &str) -> Result<(), Fai
 /// window is normal, so the stream is resumed from the last seen `id` instead
 /// of being reported as a failure. The replay protocol makes resumption lossless
 /// and duplicate-free: the server replays `(since_seq, watermark]` in order and
-/// only then attaches to live.
+/// only then attaches to live. Failures before the first successful connect are
+/// startup failures (exit 2); anything after the turn is underway is a turn
+/// failure (exit 1).
 async fn stream_turn(
     client: &reqwest::Client,
     base: &str,
@@ -336,34 +344,49 @@ async fn stream_turn(
     since_seq: u64,
 ) -> Result<(), Failure> {
     let mut since_seq = since_seq;
-    // Each resume waits a fresh `STREAM_TIMEOUT`; the cap only exists so a
-    // wedged runtime cannot keep this process alive forever.
-    for _ in 0..RESUME_LIMIT {
-        let mut response = client
+    let mut last_progress = since_seq;
+    let mut stalled = 0u32;
+    let mut attempt: u32 = 0;
+    loop {
+        let mut response = match client
             .get(format!("{base}/v1/threads/{thread_id}/events"))
             .query(&[("since_seq", since_seq.to_string())])
-            .timeout(STREAM_TIMEOUT)
             .send()
             .await
-            .map_err(startup_of("event stream failed"))?;
-        if !response.status().is_success() {
-            return Err(Failure::Startup(format!(
-                "event stream returned {}",
-                response.status()
-            )));
-        }
+        {
+            Ok(response) if response.status().is_success() => response,
+            Ok(response) => {
+                let status = response.status();
+                return Err(stream_failure(
+                    attempt,
+                    format!("event stream returned {status}"),
+                ));
+            }
+            Err(err) => {
+                return Err(stream_failure(
+                    attempt,
+                    format!("event stream failed: {err}"),
+                ))
+            }
+        };
 
-        let mut buffer = String::new();
+        // Byte buffer, not String: multi-byte UTF-8 (review findings are often
+        // Chinese) must not be split mid-character by a chunk boundary.
+        let mut buffer: Vec<u8> = Vec::new();
         loop {
-            match response.chunk().await {
-                Ok(Some(chunk)) => {
-                    buffer.push_str(&String::from_utf8_lossy(&chunk));
-                    while let Some(index) = buffer.find("\n\n") {
-                        let frame: String = buffer.drain(..index + 2).collect();
-                        since_seq = frame
-                            .lines()
-                            .find_map(|line| line.strip_prefix("id: ")?.trim().parse().ok())
-                            .unwrap_or(since_seq);
+            match tokio::time::timeout(STREAM_TIMEOUT, response.chunk()).await {
+                Err(_elapsed) => break, // read idle: resume from the last seq
+                Ok(Ok(Some(chunk))) => {
+                    buffer.extend_from_slice(&chunk);
+                    while let Some(index) = frame_end(&buffer) {
+                        let frame: Vec<u8> = buffer.drain(..index + 2).collect();
+                        let frame = String::from_utf8_lossy(&frame);
+                        // Monotonic on purpose: a stale id (possible after a
+                        // rewind) must never move the cursor backwards, or the
+                        // replay would re-print deltas.
+                        if let Some(parsed) = frame_seq(&frame) {
+                            since_seq = since_seq.max(parsed);
+                        }
                         if let Some(outcome) = handle_frame(&frame)? {
                             // Flush so a piped consumer sees every byte as it streams.
                             use std::io::Write as _;
@@ -374,14 +397,48 @@ async fn stream_turn(
                 }
                 // The server closed the stream (idle timeout is the normal
                 // case): resume from the last seen seq.
-                Ok(None) => break,
-                Err(err) => return Err(Failure::Turn(format!("event stream broke: {err}"))),
+                Ok(Ok(None)) => break,
+                Ok(Err(err)) => return Err(Failure::Turn(format!("event stream broke: {err}"))),
             }
         }
+
+        attempt += 1;
+        if since_seq == last_progress {
+            stalled += 1;
+            if stalled >= RESUME_LIMIT {
+                return Err(Failure::Turn(
+                    "event stream kept ending without a terminal event".into(),
+                ));
+            }
+        } else {
+            stalled = 0;
+            last_progress = since_seq;
+        }
+        tokio::time::sleep(RESUME_PAUSE).await;
     }
-    Err(Failure::Turn(
-        "event stream kept ending without a terminal event".into(),
-    ))
+}
+
+/// Errors before the first successful connect mean the runtime never came up;
+/// identical errors after the turn is underway mean the turn was lost.
+fn stream_failure(attempt: u32, message: String) -> Failure {
+    if attempt == 0 {
+        Failure::Startup(message)
+    } else {
+        Failure::Turn(message)
+    }
+}
+
+/// Byte offset of the SSE frame delimiter `\n\n`, or `None` while the frame is
+/// still incomplete.
+fn frame_end(buffer: &[u8]) -> Option<usize> {
+    buffer.windows(2).position(|window| window == b"\n\n")
+}
+
+/// The `id:` field of an SSE frame — the authoritative seq for resumption.
+fn frame_seq(frame: &str) -> Option<u64> {
+    frame
+        .lines()
+        .find_map(|line| line.strip_prefix("id: ")?.trim().parse().ok())
 }
 
 /// Handle one SSE frame; `Ok(Some(...))` ends the stream.
@@ -484,6 +541,34 @@ mod tests {
         // caller must resume from the last `id`, never treat it as a terminal.
         let frame = "id: 12\nevent: sse_idle_timeout\ndata: {\"kind\":\"sse_idle_timeout\",\"seq\":12,\"thread_id\":\"t\"}\n\n";
         assert!(handle_frame(frame).unwrap().is_none());
+    }
+
+    #[test]
+    fn frame_seq_parses_the_id_field() {
+        assert_eq!(frame_seq("id: 7\nevent: x\ndata: {}\n\n"), Some(7));
+        assert_eq!(frame_seq("event: x\ndata: {}\n\n"), None, "no id line");
+        assert_eq!(frame_seq("id: not-a-number\nevent: x\n\n"), None);
+        assert_eq!(
+            frame_seq("id: 9  \nevent: x\n\n"),
+            Some(9),
+            "trailing space"
+        );
+    }
+
+    #[test]
+    fn frame_end_survives_multibyte_characters_across_chunks() {
+        // One Chinese character is three bytes; a chunk boundary inside it must
+        // not make the delimiter search miss or mis-split the frame.
+        let full = "id: 1\nevent: assistant_text_delta\ndata: {\"delta\":\"中文字符\"}\n\n";
+        let bytes = full.as_bytes();
+        let boundary = bytes.len() - 6; // middle of the last multi-byte char
+        let mut buffer = bytes[..boundary].to_vec();
+        assert_eq!(frame_end(&buffer), None, "delimiter not arrived yet");
+        buffer.extend_from_slice(&bytes[boundary..]);
+        let end = frame_end(&buffer).expect("complete frame");
+        assert_eq!(&buffer[end + 2..], b"");
+        let frame = String::from_utf8_lossy(&buffer[..end + 2]);
+        assert!(frame.contains("中文字符"));
     }
 
     #[test]
