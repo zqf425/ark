@@ -128,5 +128,8 @@ export type { ImChannelRuntime } from "./ImChannelRuntime";
 export type { ImChannelListItem } from "./ImChannelListItem";
 export type { ImChannelListResponse } from "./ImChannelListResponse";
 export type { ImVerifyResponse } from "./ImVerifyResponse";
+export type { ImWeixinLoginStatus } from "./ImWeixinLoginStatus";
+export type { ImWeixinLoginStartResponse } from "./ImWeixinLoginStartResponse";
+export type { ImWeixinLoginWaitResponse } from "./ImWeixinLoginWaitResponse";
 export type { ImBinding } from "./ImBinding";
 export type { ImBindingListResponse } from "./ImBindingListResponse";

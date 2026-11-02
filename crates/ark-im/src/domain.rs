@@ -8,7 +8,7 @@
 //! binding table; this module only repairs and validates shapes.
 
 use ark_common::text::truncate_utf8;
-use ark_common::{ArkError, ArkErrorCode, Result};
+use ark_common::{ArkError, Result};
 use ark_contract::{
     CreateImChannelRequest, ImChannel, ImChannelId, ImChannelKind, ImChannelPolicy, ImCredentials,
     UpdateImChannelRequest, DEFAULT_IM_AUTONOMY, IM_TITLE_MAX_BYTES, MAX_IM_CHANNELS,
@@ -419,11 +419,20 @@ pub fn build_transport(
             app_secret.clone(),
             *domain,
         ))),
-        // Stage 4 adds the WeChat iLink adapter here.
-        (ImChannelKind::Weixin, _) => Err(ArkError::new(
-            ArkErrorCode::NotImplemented,
-            format!("transport for {kind:?} is not implemented yet"),
-        )),
+        (
+            ImChannelKind::Weixin,
+            ImCredentials::Weixin {
+                bot_token,
+                base_url,
+                owner_user_id,
+            },
+        ) => Ok(std::sync::Arc::new(crate::weixin::WeixinTransport::new(
+            client,
+            bot_token.clone(),
+            base_url.clone(),
+            owner_user_id.clone(),
+            cursor,
+        ))),
         // A credential kind that does not match the channel kind is a stored
         // document inconsistency, not a runtime condition.
         _ => Err(ArkError::validation(
@@ -435,6 +444,7 @@ pub fn build_transport(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark_common::ArkErrorCode;
     use ark_contract::FeishuDomain;
 
     fn telegram_credentials() -> ImCredentials {

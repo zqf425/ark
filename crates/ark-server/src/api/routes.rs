@@ -382,6 +382,14 @@ fn protected_routes() -> Router<AppState> {
         )
         .route("/v1/im/bindings", get(crate::api::handlers::im::bindings))
         .route(
+            "/v1/im/weixin/login/start",
+            post(crate::api::handlers::im::weixin_login_start),
+        )
+        .route(
+            "/v1/im/weixin/login/wait",
+            get(crate::api::handlers::im::weixin_login_wait),
+        )
+        .route(
             "/v1/runtime/model-providers",
             post(crate::api::handlers::pending::model_providers),
         )

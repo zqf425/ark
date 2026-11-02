@@ -304,5 +304,17 @@ LogID/service/method/headers/payload 九字段)、ping/pong 心跳、事件按 m
 重组、事件归一化)。飞书无重放游标(网关在带内 ack,重投递由网关重试窗口与去重集合兜底),
 `cursor()` 恒为 `None`。
 
-未实现:阶段 4(微信)、阶段 5(设置页)。`build_transport` 对 weixin kind 返回
-`NotImplemented`,对应渠道在 sync 时报错停用。
+阶段 4(微信)已实现:`ark-im/src/weixin.rs` iLink bot 协议原生实现(参照 smart-ark
+`weixin-bridge-runtime.ts` 与 `@tencent-weixin/openclaw-weixin` 2.4.3,不引 Node 依赖):
+`getupdates` 长轮询(游标 `get_updates_buf` 随渠道持久化)、`message_type==2` 自过滤、
+TEXT/VOICE 文本提取、`context_token` 按发送者缓存(主动推送凭据)、`sendmessage`
+(BOT/FINISH/TEXT,分块)、`ret`/`errcode` 业务错误检查、连续失败退避(2s/30s)。二维码登录
+`WeixinLoginFlow`(`get_bot_qrcode` + `get_qrcode_status` 状态机 wait/scaned/expired/
+confirmed;`need_verifycode`/`verify_code_blocked` 显式失败):HTTP 路由
+`POST /v1/im/weixin/login/start` 与 `GET /v1/im/weixin/login/wait`;确认后由后端直接创建
+渠道(经容量校验,title 取 owner id,`enabled=false` 凭证不落前端),wire 新增
+`ImWeixinLoginStatus`/`StartResponse`/`WaitResponse`。`ImLoginFlow` trait 改为
+async-trait(`start` 需网络 IO)。3 个单测(文本提取、业务错误、confirmed 映射)。
+退出条件未触发:协议完整可用。
+
+未实现:阶段 5(设置页)。

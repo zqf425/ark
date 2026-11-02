@@ -1,7 +1,7 @@
 # ark-im 模块设计
 
-> 状态:**部分实现**(设计已批准,2026-11-02;Telegram 与飞书适配器已落地,微信/设置页按
-> [IM 渠道接入需求](../requirements/im-channels.md) 的阶段 4-5 推进)。需求边界与验收见
+> 状态:**部分实现**(设计已批准,2026-11-02;Telegram/飞书/微信适配器与登录编排已落地,
+> 设置页按 [IM 渠道接入需求](../requirements/im-channels.md) 的阶段 5 推进)。需求边界与验收见
 > 需求文档。已落地部分的偏差已回填:游标经 trait 方法 `cursor()` 上报、由编排层节流持久化
 > (飞书为带内 ack、无重放游标,恒返回 `None`);`ImTransport` 另有 `is_self` 默认方法
 > (飞书/微信需要回显自身消息过滤)。
@@ -87,7 +87,8 @@ pub trait ImTransport: Send + Sync {
 /// reconcile 建连。
 pub trait ImLoginFlow: Send + Sync {
     /// 进程内短生命周期登录会话(10 分钟过期,同时至多 1 个),不落盘。
-    fn start(&self) -> ark_common::Result<LoginSession>;
+    /// `start` 需要网络 IO(取二维码),与 `poll` 同为 async。
+    async fn start(&self) -> ark_common::Result<LoginSession>;
     async fn poll(&self, session: &LoginSession) -> ark_common::Result<LoginPoll>;
 }
 ```

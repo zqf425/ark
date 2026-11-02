@@ -68,6 +68,7 @@ pub use im::{
     CreateImChannelRequest, FeishuDomain, ImBinding, ImBindingListResponse, ImChannel, ImChannelId,
     ImChannelKind, ImChannelListItem, ImChannelListResponse, ImChannelPolicy, ImChannelRuntime,
     ImChannelState, ImChannelView, ImCredentials, ImCredentialsView, ImVerifyResponse,
+    ImWeixinLoginStartResponse, ImWeixinLoginStatus, ImWeixinLoginWaitResponse,
     UpdateImChannelRequest, DEFAULT_IM_AUTONOMY, IM_TITLE_MAX_BYTES, MAX_IM_CHANNELS,
 };
 pub use item::{ItemKind, ItemMarker, ItemStatus, ThreadItem};

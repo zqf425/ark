@@ -30,7 +30,8 @@ use crate::{
     EventKind, FeishuDomain, FieldPath, FilePreview, GoalRequest, HealthResponse, ImBinding,
     ImBindingListResponse, ImChannel, ImChannelId, ImChannelKind, ImChannelListItem,
     ImChannelListResponse, ImChannelPolicy, ImChannelRuntime, ImChannelState, ImChannelView,
-    ImCredentials, ImCredentialsView, ImVerifyResponse, ItemStatus, LlmRound, LlmRoundError,
+    ImCredentials, ImCredentialsView, ImVerifyResponse, ImWeixinLoginStartResponse,
+    ImWeixinLoginStatus, ImWeixinLoginWaitResponse, ItemStatus, LlmRound, LlmRoundError,
     LlmRoundsResponse, McpServerEntry, McpServerListResponse, McpServerTestResponse, McpServerView,
     McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, PanelEntry,
     PendingApprovalView, PendingUserInputView, PlanView, PluginDiagnosticView, PluginEntry,
@@ -209,6 +210,9 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     ImChannelListItem::export_all_to(dir)?;
     ImChannelListResponse::export_all_to(dir)?;
     ImVerifyResponse::export_all_to(dir)?;
+    ImWeixinLoginStatus::export_all_to(dir)?;
+    ImWeixinLoginStartResponse::export_all_to(dir)?;
+    ImWeixinLoginWaitResponse::export_all_to(dir)?;
     ImBinding::export_all_to(dir)?;
     ImBindingListResponse::export_all_to(dir)?;
 
@@ -373,6 +377,9 @@ const ROOT_NAMES: &[&str] = &[
     "ImChannelListItem",
     "ImChannelListResponse",
     "ImVerifyResponse",
+    "ImWeixinLoginStatus",
+    "ImWeixinLoginStartResponse",
+    "ImWeixinLoginWaitResponse",
     "ImBinding",
     "ImBindingListResponse",
 ];

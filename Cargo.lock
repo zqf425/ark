@@ -160,6 +160,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -386,6 +387,7 @@ dependencies = [
  "ark-contract",
  "ark-delegation",
  "ark-http",
+ "ark-im",
  "ark-llm",
  "ark-mcp",
  "ark-obs",

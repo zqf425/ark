@@ -125,8 +125,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     // `schedules.json`. The transport client reuses the governed model/HTTP
     // policy (proxy/TLS settings stay process-wide); long polling needs no
     // client-level timeout, which `None` expresses.
-    let im = ark_server::ImService::new(
-        Arc::new(ark_store::ImFileStore::open(&args.data_dir)?),
+    let im_client =
         ark_http::transport_client(&ark_http::HttpPolicy::default(), "ark-im/channel", None)
             .unwrap_or_else(|err| {
                 tracing::warn!(
@@ -134,8 +133,14 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
                     "falling back to default http transport for im channels"
                 );
                 reqwest::Client::new()
-            }),
+            });
+    let im = ark_server::ImService::new(
+        Arc::new(ark_store::ImFileStore::open(&args.data_dir)?),
+        im_client.clone(),
     );
+    // WeChat QR login is an optional capability wired by the composition root;
+    // it needs a governed client of its own (same policy).
+    im.set_login_flow(Arc::new(ark_im::WeixinLoginFlow::new(im_client)));
     store.reconcile()?;
     let interrupted = abort_interrupted_turns(store.as_ref()).await?;
     if interrupted != 0 {

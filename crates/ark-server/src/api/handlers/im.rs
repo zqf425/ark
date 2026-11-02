@@ -17,7 +17,8 @@ use serde::Deserialize;
 use ark_common::ArkError;
 use ark_contract::{
     CreateImChannelRequest, ImBindingListResponse, ImChannelId, ImChannelListItem,
-    ImChannelListResponse, ImChannelView, ImVerifyResponse, UpdateImChannelRequest,
+    ImChannelListResponse, ImChannelView, ImVerifyResponse, ImWeixinLoginStartResponse,
+    ImWeixinLoginWaitResponse, UpdateImChannelRequest,
 };
 use ark_im::{apply_update, ensure_channel_capacity, prepare_create};
 use ark_ports::ImChannelRecord;
@@ -131,4 +132,27 @@ pub async fn bindings(
     let channel_id = query.channel_id.map(ImChannelId);
     let list = service.store().list_bindings(channel_id.as_ref())?;
     Ok(Json(ImBindingListResponse { bindings: list }))
+}
+
+/// `POST /v1/im/weixin/login/start` — fetch a QR code session.
+pub async fn weixin_login_start(
+    State(state): State<AppState>,
+) -> Result<Json<ImWeixinLoginStartResponse>, ApiError> {
+    let service = state.im_service()?;
+    Ok(Json(service.weixin_login_start().await?))
+}
+
+#[derive(Deserialize)]
+pub struct LoginWaitQuery {
+    pub session_id: String,
+}
+
+/// `GET /v1/im/weixin/login/wait` — poll once; a confirmed login creates the
+/// (disabled) channel server-side.
+pub async fn weixin_login_wait(
+    State(state): State<AppState>,
+    Query(query): Query<LoginWaitQuery>,
+) -> Result<Json<ImWeixinLoginWaitResponse>, ApiError> {
+    let service = state.im_service()?;
+    Ok(Json(service.weixin_login_wait(&query.session_id).await?))
 }

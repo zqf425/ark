@@ -19,6 +19,7 @@
 pub mod domain;
 pub mod feishu;
 pub mod telegram;
+pub mod weixin;
 
 pub use domain::{
     apply_update, build_transport, channel_autonomy, chunk_text, ensure_channel_capacity,
@@ -27,6 +28,7 @@ pub use domain::{
 };
 pub use feishu::FeishuTransport;
 pub use telegram::TelegramTransport;
+pub use weixin::{WeixinLoginFlow, WeixinTransport};
 
 use ark_contract::ImChannelKind;
 use ark_ports::CancelToken;
@@ -88,12 +90,14 @@ pub trait ImTransport: Send + Sync {
 /// *product* of the login. `LoginSession` is short-lived in-process state
 /// (expires in minutes, at most one concurrent session); on success the
 /// orchestration stores the channel and reconciles.
+#[async_trait]
 pub trait ImLoginFlow: Send + Sync {
-    fn start(&self) -> ark_common::Result<LoginSession>;
+    async fn start(&self) -> ark_common::Result<LoginSession>;
     async fn poll(&self, session: &LoginSession) -> ark_common::Result<LoginPoll>;
 }
 
 /// A pending interactive login: what the UI renders as a QR code.
+#[derive(Debug, Clone)]
 pub struct LoginSession {
     pub id: String,
     /// Platform-provided QR payload (usually a URL to encode).
@@ -101,6 +105,7 @@ pub struct LoginSession {
 }
 
 /// One poll of a pending login.
+#[derive(Debug)]
 pub enum LoginPoll {
     /// Waiting for the user to scan.
     Pending,

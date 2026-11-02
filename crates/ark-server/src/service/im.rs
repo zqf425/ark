@@ -24,8 +24,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use ark_contract::{ImChannel, ImChannelId, ImChannelRuntime, ImChannelState};
-use ark_im::{build_transport, DedupSet, ImTransport, InboundMessage};
+use ark_common::{ArkError, ArkErrorCode};
+use ark_contract::{
+    ImChannel, ImChannelId, ImChannelRuntime, ImChannelState, ImWeixinLoginStartResponse,
+    ImWeixinLoginStatus, ImWeixinLoginWaitResponse,
+};
+use ark_im::{build_transport, DedupSet, ImLoginFlow, ImTransport, InboundMessage, LoginPoll};
 use ark_ports::{CancelToken, ImChannelRecord, ImStore};
 use tokio::sync::{mpsc, Notify};
 
@@ -54,6 +58,8 @@ const CURSOR_PERSIST_MAX_MESSAGES: usize = 10;
 /// An `error`-state channel is retried at most this often (the sweep is the
 /// backoff; nothing spins inside the loop).
 const ERROR_RETRY_COOLDOWN: Duration = Duration::from_secs(60);
+/// Interactive login sessions expire after ten minutes, at most one at a time.
+const LOGIN_TTL: Duration = Duration::from_secs(600);
 
 type TransportFactory = dyn Fn(
         reqwest::Client,
@@ -93,6 +99,10 @@ pub struct ImService {
     sync_notify: Notify,
     pub(crate) conversations: ConversationQueues,
     started: AtomicBool,
+    /// Optional interactive login flow (WeChat QR); assembled by the
+    /// composition root, absent when the platform adapter is not wired.
+    login_flow: Mutex<Option<Arc<dyn ImLoginFlow>>>,
+    login_sessions: Mutex<HashMap<String, (ark_im::LoginSession, Instant)>>,
 }
 
 impl ImService {
@@ -117,6 +127,8 @@ impl ImService {
             sync_notify: Notify::new(),
             conversations: ConversationQueues::new(),
             started: AtomicBool::new(false),
+            login_flow: Mutex::new(None),
+            login_sessions: Mutex::new(HashMap::new()),
         })
     }
 
@@ -133,6 +145,141 @@ impl ImService {
     /// Ask the control loop to reconcile now (channel CRUD, config change).
     pub fn request_sync(&self) {
         self.sync_notify.notify_one();
+    }
+
+    /// Attach the interactive login flow (WeChat QR login).
+    pub fn set_login_flow(&self, flow: Arc<dyn ImLoginFlow>) {
+        *self
+            .login_flow
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(flow);
+    }
+
+    /// `POST /v1/im/weixin/login/start`: fetch (or reuse) a QR session.
+    pub async fn weixin_login_start(&self) -> ark_common::Result<ImWeixinLoginStartResponse> {
+        let flow = self
+            .login_flow
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .ok_or_else(|| {
+                ArkError::new(
+                    ArkErrorCode::RuntimeUnavailable,
+                    "weixin login flow is not wired in this build",
+                )
+            })?;
+        // One live session: a fresh request replaces any stale one instead of
+        // piling up QR codes nobody scans.
+        {
+            let mut sessions = self
+                .login_sessions
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            sessions.retain(|_, (_, started_at)| started_at.elapsed() < LOGIN_TTL);
+        }
+        let session = flow.start().await?;
+        self.login_sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(session.id.clone(), (session.clone(), Instant::now()));
+        Ok(ImWeixinLoginStartResponse {
+            session_id: session.id,
+            qr_content: session.qr_content,
+            message: "用手机微信扫描二维码以连接。".to_string(),
+        })
+    }
+
+    /// `GET /v1/im/weixin/login/wait`: poll once; a confirmed login creates
+    /// the channel server-side (capacity-checked, disabled until edited).
+    pub async fn weixin_login_wait(
+        self: &Arc<Self>,
+        session_id: &str,
+    ) -> ark_common::Result<ImWeixinLoginWaitResponse> {
+        let flow = self
+            .login_flow
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .ok_or_else(|| {
+                ArkError::new(
+                    ArkErrorCode::RuntimeUnavailable,
+                    "weixin login flow is not wired in this build",
+                )
+            })?;
+        let session = {
+            let mut sessions = self
+                .login_sessions
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            match sessions.remove(session_id) {
+                Some((session, started_at)) if started_at.elapsed() < LOGIN_TTL => Some(session),
+                Some(_) => None, // expired: fall through to the Expired branch
+                None => None,
+            }
+        };
+        let Some(session) = session else {
+            return Ok(ImWeixinLoginWaitResponse {
+                status: ImWeixinLoginStatus::Expired,
+                message: "二维码已过期，请重新生成。".to_string(),
+                channel: None,
+            });
+        };
+        match flow.poll(&session).await? {
+            LoginPoll::Pending => Ok(ImWeixinLoginWaitResponse {
+                status: ImWeixinLoginStatus::Pending,
+                message: "等待扫码。".to_string(),
+                channel: None,
+            }),
+            LoginPoll::Scanned => Ok(ImWeixinLoginWaitResponse {
+                status: ImWeixinLoginStatus::Scanned,
+                message: "已扫码，请在手机上确认。".to_string(),
+                channel: None,
+            }),
+            LoginPoll::Expired => Ok(ImWeixinLoginWaitResponse {
+                status: ImWeixinLoginStatus::Expired,
+                message: "二维码已过期，请重新生成。".to_string(),
+                channel: None,
+            }),
+            LoginPoll::Failed(message) => Ok(ImWeixinLoginWaitResponse {
+                status: ImWeixinLoginStatus::Failed,
+                message,
+                channel: None,
+            }),
+            LoginPoll::Confirmed { credentials, title } => {
+                // The login-created channel follows the normal create rules,
+                // including the capacity check: exceeding it fails the login
+                // instead of creating a 21st channel.
+                let existing = self.store().list_channels()?.len();
+                ark_im::ensure_channel_capacity(existing)?;
+                let now = chrono::Utc::now();
+                let channel = ImChannel {
+                    id: ImChannelId::new(),
+                    kind: ark_contract::ImChannelKind::Weixin,
+                    title,
+                    // Created disabled on purpose: the user reviews policy
+                    // (and the master switch) before anything connects.
+                    enabled: false,
+                    credentials: Some(credentials),
+                    policy: Default::default(),
+                    workspace: None,
+                    model: None,
+                    provider_id: None,
+                    autonomy: None,
+                    created_at: now,
+                    updated_at: now,
+                };
+                let stored = self.store().insert_channel(ImChannelRecord {
+                    channel,
+                    cursor: None,
+                })?;
+                self.request_sync();
+                Ok(ImWeixinLoginWaitResponse {
+                    status: ImWeixinLoginStatus::Confirmed,
+                    message: "已连接微信；渠道默认停用，请在设置页启用。".to_string(),
+                    channel: Some(stored.channel.to_view()),
+                })
+            }
+        }
     }
 
     /// Live runtime state of one channel, or the disabled default.

@@ -426,6 +426,46 @@ pub struct ImBindingListResponse {
     pub bindings: Vec<ImBinding>,
 }
 
+/// QR login lifecycle, mirroring `LoginPoll` minus the credential payload
+/// (a confirmed login creates the channel server-side; secrets never ride a
+/// read model).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+#[serde(rename_all = "snake_case")]
+pub enum ImWeixinLoginStatus {
+    #[default]
+    Pending,
+    Scanned,
+    Confirmed,
+    Expired,
+    Failed,
+}
+
+/// `POST /v1/im/weixin/login/start` — render the QR payload.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ImWeixinLoginStartResponse {
+    #[serde(default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub qr_content: String,
+    #[serde(default)]
+    pub message: String,
+}
+
+/// `GET /v1/im/weixin/login/wait` — one poll; `Confirmed` carries the channel
+/// the backend just created (`enabled = false`, edited before use).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ImWeixinLoginWaitResponse {
+    #[serde(default)]
+    pub status: ImWeixinLoginStatus,
+    #[serde(default)]
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<ImChannelView>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
