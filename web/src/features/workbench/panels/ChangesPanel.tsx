@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { describeError } from '../../../shared/api/error-describe'
 import { translateNow } from '../../../shared/i18n/current'
-import type { ThreadId, WorkspaceChangesResponse, WorkspaceDiff, WorkspaceView } from '../../../shared/contracts'
+import type { ThreadId, WorkspaceChangesResponse, WorkspaceDiff, WorkspaceDiffFile, WorkspaceView } from '../../../shared/contracts'
 import { EmptyState } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../../code-session/state/store'
@@ -176,20 +176,13 @@ export function ChangesPanel(): JSX.Element {
               <section key={label} className="ark-workspace-diff__group">
                 <h3>{label}</h3>
                 {files.map((file) => (
-                  <details key={`${file.status}:${file.path}`} className="ark-workspace-diff__file">
-                    <summary>
-                      <code>
-                        {file.status} {file.path}
-                        {file.truncated ? t('workbench.changes.truncatedFile') : ''}
-                        {file.binary ? t('workbench.changes.binaryFile') : ''}
-                      </code>
-                    </summary>
-                    {file.patch ? (
-                      <DiffView patch={file.patch} />
-                    ) : (
-                      <p className="ark-panel__hint ark-panel__hint--flush">{t('workbench.changes.noPatch')}</p>
-                    )}
-                  </details>
+                  <DiffFileDetails
+                    key={`${file.status}:${file.path}`}
+                    file={file}
+                    noPatchLabel={t('workbench.changes.noPatch')}
+                    truncatedLabel={t('workbench.changes.truncatedFile')}
+                    binaryLabel={t('workbench.changes.binaryFile')}
+                  />
                 ))}
               </section>
             ))}
@@ -206,5 +199,42 @@ export function ChangesPanel(): JSX.Element {
         </div>
       ) : null}
     </section>
+  )
+}
+
+/**
+ * One collapsible file row. The patch is parsed only while expanded: the panel
+ * can list hundreds of changed files, and eagerly mounting every diff would
+ * parse all of them on open.
+ */
+function DiffFileDetails(props: {
+  file: WorkspaceDiffFile
+  noPatchLabel: string
+  truncatedLabel: string
+  binaryLabel: string
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const { file, noPatchLabel, truncatedLabel, binaryLabel } = props
+  return (
+    <details
+      className="ark-workspace-diff__file"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <code>
+          {file.status} {file.path}
+          {file.truncated ? truncatedLabel : ''}
+          {file.binary ? binaryLabel : ''}
+        </code>
+      </summary>
+      {open ? (
+        file.patch ? (
+          <DiffView patch={file.patch} />
+        ) : (
+          <p className="ark-panel__hint ark-panel__hint--flush">{noPatchLabel}</p>
+        )
+      ) : null}
+    </details>
   )
 }

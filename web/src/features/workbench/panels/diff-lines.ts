@@ -33,6 +33,12 @@ export function parseUnifiedDiff(patch: string): DiffLine[] {
   const lines: DiffLine[] = []
   let oldNumber: number | null = null
   let newNumber: number | null = null
+  /**
+   * Inside a hunk, a removed content line can start with `--- ` just like a
+   * file header. Header detection is therefore only armed before the first
+   * `@@` (and re-armed by a new `diff --git` for the next file segment).
+   */
+  let inHunk = false
 
   // git patches end with a newline; the final '' from split is an artifact, not
   // an empty context row (real empty context lines arrive as a single space).
@@ -40,18 +46,27 @@ export function parseUnifiedDiff(patch: string): DiffLine[] {
 
   for (const raw of rawLines) {
     if (raw === '') continue
+    if (raw.startsWith('diff --git ')) {
+      inHunk = false
+      lines.push({ type: 'meta', text: raw, oldNumber: null, newNumber: null })
+      continue
+    }
     if (raw.startsWith('@@')) {
       const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw)
       if (match) {
         oldNumber = Number(match[1])
         newNumber = Number(match[2])
-        lines.push({ type: 'meta', text: raw, oldNumber: null, newNumber: null })
-        continue
+        inHunk = true
       }
       lines.push({ type: 'meta', text: raw, oldNumber: null, newNumber: null })
       continue
     }
-    if (isFileHeader(raw)) {
+    if (!inHunk && isFileHeader(raw)) {
+      lines.push({ type: 'meta', text: raw, oldNumber: null, newNumber: null })
+      continue
+    }
+    if (!inHunk) {
+      // Header noise we do not model (mode changes, similarity index, ...).
       lines.push({ type: 'meta', text: raw, oldNumber: null, newNumber: null })
       continue
     }

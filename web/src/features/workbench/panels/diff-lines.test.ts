@@ -46,4 +46,72 @@ describe('parseUnifiedDiff', () => {
     expect(lines).toHaveLength(1)
     expect(lines[0]?.type).toBe('meta')
   })
+
+  it('hunk 内以 ---/+++ 开头的删除与新增行不被误判为文件头', () => {
+    const patch = `--- a/f.txt
++++ b/f.txt
+@@ -1,2 +1,2 @@
+ ctx
+- --- a/fake-header
++ +++ b/fake-header
+`
+    const lines = parseUnifiedDiff(patch)
+    const removes = lines.filter((line) => line.type === 'remove')
+    expect(removes.map((line) => line.text)).toEqual([' --- a/fake-header'])
+    expect(removes[0]?.oldNumber).toBe(2)
+    const adds = lines.filter((line) => line.type === 'add')
+    expect(adds.map((line) => line.text)).toEqual([' +++ b/fake-header'])
+    expect(adds[0]?.newNumber).toBe(2)
+  })
+
+  it('多 hunk 行号各自从 @@ 头续接', () => {
+    const patch = `--- a/f
++++ b/f
+@@ -1,2 +1,2 @@
+ a
+-b
++c
+ d
+@@ -10,2 +10,2 @@
+ e
+-f
++g
+ h
+`
+    const lines = parseUnifiedDiff(patch)
+    const numbered = lines.filter((line) => line.type !== 'meta')
+    expect(numbered).toEqual([
+      { type: 'context', text: 'a', oldNumber: 1, newNumber: 1 },
+      { type: 'remove', text: 'b', oldNumber: 2, newNumber: null },
+      { type: 'add', text: 'c', oldNumber: null, newNumber: 2 },
+      { type: 'context', text: 'd', oldNumber: 3, newNumber: 3 },
+      { type: 'context', text: 'e', oldNumber: 10, newNumber: 10 },
+      { type: 'remove', text: 'f', oldNumber: 11, newNumber: null },
+      { type: 'add', text: 'g', oldNumber: null, newNumber: 11 },
+      { type: 'context', text: 'h', oldNumber: 12, newNumber: 12 }
+    ])
+  })
+
+  it('diff --git 重新武装文件头识别（下一个文件段）', () => {
+    const patch = `diff --git a/x b/x
+--- a/x
++++ b/x
+@@ -1 +1 @@
+-a
++b
+diff --git a/y b/y
+--- a/y
++++ b/y
+@@ -1 +1 @@
+-c
++d
+`
+    const lines = parseUnifiedDiff(patch)
+    const headers = lines.filter((line) => line.text.startsWith('--- a/'))
+    expect(headers).toHaveLength(2)
+    expect(headers.every((line) => line.type === 'meta')).toBe(true)
+    // Second segment's content still gets its own numbering.
+    const secondHunkAdd = lines.filter((line) => line.type === 'add').at(-1)
+    expect(secondHunkAdd).toEqual({ type: 'add', text: 'd', oldNumber: null, newNumber: 1 })
+  })
 })
