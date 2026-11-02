@@ -11,7 +11,7 @@ fn completed(thread_id: ThreadId, notification_id: &str) -> RuntimeEvent {
         notification_id: notification_id.to_string(),
         child_id: ChildId::new(),
         label: "inspect runtime".to_string(),
-        status: "completed".to_string(),
+        status: ark_common::ChildRunStatus::Completed,
         summary: Some("The runtime is healthy.".to_string()),
         error: None,
         usage: None,

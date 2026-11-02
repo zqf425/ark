@@ -46,8 +46,8 @@ pub use services::{
 };
 pub use store::{latest_child_runs, ChildRunRecord, SessionStore, SubscribeTicket, ThreadMeta};
 pub use subagent::{
-    status as child_status, stop_reason, SubagentOutcome, SubagentPolicy, SubagentPolicySource,
-    SubagentRegistry, SubagentRequest, SubagentRunner,
+    stop_reason, SubagentOutcome, SubagentPolicy, SubagentPolicySource, SubagentRegistry,
+    SubagentRequest, SubagentRunner,
 };
 pub use tool::{
     SandboxDecision, SandboxPolicy, Tool, ToolArgs, ToolContext, ToolOutput, ToolRegistryPort,

@@ -216,20 +216,27 @@ async fn a_successful_run_records_queued_running_and_completed() {
         .await
         .unwrap();
 
-    assert_eq!(outcome.status, ark_ports::child_status::COMPLETED);
+    assert_eq!(outcome.status, ark_common::ChildRunStatus::Completed);
     assert_eq!(outcome.summary.as_deref(), Some("the answer"));
     assert_eq!(outcome.tool_invocations, 1);
 
-    let statuses: Vec<String> = harness
+    let statuses: Vec<ark_common::ChildRunStatus> = harness
         .records()
         .await
         .iter()
-        .map(|record| record.status.clone())
+        .map(|record| record.status)
         .collect();
-    assert_eq!(statuses, vec!["queued", "running", "completed"]);
+    assert_eq!(
+        statuses,
+        vec![
+            ark_common::ChildRunStatus::Queued,
+            ark_common::ChildRunStatus::Running,
+            ark_common::ChildRunStatus::Completed
+        ]
+    );
 
     let latest = harness.latest(outcome.child_id).await;
-    assert_eq!(latest.status, "completed");
+    assert_eq!(latest.status, ark_common::ChildRunStatus::Completed);
     assert!(latest.ended_at.is_some());
     assert_eq!(latest.prompt.as_deref(), Some("scan the repo"));
 }
@@ -268,7 +275,7 @@ async fn a_failing_child_reports_its_message_and_still_ends() {
         .delegate(harness.request("try"))
         .await
         .unwrap();
-    assert_eq!(outcome.status, ark_ports::child_status::FAILED);
+    assert_eq!(outcome.status, ark_common::ChildRunStatus::Failed);
     assert_eq!(outcome.error.as_deref(), Some("provider 500"));
     assert_eq!(
         SubagentRegistry::active_count(&*harness.runtime),
@@ -330,7 +337,7 @@ async fn a_background_executor_panic_converges_to_failed() {
     .await
     .expect("the runtime-owned supervisor must settle a panicking background child");
 
-    assert_eq!(terminal.status, ark_ports::child_status::FAILED);
+    assert_eq!(terminal.status, ark_common::ChildRunStatus::Failed);
     assert_eq!(terminal.error.as_deref(), Some("child executor panicked"));
     assert_eq!(SubagentRegistry::active_count(&*runtime), 0);
     assert!(!SubagentRegistry::abort(&*runtime, child));
@@ -347,7 +354,7 @@ async fn the_concurrency_limit_is_enforced_and_all_runs_finish() {
     }
     for task in tasks {
         let outcome = task.await.unwrap().unwrap();
-        assert_eq!(outcome.status, ark_ports::child_status::COMPLETED);
+        assert_eq!(outcome.status, ark_common::ChildRunStatus::Completed);
     }
     let peak = harness.executor.peak_concurrency.load(Ordering::SeqCst);
     assert!(peak <= 2, "peak {peak} exceeded the limit of 2");
@@ -455,7 +462,7 @@ async fn abort_reaches_the_running_child() {
         "a running child must be abortable"
     );
     let outcome = running.await.unwrap().unwrap();
-    assert_eq!(outcome.status, ark_ports::child_status::ABORTED);
+    assert_eq!(outcome.status, ark_common::ChildRunStatus::Aborted);
     assert!(
         !SubagentRegistry::abort(&*runtime, child),
         "an ended child is no longer abortable"
@@ -486,7 +493,7 @@ async fn a_failed_run_can_be_resumed_and_counts_resumes() {
         .delegate(harness.request("first try"))
         .await
         .unwrap();
-    assert_eq!(failed.status, ark_ports::child_status::FAILED);
+    assert_eq!(failed.status, ark_common::ChildRunStatus::Failed);
 
     let mut request = harness.request("corrected instruction");
     request.resume_child_id = Some(failed.child_id);
@@ -551,7 +558,7 @@ async fn hydrate_converges_an_orphaned_run_instead_of_leaving_it_active() {
     assert_eq!(loaded, 1);
 
     let record = SubagentRegistry::get(&*harness.runtime, child).expect("child must be hydrated");
-    assert_eq!(record.status, ark_ports::child_status::FAILED);
+    assert_eq!(record.status, ark_common::ChildRunStatus::Failed);
     assert!(
         !record.is_active(),
         "a hydrated orphan must not stay active"
@@ -635,7 +642,7 @@ async fn the_policy_is_read_per_spawn_so_a_settings_change_applies() {
     policy.enabled.store(1, Ordering::SeqCst);
     assert_eq!(
         runtime.delegate(request).await.unwrap().status,
-        "completed",
+        ark_common::ChildRunStatus::Completed,
         "a settings change must apply to the next spawn without a restart"
     );
 }
@@ -706,7 +713,7 @@ async fn steering_reaches_a_running_child() {
         "steer must be accepted for a running child"
     );
     let outcome = running.await.unwrap().unwrap();
-    assert_eq!(outcome.status, "completed");
+    assert_eq!(outcome.status, ark_common::ChildRunStatus::Completed);
     assert_eq!(
         executor.delivered.lock().unwrap().as_slice(),
         ["be more careful".to_string()]
@@ -725,18 +732,22 @@ async fn child_activity_events_are_published_on_the_parent_stream() {
     let events = SessionStore::replay_events(&*harness.store, harness.parent, 0)
         .await
         .unwrap();
-    let activities: Vec<String> = events
+    let activities: Vec<ark_common::ChildRunStatus> = events
         .iter()
         .filter_map(|event| match event {
             ark_contract::RuntimeEvent::ChildActivity {
                 child_id, status, ..
-            } if *child_id == outcome.child_id => Some(status.clone()),
+            } if *child_id == outcome.child_id => Some(*status),
             _ => None,
         })
         .collect();
     assert_eq!(
         activities,
-        vec!["queued", "running", "completed"],
+        vec![
+            ark_common::ChildRunStatus::Queued,
+            ark_common::ChildRunStatus::Running,
+            ark_common::ChildRunStatus::Completed
+        ],
         "the parent stream must carry the child lifecycle"
     );
 }
@@ -776,7 +787,7 @@ async fn a_background_child_publishes_a_terminal_completion_notification() {
 
     assert_eq!(completion["child_id"], child.to_string());
     assert_eq!(completion["summary"], "final report");
-    assert_eq!(completion["status"], ark_ports::child_status::COMPLETED);
+    assert_eq!(completion["status"], serde_json::json!("completed"));
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(1), completion_wakeup.recv())
             .await
@@ -797,7 +808,7 @@ async fn hydrate_replays_a_missing_terminal_completion_notification() {
         "recovered",
         chrono::Utc::now(),
     );
-    terminal.status = ark_ports::child_status::COMPLETED.to_string();
+    terminal.status = ark_common::ChildRunStatus::Completed;
     terminal.ended_at = Some(chrono::Utc::now());
     terminal.summary = Some("recovered report".to_string());
     SessionStore::append_child_run(&*harness.store, terminal)
@@ -844,7 +855,7 @@ async fn a_finished_run_frees_its_slot_and_reports_not_active() {
             .delegate(harness.request(&format!("seq {index}")))
             .await
             .unwrap();
-        assert_eq!(outcome.status, "completed");
+        assert_eq!(outcome.status, ark_common::ChildRunStatus::Completed);
         assert_eq!(
             SubagentRegistry::active_count(&*harness.runtime),
             0,
@@ -869,7 +880,7 @@ async fn a_finished_run_frees_its_slot_and_reports_not_active() {
         latest
             .values()
             .filter(|record| record.is_active())
-            .map(|record| (record.child_id, record.status.clone()))
+            .map(|record| (record.child_id, record.status))
             .collect::<Vec<_>>()
     );
 }

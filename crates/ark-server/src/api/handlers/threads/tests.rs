@@ -153,7 +153,7 @@ fn thread_detail_keeps_only_the_latest_distinct_completion_cards() {
             notification_id: format!("child:{seq}"),
             child_id: ChildId::new(),
             label: "inspect runtime".to_string(),
-            status: "completed".to_string(),
+            status: ark_common::ChildRunStatus::Completed,
             summary: None,
             error: None,
             usage: None,
@@ -657,7 +657,11 @@ async fn detail_lists_one_child_id_per_delegated_child() {
         .create_child_run(parent.thread_id, child, "scan")
         .await
         .expect("child dir");
-    for status in ["queued", "running", "completed"] {
+    for status in [
+        ark_common::ChildRunStatus::Queued,
+        ark_common::ChildRunStatus::Running,
+        ark_common::ChildRunStatus::Completed,
+    ] {
         let mut record = ark_ports::ChildRunRecord::queued(
             child,
             parent.thread_id,
@@ -665,8 +669,8 @@ async fn detail_lists_one_child_id_per_delegated_child() {
             "scan",
             Utc::now(),
         );
-        record.status = status.to_string();
-        if status == "completed" {
+        record.status = status;
+        if status == ark_common::ChildRunStatus::Completed {
             record.ended_at = Some(Utc::now());
         }
         state.store.append_child_run(record).await.expect("append");

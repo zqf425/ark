@@ -134,17 +134,17 @@ impl RuntimeCore {
         if existing.is_active() {
             return Err(ArkError::conflict(format!(
                 "child run {child_id} is still {} and cannot be resumed",
-                existing.status
+                existing.status.as_str()
             )));
         }
-        if existing.status == ark_ports::child_status::COMPLETED {
+        if existing.status == ark_common::ChildRunStatus::Completed {
             return Err(ArkError::conflict(format!(
                 "child run {child_id} already completed; nothing to resume"
             )));
         }
         let resume_count = existing.resume_count.unwrap_or(0) + 1;
         let mut record = existing.clone();
-        record.status = ark_ports::child_status::QUEUED.to_string();
+        record.status = ark_common::ChildRunStatus::Queued;
         record.ended_at = None;
         record.error = None;
         record.summary = None;
@@ -248,7 +248,7 @@ impl RuntimeCore {
         }
 
         let started = match self
-            .relabel(&record, ark_ports::child_status::RUNNING)
+            .relabel(&record, ark_common::ChildRunStatus::Running)
             .await
         {
             Ok(started) => started,
@@ -281,7 +281,11 @@ impl RuntimeCore {
     ///
     /// Refuses (and reports) a run the user deleted while it was starting, so a
     /// late `relabel` cannot resurrect a destroyed child.
-    async fn relabel(&self, record: &ChildRunRecord, status: &str) -> Result<ChildRunRecord> {
+    async fn relabel(
+        &self,
+        record: &ChildRunRecord,
+        status: ark_common::ChildRunStatus,
+    ) -> Result<ChildRunRecord> {
         if self.is_deleted(record.child_id) {
             return Err(ArkError::not_found(format!(
                 "child run {} was deleted",
@@ -289,7 +293,7 @@ impl RuntimeCore {
             )));
         }
         let mut next = record.clone();
-        next.status = status.to_string();
+        next.status = status;
         self.store.append_child_run(next.clone()).await?;
         self.lock_known().insert(next.child_id, next.clone());
         Ok(next)
@@ -341,7 +345,7 @@ impl RuntimeCore {
             timestamp: Utc::now(),
             child_id: record.child_id,
             label: record.label.clone(),
-            status: record.status.clone(),
+            status: record.status,
         };
         // Activity events are advisory: failing to publish one must never fail
         // the child run itself.
@@ -472,7 +476,7 @@ impl RuntimeCore {
         if record.is_active() || self.lock_handles().contains_key(&child) {
             return Err(ArkError::conflict(format!(
                 "child run {child} is still {} and cannot be destroyed; abort it first",
-                record.status
+                record.status.as_str()
             )));
         }
         // Mark first so a late `finish()` cannot recreate the record. Keep the

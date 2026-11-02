@@ -358,11 +358,18 @@ mod tests {
     use ark_ports::{ChildRunRecord, SessionStore};
     use std::sync::Arc;
 
-    fn child_record(parent: ThreadId, child: ChildId, status: &str) -> ChildRunRecord {
+    fn child_record(
+        parent: ThreadId,
+        child: ChildId,
+        status: ark_common::ChildRunStatus,
+    ) -> ChildRunRecord {
         let mut record =
             ChildRunRecord::queued(child, parent, TurnId::new(), "scan", chrono::Utc::now());
-        record.status = status.to_string();
-        if status != "queued" && status != "running" {
+        record.status = status;
+        if !matches!(
+            status,
+            ark_common::ChildRunStatus::Queued | ark_common::ChildRunStatus::Running
+        ) {
             record.ended_at = Some(chrono::Utc::now());
         }
         record
@@ -379,7 +386,8 @@ mod tests {
             let store = Arc::clone(&store);
             let parent = meta.thread_id;
             tasks.push(tokio::spawn(async move {
-                let record = child_record(parent, ChildId::new(), "queued");
+                let record =
+                    child_record(parent, ChildId::new(), ark_common::ChildRunStatus::Queued);
                 store.append_child_run(record).await.unwrap();
             }));
         }
@@ -400,11 +408,19 @@ mod tests {
         let victim = ChildId::new();
         let survivor = ChildId::new();
         store
-            .append_child_run(child_record(parent, victim, "completed"))
+            .append_child_run(child_record(
+                parent,
+                victim,
+                ark_common::ChildRunStatus::Completed,
+            ))
             .await
             .unwrap();
         store
-            .append_child_run(child_record(parent, survivor, "queued"))
+            .append_child_run(child_record(
+                parent,
+                survivor,
+                ark_common::ChildRunStatus::Queued,
+            ))
             .await
             .unwrap();
 
@@ -415,7 +431,10 @@ mod tests {
             tokio::spawn(async move { store.delete_child_run(parent, victim).await.unwrap() })
         };
         let mut appends = Vec::new();
-        for status in ["running", "completed"] {
+        for status in [
+            ark_common::ChildRunStatus::Running,
+            ark_common::ChildRunStatus::Completed,
+        ] {
             let store = Arc::clone(&store);
             appends.push(tokio::spawn(async move {
                 store
@@ -534,7 +553,7 @@ mod tests {
             "scan",
             chrono::Utc::now(),
         );
-        record.status = "running".into();
+        record.status = ark_common::ChildRunStatus::Running;
         store.append_child_run(record).await.unwrap();
         let err = store.delete_thread(meta.thread_id).await.unwrap_err();
         assert_eq!(err.code, ark_common::ArkErrorCode::Conflict);
@@ -553,7 +572,7 @@ mod tests {
             "scan",
             chrono::Utc::now(),
         );
-        record.status = "completed".into();
+        record.status = ark_common::ChildRunStatus::Completed;
         record.ended_at = Some(chrono::Utc::now());
         store.append_child_run(record).await.unwrap();
         store.delete_thread(meta.thread_id).await.unwrap();

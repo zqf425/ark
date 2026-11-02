@@ -9,8 +9,7 @@
 skill 视图，以及插件宿主的只读报告（`PluginHostReport`、`PluginEntry`、`PluginDiagnosticView`）。
 后三者的贡献项（pages/panels/tools）由宿主从真正拥有它们的总线汇总，本 crate 只定义形状，不保
 平行清单。wire 字段全量使用 snake_case 命名（生成的 TypeScript 同名，如 `thread_id`、`prompt_tokens`），
-child-runs 系列曾有的 camelCase 例外已随生成类型管线移除；`parentThreadId` 是子代理路由的查询
-参数名（文档化的 HTTP API 面），与 JSON 字段命名无关。新增字段不得引入其他命名风格。
+child-runs 系列曾有的 camelCase 例外已随生成类型管线移除；子代理路由的查询参数名同为 `parent_thread_id`/`thread_id`/`since_seq`（无 camelCase 别名）。新增字段不得引入其他命名风格。
 
 `ThreadItem.marker`（`ItemMarker::ContextCheckpoint`）是系统生成条目的结构化标识，取代按文本
 前缀识别；判定入口是 `ThreadItem::is_context_checkpoint`（对历史无 marker 条目按前缀兜底，且

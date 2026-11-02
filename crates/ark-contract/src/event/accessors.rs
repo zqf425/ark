@@ -37,7 +37,7 @@ impl RuntimeEvent {
                 notification_id: notification_id.clone(),
                 child_id: *child_id,
                 label: label.clone(),
-                status: status.clone(),
+                status: *status,
                 summary: summary.clone(),
                 error: error.clone(),
             }),

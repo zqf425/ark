@@ -88,11 +88,6 @@ pub struct ThreadItem {
     pub marker: Option<ItemMarker>,
 }
 
-/// Text prefix rendered by `ark-agent`'s checkpoint family. Kept only as the
-/// legacy fallback for notice items persisted before `marker` existed; new
-/// code must match on [`ThreadItem::marker`].
-pub const CONTEXT_CHECKPOINT_PREFIX: &str = "[context checkpoint";
-
 impl ThreadItem {
     pub fn new(turn_id: TurnId, kind: ItemKind) -> Self {
         Self {
@@ -115,19 +110,11 @@ impl ThreadItem {
 
     /// Whether this item carries a rendered context checkpoint.
     ///
-    /// Matches the structural marker first; notice items persisted before the
-    /// marker existed are recognized by their text prefix. The prefix fallback
-    /// applies to every marker-less item, so it must stay gated on
-    /// [`ItemKind::Notice`]: a user message can open with the same text, and a
-    /// user message is never a checkpoint.
+    /// Marker-only on purpose: the project has no stored history predating the
+    /// marker, so a text-prefix fallback would buy nothing and reopen the hole
+    /// the marker closed (a user message can open with the same text).
     pub fn is_context_checkpoint(&self) -> bool {
-        self.kind == ItemKind::Notice
-            && (self.marker == Some(ItemMarker::ContextCheckpoint)
-                || (self.marker.is_none()
-                    && self
-                        .text
-                        .as_deref()
-                        .is_some_and(|text| text.starts_with(CONTEXT_CHECKPOINT_PREFIX))))
+        self.kind == ItemKind::Notice && self.marker == Some(ItemMarker::ContextCheckpoint)
     }
 
     pub fn with_text(mut self, text: impl Into<String>) -> Self {
@@ -182,13 +169,6 @@ mod marker_tests {
         let item = ThreadItem::new(TurnId::new(), ItemKind::Notice)
             .with_text("[context checkpoint]\nGoal: x")
             .with_marker(ItemMarker::ContextCheckpoint);
-        assert!(item.is_context_checkpoint());
-    }
-
-    #[test]
-    fn a_pre_marker_notice_is_recognized_by_its_prefix() {
-        let item = ThreadItem::new(TurnId::new(), ItemKind::Notice)
-            .with_text("[context checkpoint: truncated]\nGoal: x");
         assert!(item.is_context_checkpoint());
     }
 

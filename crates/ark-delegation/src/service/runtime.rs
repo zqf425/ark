@@ -357,7 +357,7 @@ fn completion_event(record: &ChildRunRecord, notification_id: String) -> Runtime
         notification_id,
         child_id: record.child_id,
         label: record.label.clone(),
-        status: record.status.clone(),
+        status: record.status,
         summary: record.summary.clone(),
         error: record.error.clone(),
         usage: record.usage.clone(),
@@ -404,7 +404,7 @@ fn child_context(request: &SubagentRequest, child_id: ChildId, prompt: String) -
 fn outcome_of(record: &ChildRunRecord) -> SubagentOutcome {
     SubagentOutcome {
         child_id: record.child_id,
-        status: record.status.clone(),
+        status: record.status,
         summary: record.summary.clone(),
         error: record.error.clone(),
         usage: record.usage.clone().unwrap_or_default(),

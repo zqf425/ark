@@ -505,7 +505,7 @@ mod tests {
             notification_id: notification_id.to_string(),
             child_id: ChildId::new(),
             label: "inspect runtime".to_string(),
-            status: "completed".to_string(),
+            status: ark_common::ChildRunStatus::Completed,
             summary: Some("healthy".to_string()),
             error: None,
             usage: None,

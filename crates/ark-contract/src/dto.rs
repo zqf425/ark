@@ -157,7 +157,6 @@ pub struct ThreadDetail {
     #[serde(default)]
     pub runtime: ThreadRuntimeSettings,
     /// Process-local state that is not persisted with the session settings.
-    #[serde(default)]
     pub runtime_snapshot: ThreadRuntimeSnapshot,
 }
 
@@ -576,8 +575,7 @@ pub struct ChildRunSummary {
     pub parent_thread_id: ThreadId,
     pub parent_turn_id: TurnId,
     pub label: String,
-    /// `queued` | `running` | `completed` | `failed` | `aborted`.
-    pub status: String,
+    pub status: ark_common::ChildRunStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -655,9 +653,9 @@ pub struct ResumeChildRequest {
 #[ts(optional_fields)]
 pub struct ChildRunActionResult {
     pub id: ark_common::ChildId,
-    /// Echo of the new state: `aborted`, `running`, ...
+    /// Echo of the new state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
+    pub status: Option<ark_common::ChildRunStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ok: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -689,16 +687,5 @@ mod tests {
 
         assert_eq!(payload.get("tool_invocations"), Some(&serde_json::json!(3)));
         assert!(payload.get("toolInvocations").is_none());
-    }
-
-    #[test]
-    fn thread_detail_runtime_defaults_for_older_payloads() {
-        let detail: ThreadDetail = serde_json::from_value(serde_json::json!({
-            "summary": {"thread_id": ThreadId::new(), "title": "t", "created_at": Utc::now(), "updated_at": Utc::now(), "archived": false},
-            "items": [], "child_ids": [], "child_completions": []
-        }))
-        .unwrap();
-        assert!(detail.runtime_snapshot.active_turn.is_none());
-        assert!(detail.runtime_snapshot.pending_approvals.is_empty());
     }
 }

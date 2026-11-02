@@ -139,7 +139,7 @@ fn render(outcome: &SubagentOutcome) -> ToolOutput {
 
     let mut detail = vec![
         format!("child={}", outcome.child_id),
-        format!("status={}", outcome.status),
+        format!("status={}", outcome.status.as_str()),
         format!("tools={}", outcome.tool_invocations),
     ];
     if let Some(model) = &outcome.model {

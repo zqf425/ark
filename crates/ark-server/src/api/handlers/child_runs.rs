@@ -8,8 +8,7 @@
 //!
 //! Two shape decisions are worth stating:
 //!
-//! * the `parentThreadId` *query parameter* (its name is the documented HTTP
-//!   surface, distinct from the snake_case JSON bodies) is **required** on every
+//! * the `parent_thread_id` *query parameter* is **required** on every
 //!   single-child route. A child id is
 //!   a UUID and a leaked one must not be enough to read another thread's
 //!   transcript, so ownership is always re-checked against the parent's run log.
@@ -27,7 +26,7 @@ use ark_contract::{
     ChildRunActionResult, ChildRunAggregates, ChildRunEventsResponse, ChildRunListResponse,
     ChildRunSummary, ResumeChildRequest, SteerChildRequest, ThreadDetail,
 };
-use ark_ports::{child_status, ChildRunRecord, SubagentRegistry, SubagentRequest, SubagentRunner};
+use ark_ports::{ChildRunRecord, SubagentRegistry, SubagentRequest, SubagentRunner};
 
 use crate::api::error::ApiError;
 use crate::api::handlers::threads::parse_thread;
@@ -36,7 +35,6 @@ use crate::state::AppState;
 
 /// Query shared by the list route.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ChildRunsQuery {
     /// Restrict the listing to one parent. Absent lists every known child.
     #[serde(default)]
@@ -47,14 +45,9 @@ pub struct ChildRunsQuery {
 }
 
 /// Query of the incremental transcript route.
-///
-/// `since_seq` keeps its **snake_case** wire name: the renderer and the old
-/// runtime both send `?since_seq=N`, and reading it as `sinceSeq` silently
-/// turned every incremental poll into a full replay from seq 0.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ChildEventsQuery {
-    #[serde(default, rename = "since_seq", alias = "sinceSeq")]
+    #[serde(default)]
     pub since_seq: Option<u64>,
     #[serde(default)]
     pub parent_thread_id: Option<String>,
@@ -94,7 +87,7 @@ fn require_parent(query: &ChildRunsQuery) -> Result<ThreadId, ApiError> {
     let Some(raw) = query.parent_thread_id.as_deref() else {
         return Err(ApiError::new(
             ArkErrorCode::ValidationError,
-            "parentThreadId is required for child-run access",
+            "parent_thread_id is required for child-run access",
         ));
     };
     parse_thread(raw)
@@ -123,7 +116,7 @@ fn summary_of_record(record: &ChildRunRecord) -> ChildRunSummary {
         parent_thread_id: record.parent_thread_id,
         parent_turn_id: record.parent_turn_id,
         label: record.label.clone(),
-        status: record.status.clone(),
+        status: record.status,
         summary: record.summary.clone(),
         error: record.error.clone(),
         model: record.model.clone(),
@@ -142,13 +135,12 @@ fn summary_of_record(record: &ChildRunRecord) -> ChildRunSummary {
 fn aggregates_of(records: &[ChildRunRecord]) -> ChildRunAggregates {
     let mut aggregates = ChildRunAggregates::default();
     for record in records {
-        match record.status.as_str() {
-            child_status::QUEUED => aggregates.queued += 1,
-            child_status::RUNNING => aggregates.running += 1,
-            child_status::COMPLETED => aggregates.completed += 1,
-            child_status::FAILED => aggregates.failed += 1,
-            child_status::ABORTED => aggregates.aborted += 1,
-            _ => {}
+        match record.status {
+            ark_common::ChildRunStatus::Queued => aggregates.queued += 1,
+            ark_common::ChildRunStatus::Running => aggregates.running += 1,
+            ark_common::ChildRunStatus::Completed => aggregates.completed += 1,
+            ark_common::ChildRunStatus::Failed => aggregates.failed += 1,
+            ark_common::ChildRunStatus::Aborted => aggregates.aborted += 1,
         }
         aggregates.tool_invocations += record.tool_invocations.unwrap_or(0);
         if let Some(usage) = &record.usage {
@@ -214,7 +206,7 @@ pub async fn abort(
     }
     Ok(Json(ChildRunActionResult {
         id: child,
-        status: Some(child_status::ABORTED.to_string()),
+        status: Some(ark_common::ChildRunStatus::Aborted),
         ok: None,
         deleted: None,
         resume_count: None,
@@ -319,7 +311,7 @@ pub async fn resume(
 
     Ok(Json(ChildRunActionResult {
         id: resumed,
-        status: Some(child_status::QUEUED.to_string()),
+        status: Some(ark_common::ChildRunStatus::Queued),
         ok: None,
         deleted: None,
         resume_count,
@@ -397,7 +389,7 @@ pub async fn events(
         None => {
             return Err(ApiError::new(
                 ArkErrorCode::ValidationError,
-                "parentThreadId is required for child-run access",
+                "parent_thread_id is required for child-run access",
             ))
         }
     };
