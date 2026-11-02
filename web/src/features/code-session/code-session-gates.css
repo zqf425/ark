@@ -97,12 +97,14 @@
 
 .ark-composer__box {
   border: 1px solid var(--ark-border-strong);
-  border-radius: var(--ark-radius);
+  border-radius: var(--ark-radius-lg);
   background: var(--ark-bg-raised);
-  padding: 6px;
+  box-shadow: var(--ark-shadow-1);
+  padding: 8px 10px 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  transition: border-color 120ms ease;
 }
 
 .ark-composer__box:focus-within {
@@ -116,6 +118,9 @@
   outline: none;
   background: none;
   color: var(--ark-text);
+  font-size: 13.5px;
+  /* Keep in sync with the MAX_ROWS height math in Composer.tsx (22px/row). */
+  line-height: 22px;
   max-height: 180px;
   overflow-y: auto;
 }
@@ -123,12 +128,20 @@
 .ark-composer__actions {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  justify-content: flex-end;
+}
+
+.ark-composer__tools,
+.ark-composer__send {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
 .ark-composer__status {
-  margin-right: auto;
+  margin-right: 4px;
   font-size: 11px;
   color: var(--ark-text-faint);
 }
