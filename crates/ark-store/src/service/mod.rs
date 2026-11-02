@@ -6,6 +6,7 @@
 pub mod attachments;
 pub mod child_service;
 pub mod delegation;
+pub mod im;
 pub mod memory;
 
 pub use memory::MemoryFileStore;
@@ -18,6 +19,7 @@ pub mod writer_registry;
 pub use attachments::{AttachmentStore, DEFAULT_MAX_ATTACHMENT_BYTES};
 pub use child_service::ChildStore;
 pub use delegation::{DelegateError, DelegationPolicy, MAX_DEPTH};
+pub use im::ImFileStore;
 pub use reconcile::{reconcile_index, ReconcileReport};
 pub use schedule::ScheduleFileStore;
 pub use store::FileSessionStore;

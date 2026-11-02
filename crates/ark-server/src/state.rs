@@ -54,6 +54,15 @@ pub enum TurnEnd {
 pub enum TurnSource {
     /// Explicit user input, persisted as a user message.
     User(String),
+    /// Inbound IM message (requirements/im-channels.md). The text is persisted
+    /// as a user message exactly like [`TurnSource::User`]; the channel/chat
+    /// pair is bookkeeping for tracing, since the authoritative thread record
+    /// carries no IM fields (the `im.json` binding is the source of truth).
+    Im {
+        channel_id: String,
+        chat_id: String,
+        text: String,
+    },
     /// System-origin continuation consuming the durable child-completion inbox.
     AutoContinuation,
 }

@@ -57,7 +57,7 @@ pub use domain::{
     SessionState, SessionStatus, StoreDiagnostic, ThreadFile, ThreadPaths,
 };
 pub use service::{
-    reconcile_index, AttachmentStore, ChildStore, DelegationPolicy, FileSessionStore,
+    reconcile_index, AttachmentStore, ChildStore, DelegationPolicy, FileSessionStore, ImFileStore,
     MemoryFileStore, ReconcileReport, ScheduleFileStore, DEFAULT_MAX_ATTACHMENT_BYTES,
 };
 pub use store::{
