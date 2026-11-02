@@ -62,11 +62,16 @@ export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): 
   // bar uses, rendered as one compact row instead of a full-width banner.
   const { online, onlineLabel, refreshLabel, healthError, refresh } = useRuntimeStatusLabels()
 
-  // Drawer semantics: move focus in on open, close on Escape. Focus returns
-  // to the toggle through the browser's default after the drawer hides.
+  // Drawer semantics: focus moves into the dialog on open and back to the
+  // toggle on close; Escape closes. The drawer keeps its panel state while
+  // hidden, so only focus management is event-driven here.
   const drawerRef = useRef<HTMLElement | null>(null)
+  const drawerToggleRef = useRef<HTMLButtonElement | null>(null)
   useEffect(() => {
-    if (rightCollapsed) return
+    if (rightCollapsed) {
+      drawerToggleRef.current?.focus()
+      return
+    }
     drawerRef.current?.focus()
     const onKey = (event: globalThis.KeyboardEvent): void => {
       if (event.key === 'Escape') toggleRight()
@@ -142,9 +147,11 @@ export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): 
               </button>
             )}
             <button
+              ref={drawerToggleRef}
               type="button"
               className="ark-workbench-tools__btn"
               aria-expanded={!rightCollapsed}
+              aria-controls="ark-context-drawer"
               title={
                 rightCollapsed ? t('workbench.layout.openContext') : t('workbench.layout.closeContext')
               }
@@ -168,6 +175,7 @@ export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): 
         />
         <aside
           ref={drawerRef}
+          id="ark-context-drawer"
           className="ark-drawer"
           hidden={rightCollapsed}
           role="dialog"

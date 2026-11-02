@@ -13,8 +13,6 @@ export const WORKBENCH_MESSAGES = {
   'workbench.layout.resizeLeft': ['调整会话列表宽度', 'Resize the thread list'],
   'workbench.layout.showThreads': ['显示会话', 'Show threads'],
   'workbench.layout.hideThreads': ['隐藏会话', 'Hide threads'],
-  'workbench.layout.threads': ['会话', 'Threads'],
-  'workbench.layout.collapse': ['收起', 'Collapse'],
   'workbench.layout.openContext': ['打开上下文', 'Open context'],
   'workbench.layout.closeContext': ['关闭上下文', 'Close context'],
   'workbench.layout.context': ['上下文', 'Context'],
