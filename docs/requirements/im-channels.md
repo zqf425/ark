@@ -328,3 +328,13 @@ ImChannelForm/WeixinLoginDialog)通过。
 
 至此五个阶段全部落地。真实平台端到端(真实 Telegram bot/飞书应用/微信扫码)属发布验收,
 本机未执行。
+
+**2026-11-03 补强(扫码渲染)**:微信扫码对话框此前把 `qr_content` 当纯文本放进 `<code>`,
+用户看到的是登录 URL 字符串而非可扫的二维码(实测 `get_bot_qrcode` 返回的
+`qrcode_img_content`/`qrcodeUrl` 是 `https://liteapp.weixin.qq.com/q/...` 形态的登录
+链接)。对齐 smart-ark 渲染策略(`SidebarClawDialogStepContent` 的
+`qrValueIsImage` 双路径):`data:image/` 前缀直接以 `<img>` 展示,其余内容用
+`qrcode.react` 编码为二维码(白底容器保证深色主题下可扫);新增 3 个对话框渲染单测。
+依赖变更:web `dependencies` 新增 `qrcode.react@^4.2.0`(与 smart-ark 同版本,无传递
+依赖,约 10KB gzip 量级进主 chunk)。
+

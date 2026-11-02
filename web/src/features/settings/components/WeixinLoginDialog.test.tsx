@@ -14,7 +14,10 @@ import { WeixinLoginDialog } from './WeixinLoginDialog'
 
 vi.mock('../api/im-api', () => ({
   startWeixinLogin: vi.fn(),
-  waitWeixinLogin: vi.fn()
+  waitWeixinLogin: vi.fn(),
+  // `useIm` refreshes the channel list after login side effects; without this
+  // stub the hook silently lands in its error branch during tests.
+  listImChannels: vi.fn().mockResolvedValue({ channels: [] })
 }))
 
 const startMock = vi.mocked(startWeixinLogin)
@@ -55,6 +58,7 @@ describe('WeixinLoginDialog', () => {
 
     const qr = harness.host.querySelector('.ark-im-qr svg')
     expect(qr, 'the login URL must be rendered as a QR code').not.toBeNull()
+    expect(qr?.querySelector('path'), 'the QR must encode content, not be an empty shell').not.toBeNull()
     expect(harness.host.querySelector('.ark-im-qr img')).toBeNull()
     expect(harness.host.textContent).toContain('用手机微信扫描以下二维码')
   })
@@ -79,5 +83,6 @@ describe('WeixinLoginDialog', () => {
     harness = await mountWithProviders(<WeixinLoginDialog onClose={() => {}} />)
     await settle()
     expect(harness.host.querySelector('.ark-im-qr')).toBeNull()
+    expect(harness.host.querySelector('.ark-skeleton'), 'loading state stays visible').not.toBeNull()
   })
 })
