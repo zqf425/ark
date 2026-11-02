@@ -217,6 +217,9 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
                 </button>
               </span>
             ))}
+            {attachments.some((picked) => /\.(png|jpe?g|gif|webp|bmp)$/i.test(picked.name)) ? (
+              <span className="ark-composer__status">{t('canvas.composer.imageVisionHint')}</span>
+            ) : null}
           </div>
         ) : null}
 

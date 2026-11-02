@@ -22,6 +22,9 @@ export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.
   const modelOptions = selectedProvider
     ? [selectedProvider.model, ...selectedProvider.models].filter((id) => id && id !== (runtime.model ?? ''))
     : []
+  // Vision is declared per provider entry; `null`/false both mean the image
+  // parts of an attachment will be degraded to a placeholder by the runtime.
+  const visionUnsupported = selectedProvider !== null && selectedProvider.supports_vision !== true
   const [defaultAutonomy, setDefaultAutonomy] = useState(FALLBACK_AUTONOMY)
   const [saving, setSaving] = useState(false)
   const [compacting, setCompacting] = useState(false)
@@ -122,6 +125,9 @@ export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.
           </select>
         </label>
         <label>{t('session.runtime.autonomy')}<select value={runtime.autonomy ?? defaultAutonomy} onChange={(event) => setRuntime({ ...runtime, autonomy: event.target.value })}><option value="strict">{t('session.runtime.strict')}</option><option value="workspace_write">{t('session.runtime.workspaceWrite')}</option><option value="unattended">{t('session.runtime.unattended')}</option></select></label>
+        {visionUnsupported ? (
+          <span className="ark-session-runtime__hint">{t('session.runtime.visionUnsupported')}</span>
+        ) : null}
         <Button size="sm" variant="primary" disabled={saving || !canSaveRuntime(loadedFor, threadId)} onClick={() => void save()}>{t('session.runtime.save')}</Button>
         <Button size="sm" disabled={compacting} onClick={() => void compact()}>{t('session.context.compact')}</Button>
       </div>

@@ -322,3 +322,14 @@
   flex-basis: 100%;
   margin: 0;
 }
+
+.ark-composer__attachments .ark-composer__status {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.ark-session-runtime__hint {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--ark-warn);
+}

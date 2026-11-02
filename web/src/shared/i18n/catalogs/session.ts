@@ -37,5 +37,9 @@ export const SESSION_MESSAGES = {
   'session.runtime.reasoning.off': ['关闭', 'Off'],
   'session.runtime.reasoning.low': ['低', 'Low'],
   'session.runtime.reasoning.medium': ['中', 'Medium'],
-  'session.runtime.reasoning.high': ['高', 'High']
+  'session.runtime.reasoning.high': ['高', 'High'],
+  'session.runtime.visionUnsupported': [
+    '当前模型未声明识图能力：图片附件不会发送给模型。',
+    'The selected model does not declare vision; image attachments will not reach it.'
+  ]
 } as const
