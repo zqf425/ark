@@ -397,13 +397,17 @@ mod tests {
         // Rounds 1 and 2 each ran the call once.
         machine.enter(&start_action()).unwrap();
         machine.record_calls(std::slice::from_ref(&call));
-        machine.enter(&Action::Dispatch(Default::default())).unwrap();
+        machine
+            .enter(&Action::Dispatch(Default::default()))
+            .unwrap();
         machine.enter(&start_action()).unwrap();
         machine.record_calls(std::slice::from_ref(&call));
         assert_eq!(machine.repeats_for(std::slice::from_ref(&call)), vec![2]);
 
         // Round 3: round-1's run left the 2-round window (3 - 1 = 2, not < 2).
-        machine.enter(&Action::Dispatch(Default::default())).unwrap();
+        machine
+            .enter(&Action::Dispatch(Default::default()))
+            .unwrap();
         machine.enter(&start_action()).unwrap();
         assert_eq!(machine.repeats_for(std::slice::from_ref(&call)), vec![1]);
     }
@@ -416,7 +420,9 @@ mod tests {
             machine.enter(&start_action()).unwrap();
             machine.record_calls(std::slice::from_ref(&call));
             if !machine.state().is_terminal() {
-                machine.enter(&Action::Dispatch(Default::default())).unwrap();
+                machine
+                    .enter(&Action::Dispatch(Default::default()))
+                    .unwrap();
             }
         }
         assert_eq!(machine.repeats_for(std::slice::from_ref(&call)), vec![3]);

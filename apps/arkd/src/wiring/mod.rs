@@ -151,11 +151,13 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     // settings patch reports `restart_required` instead of pretending to apply.
     let skills = {
         let settings = &config.snapshot().skills;
-        let mut skills_config = ark_skills::SkillsConfig::default();
-        skills_config.enabled = settings.enabled;
-        skills_config
-            .roots
-            .extend(settings.extra_dirs.iter().map(std::path::PathBuf::from));
+        let mut skill_roots = ark_skills::SkillsConfig::default().roots;
+        skill_roots.extend(settings.extra_dirs.iter().map(std::path::PathBuf::from));
+        let skills_config = ark_skills::SkillsConfig {
+            enabled: settings.enabled,
+            roots: skill_roots,
+            ..ark_skills::SkillsConfig::default()
+        };
         Arc::new(ark_skills::SkillRuntime::new(
             skills_config,
             roots.current(),
