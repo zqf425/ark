@@ -479,7 +479,7 @@ fn memory(tools: &mut Vec<McpToolDoc>) {
         ),
         tool(
             "memory_update",
-            "Update one long-term memory entry; absent fields keep stored values.",
+            "Update one long-term memory entry; absent fields keep stored values, and an explicit null source clears it (the only way to remove a stored source).",
             "PATCH",
             "/v1/memory/{id}",
             json!({ "id": memory_id(), "body": dto_body("UpdateMemoryRequest") }),
