@@ -2,6 +2,7 @@ import { memo } from 'react'
 import type { ThreadItem } from '../../../shared/contracts'
 import { formatClock } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
+import { Markdown } from '../../../shared/ui/Markdown'
 
 /*
  * Rows are memoized on their `item` object. The reducer keeps the identity of
@@ -42,7 +43,7 @@ export const AssistantBubble = memo(function AssistantBubble({ item }: { item: T
         {failed ? <span className="ark-chip ark-chip--error">{t('canvas.failed')}</span> : null}
       </header>
       <div className="ark-msg__body ark-msg__body--prose">
-        {item.text ?? ''}
+        <Markdown text={item.text ?? ''} />
         {streaming ? <span className="ark-caret" aria-label={t('canvas.generating')} /> : null}
       </div>
       {item.detail ? <p className="ark-msg__detail">{item.detail}</p> : null}
