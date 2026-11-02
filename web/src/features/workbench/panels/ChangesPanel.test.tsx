@@ -6,6 +6,7 @@
  * the switch, a load that fails, and a cleared selection.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act } from 'react'
 import type { WorkspaceChangesResponse, WorkspaceDiff, WorkspaceView } from '../../../shared/contracts'
 import { installBrowserStubs, mountWithProviders, settle, type ReactHarness } from '../../../shared/testing/react-harness'
 import { useCodeSessionStore } from '../../code-session/state/store'
@@ -190,5 +191,55 @@ describe('ChangesPanel thread ownership', () => {
     useCodeSessionStore.setState({ activeThreadId: THREAD_B })
     await settle()
     expect(harness.text()).not.toContain('from-thread-a.ts')
+  })
+})
+
+describe('ChangesPanel diff expansion', () => {
+  let harness: ReactHarness | null = null
+
+  beforeEach(() => {
+    installBrowserStubs()
+    changesMock.mockReset()
+    viewMock.mockReset()
+    diffMock.mockReset()
+    viewMock.mockResolvedValue(workspaceView)
+    useCodeSessionStore.getState().resetItems()
+    useCodeSessionStore.setState({ activeThreadId: null })
+  })
+
+  afterEach(async () => {
+    await harness?.unmount()
+    harness = null
+  })
+
+  it('parses a file patch only while its row is expanded', async () => {
+    diffMock.mockResolvedValue({
+      ...workspaceDiff,
+      unstaged: [{
+        path: 'edited.ts',
+        status: 'M',
+        binary: false,
+        truncated: false,
+        patch: `--- a/edited.ts\n+++ b/edited.ts\n@@ -1 +1 @@\n-old line\n+new line\n`
+      }]
+    })
+    changesMock.mockResolvedValue(changes('edited.ts'))
+    useCodeSessionStore.setState({ activeThreadId: THREAD_A })
+
+    harness = await mountWithProviders(<ChangesPanel />)
+    await settle()
+    expect(harness.text()).toContain('edited.ts')
+    // Collapsed: the patch body must not be parsed into the DOM.
+    expect(harness.text()).not.toContain('new line')
+
+    const details = harness.host.querySelector('details.ark-workspace-diff__file')
+    expect(details).not.toBeNull()
+    await act(async () => {
+      ;(details as HTMLDetailsElement).open = true
+      // jsdom fires the toggle event asynchronously after the property change.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await settle()
+    expect(harness.text()).toContain('new line')
   })
 })

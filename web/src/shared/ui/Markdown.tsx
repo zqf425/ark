@@ -3,23 +3,27 @@ import { renderMarkdown } from './markdown-render'
 import './markdown.css'
 
 /** Minimum interval between markdown re-parses while text streams in. */
-const REPARSE_INTERVAL_MS = 120
+export const REPARSE_INTERVAL_MS = 120
 
 /**
  * Coalesce rapid prop changes (streamed token deltas) into at most one value
  * per interval. Without this, an 80k-char message re-parses markdown on every
  * token and the canvas stalls; the final text always lands because the timer
- * fires with the latest value.
+ * fires with the latest value. A value equal to the one already shown never
+ * schedules a timer, so static history messages mount without one.
  */
-function useThrottledValue<T>(value: T, intervalMs: number): T {
+export function useThrottledValue<T>(value: T, intervalMs: number): T {
   const [deferred, setDeferred] = useState(value)
   const lastRunAt = useRef(0)
+  const shown = useRef(value)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
+    if (Object.is(value, shown.current)) return
     const run = (): void => {
       lastRunAt.current = Date.now()
       timer.current = null
+      shown.current = value
       setDeferred(value)
     }
     const wait = Math.max(0, lastRunAt.current + intervalMs - Date.now())

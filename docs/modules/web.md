@@ -33,6 +33,7 @@
 - 会话流 footer 展示线程用量与上下文水位：用量由权威 `usage` 事件逐条累加，打开线程时以
   `GET /v1/threads/{id}/usage` 播种且只填充空通道（避免与实时事件重复计数）；上下文水位取最近一次
   样本的 `prompt_tokens` 对 tuning `context_limit_tokens` 的占比，仅作展示，不参与运行时决策。
+  限额缓存带 TTL 并定时重取（footer 常驻挂载、跨线程不重挂，一次性获取会在设置页修改后永久陈旧）。
   `compaction_completed` 以摘要形式显示最近一次压缩规模。
 - 模型输出的 markdown 渲染集中在 `shared/ui` 的 `Markdown`（marked + DOMPurify 消毒后注入）与
   `code-highlight`（文件预览高亮）：模型输出是不可信输入，任何进入 `dangerouslySetInnerHTML` 的

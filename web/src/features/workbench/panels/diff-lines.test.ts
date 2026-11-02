@@ -92,6 +92,15 @@ describe('parseUnifiedDiff', () => {
     ])
   })
 
+  it('不可解析的 @@ 行降级为 meta，且不武装 hunk 状态', () => {
+    // Combined-diff `@@@` headers are outside the renderer's contract; they
+    // must not crash parsing nor arm hunk numbering.
+    const lines = parseUnifiedDiff('@@@ -1,2,3 +1,2,3 @@\nplain line\n')
+    expect(lines).toHaveLength(2)
+    expect(lines.every((line) => line.type === 'meta')).toBe(true)
+    expect(lines[1]?.oldNumber).toBeNull()
+  })
+
   it('diff --git 重新武装文件头识别（下一个文件段）', () => {
     const patch = `diff --git a/x b/x
 --- a/x
