@@ -8,6 +8,7 @@
 import { translateNow } from '../../../shared/i18n/current'
 import { parseProviderHeaders } from './ProviderCatalog'
 import { ENDPOINT_FORMATS, type EndpointFormat, type ProviderEntry, type ProviderView } from '../../../shared/contracts'
+import { PROVIDER_MODELS_MAX } from '../../../shared/contracts/web-only'
 
 export type ProviderDraft = {
   id: string
@@ -126,6 +127,9 @@ export function buildEntry(draft: ProviderDraft, editing: boolean): BuiltEntry {
   for (const raw of draft.models) {
     const id = raw.trim()
     if (id && id !== model) models.add(id)
+  }
+  if (models.size > PROVIDER_MODELS_MAX) {
+    return { ok: false, error: translateNow('settings.providerForm.error.tooManyModels', { max: PROVIDER_MODELS_MAX }) }
   }
   entry.models = [...models]
 

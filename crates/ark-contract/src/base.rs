@@ -207,9 +207,16 @@ pub struct ProviderEntry {
     /// Model inventory imported from the provider catalog (or pasted in), one
     /// id each. `model` remains the default a turn uses when the thread does
     /// not override it; the inventory is what the session model picker offers.
-    /// Normalized on save: trimmed, deduplicated, `model` itself removed.
-    #[serde(default)]
-    pub models: Vec<String>,
+    /// Normalized on save: trimmed, deduplicated (case-sensitive — model ids
+    /// are case-sensitive upstream), `model` itself removed.
+    ///
+    /// `Option`, not `Vec`: an omitted key means "keep the stored inventory"
+    /// (the MCP `provider_upsert` tool and other partial-edit clients never
+    /// send it), while an explicit empty list means "clear it". A plain `Vec`
+    /// could not tell the two apart and would let an unrelated label edit
+    /// silently wipe an imported inventory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub models: Option<Vec<String>>,
 }
 
 fn default_true() -> bool {
@@ -236,7 +243,7 @@ impl ProviderEntry {
             temperature: None,
             context_window_tokens: None,
             supports_vision: None,
-            models: Vec::new(),
+            models: None,
         }
     }
 }

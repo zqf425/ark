@@ -76,6 +76,10 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
     'The session runtime picker offers these; every model beyond the default is saved in the inventory.'
   ],
   'settings.providerForm.inventoryRemove': ['移除 {model}', 'Remove {model}'],
+  'settings.providerForm.error.tooManyModels': [
+    '模型清单超过上限 {max}，请先移除部分再保存',
+    'model inventory exceeds the {max} limit; remove some before saving'
+  ],
   'settings.providerForm.headersLabel': ['headers（JSON 对象，可选）', 'headers (JSON object, optional)'],
   'settings.providerForm.headersHint': ['例如 {"X-Request-Source":"ark"}；留空则不发送额外头。', 'For example {"X-Request-Source":"ark"}; leave blank to send no extra headers.'],
   'settings.providerForm.headersPlaceholder': ['{\n  "X-Request-Source": "ark"\n}', '{\n  "X-Request-Source": "ark"\n}'],
@@ -124,5 +128,6 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
   'settings.providerImport.selectedCount': ['已选 {count} 个', '{count} selected'],
   'settings.providerImport.selectAllVisible': ['全选可见（{count}）', 'Select visible ({count})'],
   'settings.providerImport.clearVisible': ['取消可见项', 'Clear visible'],
-  'settings.providerImport.confirm': ['导入 {count} 个', 'Import {count}']
+  'settings.providerImport.confirm': ['导入 {count} 个', 'Import {count}'],
+  'settings.providerImport.overCap': ['超出上限 {max}', 'over the {max} limit']
 } as const

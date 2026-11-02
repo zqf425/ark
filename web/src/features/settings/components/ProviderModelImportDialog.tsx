@@ -6,10 +6,11 @@
  * default so confirming imports only what is new. Pure row derivation lives in
  * ProviderCatalog.ts; this component only owns selection state.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import type { ProviderModelSummary } from '../../../shared/contracts'
+import { PROVIDER_MODELS_MAX } from '../../../shared/contracts/web-only'
 import {
   buildImportCandidates,
   defaultImportSelection,
@@ -29,6 +30,7 @@ export function ProviderModelImportDialog({
   onConfirm: (ids: string[]) => void
 }): JSX.Element {
   const { t } = useI18n()
+  const panelRef = useRef<HTMLDivElement | null>(null)
   const [pastedText, setPastedText] = useState('')
   const [query, setQuery] = useState('')
   const [hideExisting, setHideExisting] = useState(true)
@@ -60,6 +62,10 @@ export function ProviderModelImportDialog({
   })
 
   const checked = (row: ImportCandidate): boolean => selected.has(row.id)
+  // Count the intersection with the real rows: pasted prefixes accumulate in
+  // `selected` while typing and must not inflate the labels.
+  const chosen = rows.filter((row) => selected.has(row.id))
+  const overCap = chosen.length > PROVIDER_MODELS_MAX
   const toggle = (id: string): void => {
     const next = new Set(selected)
     if (next.has(id)) next.delete(id)
@@ -77,12 +83,21 @@ export function ProviderModelImportDialog({
   }
 
   const confirm = (): void => {
-    onConfirm(rows.filter((row) => checked(row)).map((row) => row.id))
+    onConfirm(chosen.map((row) => row.id))
   }
+
+  useEffect(() => {
+    panelRef.current?.focus()
+    const onKey = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
 
   return (
     <div className="ark-importdialog" role="dialog" aria-modal="true" aria-label={t('settings.providerImport.title')}>
-      <div className="ark-importdialog__panel">
+      <div className="ark-importdialog__panel" ref={panelRef} tabIndex={-1}>
         <header className="ark-importdialog__head">
           <div>
             <strong>{t('settings.providerImport.title')}</strong>
@@ -90,7 +105,7 @@ export function ProviderModelImportDialog({
               {t('settings.providerImport.subtitle', { total: rows.length, present: rows.filter((row) => row.alreadyPresent).length })}
             </p>
           </div>
-          <Button variant="ghost" size="sm" onClick={onCancel} aria-label={t('common.cancel')}>
+          <Button variant="ghost" size="sm" onClick={onCancel} aria-label={t('common.close')}>
             ×
           </Button>
         </header>
@@ -150,7 +165,8 @@ export function ProviderModelImportDialog({
 
         <footer className="ark-importdialog__foot">
           <span className="ark-settings__hint">
-            {t('settings.providerImport.selectedCount', { count: selected.size })}
+            {t('settings.providerImport.selectedCount', { count: chosen.length })}
+            {overCap ? ` ${t('settings.providerImport.overCap', { max: PROVIDER_MODELS_MAX })}` : ''}
           </span>
           <div className="ark-settings__row">
             <Button size="sm" disabled={visible.length === 0} onClick={toggleAllVisible}>
@@ -161,7 +177,7 @@ export function ProviderModelImportDialog({
             <Button size="sm" onClick={onCancel}>
               {t('common.cancel')}
             </Button>
-            <Button variant="primary" size="sm" disabled={selected.size === 0} onClick={confirm}>
+            <Button variant="primary" size="sm" disabled={chosen.length === 0 || overCap} onClick={confirm}>
               {t('settings.providerImport.confirm', { count: selected.size })}
             </Button>
           </div>

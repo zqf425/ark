@@ -73,7 +73,7 @@ impl ProvidersDocument {
             api_key_hint: api_key_hint(entry.api_key.as_deref()),
             context_window_tokens: entry.context_window_tokens,
             supports_vision: entry.supports_vision,
-            models: entry.models.clone(),
+            models: entry.models.clone().unwrap_or_default(),
         }
     }
 

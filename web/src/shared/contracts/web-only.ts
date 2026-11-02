@@ -49,3 +49,10 @@ export type UiPreferences = { locale: UiLocale; fontSize: UiFontSize; theme: UiT
 
 /** Lifecycle of a renderer-side resource load. Pure UI state, not a wire contract. */
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
+
+/**
+ * Mirrors `ProviderEntry::MODELS_MAX` (an associated const ts-rs cannot
+ * export). 非 Rust 契约：数值必须与 Rust 侧保持一致，改动需双向同步。
+ * The import dialog blocks before save so an oversized paste fails in place.
+ */
+export const PROVIDER_MODELS_MAX = 64

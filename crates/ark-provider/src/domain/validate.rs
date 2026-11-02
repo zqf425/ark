@@ -143,7 +143,10 @@ pub fn normalize_entry(entry: ProviderEntry) -> Result<ProviderEntry> {
         .api_key
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty());
-    let models = normalize_models(&model, entry.models)?;
+    let models = match entry.models {
+        None => None,
+        Some(list) => Some(normalize_models(&model, list)?),
+    };
     Ok(ProviderEntry {
         id,
         label,
@@ -207,30 +210,49 @@ mod tests {
     }
 
     #[test]
+    fn omitted_inventory_is_preserved_as_none() {
+        let entry = ProviderEntry::new("p", "deepseek-chat");
+        let out = normalize_entry(entry).unwrap();
+        assert_eq!(out.models, None);
+    }
+
+    #[test]
     fn model_inventory_is_trimmed_deduplicated_and_defaults_dropped() {
         let mut entry = ProviderEntry::new("p", "deepseek-chat");
-        entry.models = vec![
+        entry.models = Some(vec![
             " deepseek-reasoner ".into(),
             "deepseek-reasoner".into(),
             "".into(),
             "deepseek-chat".into(),
             "glm-5".into(),
-        ];
+        ]);
         let out = normalize_entry(entry).unwrap();
         assert_eq!(
             out.models,
-            vec!["deepseek-reasoner".to_string(), "glm-5".to_string()]
+            Some(vec!["deepseek-reasoner".to_string(), "glm-5".to_string()])
         );
     }
 
     #[test]
     fn oversized_model_inventory_is_rejected_not_truncated() {
         let mut entry = ProviderEntry::new("p", "m");
-        entry.models = (0..ProviderEntry::MODELS_MAX + 1)
-            .map(|i| format!("m{idx}", idx = i))
-            .collect();
+        entry.models = Some(
+            (0..ProviderEntry::MODELS_MAX + 1)
+                .map(|i| format!("m{idx}", idx = i))
+                .collect(),
+        );
         let err = normalize_entry(entry).unwrap_err();
         assert!(err.message.contains("exceeds"), "{}", err.message);
+    }
+
+    #[test]
+    fn explicit_empty_inventory_passes_through_normalization() {
+        let mut entry = ProviderEntry::new("p", "deepseek-chat");
+        entry.models = Some(Vec::new());
+        let out = normalize_entry(entry).unwrap();
+        // Empty stays empty here; the "omitted keeps, explicit clears" split
+        // lives in `keep_omitted_edit_fields` (store layer).
+        assert_eq!(out.models, Some(Vec::new()));
     }
 
     #[test]
