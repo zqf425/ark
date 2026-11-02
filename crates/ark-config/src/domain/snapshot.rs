@@ -266,8 +266,19 @@ impl RuntimeConfig {
             }
         }
         if let Some(value) = &patch.skills {
-            if next.skills != *value {
-                next.skills = value.clone();
+            // Trim before storing: validation and the skill runtime must see
+            // the same normalized strings, or a padded path could pass
+            // validation and then resolve as a workspace-relative root.
+            let normalized = SkillsSettings {
+                extra_dirs: value
+                    .extra_dirs
+                    .iter()
+                    .map(|dir| dir.trim().to_string())
+                    .collect(),
+                enabled: value.enabled,
+            };
+            if next.skills != normalized {
+                next.skills = normalized;
                 changed.push(FieldPath::new("skills"));
             }
         }
@@ -314,9 +325,12 @@ fn validate_hooks(hooks: &HookSettings) -> Result<(), String> {
     Ok(())
 }
 
-/// Skills scan-root bounds: empty or oversized entries are configuration
-/// mistakes, and beyond 16 roots the per-request rescan cost stops being
-/// predictable (docs/modules/ark-skills.md).
+/// Skills scan-root bounds (docs/modules/ark-skills.md).
+///
+/// Entries must be absolute or `~`-prefixed: a workspace-relative root would
+/// silently change meaning when the workspace switches, which is exactly what
+/// this config surface exists to avoid. Validation runs on the *normalized*
+/// candidate, so stored values and checked values cannot diverge.
 fn validate_skills(skills: &SkillsSettings) -> Result<(), String> {
     let mut seen = std::collections::HashSet::new();
     for dir in &skills.extra_dirs {
@@ -327,6 +341,12 @@ fn validate_skills(skills: &SkillsSettings) -> Result<(), String> {
         if trimmed.chars().count() > SKILLS_EXTRA_DIR_MAX_CHARS {
             return Err(format!(
                 "skills.extra_dirs entry exceeds {SKILLS_EXTRA_DIR_MAX_CHARS} characters"
+            ));
+        }
+        let is_absolute = std::path::Path::new(trimmed).is_absolute();
+        if !is_absolute && !trimmed.starts_with('~') {
+            return Err(format!(
+                "skills.extra_dirs entry must be absolute or ~-prefixed: {trimmed}"
             ));
         }
         if !seen.insert(trimmed.to_string()) {
@@ -358,6 +378,50 @@ mod tests {
         let mut config = RuntimeConfig::default();
         config.tuning.max_rounds = 0;
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn skills_extra_dirs_reject_relative_and_accept_absolute_or_home() {
+        let mut config = RuntimeConfig::default();
+        config.skills.extra_dirs = vec!["relative/dir".to_string()];
+        assert!(
+            config.validate().is_err(),
+            "a workspace-relative root must be rejected"
+        );
+
+        config.skills.extra_dirs = vec!["~/my-skills".to_string()];
+        assert!(config.validate().is_ok());
+        config.skills.extra_dirs = vec!["/tmp/my-skills".to_string()];
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn skills_patch_is_trimmed_before_it_is_stored() {
+        let config = RuntimeConfig::default();
+        let patch = ConfigPatch {
+            skills: Some(SkillsSettings {
+                enabled: true,
+                extra_dirs: vec!["  /tmp/skills  ".to_string(), "~/sk".to_string()],
+            }),
+            ..ConfigPatch::default()
+        };
+        let (next, changed) = config.candidate(&patch).expect("valid patch");
+        assert_eq!(changed, vec![FieldPath::new("skills")]);
+        assert_eq!(next.skills.extra_dirs, vec!["/tmp/skills", "~/sk"]);
+        assert!(next.validate().is_ok());
+    }
+
+    #[test]
+    fn padded_relative_skills_entry_is_rejected_even_though_trim_would_fix_it() {
+        let config = RuntimeConfig::default();
+        let patch = ConfigPatch {
+            skills: Some(SkillsSettings {
+                enabled: true,
+                extra_dirs: vec!["  relative  ".to_string()],
+            }),
+            ..ConfigPatch::default()
+        };
+        assert!(config.candidate(&patch).is_err());
     }
 
     #[test]

@@ -16,7 +16,7 @@ export const SETTINGS_MEMORY_MESSAGES = {
   'settings.memory.storagePath': ['存储文件', 'Storage file'],
   'settings.memory.entryCount': ['条目数', 'Entries'],
   'settings.memory.lastWritten': ['最近写入', 'Last written'],
-  'settings.memory.never': ['从未', 'never'],
+  'settings.memory.never': ['从未', 'Never'],
   'settings.memory.diagnosticsUnavailable': ['诊断信息不可用', 'Diagnostics are unavailable'],
 
   'settings.memory.textLabel': ['内容', 'Text'],
@@ -33,7 +33,7 @@ export const SETTINGS_MEMORY_MESSAGES = {
   'settings.memory.updateFailed': ['更新记忆失败', 'Failed to update the memory'],
   'settings.memory.deleted': ['记忆已删除', 'Memory deleted'],
   'settings.memory.deleteFailed': ['删除记忆失败', 'Failed to delete the memory'],
-  'settings.memory.injectHint': ['每回合注入有预算上限：条目过多时较早的条目会被整条跳过。', 'Injection has a per-turn budget: when entries overflow, the earliest ones are skipped whole.'],
+  'settings.memory.injectHint': ['每回合按创建顺序注入，有预算上限：条目过多时较新的条目会被整条跳过。', 'Entries are injected oldest first under a per-turn budget: when they overflow, newer entries are skipped whole.'],
   'settings.memory.emptyTitle': ['暂无记忆', 'No memories'],
   'settings.memory.emptyHint': ['在上方写下希望助手长期记住的内容。', 'Write what the assistant should remember above.']
 } as const

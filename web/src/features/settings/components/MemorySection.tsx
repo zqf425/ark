@@ -112,7 +112,7 @@ function MemoryCard(props: {
 }
 
 export function MemorySection(): JSX.Element {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const api = useMemory()
   const { push: pushToast } = useToast()
   const [text, setText] = useState('')
@@ -171,7 +171,9 @@ export function MemorySection(): JSX.Element {
             { key: t('settings.memory.entryCount'), value: diag.entry_count },
             {
               key: t('settings.memory.lastWritten'),
-              value: diag.last_written_at ? new Date(diag.last_written_at).toLocaleString() : t('settings.memory.never')
+              value: diag.last_written_at
+                ? new Date(diag.last_written_at).toLocaleString(locale)
+                : t('settings.memory.never')
             }
           ]}
         />

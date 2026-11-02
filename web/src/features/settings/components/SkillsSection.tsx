@@ -34,7 +34,7 @@ function SkillsConfigCard({ settings }: { settings: SettingsApi }): JSX.Element 
   const { config, saving, save } = settings
   const [enabled, setEnabled] = useState(true)
   const [dirsDraft, setDirsDraft] = useState('')
-  const [rejection, setRejection] = useState<{ reason: string; restartRequired: string[] } | null>(null)
+  const [rejection, setRejection] = useState<string | null>(null)
 
   useEffect(() => {
     if (!config) return
@@ -58,7 +58,7 @@ function SkillsConfigCard({ settings }: { settings: SettingsApi }): JSX.Element 
       return
     }
     if (outcome.value.result === 'rejected') {
-      setRejection({ reason: outcome.value.reason, restartRequired: outcome.value.restart_required })
+      setRejection(outcome.value.reason)
       toast.push('error', t('settings.skills.rejected'), outcome.value.reason)
       return
     }
@@ -115,7 +115,7 @@ function SkillsConfigCard({ settings }: { settings: SettingsApi }): JSX.Element 
 
       {rejection ? (
         <Notice tone="error" title={t('settings.skills.rejectedTitle')}>
-          <span>{t('settings.skills.reason', { reason: rejection.reason })}</span>
+          <span>{t('settings.skills.reason', { reason: rejection })}</span>
         </Notice>
       ) : null}
     </div>
