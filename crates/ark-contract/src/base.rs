@@ -52,8 +52,97 @@ pub struct UpdateMemoryRequest {
     /// leave `source` untouched, explicit `null` = clear it, a string = set it.
     /// A plain `Option` could never express "clear", which left a stored
     /// source unremovable through the API.
-    #[serde(default)]
+    ///
+    /// The custom deserializer is required, not cosmetic: serde's derived
+    /// `Option` handling collapses an explicit JSON `null` into the outer
+    /// `None` ("untouched") even for `Option<Option<T>>`, so without it the
+    /// clear intent silently disappears at the HTTP boundary.
+    ///
+    /// This asymmetry is deserialize-only: serialization still writes `None`
+    /// and `Some(None)` identically as `null`, so a serialized form of this
+    /// struct must never be fed back through the API — an "untouched" would
+    /// silently upgrade to "clear". It is a request DTO, not a round-trip
+    /// payload.
+    #[serde(default, deserialize_with = "source_update::deserialize")]
     pub source: Option<Option<String>>,
+}
+
+/// Three-state deserialization for `source` (see [`UpdateMemoryRequest`]).
+///
+/// `deserialize_option` distinguishes the two cases the derived impl cannot:
+/// `null` reaches `visit_none` (clear) while a present value reaches
+/// `visit_some` (set); a missing key never reaches the deserializer at all
+/// (`#[serde(default)]` yields "untouched").
+mod source_update {
+    use serde::{Deserialize, Deserializer};
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct SourceUpdateVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for SourceUpdateVisitor {
+            type Value = Option<Option<String>>;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a string, null, or an omitted key")
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E> {
+                Ok(Some(None))
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(Some(None))
+            }
+
+            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                String::deserialize(deserializer).map(|value| Some(Some(value)))
+            }
+        }
+
+        deserializer.deserialize_option(SourceUpdateVisitor)
+    }
+}
+
+#[cfg(test)]
+mod source_update_tests {
+    use super::*;
+
+    /// Regression: the derived `Option` handling collapsed an explicit `null`
+    /// into "untouched", so the clear intent never survived the HTTP boundary.
+    /// This test pins the wire layer, not the store layer.
+    #[test]
+    fn update_source_deserializes_the_three_wire_intents() {
+        let untouched: UpdateMemoryRequest = serde_json::from_str("{}").expect("empty body");
+        assert_eq!(untouched.source, None);
+
+        let cleared: UpdateMemoryRequest =
+            serde_json::from_str(r#"{"source": null}"#).expect("null");
+        assert_eq!(cleared.source, Some(None));
+
+        let set: UpdateMemoryRequest =
+            serde_json::from_str(r#"{"source": "web"}"#).expect("string");
+        assert_eq!(set.source, Some(Some("web".to_string())));
+    }
+
+    #[test]
+    fn serialization_collapses_untouched_and_cleared_to_null() {
+        // Deliberate asymmetry with deserialization: the wire only needs to
+        // carry intents *into* the runtime, and `null` on output covers both
+        // "untouched" and "clear". Documented on `source` — this struct must
+        // not be round-tripped, or an untouched field silently clears.
+        let request = UpdateMemoryRequest {
+            source: Some(None),
+            ..UpdateMemoryRequest::default()
+        };
+        let json = serde_json::to_string(&request).expect("serializable");
+        assert_eq!(json, r#"{"text":null,"tags":null,"source":null}"#);
+    }
 }
 
 /// `GET /v1/memory`.

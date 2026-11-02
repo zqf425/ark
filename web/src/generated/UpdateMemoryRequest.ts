@@ -9,5 +9,16 @@ export type UpdateMemoryRequest = { text?: string, tags?: Array<string>,
  * leave `source` untouched, explicit `null` = clear it, a string = set it.
  * A plain `Option` could never express "clear", which left a stored
  * source unremovable through the API.
+ *
+ * The custom deserializer is required, not cosmetic: serde's derived
+ * `Option` handling collapses an explicit JSON `null` into the outer
+ * `None` ("untouched") even for `Option<Option<T>>`, so without it the
+ * clear intent silently disappears at the HTTP boundary.
+ *
+ * This asymmetry is deserialize-only: serialization still writes `None`
+ * and `Some(None)` identically as `null`, so a serialized form of this
+ * struct must never be fed back through the API — an "untouched" would
+ * silently upgrade to "clear". It is a request DTO, not a round-trip
+ * payload.
  */
 source?: string | null, };
