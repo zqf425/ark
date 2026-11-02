@@ -86,14 +86,19 @@ export function ProviderModelImportDialog({
     onConfirm(chosen.map((row) => row.id))
   }
 
+  // Focus is claimed once on mount; onCancel goes through a ref so a fresh
+  // parent closure per render cannot re-run the effect and steal focus back
+  // from the paste box while the user is typing.
+  const onCancelRef = useRef(onCancel)
+  onCancelRef.current = onCancel
   useEffect(() => {
     panelRef.current?.focus()
     const onKey = (event: globalThis.KeyboardEvent): void => {
-      if (event.key === 'Escape') onCancel()
+      if (event.key === 'Escape') onCancelRef.current()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onCancel])
+  }, [])
 
   return (
     <div className="ark-importdialog" role="dialog" aria-modal="true" aria-label={t('settings.providerImport.title')}>
@@ -178,7 +183,7 @@ export function ProviderModelImportDialog({
               {t('common.cancel')}
             </Button>
             <Button variant="primary" size="sm" disabled={chosen.length === 0 || overCap} onClick={confirm}>
-              {t('settings.providerImport.confirm', { count: selected.size })}
+              {t('settings.providerImport.confirm', { count: chosen.length })}
             </Button>
           </div>
         </footer>
