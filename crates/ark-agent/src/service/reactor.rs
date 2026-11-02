@@ -51,6 +51,7 @@ pub struct ModelSeed {
     pub tools: Vec<serde_json::Value>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
+    pub reasoning_effort: Option<String>,
 }
 
 /// Everything the reactor needs. All fields are ports, so the reactor never
@@ -97,6 +98,7 @@ pub struct Reactor {
     tools_schema: Vec<serde_json::Value>,
     temperature: Option<f32>,
     max_tokens: Option<u32>,
+    reasoning_effort: Option<String>,
     chunk_buffer: usize,
     machine: TurnMachine,
     history: Vec<ModelMessage>,
@@ -141,6 +143,7 @@ impl Reactor {
             cancel,
             tools_schema: seed.tools,
             temperature: seed.temperature,
+            reasoning_effort: seed.reasoning_effort,
             max_tokens: seed.max_tokens,
             chunk_buffer,
             machine,
@@ -291,6 +294,7 @@ impl Reactor {
             tools: self.tools_schema.clone(),
             temperature: self.temperature,
             max_tokens: self.max_tokens,
+            reasoning_effort: self.reasoning_effort.clone(),
         }
     }
 

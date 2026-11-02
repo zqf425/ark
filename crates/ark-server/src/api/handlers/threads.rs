@@ -203,6 +203,15 @@ fn merge_runtime(
             ));
         }
     }
+    let reasoning_effort = patch.reasoning_effort.or(current.reasoning_effort);
+    if let Some(value) = reasoning_effort.as_deref() {
+        if !value.is_empty() && !ark_contract::REASONING_EFFORTS.contains(&value) {
+            return Err(ApiError::new(
+                ark_common::ArkErrorCode::ValidationError,
+                "invalid reasoning effort; use off, low, medium or high",
+            ));
+        }
+    }
     let provider_id = patch.provider_id.or(current.provider_id);
     let model = patch.model.or(current.model);
     if provider_id.is_some() || model.as_deref().is_some_and(|value| !value.is_empty()) {
@@ -228,6 +237,7 @@ fn merge_runtime(
         provider_id,
         model,
         autonomy,
+        reasoning_effort,
     })
 }
 

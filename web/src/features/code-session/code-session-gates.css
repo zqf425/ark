@@ -236,3 +236,89 @@
     opacity: 1;
   }
 }
+
+/* ---------- composer dock: runtime overrides + queue + attachments ---------- */
+
+.ark-composer-stack {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--ark-bg);
+}
+
+.ark-composer-stack .ark-session-runtime {
+  margin: 0 max(22px, calc((100% - var(--ark-canvas-width)) / 2));
+  border: 1px solid var(--ark-border);
+  border-bottom: 0;
+  border-radius: var(--ark-radius) var(--ark-radius) 0 0;
+  background: var(--ark-bg-raised);
+}
+
+.ark-composer-stack .ark-composer {
+  padding-bottom: 16px;
+}
+
+.ark-composer-stack .ark-composer__box {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.ark-composer__queue,
+.ark-composer__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 11px 6px;
+}
+
+.ark-composer__queue .ark-chip,
+.ark-composer__attachments .ark-chip {
+  gap: 6px;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-composer__skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 0 11px 6px;
+  padding: 8px;
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius-sm);
+  background: var(--ark-bg-inset);
+}
+
+.ark-composer__skill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--ark-border);
+  border-radius: 999px;
+  background: var(--ark-bg-raised);
+  color: var(--ark-text);
+  cursor: pointer;
+  padding: 2px 10px;
+  font-family: var(--ark-mono);
+  font-size: 12px;
+}
+
+.ark-composer__skill:hover {
+  border-color: var(--ark-accent-dim);
+  background: var(--ark-bg-hover);
+}
+
+.ark-composer__skill-name {
+  font-family: var(--ark-font);
+  font-size: 11px;
+  color: var(--ark-text-faint);
+}
+
+.ark-composer__skills .ark-composer__status {
+  flex-basis: 100%;
+  margin: 0;
+}

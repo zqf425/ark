@@ -48,6 +48,14 @@ pub fn build_body(config: &ProviderConfig, request: &ModelRequest) -> Result<Val
     if let Some(temperature) = request.temperature.or(config.temperature) {
         body["temperature"] = json!(temperature);
     }
+    // The Responses API carries the hint inside a `reasoning` object; `off` is
+    // omitted for the same reason as the Chat mapper.
+    match request.reasoning_effort.as_deref() {
+        Some("low") | Some("medium") | Some("high") => {
+            body["reasoning"] = json!({ "effort": request.reasoning_effort });
+        }
+        _ => {}
+    }
     if let Some(max_tokens) = request.max_tokens.or(config.max_tokens) {
         body["max_output_tokens"] = json!(max_tokens);
     }
@@ -252,6 +260,30 @@ pub fn parse_usage(usage: &Value) -> Usage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reasoning_effort_becomes_the_reasoning_object() {
+        let body = build_body(
+            &config(),
+            &ModelRequest {
+                messages: vec![ModelMessage::user("hi")],
+                reasoning_effort: Some("medium".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(body["reasoning"]["effort"], json!("medium"));
+        let off = build_body(
+            &config(),
+            &ModelRequest {
+                messages: vec![ModelMessage::user("hi")],
+                reasoning_effort: Some("off".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(off.get("reasoning").is_none());
+    }
 
     fn config() -> ProviderConfig {
         ProviderConfig::new("openai", "gpt-4o")

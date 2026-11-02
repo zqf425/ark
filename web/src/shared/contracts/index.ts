@@ -26,6 +26,8 @@ export type {
   ApplyResult,
   ArkErrorCode,
   ArkErrorPayload,
+  AttachmentUploadRequest,
+  AttachmentUploadResponse,
   ChildId,
   ChildCompletionNotice,
   ChildRunActionResult,

@@ -110,6 +110,9 @@ pub struct UpdateThreadRequest {
     pub runtime: Option<ThreadRuntimeSettings>,
 }
 
+/// Reasoning-effort vocabulary accepted for the thread runtime override.
+pub const REASONING_EFFORTS: &[&str] = &["off", "low", "medium", "high"];
+
 /// Per-thread overrides applied when the next turn is created.
 ///
 /// Empty fields fall back to the runtime defaults. The values are metadata, not
@@ -130,6 +133,10 @@ pub struct ThreadRuntimeSettings {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autonomy: Option<String>,
+    /// Reasoning-effort override for the next turn: `off` | `low` | `medium` |
+    /// `high`. Empty means unset, like the other override fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 /// `GET /v1/threads/{id}` — metadata, items and durable child terminal summaries.

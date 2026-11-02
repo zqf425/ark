@@ -63,6 +63,7 @@ impl FileSessionStore {
         file.provider_id = runtime.provider_id;
         file.model = runtime.model;
         file.autonomy = runtime.autonomy;
+        file.reasoning_effort = runtime.reasoning_effort;
         file.touch();
         crate::store::fs_util::write_json_atomic(&self.thread_paths(thread).thread_json(), &file)?;
         self.index_upsert(&file, self.highest_seq_of(thread))?;

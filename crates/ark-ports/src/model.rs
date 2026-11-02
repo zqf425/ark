@@ -167,6 +167,11 @@ pub struct ModelRequest {
     pub temperature: Option<f32>,
     #[serde(default)]
     pub max_tokens: Option<u32>,
+    /// Reasoning-effort hint for reasoning-capable models. Protocol mappers
+    /// decide the wire shape; `off` means "explicitly disabled where the
+    /// protocol can express it" and is otherwise indistinguishable from unset.
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 }
 
 /// A streamed chunk. Deltas are additive; `tool_call` marks a complete call so

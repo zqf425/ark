@@ -239,6 +239,7 @@ impl TurnRunner for AgentTurnRunner {
             &self.providers,
             thread.runtime.provider_id.as_deref(),
             thread.runtime.model,
+            thread.runtime.reasoning_effort,
         )?;
         let model = self.model_for_turn(&snapshot, provider.clone());
         let mut reactor = super::turn_common::build_reactor(super::turn_common::ReactorSpec {
@@ -254,6 +255,9 @@ impl TurnRunner for AgentTurnRunner {
                 tools: self.tool_registry.schemas(),
                 temperature: provider.as_ref().and_then(|provider| provider.temperature),
                 max_tokens: provider.as_ref().and_then(|provider| provider.max_tokens),
+                reasoning_effort: provider
+                    .as_ref()
+                    .and_then(|provider| provider.reasoning_effort.clone()),
             },
             machine: TurnMachine::new(super::turn_common::limits_for_turn(
                 &snapshot,
@@ -363,6 +367,7 @@ fn resolve_thread_provider(
     providers: &ark_provider::ProviderStore,
     provider_id: Option<&str>,
     model: Option<String>,
+    reasoning_effort: Option<String>,
 ) -> Result<Option<ark_llm::ProviderConfig>> {
     let mut provider = match provider_id {
         Some(id) => Some(providers.resolve(Some(id)).ok_or_else(|| {
@@ -370,8 +375,13 @@ fn resolve_thread_provider(
         })?),
         None => providers.resolve(None),
     };
-    if let (Some(provider), Some(model)) = (&mut provider, model) {
-        provider.model = model;
+    if let Some(provider) = &mut provider {
+        if let Some(model) = model {
+            provider.model = model;
+        }
+        // An empty override means "unset": drop it instead of sending an empty
+        // reasoning hint to the provider mapper.
+        provider.reasoning_effort = reasoning_effort.filter(|value| !value.is_empty());
     }
     Ok(provider)
 }

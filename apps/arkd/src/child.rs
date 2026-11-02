@@ -314,6 +314,9 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
                 tools: self.tool_schemas.clone(),
                 temperature: provider.as_ref().and_then(|provider| provider.temperature),
                 max_tokens: provider.as_ref().and_then(|provider| provider.max_tokens),
+                reasoning_effort: provider
+                    .as_ref()
+                    .and_then(|provider| provider.reasoning_effort.clone()),
             },
             machine: TurnMachine::new(limits_for_turn(&snapshot, provider.as_ref())),
             chunk_buffer: chunk_buffer_for_turn(&snapshot),

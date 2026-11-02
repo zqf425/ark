@@ -118,6 +118,7 @@ impl ProviderService for ProviderAdapter {
             custom_endpoint: config.custom_endpoint,
             max_tokens: config.max_tokens,
             temperature: config.temperature,
+            reasoning_effort: config.reasoning_effort,
         })
     }
 }

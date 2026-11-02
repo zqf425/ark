@@ -37,6 +37,8 @@ pub struct ModelEndpoint {
     pub custom_endpoint: Option<String>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
+    /// Reasoning-effort override from the thread runtime settings.
+    pub reasoning_effort: Option<String>,
 }
 
 /// Model provider management (design §7.2 / §7.15).

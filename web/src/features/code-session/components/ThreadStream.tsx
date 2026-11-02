@@ -234,7 +234,6 @@ export function ThreadStream({
             {live ? t('canvas.live') : groups.length > 0 ? t('canvas.turnCount', { count: groups.length }) : t('canvas.ready')}
           </p>
         </div>
-        <SessionRuntimeControls threadId={threadId} />
       </header>
       <div className="ark-stream__scroll" ref={scrollRef}>
         {/* Inner wrapper exists so a single ResizeObserver can see content
@@ -292,10 +291,17 @@ export function ThreadStream({
       ) : null}
 
       <StreamFooter />
-      {/* Keyed by thread so switching sessions remounts the textarea: the
-          composer keeps its message locally, and an unkeyed one would carry
-          the previous thread's unsent draft (ready to be sent to the new one). */}
-      <Composer key={threadId ?? ''} threadId={threadId} />
+      {/*
+        The runtime overrides dock sits with the composer: the user adjusts
+        workspace/provider/model/reasoning right where they type. Keyed by
+        thread so switching sessions remounts the textarea: the composer keeps
+        its message locally, and an unkeyed one would carry the previous
+        thread's unsent draft (ready to be sent to the new one).
+      */}
+      <div className="ark-composer-stack">
+        <SessionRuntimeControls threadId={threadId} />
+        <Composer key={threadId ?? ''} threadId={threadId} />
+      </div>
     </section>
   )
 }

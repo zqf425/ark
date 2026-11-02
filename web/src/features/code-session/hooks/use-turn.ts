@@ -16,7 +16,7 @@ function describe(error: unknown): string {
 }
 
 export type TurnApi = {
-  send: (text: string) => Promise<boolean>
+  send: (text: string, attachmentIds?: string[]) => Promise<boolean>
   steer: (text: string) => Promise<boolean>
   interrupt: () => Promise<void>
   canSend: boolean
@@ -33,17 +33,14 @@ export function useTurn(threadId: string | null): TurnApi {
   const activeTurnId = useCodeSessionStore((s) => s.activeTurnId)
 
   const send = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, attachmentIds: string[] = []): Promise<boolean> => {
       const trimmed = text.trim()
       if (!threadId || !trimmed || sending) return false
 
       setSending(true)
       setCommandError(null)
       try {
-        // The first phase never sends attachment bytes to the model, so a plain
-        // message carries an empty set; the field stays explicit because the
-        // generated type marks it required.
-        await startTurn(threadId, { text: trimmed, attachment_ids: [] })
+        await startTurn(threadId, { text: trimmed, attachment_ids: attachmentIds })
         return true
       } catch (error) {
         setCommandError(describe(error))

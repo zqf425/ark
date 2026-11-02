@@ -76,6 +76,7 @@ pub fn build_body(config: &ProviderConfig, request: &ModelRequest) -> Result<Val
     if let Some(temperature) = request.temperature.or(config.temperature) {
         body["temperature"] = json!(temperature);
     }
+    apply_anthropic_thinking(&mut body, request.reasoning_effort.as_deref());
     Ok(body)
 }
 
@@ -278,9 +279,96 @@ pub fn parse_usage(usage: &Value) -> Usage {
     UsageParser::new().parse_anthropic(usage)
 }
 
+/// Reasoning-effort mapping for Anthropic Messages: the protocol has no effort
+/// knob, only a token budget, so the levels map onto fixed budgets and `off`
+/// becomes an explicit disabled block (the only way to force thinking off for
+/// a model whose default enables it). Extended thinking requires
+/// `max_tokens > budget_tokens`, so the budget reserves headroom when the
+/// caller did not set a larger limit itself. The API pins `temperature` to 1
+/// while thinking is enabled, so any caller-set value is overridden here
+/// rather than sent and rejected.
+fn apply_anthropic_thinking(body: &mut Value, effort: Option<&str>) {
+    let budget: u32 = match effort {
+        Some("low") => 2_048,
+        Some("medium") => 8_192,
+        Some("high") => 16_384,
+        Some("off") => {
+            body["thinking"] = json!({ "type": "disabled" });
+            return;
+        }
+        _ => return,
+    };
+    let max_tokens = body
+        .get("max_tokens")
+        .and_then(Value::as_u64)
+        .map(|value| value as u32);
+    let max_tokens = match max_tokens {
+        Some(value) if value > budget => value,
+        _ => budget + 4_096,
+    };
+    body["max_tokens"] = json!(max_tokens);
+    body["temperature"] = json!(1);
+    body["thinking"] = json!({ "type": "enabled", "budget_tokens": budget });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thinking_enabled_pins_temperature_to_one() {
+        // The API rejects any other temperature while extended thinking is on;
+        // a caller-set value must be overridden, not sent and rejected.
+        let body = build_body(
+            &config(),
+            &ModelRequest {
+                messages: vec![ModelMessage::user("hi")],
+                temperature: Some(0.3),
+                reasoning_effort: Some("medium".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(body["temperature"], json!(1));
+        assert_eq!(body["thinking"]["type"], json!("enabled"));
+    }
+
+    #[test]
+    fn thinking_budgets_follow_the_effort_and_off_disables() {
+        let body = build_body(
+            &config(),
+            &ModelRequest {
+                messages: vec![ModelMessage::user("hi")],
+                reasoning_effort: Some("low".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(body["thinking"]["type"], json!("enabled"));
+        assert_eq!(body["thinking"]["budget_tokens"], json!(2_048));
+        assert!(body["max_tokens"].as_u64().unwrap() > 2_048);
+
+        let off = build_body(
+            &config(),
+            &ModelRequest {
+                messages: vec![ModelMessage::user("hi")],
+                reasoning_effort: Some("off".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(off["thinking"]["type"], json!("disabled"));
+
+        let unset = build_body(
+            &config(),
+            &ModelRequest {
+                messages: vec![ModelMessage::user("hi")],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(unset.get("thinking").is_none());
+    }
 
     fn config() -> ProviderConfig {
         ProviderConfig::new("anthropic", "claude-sonnet-4")
@@ -517,3 +605,4 @@ mod tests {
         assert_eq!(content[1]["source"]["data"], "aGk=");
     }
 }
+

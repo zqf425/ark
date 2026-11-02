@@ -43,6 +43,7 @@ pub fn build_body(config: &ProviderConfig, request: &ModelRequest) -> Result<Val
     if let Some(max_tokens) = request.max_tokens.or(config.max_tokens) {
         body["max_tokens"] = json!(max_tokens);
     }
+    apply_chat_reasoning_effort(&mut body, request.reasoning_effort.as_deref());
     if body.get("tools").is_some() {
         // Without this the final usage frame is not sent while streaming.
         body["stream_options"] = json!({ "include_usage": true });
@@ -228,9 +229,43 @@ pub fn parse_usage(usage: &Value) -> Usage {
     UsageParser::new().parse_openai(usage)
 }
 
+/// Reasoning-effort mapping for the Chat Completions wire: `low`/`medium`/
+/// `high` travel verbatim as `reasoning_effort`; `off` and an unset value are
+/// indistinguishable (the API has no "disable" switch, models default it off).
+fn apply_chat_reasoning_effort(body: &mut Value, effort: Option<&str>) {
+    match effort {
+        Some("low") | Some("medium") | Some("high") => {
+            body["reasoning_effort"] = json!(effort);
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reasoning_effort_travels_verbatim_and_off_is_omitted() {
+        let body = build_body(
+            &config(),
+            &ModelRequest {
+                reasoning_effort: Some("high".into()),
+                ..request()
+            },
+        )
+        .unwrap();
+        assert_eq!(body["reasoning_effort"], json!("high"));
+        let off = build_body(
+            &config(),
+            &ModelRequest {
+                reasoning_effort: Some("off".into()),
+                ..request()
+            },
+        )
+        .unwrap();
+        assert!(off.get("reasoning_effort").is_none());
+    }
 
     fn config() -> ProviderConfig {
         ProviderConfig::new("deepseek", "deepseek-chat")
@@ -448,3 +483,4 @@ mod tests {
         assert_eq!(calls[0]["function"]["arguments"], r#"{"path":"a.txt"}"#);
     }
 }
+

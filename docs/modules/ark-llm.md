@@ -31,6 +31,15 @@
   `common::data_url` 构造），openai responses 为 `input_text`/`input_image`，anthropic 为
   `image` + `source.type=base64` block。`images` 为空时 wire 形状与纯文本消息逐字节一致。
 
+## 推理强度映射（reasoning_effort）
+
+线程运行时覆盖 `reasoning_effort`（`off|low|medium|high`）经 `ProviderConfig.reasoning_effort` 传入
+`ModelRequest`，由各协议 mapper 决定线上形状：Chat Completions 用 `reasoning_effort`（`off` 与未设置
+都不发送，API 无强制关闭开关）；Responses API 用 `reasoning: { effort }`（同前省略 `off`）；Anthropic
+Messages 无 effort 旋钮，三档映射为固定 thinking 预算（2k/8k/16k）并保证 `max_tokens > budget`（不足
+时自动抬到 budget+4096），`off` 发送显式 `thinking: {type: disabled}`——这是唯一能强制关闭已默认开启
+思考的协议。
+
 ## 重试策略（common/retry.rs，唯一实现）
 
 `HttpModelClient::stream` 在**任何模型输出进入 sink 之前**对瞬时失败重试；已发布过增量的失败
