@@ -214,18 +214,18 @@ fn compute_diff(target: &crate::cli::ReviewTarget, workspace: &Path) -> Result<S
             // `git diff HEAD` covers tracked changes only; untracked files are
             // exactly what a pre-commit review usually looks at, so each one is
             // appended as a new-file diff.
-            let tracked = git_run(workspace, &git_args(["diff", "HEAD"]))?;
+            let tracked = git_run(workspace, &git_args(&["diff", "HEAD"]))?;
             combined.push_str(&tracked);
             let untracked = git_capture(
                 workspace,
-                git_args(["ls-files", "--others", "--exclude-standard", "-z"]),
+                git_args(&["ls-files", "--others", "--exclude-standard", "-z"]),
             )?;
             for path in untracked.split('\0').filter(|path| !path.is_empty()) {
                 // `--no-index` exits 1 when the files differ, which is the
                 // normal outcome here, not a failure.
                 let diff = git_run_accepting(
                     workspace,
-                    &git_args(["diff", "--no-index", "--", "/dev/null", path]),
+                    &git_args(&["diff", "--no-index", "--", "/dev/null", path]),
                     &[1],
                 )?;
                 if !combined.is_empty() {
@@ -236,14 +236,16 @@ fn compute_diff(target: &crate::cli::ReviewTarget, workspace: &Path) -> Result<S
         }
         ReviewTarget::Base(branch) => {
             // PR-style: everything on HEAD since it diverged from the base.
-            let merge_base =
-                git_capture(workspace, git_args(["merge-base", branch.as_str(), "HEAD"]))?;
-            combined.push_str(&git_run(workspace, &git_args(["diff", &merge_base]))?);
+            let merge_base = git_capture(
+                workspace,
+                git_args(&["merge-base", branch.as_str(), "HEAD"]),
+            )?;
+            combined.push_str(&git_run(workspace, &git_args(&["diff", &merge_base]))?);
         }
         ReviewTarget::Commit(rev) => {
             combined.push_str(&git_run(
                 workspace,
-                &git_args(["diff", &format!("{rev}~1"), rev]),
+                &git_args(&["diff", &format!("{rev}~1"), rev]),
             )?);
         }
     }
@@ -281,7 +283,7 @@ impl TruncateOnCharBoundary for String {
     }
 }
 
-fn git_args<const N: usize>(args: [&str; N]) -> Vec<String> {
+fn git_args(args: &[&str]) -> Vec<String> {
     args.iter().map(|arg| (*arg).to_string()).collect()
 }
 
@@ -326,8 +328,8 @@ fn git_capture(workspace: &Path, args: Vec<String>) -> Result<String, Failure> {
 /// snapshot.
 fn repo_context(workspace: &Path) -> String {
     const SNAPSHOT_CAP_BYTES: usize = 8 * 1024;
-    let run = |args: &[&str]| -> String {
-        git_run(workspace, &git_args_copied(args))
+    let snapshot_cmd = |args: &[&str]| -> String {
+        git_run(workspace, &git_args(args))
             .map(|out| {
                 // `trim_end` only: `git status --porcelain` lines start with a
                 // two-char status code whose first byte is a space for
@@ -339,15 +341,11 @@ fn repo_context(workspace: &Path) -> String {
     };
     let mut snapshot = format!(
         "git status --porcelain=v1:\n{}\n\ngit log --oneline -5:\n{}",
-        run(&["status", "--porcelain=v1"]),
-        run(&["log", "--oneline", "-5"]),
+        snapshot_cmd(&["status", "--porcelain=v1"]),
+        snapshot_cmd(&["log", "--oneline", "-5"]),
     );
     snapshot.truncate_on_char_boundary(SNAPSHOT_CAP_BYTES, "\n[snapshot truncated]\n");
     snapshot
-}
-
-fn git_args_copied(args: &[&str]) -> Vec<String> {
-    args.iter().map(|arg| (*arg).to_string()).collect()
 }
 
 /// The model-visible instruction for one review turn.
@@ -791,6 +789,21 @@ mod tests {
             Err(Failure::Turn(message)) => {
                 assert!(message.contains("unresolvable gate"), "{message}");
                 assert!(message.contains("bash git status"), "{message}");
+            }
+            other => panic!("expected a turn failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_user_input_gate_reports_its_prompt() {
+        // The user-input payload carries `prompt` instead of `summary`; the
+        // fallback must surface it in the failure message.
+        let frame = "id: 6\nevent: user_input_requested\ndata: {\"kind\":\"user_input_requested\",\"seq\":6,\"request_id\":\"r1\",\"prompt\":\"which branch?\"}\n\n";
+        let outcome = handle_frame(frame).unwrap().unwrap();
+        match outcome {
+            Err(Failure::Turn(message)) => {
+                assert!(message.contains("unresolvable gate"), "{message}");
+                assert!(message.contains("which branch?"), "{message}");
             }
             other => panic!("expected a turn failure, got {other:?}"),
         }
