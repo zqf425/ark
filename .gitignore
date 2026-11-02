@@ -10,4 +10,5 @@
 # tauri icon 会顺带生成移动端图标，本项目 targets 仅 nsis，不跟踪
 /apps/ark-desktop/src-tauri/icons/android/
 /apps/ark-desktop/src-tauri/icons/ios/
+/crates/ark-common/bindings/
 .idea/
