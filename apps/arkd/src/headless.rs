@@ -348,21 +348,33 @@ async fn stream_turn(
     let mut stalled = 0u32;
     let mut attempt: u32 = 0;
     loop {
-        let mut response = match client
-            .get(format!("{base}/v1/threads/{thread_id}/events"))
-            .query(&[("since_seq", since_seq.to_string())])
-            .send()
-            .await
-        {
-            Ok(response) if response.status().is_success() => response,
-            Ok(response) => {
+        // The connect itself needs the same budget as a read: a runtime that
+        // accepts the TCP connection but never returns response headers would
+        // otherwise hang `.send()` forever, past every resume safeguard.
+        let sent = tokio::time::timeout(
+            STREAM_TIMEOUT,
+            client
+                .get(format!("{base}/v1/threads/{thread_id}/events"))
+                .query(&[("since_seq", since_seq.to_string())])
+                .send(),
+        )
+        .await;
+        let mut response = match sent {
+            Err(_elapsed) => {
+                return Err(stream_failure(
+                    attempt,
+                    "event stream connect timed out".into(),
+                ))
+            }
+            Ok(Ok(response)) if response.status().is_success() => response,
+            Ok(Ok(response)) => {
                 let status = response.status();
                 return Err(stream_failure(
                     attempt,
                     format!("event stream returned {status}"),
                 ));
             }
-            Err(err) => {
+            Ok(Err(err)) => {
                 return Err(stream_failure(
                     attempt,
                     format!("event stream failed: {err}"),
@@ -410,11 +422,13 @@ async fn stream_turn(
                     "event stream kept ending without a terminal event".into(),
                 ));
             }
+            // Only a resume that made no progress pauses: an idle close right
+            // after real progress should re-subscribe without extra delay.
+            tokio::time::sleep(RESUME_PAUSE).await;
         } else {
             stalled = 0;
             last_progress = since_seq;
         }
-        tokio::time::sleep(RESUME_PAUSE).await;
     }
 }
 
