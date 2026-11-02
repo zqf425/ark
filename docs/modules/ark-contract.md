@@ -79,5 +79,19 @@ generation 均以 JSON number 输出。
 `history` 最旧在前、上限 10 条。`RunStatus` 刻意不派生 `Default`："默认运行结果"没有语义。归一化与
 `next_run_at` 计算不在本 crate，而在 `ark-schedule`；本 crate 只定义形状与上限常量。
 
+IM 渠道 wire 由 `im.rs` 提供（[IM 渠道接入需求](../requirements/im-channels.md)）：
+`ImChannelId`（newtype，序列化为字符串）、`ImChannelKind`、`FeishuDomain`、
+`ImCredentials`（写模型，按 kind 判别）、`ImCredentialsView`（脱敏读模型，参照
+`ProviderView`）、`ImChannelPolicy`、`ImChannel`（落盘与服务端内部形状）、
+`CreateImChannelRequest`/`UpdateImChannelRequest`（载荷对，与 schedules 同构）、
+`ImChannelView`、`ImChannelState`/`ImChannelRuntime`/`ImChannelListItem`/
+`ImChannelListResponse`、`ImVerifyResponse`、`ImBinding`/`ImBindingListResponse`，以及
+`MAX_IM_CHANNELS`(20)、`IM_TITLE_MAX_BYTES`(200)、`DEFAULT_IM_AUTONOMY`("unattended")。
+关键形状约定：`UpdateImChannelRequest` 每字段合并语义，凭证密文字段为空/缺省视为保留原值
+（与 provider `api_key` 空值回填一致），否则不回显密文的编辑表单会在保存时清空密钥；
+`ImChannel.enabled` 缺省 `false`，损坏或旧文档不得自动开长连接；凭证必填校验与归一化在
+`ark-im`，本 crate 只定义形状。落盘记录 `ImChannelRecord`（channel + 服务端游标）是端口
+类型，居 `ark-ports`，**不登记** ts_export——游标是服务端记账，任何客户端都不可读写。
+
 长期 memory wire 包含 `MemoryEntry`、创建/更新请求、列表和诊断响应。它只表达跨会话可复用的
 用户偏好或事实，不包含模型推理、检索排名或自动注入策略；这些后续能力仍属待决。

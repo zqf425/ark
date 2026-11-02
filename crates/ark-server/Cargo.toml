@@ -12,7 +12,9 @@ ark-agent = { workspace = true }
 ark-store = { workspace = true }
 ark-config = { workspace = true }
 ark-schedule = { workspace = true }
+ark-im = { workspace = true }
 ark-obs = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 axum = { workspace = true }

@@ -1,10 +1,11 @@
 //! Turn-start orchestration (design §7.9).
 //!
-//! `POST /v1/threads/{id}/turns`, the review route and the scheduler all start
-//! turns, so the semantics (size limit, one-turn-per-thread conflict, attach
-//! authorization, 202-style registration) live here once. This module returns
-//! domain types only: no `StatusCode`, no `Json`, no `ApiError` — the HTTP
-//! layer decides how a [`TurnSummary`] or an [`ArkError`] becomes a response.
+//! `POST /v1/threads/{id}/turns`, the review route, the scheduler and the IM
+//! service all start turns, so the semantics (size limit, one-turn-per-thread
+//! conflict, attach authorization, 202-style registration) live here once. This
+//! module returns domain types only: no `StatusCode`, no `Json`, no `ApiError`
+//! — the HTTP layer decides how a [`TurnSummary`] or an [`ArkError`] becomes a
+//! response.
 
 use std::sync::Arc;
 
@@ -15,7 +16,7 @@ use ark_contract::{TurnSummary, MAX_TURN_TEXT_BYTES};
 use crate::state::{AppState, TurnEnd, TurnJob, TurnSource};
 
 /// Shared turn-start core: validate the text, register the turn, spawn the
-/// worker.
+/// worker, with the source recorded as explicit user input.
 ///
 /// `POST /v1/threads/{id}/turns` and `POST /v1/threads/{id}/review` both go
 /// through this, so a review observes exactly the same size limit, unknown
@@ -26,13 +27,37 @@ pub async fn start_turn(
     raw_text: String,
     requested_attachments: Vec<ark_common::AttachmentId>,
 ) -> ark_common::Result<TurnSummary> {
+    start_turn_as(
+        state,
+        thread_id,
+        TurnSource::User(raw_text.clone()),
+        raw_text,
+        requested_attachments,
+    )
+    .await
+}
+
+/// [`start_turn`] with an explicit [`TurnSource`]: the IM service records the
+/// channel/chat pair on the turn while the text still lands as a persisted user
+/// message (via `turn_source_texts` in the composition root).
+///
+/// `source` carries its own copy of the text; the validation and seed text both
+/// come from `raw_text`, so a mismatch between the two is a caller bug — that
+/// is why this function is `pub(crate)`-shaped (exported for the IM service in
+/// the same crate) rather than a second HTTP entry point.
+pub async fn start_turn_as(
+    state: &AppState,
+    thread_id: ThreadId,
+    source: TurnSource,
+    raw_text: String,
+    requested_attachments: Vec<ark_common::AttachmentId>,
+) -> ark_common::Result<TurnSummary> {
     if raw_text.len() > MAX_TURN_TEXT_BYTES {
         return Err(ark_common::ArkError::validation(format!(
             "turn text exceeds the {MAX_TURN_TEXT_BYTES}-byte UTF-8 limit"
         )));
     }
-    let text = raw_text.trim().to_string();
-    if text.is_empty() {
+    if raw_text.trim().is_empty() {
         return Err(ark_common::ArkError::validation(
             "turn text must not be empty",
         ));
@@ -63,7 +88,7 @@ pub async fn start_turn(
     let job = TurnJob {
         thread_id,
         turn_id,
-        source: TurnSource::User(text),
+        source,
         cancel,
         steering: registration.steering,
         attachment_ids,

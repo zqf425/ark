@@ -275,4 +275,56 @@ GET 不回传,客户端不可写。
 
 ## 落地情况
 
-(未开始)
+阶段 1(契约与存储)已实现:`ark-contract/im.rs`(含读/写模型分离、`UpdateImChannelRequest`
+合并语义、凭证空值保留规则)与 ts_export 根类型登记;`ark-ports::ImStore`(同步端口)+
+`ImChannelRecord`(不登记 ts_export);`ark-store::ImFileStore`(原子写、损坏恢复、渠道删除
+级联绑定);`TurnSource::Im` 变体与 `start_turn_as`/`turn_source_texts` 映射;`config.im`
+热更新段(contract `ImSettings`/`ConfigPatch.im`/`RuntimeConfigView.im` + ark-config 的
+classify/diagnostics/snapshot 落点,默认关)。
+
+阶段 2(编排与 Telegram)已实现:`ark-im` crate(归一化消息模型、`ImTransport` trait、
+create/update 载荷归一化、去重 LRU、分块、命令解析、容量校验、`build_transport` 工厂,
+13 个单测)与 Telegram 适配器(getUpdates 长轮询、指数退避、HTML 转义与纯文本降级、游标
+上报、`is_self`);`ark-server` 的 `service/im.rs`(sync 对账/渠道启停/游标节流落盘)与
+`service/im_inbound.rs`(白名单空提示/非空静默、@提及、weixin owner、去重、每会话串行
+队列、`TurnSource::Im` 回合、订阅探测终态 + 注册表轮询兜底、按 turn_id 投影取回复、
+超时 ack、busy 有界重试);HTTP 路由 `/v1/im/channels`(CRUD/verify)与 `/v1/im/bindings`;
+arkd 装配(`ImFileStore` + 经治理的 transport client + `im.spawn`,仅随 serve 启动)。
+测试:ark-server 173 用例(含 7 个 IM 编排集成测试)、ark-im 13 用例;依赖方向表已含
+`ark-im` 行;文档同步清单第 1、2 行均已回填。
+
+阶段 3(飞书)已实现:`ark-im/src/feishu.rs` WebSocket 长连接,协议自官方
+`@larksuiteoapi/node-sdk`(smart-ark 的参照实现)原生提取:`POST /callback/ws/endpoint`
+拉取签名 URL 与 PingInterval 等客户端配置、pbbp2.Frame protobuf 帧手写编解码(SeqID/
+LogID/service/method/headers/payload 九字段)、ping/pong 心跳、事件按 message_id/sum/seq
+分片重组(10s TTL)、echo ack 回帧(`{"code":200}` base64);REST 侧 tenant_access_token
+缓存刷新、`im/v1/messages` 文本发送(按 kind 上限分块)、`bot/v3/info` 身份与 `is_self`。
+群聊 `is_mention` 由事件 `mentions` 非空判定,`require_mention` 策略在编排层生效。降级
+判定未触发:协议完整提取,无需 `send_only`。4 个单测(帧编解码回环、未知字段跳过、分片
+重组、事件归一化)。飞书无重放游标(网关在带内 ack,重投递由网关重试窗口与去重集合兜底),
+`cursor()` 恒为 `None`。
+
+阶段 4(微信)已实现:`ark-im/src/weixin.rs` iLink bot 协议原生实现(参照 smart-ark
+`weixin-bridge-runtime.ts` 与 `@tencent-weixin/openclaw-weixin` 2.4.3,不引 Node 依赖):
+`getupdates` 长轮询(游标 `get_updates_buf` 随渠道持久化)、`message_type==2` 自过滤、
+TEXT/VOICE 文本提取、`context_token` 按发送者缓存(主动推送凭据)、`sendmessage`
+(BOT/FINISH/TEXT,分块)、`ret`/`errcode` 业务错误检查、连续失败退避(2s/30s)。二维码登录
+`WeixinLoginFlow`(`get_bot_qrcode` + `get_qrcode_status` 状态机 wait/scaned/expired/
+confirmed;`need_verifycode`/`verify_code_blocked` 显式失败):HTTP 路由
+`POST /v1/im/weixin/login/start` 与 `GET /v1/im/weixin/login/wait`;确认后由后端直接创建
+渠道(经容量校验,title 取 owner id,`enabled=false` 凭证不落前端),wire 新增
+`ImWeixinLoginStatus`/`StartResponse`/`WaitResponse`。`ImLoginFlow` trait 改为
+async-trait(`start` 需网络 IO)。3 个单测(文本提取、业务错误、confirmed 映射)。
+退出条件未触发:协议完整可用。
+
+阶段 5(管理界面)已实现:设置页新增「IM 接入」section——渠道列表(平台/标题/启停/
+连接状态/最近错误/校验身份/绑定列表可打开线程)、新建编辑表单(按平台渲染凭证与策略,
+密文不回显、空白=保留)、微信扫码对话框(取码→2s 轮询→确认后展示新建渠道)、总开关
+`im.enabled`(默认关,只门控连接)。API client `im-api.ts`、hook `use-im.ts`、表单映射
+`im-form.ts`(凭证变更检测:非空密文即变更,空白密文保留原值,非密字段直接比对;4 个
+单测);i18n 新增 `settings-im` 目录(中英双语文案,导航与 settings-navigation 测试同步)。
+web 142 用例全绿,typecheck 与硬规则(单文件 400 行,ImSection 拆分为
+ImChannelForm/WeixinLoginDialog)通过。
+
+至此五个阶段全部落地。真实平台端到端(真实 Telegram bot/飞书应用/微信扫码)属发布验收,
+本机未执行。

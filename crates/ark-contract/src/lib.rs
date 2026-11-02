@@ -14,6 +14,7 @@ pub mod capability;
 pub mod config;
 pub mod dto;
 pub mod event;
+pub mod im;
 pub mod item;
 pub mod schedule;
 /// TypeScript binding generation (design §6.1).
@@ -42,9 +43,9 @@ pub use capability::{
     Placement, UiCatalog,
 };
 pub use config::{
-    ApplyResult, ConfigPatch, FieldPath, HookRule, HookSettings, ReloadClass, RuntimeConfigView,
-    ScheduleSettings, SubagentSettings, TuningSettings, SUBAGENT_CONCURRENCY_MAX,
-    SUBAGENT_CONCURRENCY_MIN,
+    ApplyResult, ConfigPatch, FieldPath, HookRule, HookSettings, ImSettings, ReloadClass,
+    RuntimeConfigView, ScheduleSettings, SubagentSettings, TuningSettings,
+    SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
 };
 pub use dto::{
     ChildRunActionResult, ChildRunAggregates, ChildRunEventsResponse, ChildRunListResponse,
@@ -62,6 +63,13 @@ pub use dto::{
 };
 pub use event::{
     ChildCompletionNotice, EventKind, RuntimeEvent, TurnAttachmentDelivery, TurnAttachmentOutcome,
+};
+pub use im::{
+    CreateImChannelRequest, FeishuDomain, ImBinding, ImBindingListResponse, ImChannel, ImChannelId,
+    ImChannelKind, ImChannelListItem, ImChannelListResponse, ImChannelPolicy, ImChannelRuntime,
+    ImChannelState, ImChannelView, ImCredentials, ImCredentialsView, ImVerifyResponse,
+    ImWeixinLoginStartResponse, ImWeixinLoginStatus, ImWeixinLoginWaitResponse,
+    UpdateImChannelRequest, DEFAULT_IM_AUTONOMY, IM_TITLE_MAX_BYTES, MAX_IM_CHANNELS,
 };
 pub use item::{ItemKind, ItemMarker, ItemStatus, ThreadItem};
 pub use schedule::{

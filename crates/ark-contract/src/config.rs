@@ -67,6 +67,9 @@ pub struct ConfigPatch {
     /// Scheduled-task master switch (requirements/scheduled-tasks.md).
     #[serde(default)]
     pub schedules: Option<ScheduleSettings>,
+    /// IM-channel master switch (requirements/im-channels.md).
+    #[serde(default)]
+    pub im: Option<ImSettings>,
 }
 
 /// Scheduled-task policy (requirements/scheduled-tasks.md).
@@ -86,6 +89,25 @@ impl Default for ScheduleSettings {
     fn default() -> Self {
         Self { enabled: true }
     }
+}
+
+/// IM-channel policy (requirements/im-channels.md).
+///
+/// Only the master switch is configuration: channels, credentials and bindings
+/// live in `<data_dir>/im.json` (same reasoning as `schedules.json`), and the
+/// switch is `Hot` — the IM service reconciles connections against the live
+/// snapshot.
+///
+/// The default is `false`, deliberately the opposite of schedules: an IM
+/// channel triggers unattended turns that execute tools on this machine, so
+/// the feature must be switched on explicitly rather than light up whatever
+/// channels were configured earlier.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ImSettings {
+    /// When `false` the IM service keeps channels editable but tears down and
+    /// refuses to start their connections.
+    pub enabled: bool,
 }
 
 /// Hot runtime limits exposed by the settings screen.
@@ -220,6 +242,10 @@ pub struct RuntimeConfigView {
     pub default_autonomy: String,
     pub subagents: SubagentSettings,
     pub schedules: ScheduleSettings,
+    /// Always serialized, including on older readers that default it: the
+    /// renderer treats a missing key the same as `enabled: false`.
+    #[serde(default)]
+    pub im: ImSettings,
     pub tuning: TuningSettings,
 }
 

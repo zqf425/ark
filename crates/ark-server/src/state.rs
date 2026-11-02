@@ -23,6 +23,7 @@ use tokio::sync::{broadcast, Mutex as AsyncMutex};
 use crate::gates::InteractiveGates;
 use crate::service::continuation::ContinuationRegistry;
 use crate::service::scheduler::SchedulerService;
+use crate::service::ImService;
 
 /// Durable abort reason used for process-owned shutdown cancellation.
 ///
@@ -51,9 +52,19 @@ pub enum TurnEnd {
 }
 
 /// Source that started a parent turn.
+#[derive(Clone)]
 pub enum TurnSource {
     /// Explicit user input, persisted as a user message.
     User(String),
+    /// Inbound IM message (requirements/im-channels.md). The text is persisted
+    /// as a user message exactly like [`TurnSource::User`]; the channel/chat
+    /// pair is bookkeeping for tracing, since the authoritative thread record
+    /// carries no IM fields (the `im.json` binding is the source of truth).
+    Im {
+        channel_id: String,
+        chat_id: String,
+        text: String,
+    },
     /// System-origin continuation consuming the durable child-completion inbox.
     AutoContinuation,
 }
@@ -137,6 +148,11 @@ pub struct AppState {
     /// routes answer a structured `unavailable` instead of panicking. The service
     /// owns the port, so the boundary never reaches for `ScheduleFileStore`.
     pub schedules: Option<Arc<SchedulerService>>,
+    /// IM-channel orchestration (requirements/im-channels.md).
+    ///
+    /// `None` in a build without IM, which makes the `/v1/im` routes answer a
+    /// structured `unavailable` instead of panicking.
+    pub im: Option<Arc<ImService>>,
     shutdown: Arc<broadcast::Sender<&'static str>>,
     turns_completed: Arc<AtomicU64>,
 }
@@ -184,6 +200,7 @@ impl AppState {
             base: BaseServices::default(),
             workspace_gate: Arc::new(AsyncMutex::new(())),
             schedules: None,
+            im: None,
             shutdown: Arc::new(shutdown),
             turns_completed: Arc::new(AtomicU64::new(0)),
         }
@@ -234,6 +251,26 @@ impl AppState {
     pub fn with_schedules(mut self, schedules: Arc<SchedulerService>) -> Self {
         self.schedules = Some(schedules);
         self
+    }
+
+    /// Attach IM-channel orchestration.
+    ///
+    /// Only `arkd` calls this: it builds the store and the governed HTTP
+    /// client, wraps them in the service, and keeps the handle so `serve` can
+    /// start the control loop once the state is final.
+    pub fn with_im(mut self, im: Arc<ImService>) -> Self {
+        self.im = Some(im);
+        self
+    }
+
+    /// The IM service, or a structured `unavailable` error.
+    pub fn im_service(&self) -> Result<&Arc<ImService>> {
+        self.im.as_ref().ok_or_else(|| {
+            ark_common::ArkError::new(
+                ark_common::ArkErrorCode::RuntimeUnavailable,
+                "IM channels are not available in this build",
+            )
+        })
     }
 
     /// The scheduled-task service, or a structured `unavailable` error.

@@ -26,6 +26,7 @@ fn view_of(state: &AppState) -> RuntimeConfigView {
         default_autonomy: snapshot.default_autonomy.clone(),
         subagents: snapshot.subagents,
         schedules: snapshot.schedules,
+        im: snapshot.im,
         tuning: (&snapshot.tuning).into(),
     }
 }

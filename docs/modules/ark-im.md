@@ -1,8 +1,10 @@
 # ark-im 模块设计
 
-> 状态:**计划**(设计已批准,2026-11-02;实现按
-> [IM 渠道接入需求](../requirements/im-channels.md) 的阶段推进;本文描述目标态,落地后
-> 回填实现语义)。需求边界与验收见需求文档。
+> 状态:**已实现**(设计已批准,2026-11-02;阶段 1-5 全部落地,需求边界与验收见需求文档
+> 「落地情况」)。实现相对本文的偏差已回填:游标经 trait 方法 `cursor()` 上报、由编排层
+> 节流持久化(飞书为带内 ack、无重放游标,恒返回 `None`);`ImTransport` 另有 `is_self`
+> 默认方法(飞书/微信需要回显自身消息过滤);`ImLoginFlow::start` 为 async(取二维码需
+> 网络 IO)。
 
 ## 职责与边界
 
@@ -85,7 +87,8 @@ pub trait ImTransport: Send + Sync {
 /// reconcile 建连。
 pub trait ImLoginFlow: Send + Sync {
     /// 进程内短生命周期登录会话(10 分钟过期,同时至多 1 个),不落盘。
-    fn start(&self) -> ark_common::Result<LoginSession>;
+    /// `start` 需要网络 IO(取二维码),与 `poll` 同为 async。
+    async fn start(&self) -> ark_common::Result<LoginSession>;
     async fn poll(&self, session: &LoginSession) -> ark_common::Result<LoginPoll>;
 }
 ```
@@ -122,7 +125,8 @@ feishu/lark)。群聊事件带 `mention` 列表,归一化为 `is_mention`。发�
 `im/v1/messages` REST(`tenant_access_token` 由适配器持有并按过期时间刷新)。降级判定:
 长连接协议细节受阻且短期内不可解时,渠道进入 `send_only` 运行态(仅保留 REST 发送、
 入站暂不支持)并如实回填需求文档——webhook 入站需要公网回调入口,arkd 是 loopback
-边界,不作为降级目标。
+边界,不作为降级目标。落地记录:协议自 `@larksuiteoapi/node-sdk` 完整提取(endpoint
+拉取 + pbbp2 帧 + ping/pong + 分片重组 + echo ack),降级判定未触发。
 
 ### 微信(阶段 4)
 

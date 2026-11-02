@@ -89,8 +89,9 @@ ark-plugin     → ark-common, ark-contract, ark-ports, ark-http, ark-ui, ark-mc
 ark-skills     → ark-common, ark-contract, ark-ports
 ark-workspace  → ark-common, ark-contract
 ark-obs        → ark-common, ark-contract
-ark-server     → ark-common, ark-contract, ark-ports, ark-agent, ark-store, ark-config, ark-obs, ark-schedule
+ark-server     → ark-common, ark-contract, ark-ports, ark-agent, ark-store, ark-config, ark-obs, ark-schedule, ark-im
 ark-schedule   → ark-common, ark-contract, ark-ports
+ark-im         → ark-common, ark-contract, ark-ports
 ark-studio     → ark-common, ark-contract, ark-ports
 arkd           → 所有实现（组合根）
 ark-desktop    → 无 ark crate 依赖；以受控进程启动 arkd

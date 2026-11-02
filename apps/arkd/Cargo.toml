@@ -20,6 +20,7 @@ ark-llm = { workspace = true }
 ark-tool = { workspace = true }
 ark-ui = { workspace = true }
 ark-mcp = { workspace = true }
+ark-im = { workspace = true }
 ark-server = { workspace = true }
 ark-obs = { workspace = true }
 ark-provider = { workspace = true }

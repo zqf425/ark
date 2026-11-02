@@ -344,10 +344,12 @@ impl AgentTurnRunner {
 }
 
 /// Split the turn source into the skill-resolution text and the user message
-/// text (an auto-continuation has neither).
+/// text (an auto-continuation has neither; an IM message behaves like explicit
+/// user input — requirements/im-channels.md).
 fn turn_source_texts(source: &TurnSource) -> (String, Option<String>) {
     match source {
         TurnSource::User(text) => (text.clone(), Some(text.clone())),
+        TurnSource::Im { text, .. } => (text.clone(), Some(text.clone())),
         TurnSource::AutoContinuation => (String::new(), None),
     }
 }

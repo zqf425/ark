@@ -1,7 +1,14 @@
 /** Local settings-page navigation only. Runtime configuration remains in each section hook. */
 import type { MessageKey } from '../../../shared/i18n/messages'
 
-export type SettingsSectionId = 'general' | 'runtime' | 'providers' | 'integrations' | 'skills' | 'schedules'
+export type SettingsSectionId =
+  | 'general'
+  | 'runtime'
+  | 'providers'
+  | 'integrations'
+  | 'schedules'
+  | 'im'
+  | 'skills'
 
 export type SettingsSection = {
   id: SettingsSectionId
@@ -15,6 +22,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'providers', labelKey: 'settings.nav.providers.label', detailKey: 'settings.nav.providers.detail' },
   { id: 'integrations', labelKey: 'settings.nav.integrations.label', detailKey: 'settings.nav.integrations.detail' },
   { id: 'schedules', labelKey: 'settings.nav.schedules.label', detailKey: 'settings.nav.schedules.detail' },
+  { id: 'im', labelKey: 'settings.nav.im.label', detailKey: 'settings.nav.im.detail' },
   { id: 'skills', labelKey: 'settings.nav.skills.label', detailKey: 'settings.nav.skills.detail' }
 ]
 

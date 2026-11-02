@@ -13,6 +13,6 @@ pub mod state;
 
 pub use api::{error::ApiError, routes::router};
 pub use gates::InteractiveGates;
-pub use service::scheduler::SchedulerService;
 pub use service::serve::{bind, AppHandle};
+pub use service::{ImService, SchedulerService};
 pub use state::{AppState, SharedUsage, TurnEnd, TurnJob, TurnRunner, TurnSource};

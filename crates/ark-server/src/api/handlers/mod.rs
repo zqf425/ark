@@ -14,6 +14,7 @@ pub mod events;
 pub mod export;
 pub mod gates;
 pub mod health;
+pub mod im;
 pub mod mcp_info;
 pub mod memory;
 pub mod pending;

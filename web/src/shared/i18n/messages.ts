@@ -16,6 +16,7 @@ import { SETTINGS_GENERAL_MESSAGES } from './catalogs/settings-general'
 import { SETTINGS_INTEGRATIONS_MESSAGES } from './catalogs/settings-integrations'
 import { SETTINGS_PROVIDERS_MESSAGES } from './catalogs/settings-providers'
 import { SETTINGS_RUNTIME_MESSAGES } from './catalogs/settings-runtime'
+import { SETTINGS_IM_MESSAGES } from './catalogs/settings-im'
 import { SETTINGS_SCHEDULES_MESSAGES } from './catalogs/settings-schedules'
 import { THREAD_LIST_MESSAGES } from './catalogs/thread-list'
 import { WORKBENCH_MESSAGES } from './catalogs/workbench'
@@ -31,6 +32,7 @@ export const MESSAGES = {
   ...SETTINGS_PROVIDERS_MESSAGES,
   ...SETTINGS_RUNTIME_MESSAGES,
   ...SETTINGS_SCHEDULES_MESSAGES,
+  ...SETTINGS_IM_MESSAGES,
   ...THREAD_LIST_MESSAGES,
   ...WORKBENCH_MESSAGES
 } as const

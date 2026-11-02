@@ -26,8 +26,12 @@ use crate::{
     AttachmentDiagnostics, AttachmentEntry, AttachmentUploadRequest, AttachmentUploadResponse,
     CapabilitiesResponse, ChildCompletionNotice, ChildRunActionResult, ChildRunAggregates,
     ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
-    CreateMemoryRequest, CreateScheduleRequest, CreateThreadRequest, EventKind, FieldPath,
-    FilePreview, GoalRequest, HealthResponse, ItemStatus, LlmRound, LlmRoundError,
+    CreateImChannelRequest, CreateMemoryRequest, CreateScheduleRequest, CreateThreadRequest,
+    EventKind, FeishuDomain, FieldPath, FilePreview, GoalRequest, HealthResponse, ImBinding,
+    ImBindingListResponse, ImChannel, ImChannelId, ImChannelKind, ImChannelListItem,
+    ImChannelListResponse, ImChannelPolicy, ImChannelRuntime, ImChannelState, ImChannelView,
+    ImCredentials, ImCredentialsView, ImSettings, ImVerifyResponse, ImWeixinLoginStartResponse,
+    ImWeixinLoginStatus, ImWeixinLoginWaitResponse, ItemStatus, LlmRound, LlmRoundError,
     LlmRoundsResponse, McpServerEntry, McpServerListResponse, McpServerTestResponse, McpServerView,
     McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, PanelEntry,
     PendingApprovalView, PendingUserInputView, PlanView, PluginDiagnosticView, PluginEntry,
@@ -41,10 +45,10 @@ use crate::{
     SwitchWorkspaceRequest, TaskSchedule, TerminalEntriesResponse, TerminalEntry, ThreadDetail,
     ThreadExport, ThreadItem, ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot,
     ThreadSkillsResponse, ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest,
-    TuningSettings, TurnRequest, TurnSummary, UiCatalog, UpdateMemoryRequest,
-    UpdateScheduleRequest, UpdateThreadRequest, UsageResponse, WorkspaceChange,
-    WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile,
-    WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
+    TuningSettings, TurnRequest, TurnSummary, UiCatalog, UpdateImChannelRequest,
+    UpdateMemoryRequest, UpdateScheduleRequest, UpdateThreadRequest, UsageResponse,
+    WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
+    WorkspaceDiffFile, WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
 };
 use ark_common::{
     ArkErrorCode, ArkErrorPayload, AttachmentId, ChildId, ItemId, ThreadId, TurnId, Usage,
@@ -189,6 +193,29 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     ScheduledTaskListResponse::export_all_to(dir)?;
     CreateScheduleRequest::export_all_to(dir)?;
     UpdateScheduleRequest::export_all_to(dir)?;
+
+    // ---- IM channels ----
+    ImSettings::export_all_to(dir)?;
+    ImChannelKind::export_all_to(dir)?;
+    FeishuDomain::export_all_to(dir)?;
+    ImChannelId::export_all_to(dir)?;
+    ImCredentials::export_all_to(dir)?;
+    ImCredentialsView::export_all_to(dir)?;
+    ImChannelPolicy::export_all_to(dir)?;
+    ImChannel::export_all_to(dir)?;
+    CreateImChannelRequest::export_all_to(dir)?;
+    UpdateImChannelRequest::export_all_to(dir)?;
+    ImChannelView::export_all_to(dir)?;
+    ImChannelState::export_all_to(dir)?;
+    ImChannelRuntime::export_all_to(dir)?;
+    ImChannelListItem::export_all_to(dir)?;
+    ImChannelListResponse::export_all_to(dir)?;
+    ImVerifyResponse::export_all_to(dir)?;
+    ImWeixinLoginStatus::export_all_to(dir)?;
+    ImWeixinLoginStartResponse::export_all_to(dir)?;
+    ImWeixinLoginWaitResponse::export_all_to(dir)?;
+    ImBinding::export_all_to(dir)?;
+    ImBindingListResponse::export_all_to(dir)?;
 
     Ok(())
 }
@@ -336,6 +363,27 @@ const ROOT_NAMES: &[&str] = &[
     "ScheduledTaskListResponse",
     "CreateScheduleRequest",
     "UpdateScheduleRequest",
+    "ImSettings",
+    "ImChannelKind",
+    "FeishuDomain",
+    "ImChannelId",
+    "ImCredentials",
+    "ImCredentialsView",
+    "ImChannelPolicy",
+    "ImChannel",
+    "CreateImChannelRequest",
+    "UpdateImChannelRequest",
+    "ImChannelView",
+    "ImChannelState",
+    "ImChannelRuntime",
+    "ImChannelListItem",
+    "ImChannelListResponse",
+    "ImVerifyResponse",
+    "ImWeixinLoginStatus",
+    "ImWeixinLoginStartResponse",
+    "ImWeixinLoginWaitResponse",
+    "ImBinding",
+    "ImBindingListResponse",
 ];
 
 #[cfg(test)]

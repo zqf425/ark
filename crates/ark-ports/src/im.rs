@@ -1,0 +1,95 @@
+//! IM channel persistence boundary (docs/requirements/im-channels.md).
+//!
+//! One small document (`<data_dir>/im.json`) holds every channel (with its
+//! credentials and inbound cursor) and every chat→thread binding, so the port
+//! is a plain document CRUD surface: channels change when the user edits
+//! settings, bindings change once per new conversation.
+//!
+//! Sync like [`crate::ScheduleStore`], not `async` like
+//! [`crate::SessionStore`]: the whole document is read or rewritten under one
+//! in-process lock, so there is nothing to await and no benefit in handing the
+//! critical section to the executor.
+//!
+//! ## Where policy lives
+//!
+//! The store assigns a channel id when the caller leaves one empty, persists
+//! exactly what it is given, and never normalizes. Credential validation, the
+//! channel cap and merge semantics live in `ark-im` / the server orchestration,
+//! because a store that silently rewrote a channel would make the stored
+//! document differ from the response the client just received.
+
+use ark_common::Result;
+use ark_contract::{ImBinding, ImChannel, ImChannelId};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+
+/// Stored per-channel record: the channel plus the service-maintained inbound
+/// cursor.
+///
+/// Port-level type (same reasoning as [`crate::ThreadMeta`]: this trait must be
+/// able to name its own persistence shape). Deliberately *not* exported to
+/// TypeScript — the cursor is server bookkeeping, and no client can read or
+/// write it. The cursor is a platform string (a Telegram update offset stored
+/// as a decimal string, or a platform message id) because each adapter
+/// defines what "already processed" means for its own protocol.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImChannelRecord {
+    pub channel: ImChannel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+
+/// Durable channel table and chat→thread bindings, owned by `ark-store` and
+/// injected by the composition root.
+pub trait ImStore: Send + Sync {
+    /// Every stored channel record, most recently updated first.
+    fn list_channels(&self) -> Result<Vec<ImChannelRecord>>;
+
+    /// One channel record by id. Missing ids are `not_found`.
+    fn get_channel(&self, id: &ImChannelId) -> Result<ImChannelRecord>;
+
+    /// Append a channel, assigning the id when the caller left it empty.
+    ///
+    /// Returns the stored record, which is how the caller learns the generated
+    /// id. A duplicate id is a `conflict` rather than an overwrite.
+    fn insert_channel(&self, record: ImChannelRecord) -> Result<ImChannelRecord>;
+
+    /// Overwrite an existing channel record (channel fields and cursor are one
+    /// mutation, so they must not be two calls that could interleave).
+    /// An absent id is `not_found`.
+    fn replace_channel(&self, record: ImChannelRecord) -> Result<ImChannelRecord>;
+
+    /// Remove one channel and — in the same locked critical section — every
+    /// binding that points at it, so a deleted channel cannot leave orphaned
+    /// chat→thread mappings behind. An absent id is `not_found`.
+    fn delete_channel(&self, id: &ImChannelId) -> Result<()>;
+
+    /// Bindings, optionally filtered by channel; most recently updated first.
+    fn list_bindings(&self, channel_id: Option<&ImChannelId>) -> Result<Vec<ImBinding>>;
+
+    /// The binding for one platform chat, if any. Absence is the normal
+    /// first-message state, not an error.
+    fn get_binding(&self, channel_id: &ImChannelId, chat_id: &str) -> Result<Option<ImBinding>>;
+
+    /// Insert or overwrite the binding for `(channel_id, chat_id)`.
+    fn set_binding(&self, binding: ImBinding) -> Result<()>;
+
+    /// Remove one binding. Removing an absent binding is not an error: the
+    /// `/new` command and the thread-missing cleanup race the same way.
+    fn delete_binding(&self, channel_id: &ImChannelId, chat_id: &str) -> Result<()>;
+}
+
+/// A binding stamped with "now", for the call sites that do not care about the
+/// exact instant.
+pub fn binding_now(
+    channel_id: ImChannelId,
+    chat_id: impl Into<String>,
+    thread_id: ark_common::ThreadId,
+) -> ImBinding {
+    ImBinding {
+        channel_id,
+        chat_id: chat_id.into(),
+        thread_id,
+        updated_at: Utc::now(),
+    }
+}

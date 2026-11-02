@@ -133,6 +133,16 @@ turn 启动与线程创建的编排宿主是 `service` 层（`service::turns::st
 `service` 层不得引用 `api::handlers` 或 `ApiError`（`serve.rs` 为绑定路由表的结构性豁免）；
 错误到状态码的映射仍集中在 `api::error`。
 
+IM 渠道编排（[IM 渠道接入需求](../requirements/im-channels.md)）居 `service/im.rs`
+（生命周期：sync 对账、渠道启停、游标节流落盘）与 `service/im_inbound.rs`（消息管线：
+过滤/去重/每会话串行队列/`start_turn_as(TurnSource::Im)`/回复等待与投影）。回合经
+`TurnSource::Im` 走与 HTTP 同一 `start_turn` 校验路径；回复文本在终态后按本回合
+`turn_id` 从线程投影取（同 scheduler 摘要先例），不用 delta 累积。路由
+`/v1/im/channels`(CRUD)、`/v1/im/channels/{id}/verify`、`/v1/im/bindings`、
+`/v1/im/weixin/login/{start,wait}`(确认后端直接建渠道,经容量校验、默认停用)只解包
+HTTP；
+总开关 `config.im.enabled` 只门控连接不门控编辑。
+
 ## 路由清单
 
 当前路由以 `src/api/routes.rs` 为准。新增或修改路由必须同步更新 wire DTO、接口测试、渲染层 client

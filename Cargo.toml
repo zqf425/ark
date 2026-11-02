@@ -7,6 +7,7 @@ members = [
   "crates/ark-config",
   "crates/ark-store",
   "crates/ark-schedule",
+  "crates/ark-im",
   "crates/ark-agent",
   "crates/ark-llm",
   "crates/ark-tool",
@@ -38,6 +39,7 @@ ark-ports = { path = "crates/ark-ports" }
 ark-config = { path = "crates/ark-config" }
 ark-store = { path = "crates/ark-store" }
 ark-schedule = { path = "crates/ark-schedule" }
+ark-im = { path = "crates/ark-im" }
 ark-agent = { path = "crates/ark-agent" }
 ark-llm = { path = "crates/ark-llm" }
 ark-tool = { path = "crates/ark-tool" }
@@ -61,6 +63,7 @@ thiserror = "2"
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "process", "fs", "io-util"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
 futures = "0.3"
 axum = "0.8"
 tracing = "0.1"

@@ -12,6 +12,7 @@ pub mod base;
 pub mod bus;
 pub mod event;
 pub mod exec;
+pub mod im;
 pub mod model;
 pub mod schedule;
 pub mod services;
@@ -35,6 +36,7 @@ pub use bus::{
 };
 pub use event::{EventSink, Subscription};
 pub use exec::{CancelToken, SteerQueue};
+pub use im::{binding_now, ImChannelRecord, ImStore};
 pub use model::{
     ModelChunk, ModelClient, ModelImage, ModelMessage, ModelRequest, ModelResponse, ModelRole,
     ToolCallRef,

@@ -6,8 +6,8 @@
 //! value, so a rejected patch cannot leave the live snapshot half updated.
 
 use ark_contract::{
-    ConfigPatch, FieldPath, HookSettings, ScheduleSettings, SubagentSettings, TuningSettings,
-    SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
+    ConfigPatch, FieldPath, HookSettings, ImSettings, ScheduleSettings, SubagentSettings,
+    TuningSettings, SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -130,6 +130,11 @@ pub struct RuntimeConfig {
     /// `Hot`: the tick loop re-reads it every 30s, so disabling schedules takes
     /// effect without a restart and without touching `schedules.json`.
     pub schedules: ScheduleSettings,
+    /// IM-channel master switch (requirements/im-channels.md). Classed `Hot`:
+    /// the IM service reconciles its connections against the live snapshot, so
+    /// disabling IM tears the channels down without a restart and without
+    /// touching `im.json`.
+    pub im: ImSettings,
     pub tuning: TuningConfig,
 }
 
@@ -145,6 +150,7 @@ impl Default for RuntimeConfig {
             subagents: SubagentSettings::default(),
             hooks: HookSettings::default(),
             schedules: ScheduleSettings::default(),
+            im: ImSettings::default(),
             tuning: TuningConfig::default(),
         }
     }
@@ -257,6 +263,12 @@ impl RuntimeConfig {
             if next.schedules != *value {
                 next.schedules = *value;
                 changed.push(FieldPath::new("schedules"));
+            }
+        }
+        if let Some(value) = &patch.im {
+            if next.im != *value {
+                next.im = *value;
+                changed.push(FieldPath::new("im"));
             }
         }
         next.validate()?;
