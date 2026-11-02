@@ -29,6 +29,8 @@ export const THREAD_LIST_MESSAGES = {
   'thread.row.restore': ['恢复', 'Restore'],
   'thread.row.archive': ['归档', 'Archive'],
   'thread.row.delete': ['删除', 'Delete'],
+  'thread.row.export': ['导出', 'Export'],
+  'thread.row.exportHint': ['下载会话快照 JSON', 'Download the thread snapshot as JSON'],
   'thread.row.deleteConfirm': [
     '删除会话“{title}”？此操作不可恢复。',
     'Delete the thread "{title}"? This cannot be undone.'

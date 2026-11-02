@@ -5,6 +5,7 @@ import { formatRelative } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../state/store'
 import { useThreadList } from '../hooks/use-thread-list'
+import { exportThread } from '../api/threads-api'
 import { filterThreads, type ThreadListScope } from './thread-list-filter'
 
 function ThreadRow({
@@ -91,6 +92,15 @@ function ThreadRow({
               ) : (
                 <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void onArchive()}>{t('thread.row.archive')}</button>
               )}
+              <button
+                type="button"
+                className="ark-linkbtn"
+                disabled={busy}
+                title={t('thread.row.exportHint')}
+                onClick={() => void exportThread(thread.thread_id, thread.title)}
+              >
+                {t('thread.row.export')}
+              </button>
               <button type="button" className="ark-linkbtn ark-linkbtn--danger" disabled={busy} onClick={() => void onDelete()}>
                 {t('thread.row.delete')}
               </button>

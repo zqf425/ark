@@ -43,6 +43,17 @@
 - 新增/编辑 provider 可显式查询模型目录，在用户选择后才把远端明确声明的 context window 与识图能力写入
   待保存表单；目录未声明时显示 unknown，不按模型名称猜测，也不自动提交配置。
 - 组件状态按 feature 拆分，避免重建旧 `Workbench.tsx` 巨型组件；UI 变更应进行实际浏览器验证。
+- 会话流按回合分组渲染：一回合内的 reasoning、tool_call、tool_result 收进一张可折叠"执行过程"卡
+  （对齐 smart-ark 的工作卡），运行中自动展开、结束后自动收起，用户开关即固定；用户消息与助手回复
+  留在卡外。回合多于一个时在画布右缘提供逐回合跳转导航条。会话标题行提供「评审改动」
+  （`POST /v1/threads/{id}/review`，同一 202 回合信封，进度走线程事件流）；会话列表行提供「导出」
+  （`GET /v1/threads/{id}/export` 快照下载，blob 触发浏览器保存）。
+- 输入框「技能」面板消费线程级技能视图（`GET /v1/threads/{id}/skills`，合并 base/extra 并展示加载
+  警告数，「重新扫描」调用 refresh 路由）；未选择线程时回落全局 `GET /v1/skills`。显式 `/id` 提及
+  仍是唯一激活方式，不新增技能运行时字段。
+- 已知未接入的路由：`debug/llm-rounds`（调试）、`attachments/diagnostics`（诊断）、
+  `child-runs/{id}/thread|events|cleanup`（子代理完整转录查看器需要独立的轮询/订阅设计，见子代理
+  监督约束）、`sessions/{id}/resume-thread`（定时任务结果已直接携带 thread_id 跳转）。
 - Code 使用"任务历史 → 宽会话画布"的默认两栏结构，且无全局顶栏：侧栏底部的 footer 承载运行时
   状态（在线点、重检按钮）与 Code/设置视图切换，设置视图保留顶栏。会话搜索和最近/归档切换只过滤
   已加载的 `ThreadSummary`，不新增搜索 API；Plan、Changes、File、Terminal 是浮在画布之上的上下文
@@ -74,12 +85,18 @@
   主任务层级，必须退为状态详情或提示信息。
 - 设置页的分类导航是 `web` 内本地状态，只决定既有 section 的可见性；每个 section 仍独立持有既有 hook，
   不把 provider、MCP 或 runtime 配置逻辑回流到 Code 会话状态或 `ark-agent`。
+- 运行调优参数按 smart-ark 的术语分组呈现（回合与 token / 工具保护 / 上下文与压缩 / 流式传输 /
+  权限档位），wire 键保持 `TuningSettings` 不变；子代理文案同样对齐（启用子 Agent 委派、单会话并行
+  子 Agent 上限）。设置页新增只读「插件与能力」section：`GET /v1/runtime/capabilities`（能力 pills 与
+  页面/面板目录计数）、`GET /v1/runtime/plugins`（插件贡献与失败/跳过警示）、`GET /v1/runtime/tools`
+  （该路由在 Rust 侧仍是未建模 JSON，前端经 `web-only.ts` 的视图类型渲染，Rust 建模后应迁移到生成
+  类型）。`/v1/runtime/tuning` 与 `/v1/runtime/model-providers` 是运行时的 501 占位路由，不是缺口。
 - 输入框在活跃回合提供两种非中断动作：「追加」（steer，立即注入下一轮）与「排队」（本地暂存为
   chips，回合结束的 live→idle 转变触发按顺序自动发送）；排队消息可逐条移除，纯本地状态不进 wire。
 - 附件经 `POST /v1/attachments`（Base64 JSON）上传后以 id 列表随 `TurnRequest.attachment_ids` 提交；
   上传失败走命令错误提示，已传 id 可在发送前移除（服务端无删除路由，孤儿附件由运行时清理策略负责）。
-- 「技能」面板列出 `GET /v1/skills` 的发现结果，点击把 `/id` 插入输入框——显式提及即激活，是
-  arkd 的技能指定方式；不新增技能运行时字段。
+- 「技能」面板的消费面见上方"输入框「技能」面板"条目：线程级视图 + 全局回落，显式 `/id` 提及即激活
+  是 arkd 的技能指定方式；不新增技能运行时字段。
 - 用户可见文本通过 `web/src/shared/i18n/` 的消息键与中英文资源提供；新增 UI 不得硬编码文案。
   该目录已按域拆分为 `catalogs/*`（`common`、`errors`、`session`、`thread-list`、`workbench`、
   `session-canvas`、`settings-*`）：每个 catalog 输出一张

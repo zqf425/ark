@@ -15,6 +15,7 @@ import { TuningSection } from './TuningSection'
 import { SubagentSection } from './SubagentSection'
 import { ProvidersSection } from './ProvidersSection'
 import { McpSection } from './McpSection'
+import { PluginsSection } from './PluginsSection'
 import { MemorySection } from './MemorySection'
 import { SkillsSection } from './SkillsSection'
 import { ScheduleSection } from './ScheduleSection'
@@ -60,6 +61,12 @@ export function SettingsPage(): JSX.Element {
         return (
           <ErrorBoundary label={t('settings.boundary.mcp')}>
             <McpSection />
+          </ErrorBoundary>
+        )
+      case 'plugins':
+        return (
+          <ErrorBoundary label={t('settings.boundary.plugins')}>
+            <PluginsSection />
           </ErrorBoundary>
         )
       case 'memory':
