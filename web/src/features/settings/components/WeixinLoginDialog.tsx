@@ -3,8 +3,14 @@
  *
  * A confirmed login creates the channel server-side (disabled); the dialog
  * only surfaces it. Session expiry and failure both stop the poll.
+ *
+ * Rendering mirrors smart-ark: the iLink payload carries either a ready-made
+ * image (`data:image/...`) or a plain login URL — the former is shown as-is,
+ * the latter must be encoded into a QR code, or the user sees a bare string
+ * instead of something scannable.
  */
 import { useEffect, useRef, useState } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
 import { Button, useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import type { ImWeixinLoginStatus } from '../../../shared/contracts'
@@ -14,6 +20,12 @@ import { Notice, Skeleton } from './SectionShell'
 
 const LOGIN_POLL_INTERVAL_MS = 2000
 const LOGIN_POLL_MAX_ATTEMPTS = 150
+const QR_SIZE_PX = 192
+
+/** smart-ark's rule: a `data:image/` payload is the picture itself, anything else is the content to encode. */
+function qrIsImage(content: string): boolean {
+  return content.startsWith('data:image/')
+}
 
 export function WeixinLoginDialog({
   onClose
@@ -98,7 +110,13 @@ export function WeixinLoginDialog({
       {qrContent ? (
         <div className="ark-card__meta">
           <span>{t('settings.im.login.qrHint')}</span>
-          <code className="ark-settings__hint">{qrContent}</code>
+          <div className="ark-im-qr">
+            {qrIsImage(qrContent) ? (
+              <img src={qrContent} alt={t('settings.im.login.title')} width={QR_SIZE_PX} height={QR_SIZE_PX} />
+            ) : (
+              <QRCodeSVG value={qrContent} size={QR_SIZE_PX} marginSize={1} />
+            )}
+          </div>
         </div>
       ) : (
         <Skeleton rows={1} />
