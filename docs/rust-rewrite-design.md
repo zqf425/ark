@@ -126,6 +126,10 @@ HTTP 路由 + 设置页）。
 - `plugin_id` 由宿主签发且不可伪造；日志、配置、凭据、KV、文件、缓存、MCP 工具和配额按其隔离。
 - 插件不自建 HTTP client、MCP server 或界面容器；跨插件调用经 MCP 总线并接受声明、深度和循环校验。
 - 安全策略、授权、审计与资源上限永远由内核强制，服务实现只能提供能力。
+- 事件与钩子分命名空间：`EventKind`/session log/SSE 只承载已发生的事实；干预型钩子（Decide/Supply）
+  是独立 ABI（`hook_abi`），按点授权、有硬预算与熔断，且不得在持有 workspace_gate 或 registry 锁
+  时回调插件。插件驱动 agent 只能经"开回合"通道（空闲优先），永远是 ark-agent 的同一个决策循环
+  在跑（见 `docs/requirements/plugin-hook-bus.md`）。
 
 ### 6.4 配置与变更
 
