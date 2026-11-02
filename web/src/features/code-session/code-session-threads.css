@@ -1,4 +1,90 @@
-/* Thread controls and child-run cards, kept separate from stream layout. */
+/**
+ * Thread rail: the glass sidebar's session list (rows, search, scope, footer)
+ * plus per-turn rewind controls. Row styling follows the smart-ark sidebar:
+ * 8px-radius rows, tinted hover, active row with an inset ring.
+ *
+ * Part of the Code screen stylesheet; split to stay under the 400-line
+ * per-file limit (design §7.10.2). Code-session.css is the entry. Colors come
+ * from styles/tokens.css (theme.css for dark) only — a literal hex here is a
+ * review blocker because it breaks light/dark parity.
+ */
+
+/* ---------- thread list ---------- */
+
+.ark-threadlist {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  background: transparent;
+}
+
+.ark-threadlist__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 12px 6px;
+  flex: none;
+}
+
+.ark-threadlist__title {
+  margin: 0;
+  font-weight: 650;
+  font-size: 13px;
+  color: var(--ark-text);
+  letter-spacing: -0.01em;
+}
+
+.ark-threadlist__body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.ark-threadlist__hint {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 10px 12px;
+  color: var(--ark-text-faint);
+  font-size: 12px;
+}
+
+.ark-threadlist__hint.is-error {
+  color: var(--ark-error);
+}
+
+.ark-threadlist__nav {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 8px;
+  gap: 1px;
+}
+
+.ark-threadrow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: stretch;
+  width: 100%;
+  border: 0;
+  border-radius: var(--ark-radius-sm);
+  background: none;
+  color: var(--ark-text);
+  text-align: left;
+}
+
+.ark-threadrow:hover {
+  background: var(--ark-sidebar-row-hover);
+}
+
+.ark-threadrow.is-active {
+  background: var(--ark-sidebar-row-active);
+  box-shadow: inset 0 0 0 1px var(--ark-sidebar-row-ring);
+}
+
 .ark-threadrow__select {
   display: flex;
   flex-direction: column;
@@ -8,50 +94,225 @@
   min-width: 0;
   border: 0;
   background: none;
-  padding: 6px 8px;
+  padding: 7px 9px;
   cursor: pointer;
   color: inherit;
   text-align: left;
 }
 
+.ark-threadrow__title {
+  font-size: 12.5px;
+  font-weight: 500;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-threadrow.is-active .ark-threadrow__title {
+  color: var(--ark-accent);
+}
+
+.ark-threadrow__meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ark-text-faint);
+}
+
 .ark-threadrow__actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 8px 6px;
+  gap: 8px;
+  padding: 0 9px 7px;
   flex-wrap: wrap;
 }
 
 .ark-threadrow__rename {
   min-width: 0;
   flex: 1 1 120px;
-  border: 1px solid var(--ark-border-strong);
-  border-radius: var(--ark-radius);
-  padding: 3px 5px;
-  background: var(--ark-bg-inset);
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius-sm);
+  padding: 3px 6px;
+  background: var(--ark-sidebar-field-bg);
   color: var(--ark-text);
   font: inherit;
 }
 
-.ark-session-runtime { font-size: 12px; color: var(--ark-text-dim); }
-.ark-session-runtime__fields { display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; }
-.ark-session-runtime__fields label { display: grid; gap: 3px; }
-.ark-session-runtime__fields input, .ark-session-runtime__fields select { min-width: 0; }
+/* ---------- search + scope ---------- */
 
-.ark-rewind { margin-top: 6px; display: flex; justify-content: flex-end; opacity: 0; transition: opacity 120ms ease; }
+.ark-threadlist__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 10px 8px;
+}
+
+.ark-threadlist__search {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--ark-radius-sm);
+  background: var(--ark-sidebar-field-bg);
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.ark-threadlist__search:focus-within {
+  border-color: var(--ark-accent-dim);
+  background: var(--ark-bg-raised);
+  box-shadow: 0 0 0 3px var(--ark-selection);
+}
+
+.ark-threadlist__search-icon {
+  font-size: 14px;
+  color: var(--ark-text-faint);
+}
+
+.ark-threadlist__search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ark-text);
+  padding: 7px 0;
+  font-size: 12px;
+  /* Drop the WebKit native search-field paint: it draws its own light
+     background over the glass field in the dark theme. */
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.ark-threadlist__search input::placeholder {
+  color: var(--ark-text-placeholder);
+}
+
+.ark-threadlist__scope {
+  display: flex;
+  gap: 12px;
+}
+
+.ark-threadlist__scope button {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--ark-text-faint);
+  cursor: pointer;
+  padding: 2px 0;
+  text-align: left;
+  font-size: 11.5px;
+}
+
+.ark-threadlist__scope button:hover {
+  color: var(--ark-text-dim);
+}
+
+.ark-threadlist__scope button.is-active {
+  color: var(--ark-accent);
+  font-weight: 550;
+}
+
+.ark-threadlist__scope span {
+  color: var(--ark-text-faint);
+}
+
+.ark-threadlist__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-top: 1px solid var(--ark-sidebar-divider);
+  font-size: 11px;
+  color: var(--ark-text-faint);
+  flex: none;
+}
+
+/* ---------- session runtime detail fields ---------- */
+
+.ark-session-runtime {
+  font-size: 12px;
+  color: var(--ark-text-dim);
+}
+
+.ark-session-runtime__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(150px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ark-session-runtime__fields label {
+  display: grid;
+  gap: 3px;
+}
+
+.ark-session-runtime__fields input,
+.ark-session-runtime__fields select {
+  min-width: 0;
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius-sm);
+  background: var(--ark-bg-raised);
+  padding: 4px 6px;
+  color: var(--ark-text);
+}
+
+/* ---------- rewind control ---------- */
+
+.ark-rewind {
+  margin-top: 2px;
+  display: flex;
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
 /* The entry stays out of the way of reading, but must remain reachable: a
    keyboard focus or an open confirm dialog keeps it visible. */
-.ark-turn:hover .ark-rewind, .ark-turn:focus-within .ark-rewind, .ark-rewind--confirm { opacity: 1; }
-.ark-rewind--confirm { display: grid; gap: 4px; max-width: 480px; border: 1px solid var(--ark-border); border-radius: 8px; padding: 8px 10px; }
-.ark-rewind__title { margin: 0; font-weight: 600; }
-.ark-rewind__body { margin: 0; color: var(--ark-text-dim); font-size: 12px; }
-.ark-rewind__actions { display: flex; gap: 8px; margin-top: 4px; }
+.ark-turn:hover .ark-rewind,
+.ark-turn:focus-within .ark-rewind,
+.ark-rewind--confirm {
+  opacity: 1;
+}
+
+.ark-rewind--confirm {
+  display: grid;
+  gap: 4px;
+  max-width: 480px;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius);
+  padding: 8px 10px;
+  background: var(--ark-card-soft);
+}
+
+.ark-rewind__title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.ark-rewind__body {
+  margin: 0;
+  color: var(--ark-text-dim);
+  font-size: 12px;
+}
+
+.ark-rewind__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
 
 @media (hover: none) {
   /* Touch layouts have no hover state, so the entry must always be present. */
-  .ark-rewind { opacity: 1; }
+  .ark-rewind {
+    opacity: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ark-rewind { transition: none; }
+  .ark-rewind {
+    transition: none;
+  }
 }

@@ -1,79 +1,15 @@
+@import './tokens.css';
 @import './theme.css';
+@import './primitives.css';
 @import './toast.css';
 
 /**
- * @type {Record<string, string>}
- * Design tokens only: no component styles here. Every panel consumes these.
- * A plugin page that ships its own palette violates §7.5.3; keeping the tokens
- * in one file is what makes that reviewable.
- *
- * Light palette: warm paper neutrals, one restrained accent, near-black solid
- * actions. Component CSS must consume these tokens — a literal hex outside
- * this file breaks theme parity and is a review blocker.
+ * Global entry: imports the token layers (light palette in tokens.css, dark
+ * overrides in theme.css), shared primitives and toast styles, then owns the
+ * document base — canvas washes, scrollbars, selection. Component styles must
+ * consume the tokens; a literal hex outside the token files is a review
+ * blocker because it breaks light/dark parity.
  */
-:root {
-  color-scheme: light;
-
-  /* surfaces */
-  --ark-bg: #f7f7f5;
-  --ark-bg-raised: #ffffff;
-  --ark-bg-inset: #f0f0ee;
-  --ark-bg-hover: #eaeae7;
-  --ark-border: #e4e4e1;
-  --ark-border-strong: #cfcfcb;
-
-  /* text */
-  --ark-text: #1c1c1a;
-  --ark-text-dim: #5f5f59;
-  --ark-text-faint: #676761;
-
-  /* intent */
-  --ark-accent: #3b66c4;
-  --ark-accent-dim: #7d9bdc;
-  --ark-ok: #1f7a44;
-  --ark-warn: #96660a;
-  --ark-error: #bb3a44;
-  --ark-selection: #dfe8fa;
-  /* Solid actions: near-black primary, like the modern minimal harnesses. */
-  --ark-primary: #262624;
-  --ark-primary-hover: #3d3d3a;
-  --ark-primary-text: #ffffff;
-  /* Washes: intent-tinted surfaces for notices, gates and chips. */
-  --ark-ok-wash: #e9f4ec;
-  --ark-warn-wash: #faf3e2;
-  --ark-error-wash: #fceeee;
-  --ark-error-strong: #a12d37;
-  --ark-user-message: #ececea;
-  --ark-user-border: #e0e0dc;
-  --ark-terminal-bg: #1b1b1a;
-  --ark-terminal-text: #c9ccd2;
-  --ark-overlay: rgba(20, 20, 18, 0.4);
-  --ark-shadow-1: 0 1px 2px rgba(20, 20, 18, 0.06);
-  --ark-shadow-2: 0 12px 32px rgba(20, 20, 18, 0.14);
-
-  /* type */
-  --ark-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --ark-mono: 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
-  --ark-size: 13px;
-  /* Radius scale: sm for chips/inputs, md (default) for cards/buttons, lg for
-     conversation surfaces (bubbles, composer, drawers). */
-  --ark-radius-sm: 6px;
-  --ark-radius: 10px;
-  --ark-radius-lg: 14px;
-
-  /* layout */
-  --ark-topbar: 48px;
-  --ark-left: 260px;
-  --ark-right: 360px;
-}
-
-:root[data-ark-font-size='small'] {
-  --ark-size: 12px;
-}
-
-:root[data-ark-font-size='large'] {
-  --ark-size: 14px;
-}
 
 * {
   box-sizing: border-box;
@@ -93,269 +29,72 @@ body {
   font-size: var(--ark-size);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  position: relative;
+}
+
+/* Ambient washes behind everything, ported from smart-ark: a vertical daylight
+   gradient plus a top-right whale-blue glow. Tokens keep both themes in sync. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background: var(--ark-body-wash);
+  pointer-events: none;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--ark-body-glow);
+  pointer-events: none;
 }
 
 button,
 textarea,
-input {
+input,
+select {
   font: inherit;
   color: inherit;
 }
 
 code,
-pre {
+pre,
+kbd {
   font-family: var(--ark-mono);
   font-size: 12px;
 }
 
-/* ---------- shared primitives (owned by shared/ui) ---------- */
-
-.ark-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid var(--ark-border-strong);
-  border-radius: var(--ark-radius-sm);
-  background: var(--ark-bg-raised);
-  color: var(--ark-text);
-  cursor: pointer;
-  font-weight: 500;
-  transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease,
-    box-shadow 120ms ease;
-  white-space: nowrap;
-}
-
-.ark-btn--sm {
-  padding: 4px 11px;
-  font-size: 12px;
-}
-
-.ark-btn--md {
-  padding: 7px 15px;
-}
-
-.ark-btn--block {
-  width: 100%;
-}
-
-.ark-btn:hover:not(:disabled) {
-  background: var(--ark-bg-hover);
-  border-color: var(--ark-border-strong);
-}
-
-.ark-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.ark-btn:focus-visible {
-  outline: 2px solid var(--ark-accent);
-  outline-offset: 1px;
-}
-
-.ark-btn--primary {
-  background: var(--ark-primary);
-  border-color: var(--ark-primary);
-  color: var(--ark-primary-text);
-}
-
-.ark-btn--primary:hover:not(:disabled) {
-  background: var(--ark-primary-hover);
-  border-color: var(--ark-primary-hover);
-}
-
-.ark-btn--ghost {
-  background: transparent;
-  border-color: transparent;
-  color: var(--ark-text-dim);
-}
-
-.ark-btn--ghost:hover:not(:disabled) {
-  background: var(--ark-bg-hover);
-  border-color: transparent;
-}
-
-.ark-btn--danger {
-  background: transparent;
-  border-color: var(--ark-border-strong);
-  color: var(--ark-error);
-}
-
-.ark-btn--danger:hover:not(:disabled) {
-  background: var(--ark-error-wash);
-  border-color: var(--ark-error);
-}
-
-.ark-linkbtn {
-  border: 0;
-  background: none;
-  color: var(--ark-text-dim);
-  cursor: pointer;
-  padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.ark-linkbtn:hover {
-  color: var(--ark-text);
-}
-
-.ark-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 28px 20px;
-  text-align: center;
-  color: var(--ark-text-dim);
-}
-
-.ark-empty__title {
-  margin: 0;
-  color: var(--ark-text);
-  font-weight: 600;
-}
-
-.ark-empty__hint {
-  margin: 0;
-  max-width: 34ch;
-  font-size: 12px;
-  color: var(--ark-text-faint);
-}
-
-.ark-tabs {
-  display: flex;
-  gap: 2px;
-  border-bottom: 1px solid var(--ark-border);
-  padding: 0 8px;
-  flex: none;
-}
-
-.ark-tabs__tab {
-  border: 0;
-  background: none;
-  color: var(--ark-text-dim);
-  padding: 9px 10px;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  font-size: 12.5px;
-  font-weight: 500;
-}
-
-.ark-tabs__tab:hover {
-  color: var(--ark-text);
-}
-
-.ark-tabs__tab.is-active {
-  color: var(--ark-text);
-  border-bottom-color: var(--ark-text);
-}
-
-.ark-tabs__badge {
-  margin-left: 6px;
-  color: var(--ark-text-faint);
-}
-
-.ark-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  background: var(--ark-bg-inset);
-  font-size: 11px;
-  line-height: 17px;
-  color: var(--ark-text-dim);
-}
-
-.ark-chip--ok {
-  color: var(--ark-ok);
-  background: var(--ark-ok-wash);
-}
-
-.ark-chip--error {
-  color: var(--ark-error);
-  background: var(--ark-error-wash);
-}
-
-.ark-chip--live {
-  color: var(--ark-accent);
+::selection {
   background: var(--ark-selection);
 }
 
-.ark-chip--muted {
-  color: var(--ark-text-faint);
+/* Slim rounded scrollbars, navy-tinted like the smart-ark shell. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ark-scrollbar-thumb) transparent;
 }
 
-.ark-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  display: inline-block;
-  background: var(--ark-text-faint);
-  flex: none;
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
 }
 
-.ark-dot--ok {
-  background: var(--ark-ok);
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-.ark-dot--warn {
-  background: var(--ark-warn);
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-color: var(--ark-scrollbar-thumb);
+  background-clip: padding-box;
 }
 
-.ark-dot--bad {
-  background: var(--ark-error);
-}
-
-.ark-dot--idle {
-  background: var(--ark-text-faint);
-}
-
-.ark-textarea {
-  width: 100%;
-  resize: vertical;
-  background: var(--ark-bg-inset);
-  border: 1px solid var(--ark-border);
-  border-radius: var(--ark-radius-sm);
-  padding: 7px 9px;
-  color: var(--ark-text);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
-}
-
-.ark-textarea:focus-visible,
-.ark-textarea:focus {
-  outline: none;
-  border-color: var(--ark-accent-dim);
-  box-shadow: 0 0 0 3px var(--ark-selection);
-}
-
-.ark-error-boundary {
-  border: 1px solid var(--ark-error);
-  background: var(--ark-error-wash);
-  border-radius: var(--ark-radius);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-start;
-}
-
-.ark-error-boundary__title {
-  margin: 0;
-  color: var(--ark-error);
-  font-weight: 600;
-}
-
-.ark-error-boundary__message {
-  margin: 0;
-  color: var(--ark-text-dim);
-  font-family: var(--ark-mono);
-  font-size: 12px;
-  word-break: break-word;
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--ark-scrollbar-thumb-hover);
 }
 
 /* Accessibility: honour the OS "reduce motion" setting for every transition. */

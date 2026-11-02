@@ -214,6 +214,9 @@ export function ThreadStream({
     return (
       <section className="ark-stream ark-stream--empty">
         <div className="ark-stream__emptycall">
+          <p className="ark-stream__emptykicker" aria-hidden="true">
+            {t('canvas.empty.kicker')}
+          </p>
           <EmptyState title={t('canvas.empty.title')} hint={t('canvas.empty.hint')} />
           {onCreateThread ? (
             <Button variant="primary" size="sm" onClick={() => void onCreateThread()}>

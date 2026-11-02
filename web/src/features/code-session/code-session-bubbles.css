@@ -1,0 +1,171 @@
+/**
+ * Message bubbles and reasoning rows, ported from the smart-ark timeline:
+ * the user speaks in a whale-blue bubble hugging the right edge, ark answers
+ * in prose floating directly on the canvas.
+ *
+ * Part of the Code screen stylesheet; split to stay under the 400-line
+ * per-file limit (design §7.10.2). Code-session.css is the entry. Colors come
+ * from styles/tokens.css (theme.css for dark) only.
+ */
+
+/* ---------- messages ---------- */
+
+.ark-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* User bubble: right-aligned, asymmetric radius with the "direction" corner,
+   whale-light blue wash and matching hairline. */
+.ark-msg--user {
+  align-self: flex-end;
+  align-items: flex-end;
+  max-width: min(100%, 72%);
+  border: 1px solid var(--ark-user-border);
+  border-radius: 14px 14px 4px 14px;
+  background: var(--ark-user-message);
+  box-shadow: var(--ark-shadow-ctl);
+  padding: 0.72rem 1.05rem;
+}
+
+.ark-msg--user .ark-msg__body {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.65;
+  color: var(--ark-text);
+}
+
+/* Assistant message: prose on the canvas, no card. */
+.ark-msg--assistant {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 2px 0;
+}
+
+.ark-msg--assistant.is-failed .ark-msg__body--prose {
+  color: var(--ark-error-strong);
+}
+
+.ark-msg__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ark-text-faint);
+}
+
+.ark-msg--user .ark-msg__head {
+  /* The meta row belongs to the bubble; the bubble itself is the payload. */
+  order: 2;
+  padding-right: 2px;
+}
+
+.ark-msg__author {
+  font-weight: 600;
+  color: var(--ark-text-dim);
+}
+
+.ark-msg--user .ark-msg__author {
+  color: var(--ark-text-dim);
+}
+
+.ark-msg__time {
+  font-family: var(--ark-mono);
+  font-size: 10.5px;
+}
+
+.ark-msg__body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ark-msg__body--prose {
+  line-height: 1.66;
+  font-size: 15px;
+}
+
+.ark-msg__detail {
+  margin: 0;
+  color: var(--ark-text-faint);
+  font-size: 12px;
+}
+
+/* ---------- reasoning: quiet, accent-ruled aside ---------- */
+
+.ark-reasoning {
+  border-left: 2px solid var(--ark-accent-soft);
+  padding-left: 12px;
+  color: var(--ark-text-dim);
+  max-width: 100%;
+}
+
+.ark-reasoning__summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  list-style: none;
+}
+
+.ark-reasoning__summary::-webkit-details-marker {
+  display: none;
+}
+
+.ark-reasoning__summary::before {
+  content: '▸';
+  color: var(--ark-text-faint);
+  font-size: 10px;
+  transition: transform 120ms ease;
+}
+
+.ark-reasoning[open] .ark-reasoning__summary::before {
+  transform: rotate(90deg);
+}
+
+.ark-reasoning__meta {
+  color: var(--ark-text-faint);
+  font-family: var(--ark-mono);
+  font-size: 11px;
+}
+
+.ark-reasoning__body {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ark-text-faint);
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 320px;
+  overflow: auto;
+}
+
+/* ---------- streaming caret ---------- */
+
+.ark-caret {
+  display: inline-block;
+  width: 6px;
+  height: 15px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  border-radius: 1px;
+  background: var(--ark-accent);
+  animation: ark-blink 1s step-end infinite;
+}
+
+@keyframes ark-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ark-caret {
+    animation: none;
+    opacity: 1;
+  }
+}

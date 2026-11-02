@@ -1,8 +1,11 @@
 /**
  * Composer quick runtime pickers: model/provider, permission mode and
- * reasoning effort. Split from code-session-gates.css to stay under the
- * 400-line per-file limit (design §7.10.2).
+ * reasoning effort. Styled as quiet pills inside the composer toolbar with a
+ * floating card popover above, mirroring smart-ark's composer pickers.
+ * Split from code-session-gates.css to stay under the 400-line per-file limit
+ * (design §7.10.2).
  */
+
 /* ---------- composer quick runtime pickers ---------- */
 
 .ark-composer__pickers {
@@ -18,7 +21,20 @@
 }
 
 .ark-composer__pick-trigger {
-  max-width: 200px;
+  max-width: 210px;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  border-radius: 999px;
+  color: var(--ark-text-dim);
+  font-size: 12px;
+  padding: 4px 9px;
+}
+
+.ark-composer__pick-trigger:hover:not(:disabled) {
+  background: var(--ark-bg-hover);
+  color: var(--ark-text);
+  border-color: transparent;
 }
 
 .ark-composer__pick-label {
@@ -33,6 +49,7 @@
   color: var(--ark-text-faint);
 }
 
+/* Popover opens above the toolbar, floating card like smart-ark menus. */
 .ark-composer__popover {
   position: absolute;
   bottom: calc(100% + 8px);
@@ -40,8 +57,8 @@
   z-index: 30;
   min-width: 250px;
   max-width: 330px;
-  border: 1px solid var(--ark-border-strong);
-  border-radius: var(--ark-radius);
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius-lg);
   background: var(--ark-bg-raised);
   box-shadow: var(--ark-shadow-2);
   padding: 8px;
@@ -61,6 +78,10 @@
 .ark-composer__field select,
 .ark-composer__field input {
   color: var(--ark-text);
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius-sm);
+  background: var(--ark-bg-raised);
+  padding: 4px 6px;
 }
 
 .ark-composer__option {
@@ -83,6 +104,7 @@
 
 .ark-composer__option[aria-selected='true'] {
   border-color: var(--ark-accent-dim);
+  background: var(--ark-accent-soft);
 }
 
 .ark-composer__option-desc {
