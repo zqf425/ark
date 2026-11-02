@@ -79,6 +79,9 @@ async fn serve(args: ServeArgs) -> ExitCode {
     // this, so headless turns cannot fire due schedules behind the user's
     // back.
     wiring.schedules.spawn(wiring.state.clone());
+    // IM channel connections start after the listener, same reasoning as the
+    // scheduler loop: the first sync must observe the final state.
+    wiring.im.spawn(wiring.state.clone());
     println!("arkd model {}", wiring.model_label);
     println!("arkd tools {}", wiring.tools.names().join(","));
     println!("arkd config version {}", wiring.config.version());

@@ -251,7 +251,7 @@ pub struct ImChannel {
 }
 
 /// `POST /v1/im/channels`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct CreateImChannelRequest {
     #[serde(default)]

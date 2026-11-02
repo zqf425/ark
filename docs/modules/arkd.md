@@ -141,6 +141,12 @@ facts extracted` 与 `: truncated` 两个变体）。判定 gated 在 `Notice` k
 4. 调度循环订阅 `shutdown_receiver()`,在 `Ctrl-C`/drain 只置标志位的路径上靠每轮 tick 顶部的
    `is_shutting_down()` 收敛。
 
+IM 渠道编排（`ark_server::ImService`）走同一模式：`wiring/mod.rs` 用同一 `data_dir` 创建
+`ark_store::ImFileStore`，注入 `ark_ports::ImStore`；适配器的 `reqwest::Client` 由组合根经
+`ark_http::transport_client`（与模型流量同一 `HttpPolicy` 代理/TLS 设置）构造，长轮询渠道
+以 `client_timeout=None` 传参；`AppState::with_im` 挂到路由后，`serve` 在 `main.rs` 于
+`schedules.spawn` 之后调用 `im.spawn(state)`——headless `run` 同样不启动 IM 连接。
+
 执行直接复用注入的 `TurnRunner` 与 `start_turn` 校验路径(与自动 continuation 同一先例),
 不新建第二执行通道。见 [定时任务需求](../requirements/scheduled-tasks.md)。
 

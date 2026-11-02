@@ -365,6 +365,22 @@ fn protected_routes() -> Router<AppState> {
             "/v1/schedules/{id}/run",
             post(crate::api::handlers::schedules::run),
         )
+        // IM channels (requirements/im-channels.md §HTTP API). Editing stays
+        // available while `config.im.enabled` is off; only connections gate on
+        // the switch.
+        .route(
+            "/v1/im/channels",
+            get(crate::api::handlers::im::list).post(crate::api::handlers::im::create),
+        )
+        .route(
+            "/v1/im/channels/{id}",
+            patch(crate::api::handlers::im::update).delete(crate::api::handlers::im::delete),
+        )
+        .route(
+            "/v1/im/channels/{id}/verify",
+            post(crate::api::handlers::im::verify),
+        )
+        .route("/v1/im/bindings", get(crate::api::handlers::im::bindings))
         .route(
             "/v1/runtime/model-providers",
             post(crate::api::handlers::pending::model_providers),

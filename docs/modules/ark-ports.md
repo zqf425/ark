@@ -20,6 +20,12 @@
 不一致。`replace` 是运行记账的唯一写路径：历史追加与 `last_run` 镜像必须是一次任务变更，拆成两次
 调用就会与 UI 更新交错。
 
+`ImStore` 是 IM 渠道文档（`im.json`）的持久化边界，与 `ScheduleStore` 同为同步端口：整个
+文档一次进程内锁临界区读写，锁内不做网络 IO。它持有渠道记录（`ImChannelRecord { channel,
+cursor }`，端口自有的落盘类型，同 `ThreadMeta` 先例，不进 ts_export）与 chat→thread 绑定；
+`delete_channel` 必须在同一临界区级联删除其绑定，孤儿绑定会把下一条入站消息路由进幽灵线程。
+凭证校验、渠道上限与合并语义在 `ark-im` 与 server 编排层，存储只做持久化。
+
 ## 硬约束
 
 - `ark-agent` 只能依赖到本 crate，不得引用 `ark-store`、`ark-llm`、`ark-tool` 等实现。

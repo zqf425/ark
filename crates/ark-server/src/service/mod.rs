@@ -3,6 +3,8 @@
 pub mod attachment_auth;
 pub mod compaction;
 pub mod continuation;
+pub mod im;
+pub mod im_inbound;
 pub mod mcp_info;
 pub mod mcp_tools;
 pub mod scheduler;
@@ -16,7 +18,8 @@ pub use attachment_auth::{
 };
 pub use compaction::{ensure_checkpoint, CompactionOutcome};
 pub use continuation::{schedule_auto_continuation, sync_auto_continue_policy};
+pub use im::ImService;
 pub use scheduler::{SchedulerService, TICK_INTERVAL as SCHEDULE_TICK_INTERVAL};
 pub use serve::{bind, AppHandle};
 pub use threads::{create_thread, summary_of};
-pub use turns::{spawn_turn, start_turn};
+pub use turns::{spawn_turn, start_turn, start_turn_as};

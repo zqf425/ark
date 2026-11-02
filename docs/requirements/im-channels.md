@@ -275,4 +275,23 @@ GET 不回传,客户端不可写。
 
 ## 落地情况
 
-(未开始)
+阶段 1(契约与存储)已实现:`ark-contract/im.rs`(含读/写模型分离、`UpdateImChannelRequest`
+合并语义、凭证空值保留规则)与 ts_export 根类型登记;`ark-ports::ImStore`(同步端口)+
+`ImChannelRecord`(不登记 ts_export);`ark-store::ImFileStore`(原子写、损坏恢复、渠道删除
+级联绑定);`TurnSource::Im` 变体与 `start_turn_as`/`turn_source_texts` 映射;`config.im`
+热更新段(contract `ImSettings`/`ConfigPatch.im`/`RuntimeConfigView.im` + ark-config 的
+classify/diagnostics/snapshot 落点,默认关)。
+
+阶段 2(编排与 Telegram)已实现:`ark-im` crate(归一化消息模型、`ImTransport` trait、
+create/update 载荷归一化、去重 LRU、分块、命令解析、容量校验、`build_transport` 工厂,
+13 个单测)与 Telegram 适配器(getUpdates 长轮询、指数退避、HTML 转义与纯文本降级、游标
+上报、`is_self`);`ark-server` 的 `service/im.rs`(sync 对账/渠道启停/游标节流落盘)与
+`service/im_inbound.rs`(白名单空提示/非空静默、@提及、weixin owner、去重、每会话串行
+队列、`TurnSource::Im` 回合、订阅探测终态 + 注册表轮询兜底、按 turn_id 投影取回复、
+超时 ack、busy 有界重试);HTTP 路由 `/v1/im/channels`(CRUD/verify)与 `/v1/im/bindings`;
+arkd 装配(`ImFileStore` + 经治理的 transport client + `im.spawn`,仅随 serve 启动)。
+测试:ark-server 173 用例(含 7 个 IM 编排集成测试)、ark-im 13 用例;依赖方向表已含
+`ark-im` 行;文档同步清单第 1、2 行均已回填。
+
+未实现:阶段 3(飞书)、阶段 4(微信)、阶段 5(设置页)。`build_transport` 对这两类 kind
+返回 `NotImplemented`,对应渠道在 sync 时报错停用。

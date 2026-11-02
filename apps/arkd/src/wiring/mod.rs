@@ -71,6 +71,9 @@ pub struct Wiring {
     /// Scheduled-task orchestration. Injected here so `serve` can start the
     /// loop; `run` holds it without starting anything.
     pub schedules: Arc<ark_server::SchedulerService>,
+    /// IM-channel orchestration. Same lifecycle as `schedules`: connections
+    /// only run under `serve`, never in a one-shot headless `run`.
+    pub im: Arc<ark_server::ImService>,
     /// The local plugin host, kept alive for the process lifetime.
     ///
     /// Dropping it would run every plugin's `Registration::drop`, silently
@@ -118,6 +121,21 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     let schedules = Arc::new(ark_server::SchedulerService::new(Arc::new(
         ark_store::ScheduleFileStore::open(&args.data_dir)?,
     )));
+    // IM channels live in their own document (`im.json`), same reasoning as
+    // `schedules.json`. The transport client reuses the governed model/HTTP
+    // policy (proxy/TLS settings stay process-wide); long polling needs no
+    // client-level timeout, which `None` expresses.
+    let im = ark_server::ImService::new(
+        Arc::new(ark_store::ImFileStore::open(&args.data_dir)?),
+        ark_http::transport_client(&ark_http::HttpPolicy::default(), "ark-im/channel", None)
+            .unwrap_or_else(|err| {
+                tracing::warn!(
+                    error = %err.message,
+                    "falling back to default http transport for im channels"
+                );
+                reqwest::Client::new()
+            }),
+    );
     store.reconcile()?;
     let interrupted = abort_interrupted_turns(store.as_ref()).await?;
     if interrupted != 0 {
@@ -332,6 +350,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     )
     .with_gates(gates)
     .with_schedules(Arc::clone(&schedules))
+    .with_im(Arc::clone(&im))
     .with_auth_token(args.auth_token.clone());
 
     spawn_completion_listener(state.clone(), completion_notifications);
@@ -351,6 +370,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         usage,
         model_label,
         schedules,
+        im,
         plugins,
     })
 }

@@ -31,6 +31,14 @@
 
 任务与最近 10 条运行历史是本文件的真源，不进事件日志、不进 config。该层只做持久化：节奏修复、`next_run_at` 重算和 100 条任务上限都在 `ark-schedule`，由组合根在调用本存储之前完成——存储若擅自改写任务，返回给客户端的文档就会与刚写入的不一致。`insert` 是创建路径，重复 id 返回 `conflict` 而非覆盖（覆盖会丢掉该任务的历史）；`replace` 是运行记账的唯一写路径，历史追加与 `last_run` 镜像必须是一次任务变更，否则可能与 UI 更新交错。`list` 按 `updated_at` 降序返回，稳定排序保持同一时刻的插入顺序。
 
+## IM 渠道存储
+
+`<data_dir>/im.json` 由 `ImFileStore`（`service/im.rs`）持有，模式与 `ScheduleFileStore`
+一致：Mutex 串行读改写 + `write_json_atomic` 原子替换 + 不可读折叠为空表并告警。文档形状
+为 `{ channels: [ImChannelRecord], bindings: [ImBinding] }`：渠道记录携带服务端入站游标
+（由编排层节流落盘，本层不节流），绑定随首条消息写入；渠道与绑定同文档是因为二者同域变更、
+且渠道删除需要原子级联删除其绑定。凭证明文落盘沿用 provider `api_key` 的 v1 简化。
+
 ## 目录与恢复
 
 全局附件存储位于 `<data_dir>/attachments/<attachment-id>`，其不可变元数据表位于
