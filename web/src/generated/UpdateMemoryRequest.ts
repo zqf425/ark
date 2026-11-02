@@ -3,4 +3,11 @@
 /**
  * `PATCH /v1/memory/{id}`.
  */
-export type UpdateMemoryRequest = { text?: string, tags?: Array<string>, source?: string, };
+export type UpdateMemoryRequest = { text?: string, tags?: Array<string>, 
+/**
+ * Double option so one wire shape carries three intents: key omitted =
+ * leave `source` untouched, explicit `null` = clear it, a string = set it.
+ * A plain `Option` could never express "clear", which left a stored
+ * source unremovable through the API.
+ */
+source?: string | null, };

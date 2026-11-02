@@ -148,7 +148,10 @@ export function MemorySection(): JSX.Element {
     const outcome = await api.update(memoryId, {
       text: newText,
       tags: newTags,
-      source: newSource.length > 0 ? newSource : undefined
+      // The wire distinguishes three intents: a string sets the source, an
+      // explicit `null` clears it, omitting the key would leave it untouched.
+      // An emptied input always means "clear", never "leave as is".
+      source: newSource.length > 0 ? newSource : null
     })
     outcomeToast(pushToast, outcome, t('settings.memory.updated'), t('settings.memory.updateFailed'))
   }

@@ -7,7 +7,7 @@
 
 use ark_contract::{
     ConfigPatch, FieldPath, HookSettings, ImSettings, ScheduleSettings, SkillsSettings,
-    SubagentSettings, TuningSettings, SKILLS_EXTRA_DIR_MAX_CHARS, SKILLS_EXTRA_DIRS_MAX,
+    SubagentSettings, TuningSettings, SKILLS_EXTRA_DIRS_MAX, SKILLS_EXTRA_DIR_MAX_CHARS,
     SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
 };
 use serde::{Deserialize, Serialize};

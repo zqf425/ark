@@ -3,7 +3,6 @@
 ## 当前实现
 
 ark 为用户显式维护、可跨会话复用的长期偏好或事实提供 JSON 存储。HTTP 表面为：
-
 - `GET /v1/memory`：列表；
 - `POST /v1/memory`：新增；
 - `PATCH /v1/memory/{id}`：更新；
@@ -13,6 +12,11 @@ ark 为用户显式维护、可跨会话复用的长期偏好或事实提供 JSO
 数据保存在 `<data_dir>/memory.json`，原子写入并采用 UTF-8 无 BOM。文件缺失或损坏时以空集合启动，
 从而不阻断服务启动；下一次成功写入会建立有效文件。文本不得为空且最大为 16 KiB UTF-8 字节。未知 id
 更新或删除返回 `not_found`，校验失败返回 `validation_error`。
+
+PATCH 更新的 `source` 字段是双层 Option（wire 形态 `source?: string | null`）：键省略表示不修改，
+显式 `null` 是唯一的清空方式，字符串为覆盖；`tags` 以空数组清空。设置页「记忆」section（web）提供
+列表、新增、编辑与删除，编辑时清空来源输入即提交显式 `null`；UI 遵循本需求约束，不提供逐条启用
+开关，删除条目即停止注入。
 
 ## 已批准计划
 
