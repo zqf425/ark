@@ -131,6 +131,8 @@ HTTP 路由 + 设置页）。
 
 - `ReloadClass` 是类型层的字段属性；含 `Restart` 字段的 patch 整批拒绝。
 - 新任务读取最新配置快照，已运行任务保留创建时策略。
+- 线程级运行时覆盖（`ThreadRuntimeSettings`，含 reasoning_effort）持久化在 thread.json，回合入口
+  一次性捕获，只影响后续回合；覆盖经存活 provider 表解析，不回写全局 provider 配置。
 - 新功能优先扩展现有模块、端口或插件；需要新增边界时先在需求设计中说明职责、依赖和退出条件。
 
 ## 7. 模块与需求文档治理

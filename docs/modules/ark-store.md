@@ -80,6 +80,11 @@ data/threads/<thread>/
     └── <child>/                # 内联子会话
 ```
 
+`thread.json` 除标识、标题与归档标记外，还持久化线程级运行时覆盖（workspace/provider_id/model/
+autonomy/reasoning_effort，即 `ThreadRuntimeSettings` 的逐字段平铺；全部 `serde(default)`，旧文件
+可读）。覆盖是可移植内容：fork（`forked_from`）把它们随目录复制到新线程，运行时侧如何消费见
+[arkd](arkd.md)。
+
 启动 reconciliation 以权威日志最大序号和索引水位决定跳过、增量投影或全量重建。索引写失败不能回滚
 已经 fsync 的事件；它必须留下可恢复的 dirty/reconcile 状态。全局 `child_id` locator 从所有父目录的
 `runs.jsonl` 重建，授权以记录中的 `parent_thread_id` 判断，绝不从目录路径猜测。

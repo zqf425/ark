@@ -74,8 +74,11 @@
   `ConfigPatch.subagents` 的校验、替换和持久化语义，并与 `/v1/runtime/config` 一样返回
   `ApplyResult`；不得路由到其他 split-config 占位 handler。
 - `PATCH /v1/threads/{id}` 写入 runtime 前必须通过 `ProviderService::resolve_endpoint` 校验显式
-  provider，且非空 model 必须有可解析 provider；校验失败不得写入 store。`POST /v1/threads/{id}/turns`
-  在注册回合前拒绝超过 `ark_contract::MAX_TURN_TEXT_BYTES` 的 UTF-8 文本。
+  provider，且非空 model 必须有可解析 provider；校验失败不得写入 store。覆盖字段按
+  `merge_runtime` 的 `patch.or(current)` 逐项合并（本端点不支持经 PATCH 单项清空覆盖）；`autonomy`
+  经 `Autonomy::parse` 校验，`reasoning_effort` 仅接受 `REASONING_EFFORTS`（`off|low|medium|high`），
+  空串视为未设置。覆盖语义在回合侧的解析见 [arkd](arkd.md)。
+  `POST /v1/threads/{id}/turns` 在注册回合前拒绝超过 `ark_contract::MAX_TURN_TEXT_BYTES` 的 UTF-8 文本。
 - `POST /v1/workspace/validate` 只转发 `WorkspaceService::validate` 的目录存在性校验，并使用
   `ark_common::path::normalize` 返回规范化路径；handler 不得复制工作区解析规则。
 - `GET /v1/threads/{id}/usage` 与 `GET /v1/debug/llm-rounds` 只从权威 `usage` 事件投影（每轮模型调用

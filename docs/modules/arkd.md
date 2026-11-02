@@ -56,7 +56,16 @@ per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启
 `ReactorConfig`；不得回退为 `AllowAllGates`，否则审批和用户输入卡片会变成无法影响执行的装饰。
 
 每个父/子回合在开始时读取同一份 provider 配置：自定义 headers、temperature 和 max_tokens 传入
-`ModelSeed`，不会被设置页静默忽略。模型与目录流量的 `reqwest::Client` 由组合根经
+`ModelSeed`，不会被设置页静默忽略。在此之上，线程级运行时覆盖（`ThreadRuntimeSettings`，经
+`PATCH /v1/threads/{id}` 持久化到 thread.json）在回合入口一次性捕获，只影响后续回合：
+
+- `runtime.workspace` 非空时经 `turn_common::resolve_workspace` 覆盖进程 workspace lease；
+- provider/model/reasoning_effort 经 `resolve_thread_provider`（`wiring/turns.rs`）从存活 provider
+  表解析：显式 `provider_id` 必须可解析，`model` 仅在显式给出时覆盖目录模型，空 `reasoning_effort`
+  视为未设置（不发空提示），协议映射见 [ark-llm](ark-llm.md)；
+- `runtime.autonomy` 决定该回合的 sandbox 档位（定时任务的 `unattended` 缺省即写这个字段）。
+
+模型与目录流量的 `reqwest::Client` 由组合根经
 `ark_http::transport_client`（同一 `HttpPolicy` 的代理/TLS 设置；SSE 流式响应不设 client 级总超时）
 注入 `HttpModelClient` 与 `ModelCatalogClient`，组合根不得为模型路径另建裸 client。
 模型目录明确提供 context window 时，组合根将全局 compaction
