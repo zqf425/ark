@@ -15,13 +15,13 @@ export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.
   const { t } = useI18n()
   const toast = useToast()
   const providers = useProviders()
+  const [runtime, setRuntime] = useState<ThreadRuntimeSettings>(DEFAULT_RUNTIME)
   // Model suggestions come from the selected provider's inventory: the default
   // model plus everything batch-imported for it.
   const selectedProvider = providers.providers.find((provider) => provider.id === (runtime.provider_id ?? '')) ?? null
   const modelOptions = selectedProvider
     ? [selectedProvider.model, ...selectedProvider.models].filter((id) => id && id !== (runtime.model ?? ''))
     : []
-  const [runtime, setRuntime] = useState<ThreadRuntimeSettings>(DEFAULT_RUNTIME)
   const [defaultAutonomy, setDefaultAutonomy] = useState(FALLBACK_AUTONOMY)
   const [saving, setSaving] = useState(false)
   const [compacting, setCompacting] = useState(false)
