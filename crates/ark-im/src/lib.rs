@@ -17,6 +17,7 @@
 #![deny(clippy::all)]
 
 pub mod domain;
+pub mod feishu;
 pub mod telegram;
 
 pub use domain::{
@@ -24,6 +25,7 @@ pub use domain::{
     parse_command, prepare_create, truncate_inbound, validate_credentials, Command, DedupSet,
     InboundMessage, KindLimits, DEDUP_CAPACITY,
 };
+pub use feishu::FeishuTransport;
 pub use telegram::TelegramTransport;
 
 use ark_contract::ImChannelKind;

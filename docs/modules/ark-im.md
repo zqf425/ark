@@ -1,9 +1,10 @@
 # ark-im 模块设计
 
-> 状态:**部分实现**(设计已批准,2026-11-02;Telegram 适配器已落地,飞书/微信/设置页按
-> [IM 渠道接入需求](../requirements/im-channels.md) 的阶段 3-5 推进)。需求边界与验收见
-> 需求文档。已落地部分的偏差已回填:游标经 trait 方法 `cursor()` 上报、由编排层节流持久化,
-> `ImTransport` 另有 `is_self` 默认方法(飞书/微信需要回显自身消息过滤)。
+> 状态:**部分实现**(设计已批准,2026-11-02;Telegram 与飞书适配器已落地,微信/设置页按
+> [IM 渠道接入需求](../requirements/im-channels.md) 的阶段 4-5 推进)。需求边界与验收见
+> 需求文档。已落地部分的偏差已回填:游标经 trait 方法 `cursor()` 上报、由编排层节流持久化
+> (飞书为带内 ack、无重放游标,恒返回 `None`);`ImTransport` 另有 `is_self` 默认方法
+> (飞书/微信需要回显自身消息过滤)。
 
 ## 职责与边界
 
@@ -123,7 +124,8 @@ feishu/lark)。群聊事件带 `mention` 列表,归一化为 `is_mention`。发�
 `im/v1/messages` REST(`tenant_access_token` 由适配器持有并按过期时间刷新)。降级判定:
 长连接协议细节受阻且短期内不可解时,渠道进入 `send_only` 运行态(仅保留 REST 发送、
 入站暂不支持)并如实回填需求文档——webhook 入站需要公网回调入口,arkd 是 loopback
-边界,不作为降级目标。
+边界,不作为降级目标。落地记录:协议自 `@larksuiteoapi/node-sdk` 完整提取(endpoint
+拉取 + pbbp2 帧 + ping/pong + 分片重组 + echo ack),降级判定未触发。
 
 ### 微信(阶段 4)
 

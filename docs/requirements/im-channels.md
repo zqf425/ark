@@ -293,5 +293,16 @@ arkd 装配(`ImFileStore` + 经治理的 transport client + `im.spawn`,仅随 se
 测试:ark-server 173 用例(含 7 个 IM 编排集成测试)、ark-im 13 用例;依赖方向表已含
 `ark-im` 行;文档同步清单第 1、2 行均已回填。
 
-未实现:阶段 3(飞书)、阶段 4(微信)、阶段 5(设置页)。`build_transport` 对这两类 kind
-返回 `NotImplemented`,对应渠道在 sync 时报错停用。
+阶段 3(飞书)已实现:`ark-im/src/feishu.rs` WebSocket 长连接,协议自官方
+`@larksuiteoapi/node-sdk`(smart-ark 的参照实现)原生提取:`POST /callback/ws/endpoint`
+拉取签名 URL 与 PingInterval 等客户端配置、pbbp2.Frame protobuf 帧手写编解码(SeqID/
+LogID/service/method/headers/payload 九字段)、ping/pong 心跳、事件按 message_id/sum/seq
+分片重组(10s TTL)、echo ack 回帧(`{"code":200}` base64);REST 侧 tenant_access_token
+缓存刷新、`im/v1/messages` 文本发送(按 kind 上限分块)、`bot/v3/info` 身份与 `is_self`。
+群聊 `is_mention` 由事件 `mentions` 非空判定,`require_mention` 策略在编排层生效。降级
+判定未触发:协议完整提取,无需 `send_only`。4 个单测(帧编解码回环、未知字段跳过、分片
+重组、事件归一化)。飞书无重放游标(网关在带内 ack,重投递由网关重试窗口与去重集合兜底),
+`cursor()` 恒为 `None`。
+
+未实现:阶段 4(微信)、阶段 5(设置页)。`build_transport` 对 weixin kind 返回
+`NotImplemented`,对应渠道在 sync 时报错停用。

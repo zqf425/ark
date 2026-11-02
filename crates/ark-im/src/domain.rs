@@ -406,8 +406,21 @@ pub fn build_transport(
                 cursor,
             ),
         )),
-        // Stages 3/4 add the Feishu WebSocket and WeChat iLink adapters here.
-        (ImChannelKind::Feishu, _) | (ImChannelKind::Weixin, _) => Err(ArkError::new(
+        (
+            ImChannelKind::Feishu,
+            ImCredentials::Feishu {
+                app_id,
+                app_secret,
+                domain,
+            },
+        ) => Ok(std::sync::Arc::new(crate::feishu::FeishuTransport::new(
+            client,
+            app_id.clone(),
+            app_secret.clone(),
+            *domain,
+        ))),
+        // Stage 4 adds the WeChat iLink adapter here.
+        (ImChannelKind::Weixin, _) => Err(ArkError::new(
             ArkErrorCode::NotImplemented,
             format!("transport for {kind:?} is not implemented yet"),
         )),
@@ -439,7 +452,7 @@ mod tests {
         }
         // A retained id is a duplicate; a new id evicts the oldest, which then
         // reads as new again.
-        assert!(!set.insert(&"5".to_string()));
+        assert!(!set.insert("5"));
         assert!(set.insert("9999"));
         assert!(set.insert("0"));
         assert_eq!(set.len(), DEDUP_CAPACITY);
