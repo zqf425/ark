@@ -169,6 +169,29 @@ mod tests {
     }
 
     #[test]
+    fn skills_patch_applies_hot() {
+        // Regression: skills used to be rejected as restart-class, which made
+        // the settings UI unable to save the section at all.
+        let store = store();
+        let result = store.apply(ConfigPatch {
+            skills: Some(ark_contract::SkillsSettings {
+                enabled: false,
+                extra_dirs: vec!["/tmp/skills".into()],
+            }),
+            ..ConfigPatch::default()
+        });
+        match result {
+            ApplyResult::Applied { changed, .. } => {
+                assert_eq!(changed, vec![FieldPath::new("skills")]);
+            }
+            other => panic!("expected applied, got {other:?}"),
+        }
+        let skills = &store.snapshot().skills;
+        assert!(!skills.enabled);
+        assert_eq!(skills.extra_dirs, vec!["/tmp/skills".to_string()]);
+    }
+
+    #[test]
     fn invalid_patch_leaves_every_field_untouched() {
         let store = store();
         let before = store.snapshot();

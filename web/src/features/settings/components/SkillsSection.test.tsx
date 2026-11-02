@@ -137,7 +137,7 @@ describe('SkillsSection config card', () => {
   it('renders the runtime reason when the save is rejected', async () => {
     const save = vi.fn(async () => ({
       ok: true as const,
-      value: { result: 'rejected' as const, reason: 'too many roots', restart_required: ['skills'], version: 2, changed: [] }
+      value: { result: 'rejected' as const, reason: 'too many roots', restart_required: ['port'], version: 2, changed: [] }
     }))
     harness = await mountWithProviders(<SkillsSection settings={settingsApi({ save })} />)
     await settle()

@@ -7,8 +7,9 @@
  * scan roots — absolute or `~`-prefixed paths; the workspace-relative
  * directories the runtime already scans are not addressable here, because a
  * workspace-relative config entry would silently change meaning when the
- * workspace switches. Restart-classified: the skill runtime snapshots this
- * at process start, so a patch reports `restart_required`.
+ * workspace switches. Hot-classified: the runtime re-reads this through the
+ * composition root's config source on every scan, so a saved patch takes
+ * effect without a restart.
  */
 export type SkillsSettings = { enabled: boolean, 
 /**

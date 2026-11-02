@@ -72,5 +72,5 @@ export const SETTINGS_INTEGRATIONS_MESSAGES = {
   'settings.skills.rejected': ['配置被拒绝', 'Config rejected'],
   'settings.skills.rejectedTitle': ['保存被拒绝', 'Save rejected'],
   'settings.skills.reason': ['原因：{reason}', 'Reason: {reason}'],
-  'settings.skills.restartHint': ['技能配置在进程重启后生效（发现目录在启动时固化）。', 'Skills config takes effect after a process restart (discovery roots are fixed at startup).']
+  'settings.skills.effectiveHint': ['保存后即在下一次技能扫描时生效，无需重启进程。', 'Saved config takes effect on the next skill scan — no process restart needed.']
 } as const

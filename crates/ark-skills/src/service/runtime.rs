@@ -3,7 +3,9 @@
 //!
 //! The runtime is `Send + Sync` and is meant to be held in an `Arc` by the
 //! server: [`SkillRuntime::new`] scans once and [`SkillRuntime::reload`]
-//! replaces the snapshot. The two `GET`-facing views ([`SkillRuntime::list`] and
+//! replaces the snapshot. The configuration is read through a [`ConfigSource`]
+//! on every scan/resolve, so a saved settings patch takes effect on the next
+//! rescan without a restart. The two `GET`-facing views ([`SkillRuntime::list`] and
 //! [`SkillRuntime::thread_view`]) rescan first, so a skill directory created
 //! while the process runs is visible without an explicit refresh; roots are
 //! small, so a scan per read costs less than tracking filesystem changes.
@@ -11,7 +13,7 @@
 //! cannot block a turn behind a rescan.
 
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use ark_contract::{
     SkillDiagnostics, SkillLoadWarning, SkillSource, SkillSummary, SkillTurnResolution,
@@ -36,12 +38,38 @@ struct Snapshot {
     validation_errors: Vec<SkillLoadWarning>,
 }
 
+/// Extra-root scan output for one thread view.
+#[derive(Debug, Default)]
+struct ThreadExtras {
+    skills: Vec<LoadedSkill>,
+    warnings: Vec<SkillLoadWarning>,
+    loaded_roots: Vec<PathBuf>,
+    configured_roots: Vec<PathBuf>,
+}
+
+/// Where the runtime reads its configuration from.
+///
+/// The server passes a closure over the live config snapshot, so a saved
+/// settings patch takes effect on the next scan without a process restart
+/// (skills is a `Hot` reload class). A fixed value is enough for tests and
+/// simple embedders — see [`SkillRuntime::fixed`].
+pub type ConfigSource = Arc<dyn Fn() -> SkillsConfig + Send + Sync>;
+
 /// Skill discovery, validation, activation and catalog rendering.
-#[derive(Debug)]
 pub struct SkillRuntime {
-    config: SkillsConfig,
+    config: ConfigSource,
     workspace: PathBuf,
     snapshot: RwLock<Snapshot>,
+}
+
+impl std::fmt::Debug for SkillRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The config source is an opaque closure; it has nothing useful to
+        // print, so the derived-style output simply skips it.
+        f.debug_struct("SkillRuntime")
+            .field("workspace", &self.workspace)
+            .finish_non_exhaustive()
+    }
 }
 
 impl SkillRuntime {
@@ -51,7 +79,7 @@ impl SkillRuntime {
     /// absolute roots are scanned, and the workspace-relative defaults are
     /// skipped when absent (an absent default directory is normal, not a
     /// warning).
-    pub fn new(config: SkillsConfig, workspace: PathBuf) -> Self {
+    pub fn new(config: ConfigSource, workspace: PathBuf) -> Self {
         let runtime = Self {
             config,
             workspace,
@@ -60,6 +88,11 @@ impl SkillRuntime {
         let outcome = runtime.scan();
         *runtime.write() = outcome;
         runtime
+    }
+
+    /// Build a runtime over an immutable config and scan once.
+    pub fn fixed(config: SkillsConfig, workspace: PathBuf) -> Self {
+        Self::new(Arc::new(move || config.clone()), workspace)
     }
 
     /// Rescan every configured root and replace the snapshot.
@@ -77,10 +110,11 @@ impl SkillRuntime {
     /// The `GET` views go through [`SkillRuntime::list`] or
     /// [`SkillRuntime::thread_view`] to observe the current disk state instead.
     pub fn diagnostics(&self) -> SkillDiagnostics {
+        let config = (self.config)();
         let snapshot = self.read();
         SkillDiagnostics {
-            enabled: self.config.enabled,
-            roots: self.display_roots(),
+            enabled: config.enabled,
+            roots: self.display_roots(&config),
             skills: snapshot.skills.iter().map(LoadedSkill::summary).collect(),
             validation_errors: snapshot.validation_errors.clone(),
         }
@@ -102,7 +136,8 @@ impl SkillRuntime {
     /// deliberately wins over a base skill with the same id, and the shadowed
     /// base package is reported so nothing is replaced silently.
     pub fn thread_view(&self, thread_extra_roots: &[PathBuf]) -> ThreadSkillsResponse {
-        if !self.config.enabled {
+        let config = (self.config)();
+        if !config.enabled {
             return ThreadSkillsResponse {
                 enabled: false,
                 ..ThreadSkillsResponse::default()
@@ -112,6 +147,85 @@ impl SkillRuntime {
         // `list`; extra roots are scanned per call already.
         self.rescan();
         let snapshot = self.read();
+        let extras = self.scan_thread_extras(thread_extra_roots, &snapshot.skills);
+        ThreadSkillsResponse {
+            enabled: true,
+            base_roots: self.display_roots(&config),
+            extra_roots: extras
+                .configured_roots
+                .iter()
+                .map(|root| path_display(root))
+                .collect(),
+            loaded_extra_roots: extras
+                .loaded_roots
+                .iter()
+                .map(|root| path_display(root))
+                .collect(),
+            base_skills: snapshot.skills.iter().map(LoadedSkill::summary).collect(),
+            extra_skills: extras.skills.iter().map(LoadedSkill::summary).collect(),
+            warnings: extras.warnings,
+            base_validation_errors: snapshot.validation_errors.clone(),
+        }
+    }
+
+    /// Skills this turn activates, the instruction text to inject, the catalog
+    /// of the remaining skills, and the tool allow-list.
+    ///
+    /// Scoring and the `promptPatterns` substring simplification are documented
+    /// on [`crate::service::activation`]. A skill whose entry file could not be
+    /// read is skipped (with a log line) instead of aborting the turn.
+    pub fn resolve_for_turn(&self, prompt: &str) -> SkillTurnResolution {
+        let config = (self.config)();
+        if !config.enabled {
+            return SkillTurnResolution::default();
+        }
+        let snapshot = self.read();
+        let ranked = activation::match_skills(&snapshot.skills, prompt);
+        let active: Vec<Match> = ranked.into_iter().take(config.active_limit).collect();
+        let injection = inject(&active, config.instruction_budget_bytes);
+        let injected_matches: Vec<Match> = injection
+            .injected
+            .iter()
+            .filter_map(|index| active.get(*index).cloned())
+            .collect();
+        let active_ids: Vec<String> = injected_matches
+            .iter()
+            .map(|matched| matched.skill.id.clone())
+            .collect();
+        let catalog = render_catalog(
+            &inactive_skills(&snapshot.skills, &active_ids),
+            config.catalog_budget_bytes,
+        );
+        SkillTurnResolution {
+            active_skill_ids: active_ids,
+            activations: active
+                .iter()
+                .map(|matched| ark_contract::SkillActivation {
+                    skill_id: matched.skill.id.clone(),
+                    reason: matched.reason.clone(),
+                    score: matched.score,
+                })
+                .collect(),
+            instructions: injection.instructions,
+            allowed_tool_names: activation::intersect_allowed_tools(&injected_matches),
+            injected_bytes: injection.bytes,
+            catalog,
+        }
+    }
+
+    // -- internals ---------------------------------------------------------
+
+    /// Scan a thread's extra roots against the base skills of the snapshot.
+    ///
+    /// A missing, unreadable, or empty root becomes a warning; the remaining
+    /// roots still load. An extra skill wins over a base skill with the same
+    /// id, and the shadowed base package is reported so nothing is replaced
+    /// silently.
+    fn scan_thread_extras(
+        &self,
+        thread_extra_roots: &[PathBuf],
+        base_skills: &[LoadedSkill],
+    ) -> ThreadExtras {
         let mut extra_skills: Vec<LoadedSkill> = Vec::new();
         let mut warnings: Vec<SkillLoadWarning> = Vec::new();
         let mut loaded_roots: Vec<PathBuf> = Vec::new();
@@ -159,7 +273,7 @@ impl SkillRuntime {
             }
             loaded_roots.push(configured.clone());
             for skill in outcome.skills {
-                if let Some(base) = snapshot.skills.iter().find(|base| base.id == skill.id) {
+                if let Some(base) = base_skills.iter().find(|base| base.id == skill.id) {
                     warnings.push(warning(
                         &skill.root,
                         format!(
@@ -174,66 +288,13 @@ impl SkillRuntime {
             }
         }
         extra_skills.sort_by(|a, b| a.id.cmp(&b.id));
-        ThreadSkillsResponse {
-            enabled: true,
-            base_roots: self.display_roots(),
-            extra_roots: configured_roots
-                .iter()
-                .map(|root| path_display(root))
-                .collect(),
-            loaded_extra_roots: loaded_roots.iter().map(|root| path_display(root)).collect(),
-            base_skills: snapshot.skills.iter().map(LoadedSkill::summary).collect(),
-            extra_skills: extra_skills.iter().map(LoadedSkill::summary).collect(),
+        ThreadExtras {
+            skills: extra_skills,
             warnings,
-            base_validation_errors: snapshot.validation_errors.clone(),
+            loaded_roots,
+            configured_roots,
         }
     }
-
-    /// Skills this turn activates, the instruction text to inject, the catalog
-    /// of the remaining skills, and the tool allow-list.
-    ///
-    /// Scoring and the `promptPatterns` substring simplification are documented
-    /// on [`crate::service::activation`]. A skill whose entry file could not be
-    /// read is skipped (with a log line) instead of aborting the turn.
-    pub fn resolve_for_turn(&self, prompt: &str) -> SkillTurnResolution {
-        if !self.config.enabled {
-            return SkillTurnResolution::default();
-        }
-        let snapshot = self.read();
-        let ranked = activation::match_skills(&snapshot.skills, prompt);
-        let active: Vec<Match> = ranked.into_iter().take(self.config.active_limit).collect();
-        let injection = inject(&active, self.config.instruction_budget_bytes);
-        let injected_matches: Vec<Match> = injection
-            .injected
-            .iter()
-            .filter_map(|index| active.get(*index).cloned())
-            .collect();
-        let active_ids: Vec<String> = injected_matches
-            .iter()
-            .map(|matched| matched.skill.id.clone())
-            .collect();
-        let catalog = render_catalog(
-            &inactive_skills(&snapshot.skills, &active_ids),
-            self.config.catalog_budget_bytes,
-        );
-        SkillTurnResolution {
-            active_skill_ids: active_ids,
-            activations: active
-                .iter()
-                .map(|matched| ark_contract::SkillActivation {
-                    skill_id: matched.skill.id.clone(),
-                    reason: matched.reason.clone(),
-                    score: matched.score,
-                })
-                .collect(),
-            instructions: injection.instructions,
-            allowed_tool_names: activation::intersect_allowed_tools(&injected_matches),
-            injected_bytes: injection.bytes,
-            catalog,
-        }
-    }
-
-    // -- internals ---------------------------------------------------------
 
     /// Replace the snapshot with a fresh scan, so a directory created at
     /// runtime shows up without `POST /v1/threads/{id}/skills/refresh`.
@@ -243,10 +304,12 @@ impl SkillRuntime {
     }
 
     fn scan(&self) -> Snapshot {
-        if !self.config.enabled {
+        let config = (self.config)();
+        if !config.enabled {
             return Snapshot::default();
         }
-        let outcome: ScanOutcome = discovery::scan_roots(&self.scanned_roots(), SkillSource::Base);
+        let outcome: ScanOutcome =
+            discovery::scan_roots(&self.scanned_roots(&config), SkillSource::Base);
         let mut validation_errors = outcome.validation_errors;
         validation_errors.extend(outcome.warnings);
         Snapshot {
@@ -261,10 +324,9 @@ impl SkillRuntime {
     /// Workspace-relative defaults are dropped when the directory is absent:
     /// most workspaces have no `skills/` directory at all, and reporting that on
     /// every `GET /v1/skills` would be noise rather than signal.
-    fn scanned_roots(&self) -> Vec<PathBuf> {
-        let all = self.config.base_roots(&self.workspace);
-        let optional: Vec<PathBuf> = self
-            .config
+    fn scanned_roots(&self, config: &SkillsConfig) -> Vec<PathBuf> {
+        let all = config.base_roots(&self.workspace);
+        let optional: Vec<PathBuf> = config
             .workspace_dirs
             .iter()
             .map(|dir| expand_home(&self.workspace.join(dir.trim())))
@@ -274,8 +336,8 @@ impl SkillRuntime {
             .collect()
     }
 
-    fn display_roots(&self) -> Vec<String> {
-        self.scanned_roots()
+    fn display_roots(&self, config: &SkillsConfig) -> Vec<String> {
+        self.scanned_roots(config)
             .iter()
             .map(|root| path_display(root))
             .collect()
@@ -447,7 +509,7 @@ mod tests {
             ..SkillsConfig::default()
         };
         configure(&mut config);
-        SkillRuntime::new(config, dir.to_path_buf())
+        SkillRuntime::fixed(config, dir.to_path_buf())
     }
 
     #[test]
@@ -517,7 +579,7 @@ mod tests {
             workspace_dirs: Vec::new(),
             ..SkillsConfig::default()
         };
-        let runtime = SkillRuntime::new(config, dir.path().to_path_buf());
+        let runtime = SkillRuntime::fixed(config, dir.path().to_path_buf());
         assert_eq!(runtime.count(), 0);
         let diagnostics = runtime.diagnostics();
         assert!(diagnostics.enabled);
@@ -532,7 +594,7 @@ mod tests {
             workspace_dirs: vec!["skills".to_string()],
             ..SkillsConfig::default()
         };
-        let runtime = SkillRuntime::new(config, dir.path().to_path_buf());
+        let runtime = SkillRuntime::fixed(config, dir.path().to_path_buf());
         let diagnostics = runtime.diagnostics();
         assert!(diagnostics.roots.is_empty(), "{:?}", diagnostics.roots);
         assert!(diagnostics.skills.is_empty());
@@ -585,7 +647,7 @@ mod tests {
             workspace_dirs: Vec::new(),
             ..SkillsConfig::default()
         };
-        let runtime = SkillRuntime::new(config, dir.path().to_path_buf());
+        let runtime = SkillRuntime::fixed(config, dir.path().to_path_buf());
         // The root does not exist yet, so the startup scan reports it.
         assert!(runtime
             .list()
@@ -625,6 +687,42 @@ mod tests {
         let resolution = runtime.resolve_for_turn("/pdf");
         assert!(resolution.active_skill_ids.is_empty());
         assert!(resolution.catalog.is_none());
+    }
+
+    #[test]
+    fn config_changes_take_effect_without_rebuilding() {
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("pdf");
+        write(
+            &package.join("skill.json"),
+            &manifest("PDF", "pdf", 0, "pdf"),
+        );
+        write(&package.join("SKILL.md"), "body\n");
+        let root = dir.path().to_path_buf();
+        let enabled = Arc::new(RwLock::new(true));
+        let enabled_reader = enabled.clone();
+        let runtime = SkillRuntime::new(
+            Arc::new(move || {
+                let mut config = SkillsConfig {
+                    roots: vec![root.clone()],
+                    workspace_dirs: Vec::new(),
+                    ..SkillsConfig::default()
+                };
+                config.enabled = *enabled_reader.read().unwrap();
+                config
+            }),
+            dir.path().to_path_buf(),
+        );
+        assert_eq!(runtime.count(), 1);
+
+        // Flip the master switch through the config source only: a saved
+        // settings patch must disable (and re-enable) skills without the
+        // server rebuilding the runtime.
+        *enabled.write().unwrap() = false;
+        assert!(!runtime.list().enabled);
+        assert!(runtime.resolve_for_turn("/pdf").active_skill_ids.is_empty());
+        *enabled.write().unwrap() = true;
+        assert_eq!(runtime.list().skills.len(), 1);
     }
 
     #[test]

@@ -12,3 +12,6 @@
 /apps/ark-desktop/src-tauri/icons/ios/
 /crates/ark-common/bindings/
 .idea/
+
+# web 子目录的临时构建产物（历史上被 5b17fdf 误入库）
+web/.tmp/

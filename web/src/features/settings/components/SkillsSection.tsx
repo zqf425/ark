@@ -2,9 +2,9 @@
  * Skills section: the discovery config (switch + extra roots) plus a read-only
  * listing with the validation errors verbatim.
  *
- * Skills are discovered from disk roots. The config is restart-classified on
- * the runtime side, so a successful save may still carry `restart_required` —
- * it is rendered, never swallowed.
+ * Skills are discovered from disk roots. The config is hot on the runtime side
+ * (the runtime re-reads it on every scan), so a save takes effect without a
+ * restart; a rejected patch is still rendered, never swallowed.
  */
 import { useEffect, useState } from 'react'
 import { Button, EmptyState, useToast } from '../../../shared/ui'
@@ -28,7 +28,13 @@ function parseExtraDirs(input: string): string[] {
 }
 
 /** The editable half: master switch plus extra scan roots. */
-function SkillsConfigCard({ settings }: { settings: SettingsApi }): JSX.Element | null {
+function SkillsConfigCard({
+  settings,
+  onSaved,
+}: {
+  settings: SettingsApi
+  onSaved: () => void
+}): JSX.Element | null {
   const { t } = useI18n()
   const toast = useToast()
   const { config, saving, save } = settings
@@ -62,7 +68,11 @@ function SkillsConfigCard({ settings }: { settings: SettingsApi }): JSX.Element 
       toast.push('error', t('settings.skills.rejected'), outcome.value.reason)
       return
     }
-    toast.push('success', t('settings.skills.saveSucceeded'), t('settings.skills.restartHint'))
+    // The saved config is already live on the runtime, so re-read the skill
+    // list right away instead of leaving a stale listing under the success
+    // toast until the user clicks refresh.
+    onSaved()
+    toast.push('success', t('settings.skills.saveSucceeded'), t('settings.skills.effectiveHint'))
   }
 
   return (
@@ -111,7 +121,7 @@ function SkillsConfigCard({ settings }: { settings: SettingsApi }): JSX.Element 
           {busy ? t('common.saving') : t('common.save')}
         </Button>
       </div>
-      <p className="ark-settings__hint">{t('settings.skills.restartHint')}</p>
+      <p className="ark-settings__hint">{t('settings.skills.effectiveHint')}</p>
 
       {rejection ? (
         <Notice tone="error" title={t('settings.skills.rejectedTitle')}>
@@ -171,7 +181,7 @@ export function SkillsSection({ settings }: { settings: SettingsApi }): JSX.Elem
         </Button>
       }
     >
-      <SkillsConfigCard settings={settings} />
+      <SkillsConfigCard settings={settings} onSaved={() => void api.refresh()} />
 
       {api.roots.length > 0 ? (
         <div className="ark-card__meta">

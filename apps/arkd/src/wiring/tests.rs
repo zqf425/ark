@@ -565,7 +565,7 @@ fn user_message_carries_previews_in_content_and_images_in_parts() {
 #[test]
 fn request_user_input_is_registered_for_both_agent_tool_sets() {
     let workspace = tempfile::tempdir().expect("temp dir is creatable");
-    let skills = Arc::new(ark_skills::SkillRuntime::new(
+    let skills = Arc::new(ark_skills::SkillRuntime::fixed(
         ark_skills::SkillsConfig::default(),
         workspace.path().to_path_buf(),
     ));
@@ -673,4 +673,32 @@ async fn build_hands_out_the_schedule_handle_without_starting_the_loop() {
     };
     let wiring = crate::wiring::build(&args).await.expect("runtime build");
     assert!(!wiring.schedules.is_started());
+}
+
+#[test]
+fn skills_config_source_reads_the_latest_snapshot() {
+    // The composition root injects this closure into `SkillRuntime`; a saved
+    // skills patch must be visible through it without rebuilding the runtime
+    // (skills is a `Hot` reload class).
+    let store = Arc::new(ConfigStore::new(RuntimeConfig::default()));
+    let source = skills_config_source(store.clone());
+    assert!(source().enabled);
+
+    let applied = store.apply(ark_contract::ConfigPatch {
+        skills: Some(ark_contract::SkillsSettings {
+            enabled: false,
+            extra_dirs: vec!["/tmp/extra-skills".into()],
+        }),
+        ..ark_contract::ConfigPatch::default()
+    });
+    assert!(
+        matches!(applied, ark_contract::ApplyResult::Applied { .. }),
+        "skills patch applies hot: {applied:?}"
+    );
+
+    let config = source();
+    assert!(!config.enabled);
+    assert!(config
+        .roots
+        .contains(&std::path::PathBuf::from("/tmp/extra-skills")));
 }
