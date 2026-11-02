@@ -67,7 +67,9 @@ function config(enabled = true): RuntimeConfigView {
       keep_recent_messages: 20,
       chunk_buffer: 64,
       sse_heartbeat_secs: 15,
-      sse_idle_timeout_secs: 300
+      sse_idle_timeout_secs: 300,
+      tool_storm_window_size: 0,
+      max_parallel_tool_calls: 0
     }
   }
 }

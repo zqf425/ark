@@ -65,7 +65,10 @@ pub struct TurnMachine {
     state: TurnState,
     limits: TurnLimits,
     progress: Progress,
-    repeats: BTreeMap<String, u32>,
+    /// Per-signature model rounds on which calls actually ran; the storm
+    /// breaker's repeat count is derived from these through the configured
+    /// window (`limits.tool_storm_window_size`, 0 = whole turn).
+    repeats: BTreeMap<String, Vec<u32>>,
     terminal_written: bool,
     model_in_flight: bool,
 }
@@ -122,16 +125,33 @@ impl TurnMachine {
     /// Record that these calls ran, so the storm breaker can count repeats.
     pub fn record_calls(&mut self, calls: &[ToolCallRequest]) {
         for call in calls {
-            let entry = self.repeats.entry(call.signature()).or_insert(0);
-            *entry = entry.saturating_add(1);
+            self.repeats
+                .entry(call.signature())
+                .or_default()
+                .push(self.progress.rounds);
         }
     }
 
     /// Repeat counters aligned with `calls`, as the step expects them.
+    ///
+    /// With `tool_storm_window_size > 0` only calls that ran within the last
+    /// `window` model rounds count; `0` counts the whole turn.
     pub fn repeats_for(&self, calls: &[ToolCallRequest]) -> Vec<u32> {
+        let window = self.limits.tool_storm_window_size;
+        let current = self.progress.rounds;
         calls
             .iter()
-            .map(|call| self.repeats.get(&call.signature()).copied().unwrap_or(0))
+            .map(|call| {
+                self.repeats
+                    .get(&call.signature())
+                    .map(|rounds| {
+                        rounds
+                            .iter()
+                            .filter(|round| window == 0 || current.saturating_sub(**round) < window)
+                            .count() as u32
+                    })
+                    .unwrap_or(0)
+            })
             .collect()
     }
 
@@ -365,6 +385,41 @@ mod tests {
         machine.record_calls(std::slice::from_ref(&call));
         machine.record_calls(std::slice::from_ref(&call));
         assert_eq!(machine.repeats_for(&[call]), vec![2]);
+    }
+
+    #[test]
+    fn storm_window_counts_only_recent_rounds() {
+        let mut limits = TurnLimits::tiny();
+        limits.tool_storm_window_size = 2;
+        let mut machine = TurnMachine::new(limits);
+        let call = ToolCallRequest::new("c1", "read", serde_json::json!({ "path": "a" }));
+
+        // Rounds 1 and 2 each ran the call once.
+        machine.enter(&start_action()).unwrap();
+        machine.record_calls(std::slice::from_ref(&call));
+        machine.enter(&Action::Dispatch(Default::default())).unwrap();
+        machine.enter(&start_action()).unwrap();
+        machine.record_calls(std::slice::from_ref(&call));
+        assert_eq!(machine.repeats_for(std::slice::from_ref(&call)), vec![2]);
+
+        // Round 3: round-1's run left the 2-round window (3 - 1 = 2, not < 2).
+        machine.enter(&Action::Dispatch(Default::default())).unwrap();
+        machine.enter(&start_action()).unwrap();
+        assert_eq!(machine.repeats_for(std::slice::from_ref(&call)), vec![1]);
+    }
+
+    #[test]
+    fn zero_window_counts_the_whole_turn() {
+        let mut machine = machine();
+        let call = ToolCallRequest::new("c1", "read", serde_json::json!({ "path": "a" }));
+        for _ in 0..3 {
+            machine.enter(&start_action()).unwrap();
+            machine.record_calls(std::slice::from_ref(&call));
+            if !machine.state().is_terminal() {
+                machine.enter(&Action::Dispatch(Default::default())).unwrap();
+            }
+        }
+        assert_eq!(machine.repeats_for(std::slice::from_ref(&call)), vec![3]);
     }
 
     #[test]

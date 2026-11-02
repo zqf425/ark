@@ -117,6 +117,14 @@ pub struct TuningSettings {
     pub sse_heartbeat_secs: u64,
     #[ts(as = "f64")]
     pub sse_idle_timeout_secs: u64,
+    /// Sliding window, in model rounds, the identical-call counter looks at.
+    /// `0` counts the whole turn — the historical behaviour.
+    #[ts(as = "f64")]
+    pub tool_storm_window_size: u32,
+    /// Maximum tool calls executed concurrently inside one read-only batch.
+    /// `0` means no cap — the historical behaviour.
+    #[ts(as = "f64")]
+    pub max_parallel_tool_calls: u32,
 }
 
 impl Default for TuningSettings {
@@ -131,6 +139,8 @@ impl Default for TuningSettings {
             chunk_buffer: 64,
             sse_heartbeat_secs: 15,
             sse_idle_timeout_secs: 300,
+            tool_storm_window_size: 0,
+            max_parallel_tool_calls: 0,
         }
     }
 }

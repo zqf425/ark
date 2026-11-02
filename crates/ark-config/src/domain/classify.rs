@@ -33,6 +33,8 @@ pub const TUNING_FIELDS: &[&str] = &[
     "tuning.chunk_buffer",
     "tuning.sse_heartbeat_secs",
     "tuning.sse_idle_timeout_secs",
+    "tuning.tool_storm_window_size",
+    "tuning.max_parallel_tool_calls",
 ];
 
 /// Class of one field path. Unknown paths are treated as `Restart`, so a typo
@@ -97,6 +99,12 @@ pub fn tuning_diff(old: &TuningConfig, new: &TuningConfig) -> Vec<FieldPath> {
     }
     if old.sse_idle_timeout_secs != new.sse_idle_timeout_secs {
         out.push(FieldPath::new("tuning.sse_idle_timeout_secs"));
+    }
+    if old.tool_storm_window_size != new.tool_storm_window_size {
+        out.push(FieldPath::new("tuning.tool_storm_window_size"));
+    }
+    if old.max_parallel_tool_calls != new.max_parallel_tool_calls {
+        out.push(FieldPath::new("tuning.max_parallel_tool_calls"));
     }
     out
 }

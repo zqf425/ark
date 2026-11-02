@@ -32,6 +32,10 @@ impl ToolSignature {
 #[derive(Debug, Clone)]
 pub struct ParallelPolicy {
     read_only: BTreeSet<String>,
+    /// Cap on calls executed concurrently inside one batch; `0` means no cap.
+    /// A capped read-only batch is split into sequential chunks, which keeps
+    /// ordering while bounding fan-out.
+    parallel_cap: usize,
 }
 
 impl Default for ParallelPolicy {
@@ -43,6 +47,7 @@ impl Default for ParallelPolicy {
                 .into_iter()
                 .map(str::to_string)
                 .collect(),
+            parallel_cap: 0,
         }
     }
 }
@@ -56,12 +61,19 @@ impl ParallelPolicy {
     {
         Self {
             read_only: names.into_iter().map(Into::into).collect(),
+            parallel_cap: 0,
         }
     }
 
     /// Add one tool to the read-only set.
     pub fn allow_parallel(mut self, tool: impl Into<String>) -> Self {
         self.read_only.insert(tool.into());
+        self
+    }
+
+    /// Cap the number of calls that run concurrently in one batch.
+    pub fn with_parallel_cap(mut self, cap: u32) -> Self {
+        self.parallel_cap = cap as usize;
         self
     }
 
@@ -101,7 +113,23 @@ impl ParallelPolicy {
             pending.push(call.clone());
         }
         flush(&mut batches, &mut pending, &mut pending_resources);
+        self.cap(batches)
+    }
+
+    /// Split batches that exceed the concurrency cap into ordered chunks.
+    fn cap(&self, batches: Vec<Vec<ToolCallRequest>>) -> Vec<Vec<ToolCallRequest>> {
+        if self.parallel_cap == 0 {
+            return batches;
+        }
         batches
+            .into_iter()
+            .flat_map(|batch| {
+                batch
+                    .chunks(self.parallel_cap)
+                    .map(<[ToolCallRequest]>::to_vec)
+                    .collect::<Vec<_>>()
+            })
+            .collect()
     }
 }
 
@@ -197,6 +225,29 @@ mod tests {
     #[test]
     fn empty_input_yields_no_batches() {
         assert!(ParallelPolicy::default().plan(&[]).is_empty());
+    }
+
+    #[test]
+    fn parallel_cap_splits_large_read_batches() {
+        let policy = ParallelPolicy::default().with_parallel_cap(2);
+        let calls = vec![
+            call("a", "read", Some("x.rs")),
+            call("b", "read", Some("y.rs")),
+            call("c", "read", Some("z.rs")),
+        ];
+        let batches = policy.plan(&calls);
+        assert_eq!(batches.len(), 2);
+        assert_eq!(ids(&batches[0]), vec!["a", "b"]);
+        assert_eq!(ids(&batches[1]), vec!["c"]);
+    }
+
+    #[test]
+    fn zero_parallel_cap_means_unlimited() {
+        let policy = ParallelPolicy::default();
+        let calls = (0..5)
+            .map(|index| call(&format!("c{index}"), "read", Some(&format!("f{index}.rs"))))
+            .collect::<Vec<_>>();
+        assert_eq!(policy.plan(&calls).len(), 1);
     }
 
     #[test]

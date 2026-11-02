@@ -20,6 +20,11 @@ pub struct TurnLimits {
     pub context_limit_tokens: u64,
     /// Messages kept verbatim at the tail when compacting.
     pub keep_recent_messages: usize,
+    /// Storm-breaker window in model rounds. `0` counts repeats across the
+    /// whole turn — the historical behaviour.
+    pub tool_storm_window_size: u32,
+    /// Cap on concurrent calls inside one read-only batch. `0` means no cap.
+    pub max_parallel_tool_calls: u32,
 }
 
 impl Default for TurnLimits {
@@ -32,6 +37,8 @@ impl Default for TurnLimits {
             max_compactions: 2,
             context_limit_tokens: 96_000,
             keep_recent_messages: 12,
+            tool_storm_window_size: 0,
+            max_parallel_tool_calls: 0,
         }
     }
 }
@@ -47,6 +54,8 @@ impl TurnLimits {
             max_compactions: 1,
             context_limit_tokens: 2_000,
             keep_recent_messages: 4,
+            tool_storm_window_size: 0,
+            max_parallel_tool_calls: 0,
         }
     }
 }

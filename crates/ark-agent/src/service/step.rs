@@ -147,7 +147,9 @@ fn dispatch(
     }
     let mut runnable = storm.allowed;
     runnable.extend(carry.extra);
-    let batches = ParallelPolicy::default().plan(&runnable);
+    let batches = ParallelPolicy::default()
+        .with_parallel_cap(input.limits.max_parallel_tool_calls)
+        .plan(&runnable);
     Action::Dispatch(DispatchPlan {
         batches,
         synthetic_results: synthetic,

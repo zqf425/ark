@@ -51,6 +51,8 @@ pub const TUNING_KEYS: &[&str] = &[
     "chunk_buffer",
     "sse_heartbeat_secs",
     "sse_idle_timeout_secs",
+    "tool_storm_window_size",
+    "max_parallel_tool_calls",
 ];
 
 /// Keys that fell back to a default and keys that were ignored, in table order.
