@@ -156,4 +156,33 @@ describe('useThreadStream thread ownership', () => {
     expect(state.itemOrder).toHaveLength(1)
     expect(state.itemsById['00000000-0000-0000-0000-0000000000i2']?.text).toBe('thread B message')
   })
+
+  it('seeds the usage aggregate after the detail load', async () => {
+    getThreadMock.mockImplementation(() => Promise.resolve(detail(THREAD_A, 41, [item({})])))
+    getThreadUsageMock.mockResolvedValue({
+      thread_id: THREAD_A,
+      turns: 1,
+      samples: 2,
+      prompt_tokens: 100,
+      completion_tokens: 20,
+      total_tokens: 120
+    })
+    harness = await mountWithProviders(<Probe threadId={THREAD_A} />)
+    await settle()
+
+    const usage = useCodeSessionStore.getState().usage
+    expect(usage?.totalTokens).toBe(120)
+    expect(usage?.samples).toBe(2)
+  })
+
+  it('leaves the usage channel empty when the usage seed fails', async () => {
+    getThreadMock.mockImplementation(() => Promise.resolve(detail(THREAD_A, 41, [item({})])))
+    getThreadUsageMock.mockRejectedValue(new Error('usage unavailable'))
+    harness = await mountWithProviders(<Probe threadId={THREAD_A} />)
+    await settle()
+
+    expect(useCodeSessionStore.getState().usage).toBeNull()
+    // The stream itself must be unaffected by the failed seed.
+    expect(useCodeSessionStore.getState().itemOrder).toHaveLength(1)
+  })
 })

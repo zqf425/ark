@@ -68,7 +68,12 @@ export function useThreadStream(threadId: ThreadId | null): void {
           .then((usage) => {
             if (!cancelled) noteThreadUsage(usage)
           })
-          .catch(() => {})
+          .catch(() => {
+            // Seeding is best effort, but "footer shows no usage" must stay
+            // diagnosable: surface the failure in development like the
+            // reducer's unhandled-event warn.
+            if (import.meta.env.DEV) console.warn('[ark] thread usage seed failed')
+          })
 
         await subscribeThreadEvents({
           threadId,

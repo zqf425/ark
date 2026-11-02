@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useI18n, type MessageKey } from '../../../shared/i18n'
-import { formatTokens } from '../../../shared/format'
+import { formatTokens, formatUsd } from '../../../shared/format'
 import { useCodeSessionStore } from '../state/store'
 import { hasLiveItems, type ItemView } from '../state/selectors'
 import { useContextLimit } from '../hooks/use-context-limit'
@@ -22,7 +22,7 @@ const CONTEXT_WARN_RATIO = 0.8
  * pressure are visible without leaving the canvas.
  */
 export function StreamFooter(): JSX.Element {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const streamStatus = useCodeSessionStore((s) => s.streamStatus)
   const streamError = useCodeSessionStore((s) => s.streamError)
   const lastSeq = useCodeSessionStore((s) => s.lastSeq)
@@ -52,7 +52,7 @@ export function StreamFooter(): JSX.Element {
             prompt: formatTokens(usage.promptTokens),
             completion: formatTokens(usage.completionTokens)
           })}
-          {usage.costUsd != null ? ` · $${usage.costUsd.toFixed(4)}` : ''}
+          {usage.costUsd != null ? ` · ${formatUsd(usage.costUsd, locale)}` : ''}
         </span>
       ) : null}
       {contextRatio != null ? (

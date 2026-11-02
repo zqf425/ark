@@ -45,3 +45,17 @@ export function formatTokens(value: number): string {
   if (value < 1000) return String(value)
   return `${(value / 1000).toFixed(1)}k`
 }
+
+/**
+ * `cost_usd` is USD by contract, but its rendering follows the display locale:
+ * the currency symbol is never hardcoded in components.
+ */
+export function formatUsd(value: number, locale: UiLocale): string {
+  if (!Number.isFinite(value)) return new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(0)
+  return new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4
+  }).format(value)
+}
