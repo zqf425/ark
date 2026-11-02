@@ -368,3 +368,54 @@ fn inspector_is_send_and_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<WorkspaceInspector>();
 }
+
+#[test]
+fn pure_rename_without_content_is_attributed_by_the_rename_header() {
+    if !git_available() {
+        eprintln!("skipping: git is not on PATH (mark #[ignore] on such a machine)");
+        return;
+    }
+    let fixture = TempDir::new("diff-rename");
+    init_repo(fixture.path());
+    std::fs::write(fixture.path().join("old-name.txt"), "same\n").expect("write original");
+    git(fixture.path(), &["add", "old-name.txt"]);
+    git(fixture.path(), &["commit", "--quiet", "-m", "add"]);
+    git(fixture.path(), &["mv", "old-name.txt", "new-name.txt"]);
+    git(fixture.path(), &["add", "-A"]);
+
+    let diff = WorkspaceInspector::new()
+        .diff(fixture.path())
+        .expect("git diff");
+
+    let renamed = diff
+        .staged
+        .iter()
+        .find(|file| file.path == "new-name.txt")
+        .expect("renamed file listed");
+    let patch = renamed
+        .patch
+        .as_deref()
+        .expect("pure rename carries a segment");
+    assert!(
+        patch.contains("rename to new-name.txt"),
+        "segment header present"
+    );
+}
+
+#[test]
+fn quoted_path_with_escapes_is_unescaped_to_the_raw_name() {
+    // Synthetic segment: git c-quotes a path containing a double quote even
+    // with core.quotePath=false; attribution must decode the escape back to
+    // the raw name the porcelain listing reported.
+    let patch = "diff --git \"a/quote\\\"name.txt\" \"b/quote\\\"name.txt\"\n\
+                 index 1111111..2222222 100644\n\
+                 --- \"a/quote\\\"name.txt\"\n\
+                 +++ \"b/quote\\\"name.txt\"\n\
+                 @@ -1 +1 @@\n\
+                 -old\n\
+                 +new\n";
+    let segments = super::split_patch_segments(patch);
+    assert_eq!(segments.len(), 1);
+    assert_eq!(segments[0].path, "quote\"name.txt");
+    assert!(segments[0].text.ends_with("+new\n"), "content preserved");
+}
