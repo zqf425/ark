@@ -565,7 +565,7 @@ fn user_message_carries_previews_in_content_and_images_in_parts() {
 #[test]
 fn request_user_input_is_registered_for_both_agent_tool_sets() {
     let workspace = tempfile::tempdir().expect("temp dir is creatable");
-    let skills = Arc::new(ark_skills::SkillRuntime::new(
+    let skills = Arc::new(ark_skills::SkillRuntime::fixed(
         ark_skills::SkillsConfig::default(),
         workspace.path().to_path_buf(),
     ));

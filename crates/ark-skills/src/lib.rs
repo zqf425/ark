@@ -26,4 +26,4 @@ pub use config::{
 pub use domain::skill::{slug, LoadedSkill};
 pub use service::catalog::render_catalog;
 pub use service::discovery::ScanOutcome;
-pub use service::runtime::SkillRuntime;
+pub use service::runtime::{ConfigSource, SkillRuntime};

@@ -94,4 +94,5 @@
 Option 语义);与 secret 类字段"空=保留"的约定相反,此处"空=清除"。
 
 「Skills」section 在原只读列表之上提供发现配置(`skills.enabled` 总开关与 `extra_dirs` 额外根,
-上限与运行时一致);该配置为 Restart 类,保存成功后仍须提示重启生效,`restart_required` 原样展示。
+上限与运行时一致);该配置为 Hot 类,保存后在下一次技能扫描时生效,无需重启;被拒绝的 patch
+原样展示。

@@ -170,19 +170,25 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         args.data_dir.clone(),
         ark_llm::ModelCatalogClient::new(crate::model::governed_transport()),
     ));
-    // Skills config is a `Restart` field: the runtime snapshots it here, and a
-    // settings patch reports `restart_required` instead of pretending to apply.
+    // Skills config is a `Hot` field: the runtime reads it through this source
+    // on every scan/resolve, so a saved settings patch takes effect on the next
+    // rescan without a restart. The workspace root is still captured once —
+    // switching workspaces goes through its own HTTP surface and leases a new
+    // root per turn.
     let skills = {
-        let settings = &config.snapshot().skills;
-        let mut skill_roots = ark_skills::SkillsConfig::default().roots;
-        skill_roots.extend(settings.extra_dirs.iter().map(std::path::PathBuf::from));
-        let skills_config = ark_skills::SkillsConfig {
-            enabled: settings.enabled,
-            roots: skill_roots,
-            ..ark_skills::SkillsConfig::default()
-        };
+        let config = config.clone();
+        let config_source = Arc::new(move || {
+            let settings = config.snapshot().skills.clone();
+            let mut skill_roots = ark_skills::SkillsConfig::default().roots;
+            skill_roots.extend(settings.extra_dirs.iter().map(std::path::PathBuf::from));
+            ark_skills::SkillsConfig {
+                enabled: settings.enabled,
+                roots: skill_roots,
+                ..ark_skills::SkillsConfig::default()
+            }
+        });
         Arc::new(ark_skills::SkillRuntime::new(
-            skills_config,
+            config_source,
             roots.current(),
         ))
     };

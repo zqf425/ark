@@ -120,7 +120,7 @@ mod tests {
             workspace_dirs: Vec::new(),
             ..ark_skills::SkillsConfig::default()
         };
-        Arc::new(ark_skills::SkillRuntime::new(
+        Arc::new(ark_skills::SkillRuntime::fixed(
             config,
             dir.path().to_path_buf(),
         ))

@@ -14,10 +14,11 @@
 Skill 是提示词和工具使用说明资产，不是第二个 agent 或任意代码执行通道。激活结果通过端口和契约
 提供给回合构建；路径扩展、长度和数量都受 `SkillsConfig` 约束。
 
-技能发现有两个配置面（`config.json` 的 `skills` 段，Restart 类）：`enabled` 总开关（关闭时所有
+技能发现有两个配置面（`config.json` 的 `skills` 段，Hot 类）：`enabled` 总开关（关闭时所有
 skills 视图为空）与 `extra_dirs` 额外扫描根（绝对路径或 `~` 前缀，最多 16 个；工作区相对目录不可
-配置，因为切换 workspace 会改变其含义）。组合根在启动时把 `skills` 设置烘焙进 `SkillsConfig`，
-因此该段不热生效——patch 照常入 snapshot 并在 `restart_required` 中上报 `skills`。
+配置，因为切换 workspace 会改变其含义）。组合根注入的是一个读取 live config snapshot 的
+`ConfigSource` 闭包，运行时每次扫描/解析都重读配置，因此 patch 保存后在下一次重扫即生效，
+无需重启进程。
 
 用户显式提及 skill 的 id 或 name 会触发自动激活，即使其 front matter 未声明其它触发器；其余命令、
 文本模式和文件类型触发保持既有优先级和评分口径。

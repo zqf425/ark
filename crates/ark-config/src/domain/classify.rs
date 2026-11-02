@@ -16,7 +16,11 @@ pub const FIELD_CLASSES: &[(&str, ReloadClass)] = &[
     ("default_workspace", ReloadClass::Hot),
     ("default_autonomy", ReloadClass::Hot),
     ("subagents", ReloadClass::Hot),
-    ("skills", ReloadClass::Restart),
+    // Hot: `SkillRuntime` reads the config through a source closure on every
+    // scan/resolve, so a saved patch takes effect on the next rescan without a
+    // process restart. Classifying it `Restart` would make `apply` reject the
+    // whole patch and the settings UI could never save it.
+    ("skills", ReloadClass::Hot),
     ("hooks", ReloadClass::Hot),
     ("schedules", ReloadClass::Hot),
     ("im", ReloadClass::Hot),
@@ -49,14 +53,13 @@ pub fn reload_class(path: &str) -> ReloadClass {
 }
 
 /// `Restart` field paths present in `patch`, in table order.
+///
+/// `data_dir` has no patch field (it is fixed by the CLI at startup), so
+/// `port` is the only Restart-class field a patch can carry.
 pub fn restart_fields(patch: &ConfigPatch) -> Vec<FieldPath> {
     let mut out = Vec::new();
     if patch.port.is_some() {
         out.push(FieldPath::new("port"));
-    }
-    if patch.skills.is_some() {
-        // The skill runtime snapshots its config at process start.
-        out.push(FieldPath::new("skills"));
     }
     out
 }
@@ -133,6 +136,22 @@ mod tests {
             ..ConfigPatch::default()
         };
         assert_eq!(restart_fields(&patch), vec![FieldPath::new("port")]);
+    }
+
+    #[test]
+    fn skills_patch_is_hot() {
+        // Regression: `restart_fields` used to hard-code `skills` as restart
+        // even after the table flipped it to `Hot`, so the settings UI could
+        // never save a skills patch ("requires an arkd restart").
+        let patch = ConfigPatch {
+            skills: Some(ark_contract::SkillsSettings {
+                enabled: false,
+                extra_dirs: Vec::new(),
+            }),
+            ..ConfigPatch::default()
+        };
+        assert_eq!(reload_class("skills"), ReloadClass::Hot);
+        assert!(restart_fields(&patch).is_empty());
     }
 
     #[test]
