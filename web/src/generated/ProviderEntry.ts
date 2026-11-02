@@ -24,4 +24,18 @@ context_window_tokens?: number,
  * Whether the selected model accepts image input. `None` means unknown,
  * not false: generic model-list endpoints often do not publish modalities.
  */
-supports_vision?: boolean, };
+supports_vision?: boolean, 
+/**
+ * Model inventory imported from the provider catalog (or pasted in), one
+ * id each. `model` remains the default a turn uses when the thread does
+ * not override it; the inventory is what the session model picker offers.
+ * Normalized on save: trimmed, deduplicated (case-sensitive — model ids
+ * are case-sensitive upstream), `model` itself removed.
+ *
+ * `Option`, not `Vec`: an omitted key means "keep the stored inventory"
+ * (the MCP `provider_upsert` tool and other partial-edit clients never
+ * send it), while an explicit empty list means "clear it". A plain `Vec`
+ * could not tell the two apart and would let an unrelated label edit
+ * silently wipe an imported inventory.
+ */
+models?: Array<string>, };

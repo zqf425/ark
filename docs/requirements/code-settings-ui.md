@@ -150,6 +150,12 @@ abort/steer/resume。终态摘要卡片继续按 `notification_id` 去重，且�
 回合的压缩阈值，并为用户设置的 max_tokens 预留输出空间。此前已保存但未实际使用的 headers、temperature
 和 max_tokens 同步进入模型请求；核心协议头仍由 endpoint family 覆盖，防止自定义 header 破坏认证。
 
+批量导入（验收扩展）：供应商条目除默认 `model` 外维护模型清单（上限 64），导入对话框候选来自已查询
+目录与粘贴输入（每行一个 id，覆盖无 `/models` 的端点）；已存在的 id 标记且默认不勾选，确认后并入草稿，
+默认 `model` 为空时由首个候选行回填。清单在契约上是 `Option<Vec<String>>`：省略 = 保留存储值（MCP
+`provider_upsert` 等部分编辑客户端不带该字段），显式空列表 = 清空；web 表单恒发完整清单。清单只是
+登记表，回合默认仍用 `model`，线程 `runtime.model` 覆盖时由回合解析替换，验收标准与既有覆盖语义一致。
+
 ## 阶段 F：Code 与设置的信息架构
 
 视觉重构只发生在 `web/`：不增加 wire 字段、不改变 reactor 状态，也不让插件或 provider 实现承担界面职责。

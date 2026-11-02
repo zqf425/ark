@@ -395,6 +395,11 @@ fn catalog_config_from_connection(
 /// from the redacted list response. Empty/absent values therefore mean "not
 /// edited", not "erase the persisted value". A later explicit patch shape
 /// will carry a separate clear operation instead of making absence ambiguous.
+///
+/// `models` participates in the retention: it is `Option<Vec<_>>` on the wire,
+/// so an omitted key keeps the stored inventory (partial-edit clients such as
+/// the MCP `provider_upsert` tool never send it) and an explicit list —
+/// including an empty one — replaces it.
 fn keep_omitted_edit_fields(
     mut candidate: ProviderEntry,
     previous: Option<&ProviderEntry>,
@@ -419,6 +424,9 @@ fn keep_omitted_edit_fields(
     }
     if candidate.supports_vision.is_none() {
         candidate.supports_vision = previous.supports_vision;
+    }
+    if candidate.models.is_none() {
+        candidate.models = previous.models.clone();
     }
     candidate
 }
@@ -693,6 +701,31 @@ mod tests {
             Some("on")
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn omitted_models_keep_the_stored_inventory_and_empty_clears_it() {
+        let dir = temp_dir("models-retention");
+        let mut seeded = entry("p", Some("sk-1234567890abcdef"));
+        seeded.models = Some(vec!["glm-4".into(), "glm-5".into()]);
+        {
+            let store = store(&dir);
+            store.upsert(seeded, true).unwrap();
+            // A partial edit (MCP tool / script) resends without `models`.
+            let mut partial = entry("p", None);
+            partial.model = "glm-4".into();
+            store.upsert(partial, false).unwrap();
+            assert_eq!(
+                store.list().providers[0].models,
+                vec!["glm-4".to_string(), "glm-5".to_string()]
+            );
+            // The settings form sends an explicit empty list: clear.
+            let mut cleared = entry("p", None);
+            cleared.model = "glm-4".into();
+            cleared.models = Some(Vec::new());
+            store.upsert(cleared, false).unwrap();
+            assert_eq!(store.list().providers[0].models, Vec::<String>::new());
+        }
     }
 
     #[test]

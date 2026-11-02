@@ -7,4 +7,8 @@ export type ProviderView = { id: string, label?: string, base_url: string, endpo
 /**
  * First and last four characters only, e.g. `sk-a...cdef`.
  */
-api_key_hint?: string, context_window_tokens?: number, supports_vision?: boolean, };
+api_key_hint?: string, context_window_tokens?: number, supports_vision?: boolean, 
+/**
+ * Redacted inventory mirror of [`ProviderEntry::models`].
+ */
+models: Array<string>, };

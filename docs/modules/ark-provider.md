@@ -15,7 +15,14 @@ provider id 的回合经 `resolve(None)` 使用该默认；`resolve_vision(id)` 
 只返回显式正向声明的 `supports_vision`（`None` 一律按未声明处理）。
 
 编辑现有 provider 时空 API key、headers、`max_tokens`、`temperature` 均表示未修改并保留存储值；这使
-只读脱敏视图不会在普通表单保存时破坏高级配置。显式清空需独立 patch 语义，不得复用空值。
+只读脱敏视图不会在普通表单保存时破坏高级配置。显式清空需独立 patch 语义，不得复用空值。`models`
+刻意不在此列：设置表单持有完整清单（由脱敏视图播种），一次保存表达完整新列表，空列表即清空。
+
+每个 provider 除默认 `model` 外还维护一个模型清单 `models`（`ProviderEntry.MODELS_MAX = 64`）：保存时
+归一化（trim、去重、去掉与默认 `model` 相同的项），超上限整体事务性拒绝而非静默截断。清单只做
+"该供应商可用的模型"登记，回合仍以 `model` 为默认——线程运行时覆盖 `runtime.model` 时由
+`resolve_thread_provider` 用覆盖值替换默认模型，因此清单是新模型进入会话选择器的登记表，不是
+每回合的解析来源。`ProviderView.models` 是该清单的脱敏镜像。
 
 模型目录只在用户点击查询时请求，既可引用已保存条目，也可使用未保存草稿；空草稿密钥/header 会复用
 同 id 的已存机密。目录解析出的 `context_window_tokens` 和 `supports_vision` 只有用户选择模型并保存后才

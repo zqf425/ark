@@ -16,6 +16,12 @@ export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.
   const toast = useToast()
   const providers = useProviders()
   const [runtime, setRuntime] = useState<ThreadRuntimeSettings>(DEFAULT_RUNTIME)
+  // Model suggestions come from the selected provider's inventory: the default
+  // model plus everything batch-imported for it.
+  const selectedProvider = providers.providers.find((provider) => provider.id === (runtime.provider_id ?? '')) ?? null
+  const modelOptions = selectedProvider
+    ? [selectedProvider.model, ...selectedProvider.models].filter((id) => id && id !== (runtime.model ?? ''))
+    : []
   const [defaultAutonomy, setDefaultAutonomy] = useState(FALLBACK_AUTONOMY)
   const [saving, setSaving] = useState(false)
   const [compacting, setCompacting] = useState(false)
@@ -98,7 +104,13 @@ export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.
       <div className="ark-session-runtime__fields">
         <label>{t('session.runtime.workspace')}<input value={runtime.workspace ?? ''} onChange={(event) => setRuntime({ ...runtime, workspace: event.target.value || undefined })} /></label>
         <label>{t('session.runtime.provider')}<select value={runtime.provider_id ?? ''} onChange={(event) => setRuntime({ ...runtime, provider_id: event.target.value || undefined })}><option value="">—</option>{providers.providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.label ?? provider.id}</option>)}</select></label>
-        <label>{t('session.runtime.model')}<input value={runtime.model ?? ''} onChange={(event) => setRuntime({ ...runtime, model: event.target.value || undefined })} /></label>
+        <label>
+          {t('session.runtime.model')}
+          <input list="ark-session-model-options" value={runtime.model ?? ''} onChange={(event) => setRuntime({ ...runtime, model: event.target.value || undefined })} />
+          <datalist id="ark-session-model-options">
+            {modelOptions.map((id) => <option key={id} value={id} />)}
+          </datalist>
+        </label>
         <label>{t('session.runtime.autonomy')}<select value={runtime.autonomy ?? defaultAutonomy} onChange={(event) => setRuntime({ ...runtime, autonomy: event.target.value })}><option value="strict">{t('session.runtime.strict')}</option><option value="workspace_write">{t('session.runtime.workspaceWrite')}</option><option value="unattended">{t('session.runtime.unattended')}</option></select></label>
         <Button size="sm" variant="primary" disabled={saving || !canSaveRuntime(loadedFor, threadId)} onClick={() => void save()}>{t('session.runtime.save')}</Button>
         <Button size="sm" disabled={compacting} onClick={() => void compact()}>{t('session.context.compact')}</Button>

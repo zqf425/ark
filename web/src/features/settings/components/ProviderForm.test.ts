@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProviderModelSummary } from '../../../shared/contracts'
-import { buildEntry, emptyDraft } from './ProviderForm'
+import { buildEntry, emptyDraft } from './ProviderDraft'
 import { applyCatalogModel } from './ProviderCatalog'
 
 describe('provider model discovery form helpers', () => {

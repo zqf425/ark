@@ -69,6 +69,17 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
   'settings.providerForm.advancedHide': ['收起高级选项', 'Hide advanced options'],
   'settings.providerForm.querying': ['查询中…', 'Querying…'],
   'settings.providerForm.queryModels': ['查询模型列表', 'Query model list'],
+  'settings.providerForm.importModels': ['批量导入模型', 'Batch import models'],
+  'settings.providerForm.inventoryLabel': ['已导入模型', 'Imported models'],
+  'settings.providerForm.inventoryHint': [
+    '会话运行配置可从这份清单里选；默认模型之外的模型都会保存为清单。',
+    'The session runtime picker offers these; every model beyond the default is saved in the inventory.'
+  ],
+  'settings.providerForm.inventoryRemove': ['移除 {model}', 'Remove {model}'],
+  'settings.providerForm.error.tooManyModels': [
+    '模型清单超过上限 {max}，请先移除部分再保存',
+    'model inventory exceeds the {max} limit; remove some before saving'
+  ],
   'settings.providerForm.headersLabel': ['headers（JSON 对象，可选）', 'headers (JSON object, optional)'],
   'settings.providerForm.headersHint': ['例如 {"X-Request-Source":"ark"}；留空则不发送额外头。', 'For example {"X-Request-Source":"ark"}; leave blank to send no extra headers.'],
   'settings.providerForm.headersPlaceholder': ['{\n  "X-Request-Source": "ark"\n}', '{\n  "X-Request-Source": "ark"\n}'],
@@ -98,5 +109,25 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
 
   'settings.providerCatalog.maxOutput': ['最大输出 {value}', 'max output {value}'],
   'settings.providerCatalog.visionSupported': ['支持识图', 'supports vision'],
-  'settings.providerCatalog.visionUnsupported': ['不支持识图', 'no vision support']
+  'settings.providerCatalog.visionUnsupported': ['不支持识图', 'no vision support'],
+
+  'settings.providerImport.title': ['批量导入模型', 'Batch import models'],
+  'settings.providerImport.subtitle': [
+    '共 {total} 个候选，其中 {present} 个已在供应商中。',
+    '{total} candidates, {present} already in the provider.'
+  ],
+  'settings.providerImport.searchPlaceholder': ['搜索模型 id', 'Search model id'],
+  'settings.providerImport.hideExisting': ['隐藏已存在（{count}）', 'Hide existing ({count})'],
+  'settings.providerImport.pastePlaceholder': [
+    '没有 /models 的供应商可在此粘贴，每行一个模型 id',
+    'For providers without /models, paste one model id per line'
+  ],
+  'settings.providerImport.alreadyPresent': ['已存在', 'already present'],
+  'settings.providerImport.nothingFetched': ['没有候选：先「查询模型列表」，或在上方粘贴模型 id。', 'No candidates: query the model list first, or paste ids above.'],
+  'settings.providerImport.nothingMatches': ['没有匹配当前筛选的模型。', 'No models match the current filter.'],
+  'settings.providerImport.selectedCount': ['已选 {count} 个', '{count} selected'],
+  'settings.providerImport.selectAllVisible': ['全选可见（{count}）', 'Select visible ({count})'],
+  'settings.providerImport.clearVisible': ['取消可见项', 'Clear visible'],
+  'settings.providerImport.confirm': ['导入 {count} 个', 'Import {count}'],
+  'settings.providerImport.overCap': ['超出上限 {max}', 'over the {max} limit']
 } as const

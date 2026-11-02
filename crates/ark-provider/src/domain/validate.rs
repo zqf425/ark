@@ -124,7 +124,9 @@ pub fn validate_context_window_tokens(value: Option<u64>) -> Result<Option<u64>>
 /// Validate and canonicalize a whole entry.
 ///
 /// The returned entry has trimmed fields and a canonical `endpoint_format`
-/// string, so persisting the same input twice writes identical bytes.
+/// string, so persisting the same input twice writes identical bytes. The
+/// model inventory is normalized the same way: trimmed, deduplicated, with
+/// empty ids and duplicates of the default `model` dropped.
 pub fn normalize_entry(entry: ProviderEntry) -> Result<ProviderEntry> {
     let id = validate_id(&entry.id)?;
     let model = validate_model(&entry.model)?;
@@ -141,6 +143,10 @@ pub fn normalize_entry(entry: ProviderEntry) -> Result<ProviderEntry> {
         .api_key
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty());
+    let models = match entry.models {
+        None => None,
+        Some(list) => Some(normalize_models(&model, list)?),
+    };
     Ok(ProviderEntry {
         id,
         label,
@@ -154,7 +160,30 @@ pub fn normalize_entry(entry: ProviderEntry) -> Result<ProviderEntry> {
         temperature,
         context_window_tokens,
         supports_vision: entry.supports_vision,
+        models,
     })
+}
+
+/// Canonicalize the model inventory: trim, drop empties and duplicates
+/// (including duplicates of the default `model`), then enforce the ceiling so
+/// an oversized paste fails transactionally instead of truncating silently.
+fn normalize_models(model: &str, models: Vec<String>) -> Result<Vec<String>> {
+    let mut out: Vec<String> = Vec::new();
+    for raw in models {
+        let id = raw.trim();
+        if id.is_empty() || id == model || out.iter().any(|seen| seen == id) {
+            continue;
+        }
+        out.push(id.to_string());
+    }
+    if out.len() > ProviderEntry::MODELS_MAX {
+        return Err(ArkError::validation(format!(
+            "provider model inventory exceeds {}: {} entries",
+            ProviderEntry::MODELS_MAX,
+            out.len()
+        )));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -178,6 +207,52 @@ mod tests {
         let too_long = "a".repeat(ID_MAX_LEN + 1);
         let err = validate_id(&too_long).unwrap_err();
         assert!(err.message.contains("too long"), "{}", err.message);
+    }
+
+    #[test]
+    fn omitted_inventory_is_preserved_as_none() {
+        let entry = ProviderEntry::new("p", "deepseek-chat");
+        let out = normalize_entry(entry).unwrap();
+        assert_eq!(out.models, None);
+    }
+
+    #[test]
+    fn model_inventory_is_trimmed_deduplicated_and_defaults_dropped() {
+        let mut entry = ProviderEntry::new("p", "deepseek-chat");
+        entry.models = Some(vec![
+            " deepseek-reasoner ".into(),
+            "deepseek-reasoner".into(),
+            "".into(),
+            "deepseek-chat".into(),
+            "glm-5".into(),
+        ]);
+        let out = normalize_entry(entry).unwrap();
+        assert_eq!(
+            out.models,
+            Some(vec!["deepseek-reasoner".to_string(), "glm-5".to_string()])
+        );
+    }
+
+    #[test]
+    fn oversized_model_inventory_is_rejected_not_truncated() {
+        let mut entry = ProviderEntry::new("p", "m");
+        entry.models = Some(
+            (0..ProviderEntry::MODELS_MAX + 1)
+                .map(|i| format!("m{idx}", idx = i))
+                .collect(),
+        );
+        let err = normalize_entry(entry).unwrap_err();
+        assert!(err.message.contains("exceeds"), "{}", err.message);
+    }
+
+    #[test]
+    fn explicit_empty_inventory_passes_through_normalization() {
+        let mut entry = ProviderEntry::new("p", "deepseek-chat");
+        entry.models = Some(Vec::new());
+        let out = normalize_entry(entry).unwrap();
+        // Empty stays empty here; the "omitted keeps, explicit clears" split
+        // lives in `keep_omitted_edit_fields` (store layer).
+        assert_eq!(out.models, Some(Vec::new()));
     }
 
     #[test]

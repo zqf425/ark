@@ -17,7 +17,8 @@ import type {
 } from '../../../shared/contracts'
 import type { ProvidersApi } from '../hooks/use-providers'
 import { describeOutcome } from '../api/outcome'
-import { draftFromView, emptyDraft, ProviderForm, type ProviderDraft } from './ProviderForm'
+import { ProviderForm } from './ProviderForm'
+import { draftFromView, emptyDraft, type ProviderDraft } from './ProviderDraft'
 import { LoadError, Notice, SettingsSection, Skeleton } from './SectionShell'
 
 /** Pending test outcome, keyed by provider id (`*` = unsaved draft). */
