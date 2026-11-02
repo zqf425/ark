@@ -63,3 +63,22 @@ manifest 必须描述稳定 ID、版本、kind、能力、依赖和配置 schema
 
 平台服务的完整发布与外部插件运行时仍是目标态。文档中提及的未来插件目录、市场或 WASM 不得被
 当前实现依赖；新增服务前必须先定义端口、授权和失败隔离。
+
+## 已批准计划：事件钩子总线
+
+需求设计见 [`docs/requirements/plugin-hook-bus.md`](../requirements/plugin-hook-bus.md)。
+本模块将新增（尚未实施，属已批准计划）：
+
+- **钩子授权**：manifest 新增独立 `hooks` 段（`#[serde(default)]`）与 `hook_abi` 版本声明，逐点
+  授权；不扩 `Capability` 枚举。钩子句柄进 `Registration`，Drop 即反注册；句柄即授权
+  （`ctx.hooks()` 无授权点则无对应方法）。`hook_abi` 不匹配在扫描/计划阶段剔除，复用
+  `plugin_skipped` 诊断。
+- **钩子四级**：Observe（可丢 + 水位重放）/ Decide（同步窄改写、硬预算、熔断即撤句柄）/
+  Supply（prompt sections、tool catalog filter）。v1 的 Decide/Supply 仅 `ark.builtin.*` 内置
+  插件可用；目录插件（声明式）不声明钩子。
+- **Observe 投递**：不开放裸 `EventSink`；宿主为每个插件懒启动 per-thread 订阅任务（既有
+  `subscribe(thread, since_seq)` 语义），有界、按插件隔离，插件持水位续传。
+- **审计**：新增 `HookAuditSink`（照 `HttpDiagnosticSink`/`PluginDiagnosticView` 形状：有界环 +
+  wire 视图），记录钩子点、决策、延迟与 diff；`PluginHostReport` 相应扩展可选字段。
+- **回合计入与定时**：followup 经 `CompletionInbox` plugin 来源条目（空闲优先，不抢占）；
+  `on_tick` 为插件可选生命周期回调。二者与配额、`TurnSource::Plugin` 归因同批落地（P3）。
