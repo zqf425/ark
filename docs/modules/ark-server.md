@@ -138,7 +138,9 @@ IM 渠道编排（[IM 渠道接入需求](../requirements/im-channels.md)）居 
 过滤/去重/每会话串行队列/`start_turn_as(TurnSource::Im)`/回复等待与投影）。回合经
 `TurnSource::Im` 走与 HTTP 同一 `start_turn` 校验路径；回复文本在终态后按本回合
 `turn_id` 从线程投影取（同 scheduler 摘要先例），不用 delta 累积。路由
-`/v1/im/channels`(CRUD)、`/v1/im/channels/{id}/verify`、`/v1/im/bindings` 只解包 HTTP；
+`/v1/im/channels`(CRUD)、`/v1/im/channels/{id}/verify`、`/v1/im/bindings`、
+`/v1/im/weixin/login/{start,wait}`(确认后端直接建渠道,经容量校验、默认停用)只解包
+HTTP；
 总开关 `config.im.enabled` 只门控连接不门控编辑。
 
 ## 路由清单
