@@ -1,7 +1,8 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, EmptyState, ErrorBoundary } from '../../../shared/ui'
-import type { ThreadItem } from '../../../shared/contracts'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Button, EmptyState, useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
+import { translateNow } from '../../../shared/i18n/current'
+import { describeError } from '../../../shared/api/error-describe'
 import { useCodeSessionStore } from '../state/store'
 import {
   approvalCards,
@@ -14,81 +15,19 @@ import {
   type TurnGroup,
   type TurnView
 } from '../state/selectors'
-import { UserBubble, AssistantBubble, ReasoningBlock } from './MessageBubble'
-import { ToolCard } from './ToolCard'
-import { ChildCompletionCard, ErrorRow, NoticeRow, ToolResultRow } from './ErrorRow'
+import { TurnBlock } from './TurnBlock'
 import { ApprovalCard } from './ApprovalCard'
+import { ChildCompletionCard } from './ErrorRow'
 import { UserInputCard } from './UserInputCard'
 import { Composer } from './Composer'
 import { StreamFooter } from './StreamFooter'
 import { ChildRunsPanel } from './ChildRunsPanel'
-import { RewindControl } from './RewindControl'
-import { rewindAvailabilityByTurn, type RewindAvailability } from './rewind-flow'
+import { rewindAvailabilityByTurn } from './rewind-flow'
 import { SessionRuntimeControls } from './SessionRuntimeControls'
+import { startReview } from '../api/turns-api'
 
 /** Pixels of slack that still count as "at the bottom" (caret/last-pixel noise). */
 const BOTTOM_THRESHOLD = 32
-
-/**
- * One row dispatcher. This is the entire "event → UI" decision surface left on
- * the client: pick a component by `item.kind`, no semantic reconstruction.
- *
- * Memoized on the item object: the reducer keeps the identity of every item a
- * fold did not touch, so a streamed token re-renders exactly one row.
- */
-const StreamRow = memo(function StreamRow({ item }: { item: ThreadItem }): JSX.Element | null {
-  switch (item.kind) {
-    case 'user_message':
-      return <UserBubble item={item} />
-    case 'assistant_message':
-      return <AssistantBubble item={item} />
-    case 'reasoning':
-      return <ReasoningBlock item={item} />
-    case 'tool_call':
-      return <ToolCard item={item} />
-    case 'tool_result':
-      return <ToolResultRow item={item} />
-    case 'error':
-      return <ErrorRow item={item} />
-    case 'approval':
-    case 'user_input':
-      // Gates render from live control events below, so a historical gate item
-      // would duplicate the card. Keep it out of the stream.
-      return null
-    case 'notice':
-    default:
-      return <NoticeRow item={item} />
-  }
-})
-
-/**
- * One turn block. `group` keeps its identity while the turn's rows and state do
- * (see `groupByTurn`), so a token streaming into the newest turn leaves every
- * earlier turn untouched — no re-render, no boundary re-mount.
- */
-const TurnBlock = memo(function TurnBlock({
-  threadId,
-  group,
-  availability
-}: {
-  threadId: string
-  group: TurnGroup
-  availability: RewindAvailability
-}): JSX.Element {
-  const { t } = useI18n()
-  return (
-    <div className="ark-turn">
-      {group.items.map((item) => (
-        <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
-          <StreamRow item={item} />
-        </ErrorBoundary>
-      ))}
-      <ErrorBoundary label={t('thread.canvas.boundaryRewind')}>
-        <RewindControl threadId={threadId} turnId={group.turnId} availability={availability} />
-      </ErrorBoundary>
-    </div>
-  )
-})
 
 /**
  * Follow the newest row, event-driven.
@@ -167,6 +106,7 @@ export function ThreadStream({
   onCreateThread?: () => Promise<unknown>
 }): JSX.Element {
   const { t } = useI18n()
+  const toast = useToast()
 
   // One slice per channel: an event that only appends a delta leaves
   // `approvals`, `userInputs`, `errors` and `childCompletions` untouched, so
@@ -210,10 +150,51 @@ export function ThreadStream({
   const resolveApprovalLocally = useCodeSessionStore((s) => s.noteApprovalResolved)
   const answerInputLocally = useCodeSessionStore((s) => s.noteUserInputAnswered)
 
+  // The review action starts a system-composed turn; progress then flows
+  // through the same event stream as any other turn.
+  const [reviewBusy, setReviewBusy] = useState(false)
+  const startReviewTurn = async (): Promise<void> => {
+    if (!threadId || reviewBusy) return
+    setReviewBusy(true)
+    try {
+      await startReview(threadId)
+      toast.push('success', t('canvas.header.reviewStarted'))
+    } catch (error) {
+      toast.push('error', t('canvas.header.reviewFailed'), describeError(error, translateNow))
+    } finally {
+      setReviewBusy(false)
+    }
+  }
+
+  const jumpToTurn = useCallback((turnId: string): void => {
+    document.getElementById(`ark-turn-${turnId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
+
   if (!threadId) {
     return (
       <section className="ark-stream ark-stream--empty">
         <div className="ark-stream__emptycall">
+          <div className="ark-hero-stage" aria-hidden="true">
+            <div className="ark-hero-stage__window">
+              <div className="ark-hero-stage__bar">
+                <i />
+                <i />
+                <i />
+              </div>
+              <div className="ark-hero-stage__canvas">
+                <div className="ark-hero-stage__rail">
+                  <i />
+                  <i />
+                  <i />
+                </div>
+                <div className="ark-hero-stage__lines">
+                  <i />
+                  <i className="is-wide" />
+                  <i className="is-narrow" />
+                </div>
+              </div>
+            </div>
+          </div>
           <p className="ark-stream__emptykicker" aria-hidden="true">
             {t('canvas.empty.kicker')}
           </p>
@@ -230,13 +211,22 @@ export function ThreadStream({
 
   return (
     <section className="ark-stream">
-      <header className="ark-threadfocus">
+      <header className={`ark-threadfocus${live ? ' is-live' : ''}`}>
         <div className="ark-threadfocus__identity">
           <h1 title={activeThread?.title ?? ''}>{activeThread?.title || t('canvas.untitled')}</h1>
-          <p aria-live="polite">
+          <p className={live ? 'is-live' : ''} aria-live="polite">
             {live ? t('canvas.live') : groups.length > 0 ? t('canvas.turnCount', { count: groups.length }) : t('canvas.ready')}
           </p>
         </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ark-threadfocus__review"
+          disabled={live || reviewBusy}
+          onClick={() => void startReviewTurn()}
+        >
+          {reviewBusy ? t('canvas.header.reviewBusy') : t('canvas.header.review')}
+        </Button>
       </header>
       <div className="ark-stream__scroll" ref={scrollRef}>
         {/* Inner wrapper exists so a single ResizeObserver can see content
@@ -286,6 +276,20 @@ export function ThreadStream({
           ) : null}
         </div>
       </div>
+
+      {groups.length > 1 ? (
+        <nav className="ark-jumprail" aria-label={t('canvas.jumpRail.aria')}>
+          {groups.map((group, index) => (
+            <button
+              key={group.turnId}
+              type="button"
+              title={t('canvas.jumpRail.turn', { index: index + 1 })}
+              aria-label={t('canvas.jumpRail.turn', { index: index + 1 })}
+              onClick={() => jumpToTurn(group.turnId)}
+            />
+          ))}
+        </nav>
+      ) : null}
 
       {!atBottom ? (
         <button type="button" className="ark-stream__jump" onClick={scrollToBottom}>

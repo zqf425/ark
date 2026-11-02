@@ -17,7 +17,7 @@ import { describeError } from '../../../shared/api/error-describe'
 import { useCodeSessionStore } from '../state/store'
 import { useTurn } from '../hooks/use-turn'
 import { associateAttachment, uploadAttachment } from '../api/attachments-api'
-import { listSkills } from '../api/skills-api'
+import { listSkills, listThreadSkills, refreshThreadSkills } from '../api/skills-api'
 import { canEditComposer, canSendToThread } from './composer-availability'
 import { ComposerRuntimeControls } from './ComposerRuntimeControls'
 import type { SkillSummary } from '../../../shared/contracts'
@@ -55,6 +55,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const [uploading, setUploading] = useState(false)
   const [skills, setSkills] = useState<SkillSummary[] | null>(null)
   const [skillsOpen, setSkillsOpen] = useState(false)
+  const [skillWarnings, setSkillWarnings] = useState(0)
 
   const inputDisabled = !canEditComposer(threadId, draft)
   const sendDisabled = !canSendToThread(threadId, draft, streamStatus)
@@ -146,16 +147,35 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     }
   }
 
+  // Skills are what THIS thread loaded (base + extra roots, with load
+  // warnings); without a thread the runtime-wide diagnostics are the fallback.
   const toggleSkills = async (): Promise<void> => {
     const next = !skillsOpen
     setSkillsOpen(next)
     if (next && skills === null) {
       try {
-        const diagnostics = await listSkills()
-        setSkills(diagnostics.skills)
+        if (threadId) {
+          const view = await listThreadSkills(threadId)
+          setSkills([...view.base_skills, ...view.extra_skills])
+          setSkillWarnings(view.warnings.length)
+        } else {
+          const diagnostics = await listSkills()
+          setSkills(diagnostics.skills)
+        }
       } catch {
         setSkills([])
       }
+    }
+  }
+
+  const reloadSkills = async (): Promise<void> => {
+    if (!threadId) return
+    try {
+      const view = await refreshThreadSkills(threadId)
+      setSkills([...view.base_skills, ...view.extra_skills])
+      setSkillWarnings(view.warnings.length)
+    } catch {
+      // Keep the current list: a failed rescan must not blank the panel.
     }
   }
 
@@ -273,6 +293,16 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
                 </button>
               ))
             )}
+            <div className="ark-composer__skillfoot">
+              {skillWarnings > 0 ? (
+                <span className="ark-composer__status is-warn">{t('canvas.composer.skillWarnings', { count: skillWarnings })}</span>
+              ) : null}
+              {threadId ? (
+                <button type="button" className="ark-linkbtn" onClick={() => void reloadSkills()}>
+                  {t('canvas.composer.skillsRefresh')}
+                </button>
+              ) : null}
+            </div>
             <p className="ark-composer__status">{t('canvas.composer.skillsHint')}</p>
           </div>
         ) : null}

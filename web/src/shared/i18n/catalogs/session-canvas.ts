@@ -21,6 +21,16 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.emptyThreadHint': ['在下方输入框发送第一条消息。', 'Send the first message from the composer below.'],
   'canvas.jumpToLatest': ['跳到最新', 'Jump to latest'],
 
+  'canvas.process.title': ['执行过程', 'Work in progress'],
+  'canvas.process.count': ['{count} 步', '{count} steps'],
+  'canvas.jumpRail.aria': ['回合导航', 'Turn navigation'],
+  'canvas.jumpRail.turn': ['第 {index} 个回合', 'Turn {index}'],
+
+  'canvas.header.review': ['评审改动', 'Review changes'],
+  'canvas.header.reviewBusy': ['正在发起评审…', 'Starting review…'],
+  'canvas.header.reviewStarted': ['评审回合已开始', 'Review turn started'],
+  'canvas.header.reviewFailed': ['发起评审失败', 'Failed to start review'],
+
   'canvas.author.you': ['你', 'You'],
   'canvas.reasoning': ['思考过程', 'Reasoning'],
   'canvas.aborted': ['已中断', 'Interrupted'],
@@ -140,5 +150,7 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.composer.skillsAria': ['可指定的技能', 'Skills to mention'],
   'canvas.composer.skillsLoading': ['技能加载中…', 'Loading skills…'],
   'canvas.composer.skillsEmpty': ['没有可用技能。', 'No skills available.'],
-  'canvas.composer.skillsHint': ['点击插入 /id，消息中提及即激活该技能。', 'Click to insert /id; mentioning it in the message activates the skill.']
+  'canvas.composer.skillsHint': ['点击插入 /id，消息中提及即激活该技能。', 'Click to insert /id; mentioning it in the message activates the skill.'],
+  'canvas.composer.skillWarnings': ['{count} 条技能加载警告', '{count} skill load warning(s)'],
+  'canvas.composer.skillsRefresh': ['重新扫描', 'Rescan'],
 } as const

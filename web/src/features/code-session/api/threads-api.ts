@@ -10,7 +10,7 @@ import type {
   TurnState,
   UpdateThreadRequest
 } from '../../../shared/contracts'
-import { del, get, patch, post } from '../../../shared/api/client'
+import { buildUrl, del, get, patch, post, readToken } from '../../../shared/api/client'
 
 /** `GET /v1/threads` — deterministic order; archived threads are filtered by the caller. */
 export function listThreads(signal?: AbortSignal): Promise<ThreadSummary[]> {
@@ -53,3 +53,29 @@ export function getThreadUsage(threadId: ThreadId, signal?: AbortSignal): Promis
 }
 
 export type { TurnState }
+
+/**
+ * `GET /v1/threads/{id}/export` — download the portable thread snapshot.
+ *
+ * The response is a JSON attachment, not an envelope, so this bypasses the
+ * JSON helpers and streams the body into a blob download; the auth header is
+ * attached the same way `client.ts` does.
+ */
+export async function exportThread(threadId: ThreadId, title: string): Promise<void> {
+  const token = readToken()
+  const headers: Record<string, string> = {}
+  if (token) headers.authorization = `Bearer ${token}`
+  const response = await fetch(buildUrl(`/v1/threads/${threadId}/export`), { headers })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  const blob = await response.blob()
+  const safe = title.replace(/[^\w\u4e00-\u9fff.-]+/g, '_').slice(0, 60) || 'thread'
+  const url = URL.createObjectURL(blob)
+  try {
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${safe}-${threadId}.json`
+    anchor.click()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}

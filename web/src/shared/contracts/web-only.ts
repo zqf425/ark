@@ -56,3 +56,11 @@ export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
  * The import dialog blocks before save so an oversized paste fails in place.
  */
 export const PROVIDER_MODELS_MAX = 64
+
+/**
+ * `GET /v1/runtime/tools` 的响应视图。非 Rust 契约：ark-server 对该路由仍返回
+ * 未建模 JSON（`serde_json::Value`），这里只固化渲染所需的字段名；Rust 侧一旦
+ * 建模应迁移到生成类型。
+ */
+export type RuntimeToolEntry = { name: string; schema: unknown }
+export type RuntimeToolsReport = { version: number; names: string[]; tools: RuntimeToolEntry[] }

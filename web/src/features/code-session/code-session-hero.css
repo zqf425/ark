@@ -1,0 +1,97 @@
+/**
+ * Empty-state hero illustration: a CSS-only "desk" window, ported from the
+ * smart-ark hero stage. Colours come from the shared tokens only.
+ */
+/* ---------- empty-state hero: the smart-ark "desk" illustration ---------- */
+
+.ark-hero-stage {
+  margin-bottom: 16px;
+}
+
+.ark-hero-stage__window {
+  width: min(420px, 82vw);
+  height: 150px;
+  margin: 0 auto;
+  border-radius: 22px;
+  border: 1px solid var(--ark-border);
+  background: var(--ark-card-strong);
+  box-shadow: var(--ark-shadow-2), inset 0 1px 0 var(--ark-card-ghost);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ark-hero-stage__bar {
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ark-border-muted);
+}
+
+.ark-hero-stage__bar i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.ark-hero-stage__bar i:nth-child(1) {
+  background: var(--ark-error);
+  opacity: 0.7;
+}
+
+.ark-hero-stage__bar i:nth-child(2) {
+  background: var(--ark-warn);
+  opacity: 0.7;
+}
+
+.ark-hero-stage__bar i:nth-child(3) {
+  background: var(--ark-ok);
+  opacity: 0.7;
+}
+
+.ark-hero-stage__canvas {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  min-height: 0;
+}
+
+.ark-hero-stage__rail {
+  width: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-right: 10px;
+  border-right: 1px solid var(--ark-border-muted);
+}
+
+.ark-hero-stage__rail i {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ark-bg-inset);
+}
+
+.ark-hero-stage__lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+}
+
+.ark-hero-stage__lines i {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ark-bg-inset);
+  width: 72%;
+}
+
+.ark-hero-stage__lines i.is-wide {
+  width: 92%;
+}
+
+.ark-hero-stage__lines i.is-narrow {
+  width: 46%;
+  background: var(--ark-accent-soft);
+}

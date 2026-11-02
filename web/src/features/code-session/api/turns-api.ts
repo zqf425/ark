@@ -24,3 +24,13 @@ export function steerTurn(threadId: ThreadId, turnId: TurnId, text: string): Pro
 export function getTurn(threadId: ThreadId, turnId: TurnId, signal?: AbortSignal): Promise<TurnSummary> {
   return get<TurnSummary>(`/v1/threads/${threadId}/turns/${turnId}`, signal ? { signal } : {})
 }
+
+/**
+ * `POST /v1/threads/{id}/review` — a system-composed review turn seeded with
+ * the thread's workspace-change projection. The response is the same 202
+ * `TurnSummary` envelope as a normal turn; progress arrives on the event
+ * stream under the returned turn id. An empty body means "no focus".
+ */
+export function startReview(threadId: ThreadId): Promise<TurnSummary> {
+  return post<TurnSummary>(`/v1/threads/${threadId}/review`, {})
+}

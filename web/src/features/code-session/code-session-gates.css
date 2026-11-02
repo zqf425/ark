@@ -271,6 +271,13 @@
   margin: 0;
 }
 
+.ark-composer__skillfoot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-basis: 100%;
+}
+
 .ark-session-runtime__hint {
   flex-basis: 100%;
   font-size: 11px;

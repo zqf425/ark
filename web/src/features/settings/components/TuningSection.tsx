@@ -1,9 +1,10 @@
 /**
- * Hot turn and SSE limits.
- *
- * Values are generated from the Rust `TuningSettings` wire contract. The page
- * deliberately submits the complete typed object: config validation stays in
- * the runtime and one accepted snapshot cannot contain a mixed old/new limit.
+ * Hot turn and SSE limits, grouped the way smart-ark presents its runtime
+ * parameters: turn/token limits, tool protection, context & compaction, and
+ * streaming. Values are generated from the Rust `TuningSettings` wire contract;
+ * the page deliberately submits the complete typed object: config validation
+ * stays in the runtime and one accepted snapshot cannot contain a mixed
+ * old/new limit.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Button, useToast } from '../../../shared/ui'
@@ -24,19 +25,46 @@ type TuningField = {
   max: number
 }
 
-const FIELDS: readonly TuningField[] = [
-  { key: 'max_rounds', labelKey: 'settings.tuning.field.maxRounds.label', hintKey: 'settings.tuning.field.maxRounds.hint', min: 1, max: 200 },
-  { key: 'max_tokens', labelKey: 'settings.tuning.field.maxTokens.label', hintKey: 'settings.tuning.field.maxTokens.hint', min: 1_000, max: 50_000_000 },
-  { key: 'max_tool_calls', labelKey: 'settings.tuning.field.maxToolCalls.label', hintKey: 'settings.tuning.field.maxToolCalls.hint', min: 1, max: 5_000 },
-  { key: 'max_identical_calls', labelKey: 'settings.tuning.field.maxIdenticalCalls.label', hintKey: 'settings.tuning.field.maxIdenticalCalls.hint', min: 1, max: 100 },
-  { key: 'context_limit_tokens', labelKey: 'settings.tuning.field.contextLimitTokens.label', hintKey: 'settings.tuning.field.contextLimitTokens.hint', min: 1_000, max: 10_000_000 },
-  { key: 'keep_recent_messages', labelKey: 'settings.tuning.field.keepRecentMessages.label', hintKey: 'settings.tuning.field.keepRecentMessages.hint', min: 1, max: 10_000 },
-  { key: 'chunk_buffer', labelKey: 'settings.tuning.field.chunkBuffer.label', hintKey: 'settings.tuning.field.chunkBuffer.hint', min: 1, max: 4_096 },
-  { key: 'sse_heartbeat_secs', labelKey: 'settings.tuning.field.sseHeartbeatSecs.label', hintKey: 'settings.tuning.field.sseHeartbeatSecs.hint', min: 0, max: 3_600 },
-  { key: 'sse_idle_timeout_secs', labelKey: 'settings.tuning.field.sseIdleTimeoutSecs.label', hintKey: 'settings.tuning.field.sseIdleTimeoutSecs.hint', min: 0, max: 86_400 },
-  { key: 'tool_storm_window_size', labelKey: 'settings.tuning.field.toolStormWindowSize.label', hintKey: 'settings.tuning.field.toolStormWindowSize.hint', min: 0, max: 128 },
-  { key: 'max_parallel_tool_calls', labelKey: 'settings.tuning.field.maxParallelToolCalls.label', hintKey: 'settings.tuning.field.maxParallelToolCalls.hint', min: 0, max: 32 }
+type TuningGroup = {
+  titleKey: MessageKey
+  fields: readonly TuningField[]
+}
+
+const GROUPS: readonly TuningGroup[] = [
+  {
+    titleKey: 'settings.tuning.group.turn',
+    fields: [
+      { key: 'max_rounds', labelKey: 'settings.tuning.field.maxRounds.label', hintKey: 'settings.tuning.field.maxRounds.hint', min: 1, max: 200 },
+      { key: 'max_tokens', labelKey: 'settings.tuning.field.maxTokens.label', hintKey: 'settings.tuning.field.maxTokens.hint', min: 1_000, max: 50_000_000 }
+    ]
+  },
+  {
+    titleKey: 'settings.tuning.group.tools',
+    fields: [
+      { key: 'max_tool_calls', labelKey: 'settings.tuning.field.maxToolCalls.label', hintKey: 'settings.tuning.field.maxToolCalls.hint', min: 1, max: 5_000 },
+      { key: 'max_identical_calls', labelKey: 'settings.tuning.field.maxIdenticalCalls.label', hintKey: 'settings.tuning.field.maxIdenticalCalls.hint', min: 1, max: 100 },
+      { key: 'tool_storm_window_size', labelKey: 'settings.tuning.field.toolStormWindowSize.label', hintKey: 'settings.tuning.field.toolStormWindowSize.hint', min: 0, max: 128 },
+      { key: 'max_parallel_tool_calls', labelKey: 'settings.tuning.field.maxParallelToolCalls.label', hintKey: 'settings.tuning.field.maxParallelToolCalls.hint', min: 0, max: 32 }
+    ]
+  },
+  {
+    titleKey: 'settings.tuning.group.context',
+    fields: [
+      { key: 'context_limit_tokens', labelKey: 'settings.tuning.field.contextLimitTokens.label', hintKey: 'settings.tuning.field.contextLimitTokens.hint', min: 1_000, max: 10_000_000 },
+      { key: 'keep_recent_messages', labelKey: 'settings.tuning.field.keepRecentMessages.label', hintKey: 'settings.tuning.field.keepRecentMessages.hint', min: 1, max: 10_000 }
+    ]
+  },
+  {
+    titleKey: 'settings.tuning.group.stream',
+    fields: [
+      { key: 'chunk_buffer', labelKey: 'settings.tuning.field.chunkBuffer.label', hintKey: 'settings.tuning.field.chunkBuffer.hint', min: 1, max: 4_096 },
+      { key: 'sse_heartbeat_secs', labelKey: 'settings.tuning.field.sseHeartbeatSecs.label', hintKey: 'settings.tuning.field.sseHeartbeatSecs.hint', min: 0, max: 3_600 },
+      { key: 'sse_idle_timeout_secs', labelKey: 'settings.tuning.field.sseIdleTimeoutSecs.label', hintKey: 'settings.tuning.field.sseIdleTimeoutSecs.hint', min: 0, max: 86_400 }
+    ]
+  }
 ]
+
+const FIELDS: readonly TuningField[] = GROUPS.flatMap((group) => group.fields)
 
 function cloneTuning(value: TuningSettings): TuningSettings {
   return { ...value }
@@ -114,41 +142,49 @@ export function TuningSection({ settings }: { settings: SettingsApi }): JSX.Elem
 
   return (
     <SettingsSection title={t('settings.tuning.title')} desc={t('settings.tuning.desc')}>
-      <div className="ark-settings__grid">
-        {FIELDS.map((field) => {
-          const value = draft[field.key]
-          const invalid = !Number.isInteger(value) || value < field.min || value > field.max
-          return (
-            <Field
-              key={field.key}
-              label={t(field.labelKey)}
-              htmlFor={`tuning-${field.key}`}
-              hint={`${t(field.hintKey)} ${t('settings.tuning.rangeSuffix', { min: field.min, max: field.max })}`}
-            >
-              <input
-                id={`tuning-${field.key}`}
-                className="ark-field__input"
-                type="number"
-                min={field.min}
-                max={field.max}
-                step={1}
-                value={Number.isFinite(value) ? value : ''}
-                disabled={saving === 'tuning'}
-                aria-invalid={invalid}
-                onChange={(event) => setValue(field.key, event.target.value)}
-              />
-            </Field>
-          )
-        })}
-      </div>
+      {GROUPS.map((group) => (
+        <div key={group.titleKey} className="ark-settings__group">
+          <h3 className="ark-settings__subhead">{t(group.titleKey)}</h3>
+          <div className="ark-settings__grid">
+            {group.fields.map((field) => {
+              const value = draft[field.key]
+              const invalid = !Number.isInteger(value) || value < field.min || value > field.max
+              return (
+                <Field
+                  key={field.key}
+                  label={t(field.labelKey)}
+                  htmlFor={`tuning-${field.key}`}
+                  hint={`${t(field.hintKey)} ${t('settings.tuning.rangeSuffix', { min: field.min, max: field.max })}`}
+                >
+                  <input
+                    id={`tuning-${field.key}`}
+                    className="ark-field__input"
+                    type="number"
+                    min={field.min}
+                    max={field.max}
+                    step={1}
+                    value={Number.isFinite(value) ? value : ''}
+                    disabled={saving === 'tuning'}
+                    aria-invalid={invalid}
+                    onChange={(event) => setValue(field.key, event.target.value)}
+                  />
+                </Field>
+              )
+            })}
+          </div>
+        </div>
+      ))}
 
-      <Field label={t('settings.autonomy.label')} htmlFor="default-autonomy" hint={t('settings.autonomy.hint')}>
-        <select id="default-autonomy" className="ark-field__input" value={defaultAutonomy} disabled={saving === 'default_autonomy'} onChange={(event) => setDefaultAutonomy(event.target.value)}>
-          <option value="strict">{t('session.runtime.strict')}</option>
-          <option value="workspace_write">{t('session.runtime.workspaceWrite')}</option>
-          <option value="unattended">{t('session.runtime.unattended')}</option>
-        </select>
-      </Field>
+      <div className="ark-settings__group">
+        <h3 className="ark-settings__subhead">{t('settings.autonomy.group')}</h3>
+        <Field label={t('settings.autonomy.label')} htmlFor="default-autonomy" hint={t('settings.autonomy.hint')}>
+          <select id="default-autonomy" className="ark-field__input" value={defaultAutonomy} disabled={saving === 'default_autonomy'} onChange={(event) => setDefaultAutonomy(event.target.value)}>
+            <option value="strict">{t('session.runtime.strict')}</option>
+            <option value="workspace_write">{t('session.runtime.workspaceWrite')}</option>
+            <option value="unattended">{t('session.runtime.unattended')}</option>
+          </select>
+        </Field>
+      </div>
 
       {!valid ? <Notice tone="error" title={t('settings.tuning.invalidTitle')}>{t('settings.tuning.invalidBody')}</Notice> : null}
       {rejection ? <Notice tone="error" title={t('settings.tuning.rejectedTitle')}>{rejection}</Notice> : null}

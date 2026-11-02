@@ -254,6 +254,26 @@
   align-items: center;
 }
 
+/* ---------- grouped fields (smart-ark detail sections) ---------- */
+
+.ark-settings__group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ark-settings__group + .ark-settings__group {
+  border-top: 1px solid var(--ark-border-muted);
+  padding-top: 14px;
+}
+
+.ark-settings__subhead {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ark-text-dim);
+}
+
 /* ---------- notices ---------- */
 
 .ark-settings__notice {
