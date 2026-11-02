@@ -5,11 +5,13 @@
  *   - code-session-stream.css  status bar, thread rail, stream, messages
  *   - code-session-tools.css   tool cards, tool results, error / notice rows
  *   - code-session-gates.css   gates, composer, stream footer
+ *   - code-session-composer.css composer quick runtime pickers
  *   - code-session-threads.css thread controls and child-run cards
  * Order matters: later files refine earlier ones.
  */
 @import './code-session-stream.css';
 @import './code-session-tools.css';
 @import './code-session-gates.css';
+@import './code-session-composer.css';
 @import './code-session-threads.css';
 @import './agent-workspace.css';

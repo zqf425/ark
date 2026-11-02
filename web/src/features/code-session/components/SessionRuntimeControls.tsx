@@ -1,36 +1,24 @@
+/**
+ * Detailed runtime panel docked above the composer: workspace override and
+ * context compaction. The quick overrides (model, permission mode, reasoning
+ * effort) live in the composer toolbar (`ComposerRuntimeControls`); keeping
+ * only the workspace field here means the panel's explicit save can never
+ * clobber a value the toolbar just wrote (the PATCH merge keeps fields the
+ * patch omits).
+ */
 import { useEffect, useRef, useState } from 'react'
 import { Button, useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import type { ThreadRuntimeSettings } from '../../../shared/contracts'
 import { compactThread, getThread, updateThread } from '../api/threads-api'
-import { useProviders } from '../../settings/hooks/use-providers'
-import { getRuntimeConfig } from '../../settings/api/settings-api'
 import { canSaveRuntime, isRuntimeFormStale, type RuntimeOwner } from './session-runtime-guard'
 
 const DEFAULT_RUNTIME: ThreadRuntimeSettings = {}
-/** Shown until the global default resolves; never persisted on its own. */
-const FALLBACK_AUTONOMY = 'workspace_write'
 
 export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.Element {
   const { t } = useI18n()
   const toast = useToast()
-  const providers = useProviders()
   const [runtime, setRuntime] = useState<ThreadRuntimeSettings>(DEFAULT_RUNTIME)
-  // The provider a turn would actually use: the thread override, else the
-  // store's default. Model suggestions and the vision warning both key off it.
-  const selectedProvider =
-    providers.providers.find((provider) => provider.id === (runtime.provider_id ?? '')) ??
-    providers.providers.find((provider) => provider.is_default) ??
-    null
-  // Model suggestions come from the effective provider's inventory: the default
-  // model plus everything batch-imported for it.
-  const modelOptions = selectedProvider
-    ? [selectedProvider.model, ...selectedProvider.models].filter((id) => id && id !== (runtime.model ?? ''))
-    : []
-  // Vision is declared per provider entry; `null`/false both mean the image
-  // parts of an attachment will be degraded to a placeholder by the runtime.
-  const visionUnsupported = selectedProvider !== null && selectedProvider.supports_vision !== true
-  const [defaultAutonomy, setDefaultAutonomy] = useState(FALLBACK_AUTONOMY)
   const [saving, setSaving] = useState(false)
   const [compacting, setCompacting] = useState(false)
   /** Thread the form values were actually loaded for; `null` until a load lands. */
@@ -38,8 +26,8 @@ export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.
   const paintedThreadId = useRef(threadId)
 
   // Switching threads must blank the form in the same commit: reusing A's
-  // workspace/provider/model while B loads would show (and offer to save) the
-  // wrong thread's overrides.
+  // workspace while B loads would show (and offer to save) the wrong thread's
+  // overrides.
   if (isRuntimeFormStale(paintedThreadId.current, threadId)) {
     paintedThreadId.current = threadId
     setRuntime(DEFAULT_RUNTIME)
@@ -64,16 +52,6 @@ export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.
         setLoadedFor(null)
         toast.push('error', t('session.runtime.title'), error instanceof Error ? error.message : String(error))
       })
-    // The runtime falls back to the global default when a thread has no
-    // override, so the control must show that same value: showing a hardcoded
-    // mode would misreport the effective permission.
-    void getRuntimeConfig()
-      .then((config) => {
-        if (active) setDefaultAutonomy(config.default_autonomy)
-      })
-      .catch(() => {
-        // Keep the fallback: an unreadable config must not block the panel.
-      })
     return () => { active = false }
     // `toast` and `t` are stable enough for this load; including them would
     // re-run the fetch on every language switch.
@@ -85,7 +63,9 @@ export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.
     if (!canSaveRuntime(loadedFor, threadId)) return
     setSaving(true)
     try {
-      await updateThread(threadId, { runtime })
+      // Only the workspace override travels: omitted fields keep their stored
+      // values, so a toolbar change made after this panel loaded survives.
+      await updateThread(threadId, { runtime: { workspace: runtime.workspace } })
       toast.push('success', t('session.runtime.title'))
     } catch (error) {
       toast.push('error', t('session.runtime.title'), error instanceof Error ? error.message : String(error))
@@ -111,28 +91,6 @@ export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.
       <summary>{t('session.runtime.title')}</summary>
       <div className="ark-session-runtime__fields">
         <label>{t('session.runtime.workspace')}<input value={runtime.workspace ?? ''} onChange={(event) => setRuntime({ ...runtime, workspace: event.target.value || undefined })} /></label>
-        <label>{t('session.runtime.provider')}<select value={runtime.provider_id ?? ''} onChange={(event) => setRuntime({ ...runtime, provider_id: event.target.value || undefined })}><option value="">—</option>{providers.providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.label ?? provider.id}</option>)}</select></label>
-        <label>
-          {t('session.runtime.model')}
-          <input list="ark-session-model-options" value={runtime.model ?? ''} onChange={(event) => setRuntime({ ...runtime, model: event.target.value || undefined })} />
-          <datalist id="ark-session-model-options">
-            {modelOptions.map((id) => <option key={id} value={id} />)}
-          </datalist>
-        </label>
-        <label>
-          {t('session.runtime.reasoning')}
-          <select value={runtime.reasoning_effort ?? ''} onChange={(event) => setRuntime({ ...runtime, reasoning_effort: event.target.value || undefined })}>
-            <option value="">{t('session.runtime.reasoning.unset')}</option>
-            <option value="low">{t('session.runtime.reasoning.low')}</option>
-            <option value="medium">{t('session.runtime.reasoning.medium')}</option>
-            <option value="high">{t('session.runtime.reasoning.high')}</option>
-            <option value="off">{t('session.runtime.reasoning.off')}</option>
-          </select>
-        </label>
-        <label>{t('session.runtime.autonomy')}<select value={runtime.autonomy ?? defaultAutonomy} onChange={(event) => setRuntime({ ...runtime, autonomy: event.target.value })}><option value="strict">{t('session.runtime.strict')}</option><option value="workspace_write">{t('session.runtime.workspaceWrite')}</option><option value="unattended">{t('session.runtime.unattended')}</option></select></label>
-        {visionUnsupported ? (
-          <span className="ark-session-runtime__hint">{t('session.runtime.visionUnsupported')}</span>
-        ) : null}
         <Button size="sm" variant="primary" disabled={saving || !canSaveRuntime(loadedFor, threadId)} onClick={() => void save()}>{t('session.runtime.save')}</Button>
         <Button size="sm" disabled={compacting} onClick={() => void compact()}>{t('session.context.compact')}</Button>
       </div>

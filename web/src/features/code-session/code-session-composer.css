@@ -1,0 +1,97 @@
+/**
+ * Composer quick runtime pickers: model/provider, permission mode and
+ * reasoning effort. Split from code-session-gates.css to stay under the
+ * 400-line per-file limit (design §7.10.2).
+ */
+/* ---------- composer quick runtime pickers ---------- */
+
+.ark-composer__pickers {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ark-composer__pick {
+  position: relative;
+}
+
+.ark-composer__pick-trigger {
+  max-width: 200px;
+}
+
+.ark-composer__pick-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-composer__pick-caret {
+  flex: none;
+  font-size: 9px;
+  color: var(--ark-text-faint);
+}
+
+.ark-composer__popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  min-width: 250px;
+  max-width: 330px;
+  border: 1px solid var(--ark-border-strong);
+  border-radius: var(--ark-radius);
+  background: var(--ark-bg-raised);
+  box-shadow: var(--ark-shadow-2);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ark-composer__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--ark-text-dim);
+}
+
+.ark-composer__field select,
+.ark-composer__field input {
+  color: var(--ark-text);
+}
+
+.ark-composer__option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: var(--ark-radius-sm);
+  background: none;
+  color: var(--ark-text);
+  cursor: pointer;
+  padding: 6px 8px;
+  font-size: 12.5px;
+}
+
+.ark-composer__option:hover {
+  background: var(--ark-bg-hover);
+}
+
+.ark-composer__option[aria-selected='true'] {
+  border-color: var(--ark-accent-dim);
+}
+
+.ark-composer__option-desc {
+  font-size: 11px;
+  color: var(--ark-text-faint);
+}
+
+.ark-composer__hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ark-warn);
+}

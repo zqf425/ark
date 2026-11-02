@@ -5,7 +5,9 @@
  * button becomes a steering action (追加) and a second action queues the draft
  * locally; queued drafts flush automatically when the turn ends, in order.
  * Message state is local: the runtime owns conversation state, and the user's
- * own message returns as a `ThreadItem`.
+ * own message returns as a `ThreadItem`. The tools row also hosts the quick
+ * runtime overrides (model, permission mode, reasoning effort); the detailed
+ * panel above keeps workspace and compaction.
  */
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../../shared/ui'
@@ -17,6 +19,7 @@ import { useTurn } from '../hooks/use-turn'
 import { associateAttachment, uploadAttachment } from '../api/attachments-api'
 import { listSkills } from '../api/skills-api'
 import { canEditComposer, canSendToThread } from './composer-availability'
+import { ComposerRuntimeControls } from './ComposerRuntimeControls'
 import type { SkillSummary } from '../../../shared/contracts'
 
 const MAX_ROWS = 8
@@ -275,42 +278,47 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
         ) : null}
 
         <div className="ark-composer__actions">
-          <input
-            ref={fileRef}
-            type="file"
-            multiple
-            hidden
-            aria-hidden="true"
-            onChange={(event) => void pickFiles(event.target.files)}
-          />
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={inputDisabled || uploading || live}
-            title={live ? t('canvas.composer.attachLiveHint') : undefined}
-            onClick={() => fileRef.current?.click()}
-          >
-            {uploading ? t('canvas.composer.attachUploading') : t('canvas.composer.attach')}
-          </Button>
-          <Button variant="ghost" size="sm" disabled={inputDisabled} onClick={() => void toggleSkills()}>
-            {t('canvas.composer.skills')}
-          </Button>
-          <span className={`ark-composer__status${notOpen ? ' is-warn' : ''}`}>
-            {notOpen ? t('canvas.composer.streamDown') : t('canvas.composer.streamUp')}
-          </span>
-          {live ? (
-            <Button variant="default" size="sm" disabled={inputDisabled} onClick={queueDraft}>
-              {t('canvas.composer.queue')}
+          <div className="ark-composer__tools">
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              hidden
+              aria-hidden="true"
+              onChange={(event) => void pickFiles(event.target.files)}
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={inputDisabled || uploading || live}
+              title={live ? t('canvas.composer.attachLiveHint') : undefined}
+              onClick={() => fileRef.current?.click()}
+            >
+              {uploading ? t('canvas.composer.attachUploading') : t('canvas.composer.attach')}
             </Button>
-          ) : null}
-          {live ? (
-            <Button variant="default" size="sm" onClick={() => void interrupt()}>
-              {t('canvas.composer.interrupt')}
+            <Button variant="ghost" size="sm" disabled={inputDisabled} onClick={() => void toggleSkills()}>
+              {t('canvas.composer.skills')}
             </Button>
-          ) : null}
-          <Button variant="primary" size="sm" disabled={sendDisabled} onClick={() => void submit()}>
-            {draft ? t('common.submitting') : live ? t('canvas.composer.steer') : t('canvas.composer.send')}
-          </Button>
+            <ComposerRuntimeControls threadId={threadId} />
+          </div>
+          <div className="ark-composer__send">
+            <span className={`ark-composer__status${notOpen ? ' is-warn' : ''}`}>
+              {notOpen ? t('canvas.composer.streamDown') : t('canvas.composer.streamUp')}
+            </span>
+            {live ? (
+              <Button variant="default" size="sm" disabled={inputDisabled} onClick={queueDraft}>
+                {t('canvas.composer.queue')}
+              </Button>
+            ) : null}
+            {live ? (
+              <Button variant="default" size="sm" onClick={() => void interrupt()}>
+                {t('canvas.composer.interrupt')}
+              </Button>
+            ) : null}
+            <Button variant="primary" size="sm" disabled={sendDisabled} onClick={() => void submit()}>
+              {draft ? t('common.submitting') : live ? t('canvas.composer.steer') : t('canvas.composer.send')}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
