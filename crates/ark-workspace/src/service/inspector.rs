@@ -264,14 +264,73 @@ fn attach_patch(
     } else {
         (output, false)
     };
-    diff.patch_bytes += patch.len() as u64;
     diff.truncated |= truncated;
-    let binary = patch.contains("Binary files ") || patch.contains("GIT binary patch");
-    for file in files {
+    // Each file row must carry only its own `diff --git` segment: a renderer
+    // expands a row to show that file's changes, so handing every row the whole
+    // group diff would repeat the other files' edits under each path.
+    let segments = split_patch_segments(&patch);
+    let mut assigned_bytes = 0usize;
+    for file in files.iter_mut() {
+        let Some(segment) = segments.iter().find(|segment| segment.path == file.path) else {
+            continue;
+        };
+        let binary =
+            segment.text.contains("Binary files ") || segment.text.contains("GIT binary patch");
         file.binary = binary;
-        file.patch = (!binary).then(|| patch.clone());
+        file.patch = (!binary).then(|| segment.text.clone());
         file.truncated = truncated;
+        assigned_bytes += segment.text.len();
     }
+    diff.patch_bytes += assigned_bytes as u64;
+}
+
+/// A per-file slice of a group `git diff`, keyed by the path its headers name.
+struct PatchSegment {
+    path: String,
+    text: String,
+}
+
+/// Split group `git diff` output into per-file segments at `diff --git `
+/// boundaries.
+///
+/// The key path prefers `+++ b/<path>` (present for every content change),
+/// then `rename to ` (a pure rename has no content hunk), then `--- a/<path>`
+/// (deletions, where `+++` is `/dev/null`). Segments without a recognizable
+/// path are dropped: they cannot be attributed to any file row.
+fn split_patch_segments(patch: &str) -> Vec<PatchSegment> {
+    let mut segments = Vec::new();
+    for chunk in patch.split("diff --git ") {
+        if chunk.is_empty() {
+            continue;
+        }
+        let text = format!("diff --git {chunk}");
+        let mut path: Option<String> = None;
+        for line in text.lines() {
+            if let Some(rest) = line
+                .strip_prefix("+++ b/")
+                .or_else(|| line.strip_prefix("rename to "))
+            {
+                path = Some(unquote_path(rest).to_string());
+                break;
+            }
+            if let Some(rest) = line.strip_prefix("--- a/") {
+                path = Some(unquote_path(rest).to_string());
+            }
+        }
+        if let Some(path) = path {
+            segments.push(PatchSegment { path, text });
+        }
+    }
+    segments
+}
+
+/// Git quotes paths containing spaces or non-ASCII in diff headers.
+fn unquote_path(path: &str) -> &str {
+    let trimmed = path.trim_end();
+    trimmed
+        .strip_prefix('"')
+        .and_then(|inner| inner.strip_suffix('"'))
+        .unwrap_or(trimmed)
 }
 
 /// `git rev-parse --is-inside-work-tree` prints exactly `true` inside a work

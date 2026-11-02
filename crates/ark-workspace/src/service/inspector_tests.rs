@@ -187,6 +187,73 @@ fn diff_separates_staged_unstaged_and_untracked_files() {
 }
 
 #[test]
+fn staged_patch_is_per_file_not_the_whole_group_diff() {
+    if !git_available() {
+        eprintln!("skipping: git is not on PATH (mark #[ignore] on such a machine)");
+        return;
+    }
+    let fixture = TempDir::new("diff-split");
+    init_repo(fixture.path());
+    std::fs::write(fixture.path().join("README.md"), "alpha\n").expect("write first file");
+    std::fs::write(fixture.path().join("guide.md"), "beta\n").expect("write second file");
+    git(fixture.path(), &["add", "README.md", "guide.md"]);
+
+    let diff = WorkspaceInspector::new()
+        .diff(fixture.path())
+        .expect("git diff");
+
+    assert_eq!(diff.staged.len(), 2);
+    for file in &diff.staged {
+        let patch = file
+            .patch
+            .as_deref()
+            .expect("staged file should carry a patch");
+        assert!(patch.contains("diff --git"), "segment keeps its header");
+        assert!(
+            !patch.contains("+++") || patch.contains(&format!("+++ b/{}", file.path)),
+            "segment for {} must not contain another file's +++ header",
+            file.path
+        );
+        assert!(
+            !patch.contains("diff --git a/guide.md") || file.path == "guide.md",
+            "guide.md segment must not leak into {}",
+            file.path
+        );
+        assert!(
+            !patch.contains("diff --git a/README.md") || file.path == "README.md",
+            "README.md segment must not leak into {}",
+            file.path
+        );
+    }
+}
+
+#[test]
+fn deleted_file_patch_is_keyed_by_the_old_path() {
+    if !git_available() {
+        eprintln!("skipping: git is not on PATH (mark #[ignore] on such a machine)");
+        return;
+    }
+    let fixture = TempDir::new("diff-delete");
+    init_repo(fixture.path());
+    std::fs::write(fixture.path().join("gone.txt"), "bye\n").expect("write doomed file");
+    git(fixture.path(), &["add", "gone.txt"]);
+    git(fixture.path(), &["commit", "--quiet", "-m", "add gone"]);
+    std::fs::remove_file(fixture.path().join("gone.txt")).expect("delete file");
+
+    let diff = WorkspaceInspector::new()
+        .diff(fixture.path())
+        .expect("git diff");
+
+    assert_eq!(diff.unstaged.len(), 1);
+    let patch = diff.unstaged[0]
+        .patch
+        .as_deref()
+        .expect("deleted file should carry a patch");
+    assert!(patch.contains("--- a/gone.txt"), "deletion header present");
+    assert!(patch.contains("+++ /dev/null"), "deletion target present");
+}
+
+#[test]
 fn validate_rejects_missing_path() {
     let fixture = TempDir::new("validate-missing");
     let missing = fixture.path().join("nope");
