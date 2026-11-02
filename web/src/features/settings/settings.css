@@ -142,6 +142,7 @@
 .ark-field__area:focus-visible {
   outline: none;
   border-color: var(--ark-accent-dim);
+  box-shadow: 0 0 0 3px var(--ark-selection);
 }
 
 .ark-field__input:disabled,
@@ -262,8 +263,8 @@
 /* ---------- notices ---------- */
 
 .ark-settings__notice {
-  border: 1px solid #4a3a1e;
-  background: #1c1812;
+  border: 1px solid var(--ark-warn);
+  background: var(--ark-warn-wash);
   border-radius: var(--ark-radius);
   padding: 8px 10px;
   display: flex;
@@ -274,9 +275,9 @@
 }
 
 .ark-settings__notice--error {
-  border-color: #4a2429;
-  background: #1a1114;
-  color: #f0b8bc;
+  border-color: var(--ark-error);
+  background: var(--ark-error-wash);
+  color: var(--ark-error-strong);
 }
 
 .ark-settings__notice-title {

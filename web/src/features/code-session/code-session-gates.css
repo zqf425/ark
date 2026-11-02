@@ -9,7 +9,7 @@
 .ark-gate {
   border: 1px solid var(--ark-border-strong);
   border-radius: var(--ark-radius);
-  background: #141a22;
+  background: var(--ark-bg-raised);
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -17,8 +17,8 @@
 }
 
 .ark-gate--approval {
-  border-color: #4a3a1e;
-  background: #1c1812;
+  border-color: var(--ark-warn);
+  background: var(--ark-warn-wash);
 }
 
 .ark-gate__head {
@@ -79,11 +79,11 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid #4a2429;
-  background: #1a1114;
+  border: 1px solid var(--ark-error);
+  background: var(--ark-error-wash);
   border-radius: var(--ark-radius);
   padding: 4px 8px;
-  color: #f0b8bc;
+  color: var(--ark-error-strong);
   font-size: 12px;
 }
 

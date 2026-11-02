@@ -1,21 +1,40 @@
-/* Theme tokens only. The renderer switches this selector through I18nProvider. */
+/* Theme tokens only. The renderer switches this selector through I18nProvider.
+ *
+ * Dark palette: near-black neutral surfaces with a single restrained accent.
+ * Every component style must consume tokens, never these hex values, so both
+ * themes stay in sync by construction.
+ */
 :root[data-ark-theme='dark'] {
   color-scheme: dark;
-  --ark-bg: #17191d;
-  --ark-bg-raised: #202328;
-  --ark-bg-inset: #131519;
-  --ark-bg-hover: #2a2e34;
-  --ark-border: #32363d;
-  --ark-border-strong: #454a52;
-  --ark-text: #f1f1ec;
-  --ark-text-dim: #bac0c8;
-  --ark-text-faint: #8c939d;
-  --ark-accent: #7cb4dd;
-  --ark-accent-dim: #416f91;
-  --ark-ok: #79b99a;
-  --ark-warn: #d7ab6b;
-  --ark-error: #d9868f;
-  --ark-selection: #31404f;
-  --ark-user-message: #26333e;
-  --ark-user-border: #3b5365;
+  --ark-bg: #141413;
+  --ark-bg-raised: #1d1d1c;
+  --ark-bg-inset: #101010;
+  --ark-bg-hover: #262625;
+  --ark-border: #2b2b2a;
+  --ark-border-strong: #40403e;
+  --ark-text: #ececea;
+  --ark-text-dim: #b6b6b0;
+  --ark-text-faint: #84847e;
+  --ark-accent: #8fb0f0;
+  --ark-accent-dim: #3f5c96;
+  --ark-ok: #74c094;
+  --ark-warn: #d4ab5f;
+  --ark-error: #e28b8b;
+  --ark-selection: #2a3a54;
+  /* Solid actions invert in the dark theme: a light button on dark canvas. */
+  --ark-primary: #ececea;
+  --ark-primary-hover: #ffffff;
+  --ark-primary-text: #161615;
+  /* Washes: intent-tinted surfaces for notices, gates and chips. */
+  --ark-ok-wash: #182720;
+  --ark-warn-wash: #272115;
+  --ark-error-wash: #2b1819;
+  --ark-error-strong: #f0b6b6;
+  --ark-user-message: #232322;
+  --ark-user-border: #323230;
+  --ark-terminal-bg: #0c0c0c;
+  --ark-terminal-text: #c6c9cf;
+  --ark-overlay: rgba(0, 0, 0, 0.55);
+  --ark-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --ark-shadow-2: 0 12px 32px rgba(0, 0, 0, 0.5);
 }

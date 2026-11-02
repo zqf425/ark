@@ -1,0 +1,63 @@
+/**
+ * Toast primitives (owned by shared/ui Toast).
+ * Split from global.css to respect the 400-line file limit.
+ */
+
+/* ---------- toast ---------- */
+
+.ark-toast-stack {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 50;
+  max-width: 380px;
+}
+
+.ark-toast {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--ark-radius);
+  border: 1px solid var(--ark-border);
+  background: var(--ark-bg-raised);
+  box-shadow: var(--ark-shadow-2);
+}
+
+.ark-toast--error {
+  border-color: var(--ark-error);
+}
+
+.ark-toast--success {
+  border-color: var(--ark-ok);
+}
+
+.ark-toast__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.ark-toast__message {
+  font-weight: 600;
+}
+
+.ark-toast__detail {
+  color: var(--ark-text-dim);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.ark-toast__close {
+  border: 0;
+  background: none;
+  color: var(--ark-text-faint);
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 2px;
+}
+
