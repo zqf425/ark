@@ -28,8 +28,9 @@
 安装不使用 hooks），加载诊断对它**刻意不告警**，不能把它列入 `defaulted`/`ignored`。
 
 `skills` 配置节整体为 `Hot`：`SkillRuntime` 通过组合根注入的配置源在每次扫描/解析时重读快照，
-patch 保存后在下一次重扫即生效，无需重启进程。（此前归为 `Restart` 时 `apply` 整批拒绝，设置
-界面永远无法保存该节。）
+patch 保存后在下一次重扫即生效，无需重启进程。HTTP 层在 apply 结果的 `changed` 含 `skills` 时
+还会主动调用 skills 服务的 `reload()`，保证只读快照的回合解析路径不落在陈旧快照上。（此前归为
+`Restart` 时 `apply` 整批拒绝，设置界面永远无法保存该节。）
 
 ## 加载诊断
 

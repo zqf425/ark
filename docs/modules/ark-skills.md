@@ -18,7 +18,9 @@ Skill 是提示词和工具使用说明资产，不是第二个 agent 或任意�
 skills 视图为空）与 `extra_dirs` 额外扫描根（绝对路径或 `~` 前缀，最多 16 个；工作区相对目录不可
 配置，因为切换 workspace 会改变其含义）。组合根注入的是一个读取 live config snapshot 的
 `ConfigSource` 闭包，运行时每次扫描/解析都重读配置，因此 patch 保存后在下一次重扫即生效，
-无需重启进程。
+无需重启进程。另外 `POST /v1/runtime/config` 在 `changed` 含 `skills` 时会主动调用
+`skills.reload()`：`resolve_for_turn` 只读快照不重扫，没有这次主动重载，`enabled` 关→开会留下一
+个陈旧空快照窗口。
 
 用户显式提及 skill 的 id 或 name 会触发自动激活，即使其 front matter 未声明其它触发器；其余命令、
 文本模式和文件类型触发保持既有优先级和评分口径。
