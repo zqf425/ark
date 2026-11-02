@@ -46,6 +46,10 @@ gated 在 `Notice` kind 上）。取消原因词表与自治权词表不在本 c
 `ThreadDetail.runtime` 只携带已持久化的每线程覆盖值（作为 PATCH 合并后的结果）；同一存活 `arkd`
 进程内的短暂控制快照（active turn 与待处理 gate 的最小展示字段）位于 `ThreadDetail.runtime_snapshot`。
 两者以 serde default 保持旧 detail JSON 可读；`runtime_snapshot` 绝不用于重建重启后的 waiter。
+`ThreadRuntimeSettings` 的覆盖字段为 workspace、provider_id、model、autonomy、reasoning_effort，全部
+可选；`reasoning_effort` 词表由 `REASONING_EFFORTS`（`off|low|medium|high`）定义，空串视为未设置。
+PATCH 端校验与回合侧解析分别见 [ark-server](ark-server.md) 与 [arkd](arkd.md)，协议映射见
+[ark-llm](ark-llm.md)。
 
 ## 类型生成
 
