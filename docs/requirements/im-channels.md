@@ -1,6 +1,8 @@
 # IM 渠道接入（IM Channels）
 
-> 状态:**已批准计划**(2026-11-02 设计定稿)。参照 smart-ark 桌面端 IM 接入(内部代号
+> 状态:**已实现**(2026-11-02 设计定稿,五个阶段全部落地,离线可测部分;真实 Telegram/飞书/微信
+> 平台端到端由发布验收承接,本机未执行)。设计节即实现语义,落地情况见文末。参照 smart-ark 桌面端
+> IM 接入(内部代号
 > claw,`src/main/claw-runtime.ts` 及 feishu/telegram/weixin 三个平台
 > runtime)按 ark 架构
 > 裁剪。QQ、企业微信等新渠道按同一扩展点后续另立项,不在本需求范围。
