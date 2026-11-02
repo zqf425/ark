@@ -60,6 +60,8 @@ export type { MemoryDiagnosticsResponse } from "./MemoryDiagnosticsResponse";
 export type { AttachmentEntry } from "./AttachmentEntry";
 export type { AttachmentUploadRequest } from "./AttachmentUploadRequest";
 export type { AttachmentUploadResponse } from "./AttachmentUploadResponse";
+export type { AttachmentAssociationRequest } from "./AttachmentAssociationRequest";
+export type { AttachmentAssociationResponse } from "./AttachmentAssociationResponse";
 export type { AttachmentDiagnostics } from "./AttachmentDiagnostics";
 export type { ItemKind } from "./ItemKind";
 export type { ItemStatus } from "./ItemStatus";

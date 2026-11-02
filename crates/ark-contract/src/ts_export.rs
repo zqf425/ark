@@ -311,6 +311,8 @@ const ROOT_NAMES: &[&str] = &[
     "AttachmentEntry",
     "AttachmentUploadRequest",
     "AttachmentUploadResponse",
+    "AttachmentAssociationRequest",
+    "AttachmentAssociationResponse",
     "AttachmentDiagnostics",
     "ItemKind",
     "ItemStatus",

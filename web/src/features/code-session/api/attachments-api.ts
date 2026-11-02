@@ -11,3 +11,12 @@ import { post } from '../../../shared/api/client'
 export function uploadAttachment(request: AttachmentUploadRequest): Promise<AttachmentUploadResponse> {
   return post<AttachmentUploadResponse>('/v1/attachments', request)
 }
+
+/**
+ * `POST /v1/threads/{id}/attachments` — authorize the attachment for the
+ * thread. Idempotent server-side; a turn start rejects unassociated ids, so
+ * this must land before the turn request.
+ */
+export function associateAttachment(threadId: string, attachmentId: string): Promise<void> {
+  return post<void>(`/v1/threads/${threadId}/attachments`, { attachment_id: attachmentId })
+}

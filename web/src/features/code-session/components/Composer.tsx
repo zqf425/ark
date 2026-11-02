@@ -14,7 +14,7 @@ import { translateNow } from '../../../shared/i18n/current'
 import { describeError } from '../../../shared/api/error-describe'
 import { useCodeSessionStore } from '../state/store'
 import { useTurn } from '../hooks/use-turn'
-import { uploadAttachment } from '../api/attachments-api'
+import { associateAttachment, uploadAttachment } from '../api/attachments-api'
 import { listSkills } from '../api/skills-api'
 import { canEditComposer, canSendToThread } from './composer-availability'
 import type { SkillSummary } from '../../../shared/contracts'
@@ -84,6 +84,16 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     const text = node.value
     if (!text.trim()) return
     const ids = attachments.map((picked) => picked.id)
+    // The runtime rejects turn starts that carry unassociated attachment ids,
+    // so every picked id is linked to the thread right before the turn.
+    if (!live && ids.length > 0 && threadId) {
+      try {
+        for (const id of ids) await associateAttachment(threadId, id)
+      } catch (error) {
+        setCommandError(describeError(error, translateNow))
+        return
+      }
+    }
     const ok = live ? await steer(text) : await send(text, ids)
     if (ok) {
       node.value = ''
@@ -273,7 +283,8 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
           <Button
             variant="ghost"
             size="sm"
-            disabled={inputDisabled || uploading}
+            disabled={inputDisabled || uploading || live}
+            title={live ? t('canvas.composer.attachLiveHint') : undefined}
             onClick={() => fileRef.current?.click()}
           >
             {uploading ? t('canvas.composer.attachUploading') : t('canvas.composer.attach')}
