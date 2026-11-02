@@ -43,12 +43,12 @@ pub enum ChildTurnStatus {
 }
 
 impl ChildTurnStatus {
-    /// Record status string (`completed` | `failed` | `aborted`).
-    pub fn as_str(&self) -> &'static str {
+    /// The durable run state this report folds into.
+    pub fn status(&self) -> ark_common::ChildRunStatus {
         match self {
-            ChildTurnStatus::Completed => ark_ports::child_status::COMPLETED,
-            ChildTurnStatus::Failed { .. } => ark_ports::child_status::FAILED,
-            ChildTurnStatus::Aborted { .. } => ark_ports::child_status::ABORTED,
+            ChildTurnStatus::Completed => ark_common::ChildRunStatus::Completed,
+            ChildTurnStatus::Failed { .. } => ark_common::ChildRunStatus::Failed,
+            ChildTurnStatus::Aborted { .. } => ark_common::ChildRunStatus::Aborted,
         }
     }
 
@@ -150,7 +150,7 @@ pub fn finished_record(
     report: &ChildTurnReport,
     ended_at: DateTime<Utc>,
 ) -> ChildRunRecord {
-    record.status = report.status.as_str().to_string();
+    record.status = report.status.status();
     record.ended_at = Some(ended_at);
     record.summary = Some(report.summary.clone());
     record.usage = Some(report.usage.clone());
@@ -181,7 +181,7 @@ mod tests {
     fn a_completed_run_carries_no_error() {
         let report = ChildTurnReport::completed("done");
         let finished = finished_record(record(), &report, Utc::now());
-        assert_eq!(finished.status, "completed");
+        assert_eq!(finished.status, ark_common::ChildRunStatus::Completed);
         assert!(finished.error.is_none());
         assert_eq!(finished.summary.as_deref(), Some("done"));
         assert!(finished.ended_at.is_some());
@@ -191,7 +191,7 @@ mod tests {
     fn a_failed_run_keeps_its_message() {
         let report = ChildTurnReport::failed("provider 500");
         let finished = finished_record(record(), &report, Utc::now());
-        assert_eq!(finished.status, "failed");
+        assert_eq!(finished.status, ark_common::ChildRunStatus::Failed);
         assert_eq!(finished.error.as_deref(), Some("provider 500"));
         assert_eq!(
             report.status.stop_reason().map(StopReason::as_str),
@@ -203,7 +203,7 @@ mod tests {
     fn an_aborted_run_records_the_user_stop_reason() {
         let report = ChildTurnReport::aborted("stopped by user");
         let finished = finished_record(record(), &report, Utc::now());
-        assert_eq!(finished.status, "aborted");
+        assert_eq!(finished.status, ark_common::ChildRunStatus::Aborted);
         assert_eq!(
             report.status.stop_reason().map(StopReason::as_str),
             Some("user")

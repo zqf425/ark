@@ -143,9 +143,13 @@ mod tests {
     use ark_ports::SessionStore;
     use chrono::Utc;
 
-    fn record(parent: ThreadId, child: ChildId, status: &str) -> ChildRunRecord {
+    fn record(
+        parent: ThreadId,
+        child: ChildId,
+        status: ark_common::ChildRunStatus,
+    ) -> ChildRunRecord {
         let mut record = ChildRunRecord::queued(child, parent, TurnId::new(), "scan", Utc::now());
-        record.status = status.into();
+        record.status = status;
         record
     }
 
@@ -194,7 +198,11 @@ mod tests {
         let other = store.create_thread("other").await.unwrap();
         let err = store
             .child_store(parent.thread_id)
-            .append(record(other.thread_id, ChildId::new(), "running"))
+            .append(record(
+                other.thread_id,
+                ChildId::new(),
+                ark_common::ChildRunStatus::Running,
+            ))
             .unwrap_err();
         assert_eq!(err.code, ArkErrorCode::ValidationError);
     }

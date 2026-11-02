@@ -10,7 +10,12 @@ use super::*;
 use ark_common::{ChildId, ThreadId, TurnId, Usage};
 use chrono::Utc;
 
-fn record(parent: ThreadId, child: ChildId, status: &str, minutes_ago: i64) -> ChildRunRecord {
+fn record(
+    parent: ThreadId,
+    child: ChildId,
+    status: ark_common::ChildRunStatus,
+    minutes_ago: i64,
+) -> ChildRunRecord {
     let mut record = ChildRunRecord::queued(
         child,
         parent,
@@ -18,7 +23,7 @@ fn record(parent: ThreadId, child: ChildId, status: &str, minutes_ago: i64) -> C
         "scan",
         Utc::now() - chrono::Duration::minutes(minutes_ago),
     );
-    record.status = status.to_string();
+    record.status = status;
     record
 }
 
@@ -61,12 +66,12 @@ fn folding_keeps_the_latest_row_per_child() {
     let parent = ThreadId::new();
     let child = ChildId::new();
     let folded = fold_latest(vec![
-        record(parent, child, child_status::QUEUED, 10),
-        record(parent, child, child_status::RUNNING, 5),
-        record(parent, child, child_status::COMPLETED, 1),
+        record(parent, child, ark_common::ChildRunStatus::Queued, 10),
+        record(parent, child, ark_common::ChildRunStatus::Running, 5),
+        record(parent, child, ark_common::ChildRunStatus::Completed, 1),
     ]);
     assert_eq!(folded.len(), 1);
-    assert_eq!(folded[0].status, child_status::COMPLETED);
+    assert_eq!(folded[0].status, ark_common::ChildRunStatus::Completed);
 }
 
 #[test]
@@ -75,8 +80,8 @@ fn folding_orders_children_newest_first_with_a_stable_tiebreak() {
     let older = ChildId::new();
     let newer = ChildId::new();
     let folded = fold_latest(vec![
-        record(parent, older, child_status::COMPLETED, 30),
-        record(parent, newer, child_status::RUNNING, 1),
+        record(parent, older, ark_common::ChildRunStatus::Completed, 30),
+        record(parent, newer, ark_common::ChildRunStatus::Running, 1),
     ]);
     assert_eq!(folded[0].child_id, newer);
     assert_eq!(folded[1].child_id, older);
@@ -84,8 +89,8 @@ fn folding_orders_children_newest_first_with_a_stable_tiebreak() {
     // Same timestamp: the id decides, so two runs can never swap places between
     // refreshes and make the list flicker.
     let same = Utc::now();
-    let mut a = record(parent, older, child_status::COMPLETED, 0);
-    let mut b = record(parent, newer, child_status::COMPLETED, 0);
+    let mut a = record(parent, older, ark_common::ChildRunStatus::Completed, 0);
+    let mut b = record(parent, newer, ark_common::ChildRunStatus::Completed, 0);
     a.created_at = same;
     b.created_at = same;
     let again = fold_latest(vec![b.clone(), a.clone()]);
@@ -99,15 +104,40 @@ fn folding_orders_children_newest_first_with_a_stable_tiebreak() {
 #[test]
 fn aggregates_count_every_terminal_status() {
     let parent = ThreadId::new();
-    let mut failed = record(parent, ChildId::new(), child_status::FAILED, 5);
+    let mut failed = record(
+        parent,
+        ChildId::new(),
+        ark_common::ChildRunStatus::Failed,
+        5,
+    );
     failed.tool_invocations = Some(2);
-    let mut done = record(parent, ChildId::new(), child_status::COMPLETED, 4);
+    let mut done = record(
+        parent,
+        ChildId::new(),
+        ark_common::ChildRunStatus::Completed,
+        4,
+    );
     done.tool_invocations = Some(3);
     done.usage = Some(Usage::new(10, 5));
     let aggregates = aggregates_of(&[
-        record(parent, ChildId::new(), child_status::QUEUED, 3),
-        record(parent, ChildId::new(), child_status::RUNNING, 2),
-        record(parent, ChildId::new(), child_status::ABORTED, 1),
+        record(
+            parent,
+            ChildId::new(),
+            ark_common::ChildRunStatus::Queued,
+            3,
+        ),
+        record(
+            parent,
+            ChildId::new(),
+            ark_common::ChildRunStatus::Running,
+            2,
+        ),
+        record(
+            parent,
+            ChildId::new(),
+            ark_common::ChildRunStatus::Aborted,
+            1,
+        ),
         failed,
         done,
     ]);
@@ -125,28 +155,21 @@ fn a_child_that_never_reached_a_model_reports_no_tokens() {
     // A queued child has no usage sample. Summing a zero would look like a real
     // measurement of a free run, which is exactly what the design forbids.
     let parent = ThreadId::new();
-    let aggregates = aggregates_of(&[record(parent, ChildId::new(), child_status::QUEUED, 1)]);
+    let aggregates = aggregates_of(&[record(
+        parent,
+        ChildId::new(),
+        ark_common::ChildRunStatus::Queued,
+        1,
+    )]);
     assert_eq!(aggregates.usage.total_tokens, 0);
     assert_eq!(aggregates.usage.cache_hit_rate, None);
-}
-
-#[test]
-fn an_unknown_status_is_counted_nowhere_but_still_counts_its_tools() {
-    // Forward compatibility: a future status must not crash the panel, and its
-    // tool count is still real telemetry.
-    let parent = ThreadId::new();
-    let mut record = record(parent, ChildId::new(), "paused", 1);
-    record.tool_invocations = Some(4);
-    let aggregates = aggregates_of(&[record]);
-    assert_eq!(aggregates.queued + aggregates.running, 0);
-    assert_eq!(aggregates.tool_invocations, 4);
 }
 
 #[test]
 fn a_summary_payload_carries_the_child_identity_and_real_usage() {
     let parent = ThreadId::new();
     let child = ChildId::new();
-    let mut source = record(parent, child, child_status::COMPLETED, 1);
+    let mut source = record(parent, child, ark_common::ChildRunStatus::Completed, 1);
     source.summary = Some("done".into());
     source.tool_invocations = Some(7);
     source.usage = Some(Usage::new(20, 10));
@@ -154,7 +177,7 @@ fn a_summary_payload_carries_the_child_identity_and_real_usage() {
     let summary = summary_of_record(&source);
     assert_eq!(summary.id, child);
     assert_eq!(summary.parent_thread_id, parent);
-    assert_eq!(summary.status, child_status::COMPLETED);
+    assert_eq!(summary.status, ark_common::ChildRunStatus::Completed);
     assert_eq!(summary.summary.as_deref(), Some("done"));
     assert_eq!(summary.tool_invocations, Some(7));
     assert_eq!(summary.resume_count, Some(2));
@@ -167,7 +190,12 @@ fn the_summary_serializes_with_the_workspace_wire_naming() {
     // consumes generated types, so a drift here is a TS compile error too.
     let parent = ThreadId::new();
     let child = ChildId::new();
-    let summary = summary_of_record(&record(parent, child, child_status::COMPLETED, 1));
+    let summary = summary_of_record(&record(
+        parent,
+        child,
+        ark_common::ChildRunStatus::Completed,
+        1,
+    ));
     let json = serde_json::to_value(&summary).unwrap();
     assert!(json.get("parent_thread_id").is_some(), "{json}");
     assert!(json.get("parent_turn_id").is_some(), "{json}");

@@ -223,7 +223,7 @@ pub struct ChildCompletionNotice {
     pub notification_id: String,
     pub child_id: ark_common::ChildId,
     pub label: String,
-    pub status: String,
+    pub status: ark_common::ChildRunStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -534,7 +534,7 @@ pub enum RuntimeEvent {
         timestamp: DateTime<Utc>,
         child_id: ark_common::ChildId,
         label: String,
-        status: String,
+        status: ark_common::ChildRunStatus,
     },
 
     /// A child reached a terminal state. This is a durable parent-thread
@@ -547,7 +547,7 @@ pub enum RuntimeEvent {
         notification_id: String,
         child_id: ark_common::ChildId,
         label: String,
-        status: String,
+        status: ark_common::ChildRunStatus,
         #[serde(skip_serializing_if = "Option::is_none")]
         summary: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -769,7 +769,7 @@ mod tests {
             notification_id: "child:result".to_string(),
             child_id: ark_common::ChildId::new(),
             label: "inspect runtime".to_string(),
-            status: "completed".to_string(),
+            status: ark_common::ChildRunStatus::Completed,
             summary: Some("The runtime is healthy.".to_string()),
             error: None,
             usage: None,

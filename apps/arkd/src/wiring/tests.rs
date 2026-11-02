@@ -106,6 +106,7 @@ fn conversation_history_replays_context_checkpoints_as_system_messages() {
     let checkpoint =
         ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::Notice)
             .with_text("[context checkpoint]\nGoal: preserve state")
+            .with_marker(ark_contract::ItemMarker::ContextCheckpoint)
             .completed();
 
     assert_eq!(
@@ -295,7 +296,7 @@ async fn child_completion_events_are_loaded_as_the_next_turn_system_source() {
                 notification_id: "child:one".to_string(),
                 child_id: ChildId::new(),
                 label: "inspect runtime".to_string(),
-                status: "completed".to_string(),
+                status: ark_common::ChildRunStatus::Completed,
                 summary: Some("The runtime is healthy.".to_string()),
                 error: None,
                 usage: None,
@@ -330,7 +331,7 @@ async fn completed_parent_turn_acknowledges_the_injected_completion_and_skips_it
                 notification_id: "child:one".to_string(),
                 child_id: ChildId::new(),
                 label: "inspect runtime".to_string(),
-                status: "completed".to_string(),
+                status: ark_common::ChildRunStatus::Completed,
                 summary: Some("The runtime is healthy.".to_string()),
                 error: None,
                 usage: None,
@@ -372,7 +373,7 @@ async fn completed_parent_turn_reports_another_bounded_inbox_page() {
                     notification_id: format!("child:{index}"),
                     child_id: ChildId::new(),
                     label: format!("worker {index}"),
-                    status: "completed".to_string(),
+                    status: ark_common::ChildRunStatus::Completed,
                     summary: Some("done".to_string()),
                     error: None,
                     usage: None,
@@ -433,7 +434,7 @@ async fn failed_parent_turn_leaves_the_completion_for_redelivery() {
                 notification_id: "child:one".to_string(),
                 child_id: ChildId::new(),
                 label: "inspect runtime".to_string(),
-                status: "failed".to_string(),
+                status: ark_common::ChildRunStatus::Failed,
                 summary: None,
                 error: Some("child failed".to_string()),
                 usage: None,

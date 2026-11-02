@@ -36,7 +36,7 @@ pub struct ChildRunRecord {
     ///
     /// Kept as a string so an unknown future state degrades to "unknown" in the
     /// UI instead of failing to deserialize the whole run log.
-    pub status: String,
+    pub status: ark_common::ChildRunStatus,
     pub created_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<DateTime<Utc>>,
@@ -82,7 +82,7 @@ impl ChildRunRecord {
             parent_thread_id,
             parent_turn_id,
             label: label.into(),
-            status: "queued".to_string(),
+            status: ark_common::ChildRunStatus::Queued,
             created_at,
             ended_at: None,
             model: None,
@@ -99,7 +99,11 @@ impl ChildRunRecord {
 
     /// True while the child still holds a concurrency slot.
     pub fn is_active(&self) -> bool {
-        self.ended_at.is_none() && (self.status == "queued" || self.status == "running")
+        self.ended_at.is_none()
+            && matches!(
+                self.status,
+                ark_common::ChildRunStatus::Queued | ark_common::ChildRunStatus::Running
+            )
     }
 }
 
@@ -245,9 +249,13 @@ pub trait SessionStore: Send + Sync {
 mod tests {
     use super::*;
 
-    fn record(parent: ThreadId, child: ChildId, status: &str) -> ChildRunRecord {
+    fn record(
+        parent: ThreadId,
+        child: ChildId,
+        status: ark_common::ChildRunStatus,
+    ) -> ChildRunRecord {
         let mut record = ChildRunRecord::queued(child, parent, TurnId::new(), "scan", Utc::now());
-        record.status = status.to_string();
+        record.status = status;
         record
     }
 
@@ -258,13 +266,17 @@ mod tests {
         let parent = ThreadId::new();
         let child = ChildId::new();
         let folded = latest_child_runs(vec![
-            record(parent, child, "queued"),
-            record(parent, child, "running"),
-            record(parent, child, "completed"),
+            record(parent, child, ark_common::ChildRunStatus::Queued),
+            record(parent, child, ark_common::ChildRunStatus::Running),
+            record(parent, child, ark_common::ChildRunStatus::Completed),
         ]);
         assert_eq!(folded.len(), 1);
         assert_eq!(folded[0].child_id, child);
-        assert_eq!(folded[0].status, "completed", "the newest row wins");
+        assert_eq!(
+            folded[0].status,
+            ark_common::ChildRunStatus::Completed,
+            "the newest row wins"
+        );
     }
 
     #[test]
@@ -273,15 +285,19 @@ mod tests {
         // second one, so the fold must not report the retry as a duplicate.
         let parent = ThreadId::new();
         let child = ChildId::new();
-        let mut resumed = record(parent, child, "completed");
+        let mut resumed = record(parent, child, ark_common::ChildRunStatus::Completed);
         resumed.resume_count = Some(1);
         // The rows that follow a resume are cloned from the resumed record, so
         // the count survives to the row that actually wins the fold.
-        let mut running = record(parent, child, "running");
+        let mut running = record(parent, child, ark_common::ChildRunStatus::Running);
         running.resume_count = Some(1);
-        let folded = latest_child_runs(vec![record(parent, child, "failed"), resumed, running]);
+        let folded = latest_child_runs(vec![
+            record(parent, child, ark_common::ChildRunStatus::Failed),
+            resumed,
+            running,
+        ]);
         assert_eq!(folded.len(), 1);
-        assert_eq!(folded[0].status, "running");
+        assert_eq!(folded[0].status, ark_common::ChildRunStatus::Running);
         assert_eq!(folded[0].resume_count, Some(1));
     }
 
@@ -291,9 +307,9 @@ mod tests {
         let first = ChildId::new();
         let second = ChildId::new();
         let folded = latest_child_runs(vec![
-            record(parent, first, "queued"),
-            record(parent, second, "queued"),
-            record(parent, first, "completed"),
+            record(parent, first, ark_common::ChildRunStatus::Queued),
+            record(parent, second, ark_common::ChildRunStatus::Queued),
+            record(parent, first, ark_common::ChildRunStatus::Completed),
         ]);
         assert_eq!(
             folded.iter().map(|r| r.child_id).collect::<Vec<_>>(),

@@ -316,9 +316,13 @@ mod tests {
     use ark_common::TurnId;
     use chrono::Utc;
 
-    fn record(child: ChildId, parent: ThreadId, status: &str) -> ChildRunRecord {
+    fn record(
+        child: ChildId,
+        parent: ThreadId,
+        status: ark_common::ChildRunStatus,
+    ) -> ChildRunRecord {
         let mut record = ChildRunRecord::queued(child, parent, TurnId::new(), "scan", Utc::now());
-        record.status = status.into();
+        record.status = status;
         record
     }
 
@@ -334,8 +338,18 @@ mod tests {
         let paths = parent_paths(&dir);
         let parent = ThreadId::new();
         let child = ChildId::new();
-        append_child_run_blocking(&paths, &record(child, parent, "running"), true).unwrap();
-        append_child_run_blocking(&paths, &record(child, parent, "completed"), true).unwrap();
+        append_child_run_blocking(
+            &paths,
+            &record(child, parent, ark_common::ChildRunStatus::Running),
+            true,
+        )
+        .unwrap();
+        append_child_run_blocking(
+            &paths,
+            &record(child, parent, ark_common::ChildRunStatus::Completed),
+            true,
+        )
+        .unwrap();
 
         // Corrupt the cache deliberately: the log still wins.
         std::fs::write(paths.children_index(), b"{\"children\":[]}").unwrap();
@@ -343,7 +357,7 @@ mod tests {
         let entries = sync_child_index_blocking(&paths, parent, &sink).unwrap();
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].status, "completed");
+        assert_eq!(entries[0].status, ark_common::ChildRunStatus::Completed);
         assert!(sink.has(DiagnosticKind::IndexRepaired));
         let cache = read_child_index_blocking(&paths).unwrap();
         assert_eq!(cache.children.len(), 1);
@@ -354,8 +368,12 @@ mod tests {
         let dir = TempDir::new("child-no-cache");
         let paths = parent_paths(&dir);
         let parent = ThreadId::new();
-        append_child_run_blocking(&paths, &record(ChildId::new(), parent, "running"), true)
-            .unwrap();
+        append_child_run_blocking(
+            &paths,
+            &record(ChildId::new(), parent, ark_common::ChildRunStatus::Running),
+            true,
+        )
+        .unwrap();
         let sink = MemoryDiagnostics::new();
         sync_child_index_blocking(&paths, parent, &sink).unwrap();
         assert!(!sink.has(DiagnosticKind::IndexRepaired));
@@ -367,13 +385,22 @@ mod tests {
         let dir = TempDir::new("child-active");
         let paths = parent_paths(&dir);
         let parent = ThreadId::new();
-        append_child_run_blocking(&paths, &record(ChildId::new(), parent, "running"), false)
-            .unwrap();
+        append_child_run_blocking(
+            &paths,
+            &record(ChildId::new(), parent, ark_common::ChildRunStatus::Running),
+            false,
+        )
+        .unwrap();
         let done = ChildId::new();
-        append_child_run_blocking(&paths, &record(done, parent, "completed"), false).unwrap();
+        append_child_run_blocking(
+            &paths,
+            &record(done, parent, ark_common::ChildRunStatus::Completed),
+            false,
+        )
+        .unwrap();
         let active = active_child_runs_blocking(&paths);
         assert_eq!(active.len(), 1);
-        assert_eq!(active[0].status, "running");
+        assert_eq!(active[0].status, ark_common::ChildRunStatus::Running);
         assert_eq!(child_count_blocking(&paths), 2);
     }
 
@@ -382,8 +409,16 @@ mod tests {
         let dir = TempDir::new("child-tombstone");
         let paths = parent_paths(&dir);
         let parent = ThreadId::new();
-        append_child_run_blocking(&paths, &record(ChildId::new(), parent, "completed"), false)
-            .unwrap();
+        append_child_run_blocking(
+            &paths,
+            &record(
+                ChildId::new(),
+                parent,
+                ark_common::ChildRunStatus::Completed,
+            ),
+            false,
+        )
+        .unwrap();
 
         let tombstone = begin_children_delete_blocking(&paths).unwrap();
         assert!(is_deleting_dir(
@@ -421,7 +456,12 @@ mod tests {
         let paths = parent_paths(&dir);
         let parent = ThreadId::new();
         let known = ChildId::new();
-        append_child_run_blocking(&paths, &record(known, parent, "completed"), false).unwrap();
+        append_child_run_blocking(
+            &paths,
+            &record(known, parent, ark_common::ChildRunStatus::Completed),
+            false,
+        )
+        .unwrap();
         ensure_dir(&paths.children_dir().join(known.to_string())).unwrap();
         let orphan = ChildId::new();
         ensure_dir(&paths.children_dir().join(orphan.to_string())).unwrap();
@@ -437,7 +477,12 @@ mod tests {
         let paths = parent_paths(&dir);
         let parent = ThreadId::new();
         let child = ChildId::new();
-        append_child_run_blocking(&paths, &record(child, parent, "running"), false).unwrap();
+        append_child_run_blocking(
+            &paths,
+            &record(child, parent, ark_common::ChildRunStatus::Running),
+            false,
+        )
+        .unwrap();
 
         let mut locator = ChildLocator::default();
         assert!(absorb_parent_blocking(&mut locator, parent, &paths).is_empty());
@@ -454,7 +499,12 @@ mod tests {
         let paths = parent_paths(&dir);
         let parent = ThreadId::new();
         let child = ChildId::new();
-        append_child_run_blocking(&paths, &record(child, parent, "running"), false).unwrap();
+        append_child_run_blocking(
+            &paths,
+            &record(child, parent, ark_common::ChildRunStatus::Running),
+            false,
+        )
+        .unwrap();
         let mut raw = std::fs::read_to_string(paths.children_runs()).unwrap();
         raw.push_str("{\"child_id\": \n");
         std::fs::write(paths.children_runs(), raw).unwrap();
@@ -471,7 +521,12 @@ mod tests {
         let paths = parent_paths(&dir);
         let parent = ThreadId::new();
         let first = ChildId::new();
-        append_child_run_blocking(&paths, &record(first, parent, "running"), false).unwrap();
+        append_child_run_blocking(
+            &paths,
+            &record(first, parent, ark_common::ChildRunStatus::Running),
+            false,
+        )
+        .unwrap();
 
         let torn = "{\"child_id\": ";
         let mut raw = std::fs::read_to_string(paths.children_runs()).unwrap();
@@ -479,7 +534,12 @@ mod tests {
         std::fs::write(paths.children_runs(), raw).unwrap();
 
         let second = ChildId::new();
-        append_child_run_blocking(&paths, &record(second, parent, "queued"), false).unwrap();
+        append_child_run_blocking(
+            &paths,
+            &record(second, parent, ark_common::ChildRunStatus::Queued),
+            false,
+        )
+        .unwrap();
 
         let repaired = std::fs::read_to_string(paths.children_runs()).unwrap();
         assert!(
@@ -490,7 +550,7 @@ mod tests {
         assert_eq!(records.len(), 2, "both whole records must survive");
         assert_eq!(records[0].child_id, first);
         assert_eq!(records[1].child_id, second);
-        assert_eq!(records[1].status, "queued");
+        assert_eq!(records[1].status, ark_common::ChildRunStatus::Queued);
     }
 
     #[test]
@@ -501,8 +561,12 @@ mod tests {
         let dir = TempDir::new("child-terminated-garbage");
         let paths = parent_paths(&dir);
         let parent = ThreadId::new();
-        append_child_run_blocking(&paths, &record(ChildId::new(), parent, "running"), false)
-            .unwrap();
+        append_child_run_blocking(
+            &paths,
+            &record(ChildId::new(), parent, ark_common::ChildRunStatus::Running),
+            false,
+        )
+        .unwrap();
         let mut raw = std::fs::read_to_string(paths.children_runs()).unwrap();
         raw.push_str("{\"child_id\": \n");
         std::fs::write(paths.children_runs(), raw).unwrap();
@@ -523,7 +587,12 @@ mod tests {
         let paths = parent_paths(&dir);
         let parent = ThreadId::new();
         let child = ChildId::new();
-        append_child_run_blocking(&paths, &record(child, parent, "queued"), false).unwrap();
+        append_child_run_blocking(
+            &paths,
+            &record(child, parent, ark_common::ChildRunStatus::Queued),
+            false,
+        )
+        .unwrap();
         let before = std::fs::read_to_string(paths.children_runs()).unwrap();
 
         let removed = repair_child_runs_tail_blocking(&paths).unwrap();

@@ -12,20 +12,13 @@ use std::collections::BTreeMap;
 
 /// Statuses that mean "the child still owns work". Anything else is terminal.
 ///
-/// These are the **same** strings `ark_ports::child_status` writes and
-/// `ChildRunRecord::is_active` reads. Keeping a hand-typed list here drifted from
-/// that source once already: it named `pending`/`streaming`/`started`, none of
-/// which any writer produces, and omitted `queued`, so a queued child failed to
-/// block deleting its parent thread (P1-1).
-pub const ACTIVE_STATUSES: [&str; 2] = [
-    ark_ports::child_status::QUEUED,
-    ark_ports::child_status::RUNNING,
-];
-
-/// Whether a `ChildRunRecord.status` blocks deleting the parent thread.
-pub fn is_active_status(status: &str) -> bool {
-    let normalized = status.trim().to_ascii_lowercase();
-    ACTIVE_STATUSES.contains(&normalized.as_str())
+/// Whether a run state blocks deleting the parent thread: anything that still
+/// holds (or waits for) a concurrency slot.
+pub fn is_active_status(status: ark_common::ChildRunStatus) -> bool {
+    matches!(
+        status,
+        ark_common::ChildRunStatus::Queued | ark_common::ChildRunStatus::Running
+    )
 }
 
 /// One row of `children/index.json` (derived from the run log).
@@ -35,7 +28,7 @@ pub struct ChildIndexEntry {
     pub parent_thread_id: ThreadId,
     pub parent_turn_id: TurnId,
     pub label: String,
-    pub status: String,
+    pub status: ark_common::ChildRunStatus,
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<DateTime<Utc>>,
@@ -54,7 +47,7 @@ impl ChildIndexEntry {
             parent_thread_id: record.parent_thread_id,
             parent_turn_id: record.parent_turn_id,
             label: record.label.clone(),
-            status: record.status.clone(),
+            status: record.status,
             created_at: record.created_at,
             ended_at: record.ended_at,
             model: record.model.clone(),
@@ -64,7 +57,7 @@ impl ChildIndexEntry {
     }
 
     pub fn is_active(&self) -> bool {
-        is_active_status(&self.status)
+        is_active_status(self.status)
     }
 }
 
@@ -200,18 +193,21 @@ impl ChildLocator {
 mod tests {
     use super::*;
 
-    fn record(child: ChildId, parent: ThreadId, status: &str) -> ChildRunRecord {
+    fn record(
+        child: ChildId,
+        parent: ThreadId,
+        status: ark_common::ChildRunStatus,
+    ) -> ChildRunRecord {
         let mut record = ChildRunRecord::queued(child, parent, TurnId::new(), "scan", Utc::now());
-        record.status = status.into();
+        record.status = status;
         record
     }
 
     #[test]
-    fn active_statuses_are_recognized_case_insensitively() {
-        assert!(is_active_status("running"));
-        assert!(is_active_status(" Running "));
-        assert!(!is_active_status("completed"));
-        assert!(!is_active_status("failed"));
+    fn only_slot_holding_states_block_deletion() {
+        assert!(is_active_status(ark_common::ChildRunStatus::Running));
+        assert!(!is_active_status(ark_common::ChildRunStatus::Completed));
+        assert!(!is_active_status(ark_common::ChildRunStatus::Failed));
     }
 
     #[test]
@@ -219,10 +215,10 @@ mod tests {
         // `queued` means "accepted, not started yet". Treating it as terminal
         // would let the parent directory be deleted while the run still holds a
         // reservation, and the child would then write into nothing (P1-1).
-        assert!(is_active_status("queued"));
+        assert!(is_active_status(ark_common::ChildRunStatus::Queued));
         let parent = ThreadId::new();
         let child = ChildId::new();
-        let queued = record(child, parent, "queued");
+        let queued = record(child, parent, ark_common::ChildRunStatus::Queued);
         assert!(queued.is_active());
         let entry = ChildIndexEntry::from_record(&queued);
         assert!(entry.is_active());
@@ -233,13 +229,13 @@ mod tests {
         // Two independent liveness rules existed (this one and
         // `ChildRunRecord::is_active`); they must not be able to drift again.
         let parent = ThreadId::new();
-        for status in ["queued", "running", "completed", "failed", "aborted"] {
+        for status in ark_common::ChildRunStatus::ALL {
             let record = record(ChildId::new(), parent, status);
             let entry = ChildIndexEntry::from_record(&record);
             assert_eq!(
                 entry.is_active(),
                 record.is_active(),
-                "status `{status}` disagrees between index and record"
+                "status `{status:?}` disagrees between index and record"
             );
         }
     }
@@ -250,13 +246,13 @@ mod tests {
         let a = ChildId::new();
         let b = ChildId::new();
         let entries = fold_child_runs(vec![
-            record(a, parent, "running"),
-            record(b, parent, "running"),
-            record(a, parent, "completed"),
+            record(a, parent, ark_common::ChildRunStatus::Running),
+            record(b, parent, ark_common::ChildRunStatus::Running),
+            record(a, parent, ark_common::ChildRunStatus::Completed),
         ]);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].child_id, a);
-        assert_eq!(entries[0].status, "completed");
+        assert_eq!(entries[0].status, ark_common::ChildRunStatus::Completed);
         assert!(!entries[0].is_active());
         assert_eq!(entries[1].child_id, b);
     }
@@ -266,8 +262,8 @@ mod tests {
         let parent = ThreadId::new();
         let child = ChildId::new();
         let index = index_from_runs(vec![
-            record(child, parent, "running"),
-            record(child, parent, "completed"),
+            record(child, parent, ark_common::ChildRunStatus::Running),
+            record(child, parent, ark_common::ChildRunStatus::Completed),
         ]);
         assert_eq!(index.version, ChildIndexFile::VERSION);
         assert_eq!(index.children.len(), 1);
@@ -279,7 +275,7 @@ mod tests {
         let parent = ThreadId::new();
         let child = ChildId::new();
         let mut locator = ChildLocator::default();
-        let records = vec![record(child, parent, "running")];
+        let records = vec![record(child, parent, ark_common::ChildRunStatus::Running)];
 
         let first = locator.absorb(parent, &records, |id| {
             format!("threads/{parent}/children/{id}")

@@ -168,7 +168,8 @@ impl CompletionInbox {
             let detail = ark_common::text::truncate_utf8(detail, MAX_COMPLETION_DETAIL_BYTES);
             notification_ids.push(notification_id.clone());
             lines.push(format!(
-                "- notification {notification_id}; child {label}; status {status}: {detail}"
+                "- notification {notification_id}; child {label}; status {}: {detail}",
+                status.as_str()
             ));
         }
 
@@ -220,7 +221,7 @@ mod delivery_bound_tests {
             notification_id: id.to_string(),
             child_id: ark_common::ChildId::new(),
             label: "w".into(),
-            status: "completed".into(),
+            status: ark_common::ChildRunStatus::Completed,
             summary: Some("done".into()),
             error: None,
             usage: None,

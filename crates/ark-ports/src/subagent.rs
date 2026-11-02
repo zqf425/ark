@@ -14,16 +14,6 @@ use ark_common::{ChildId, Result, ThreadId, TurnId, Usage};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-/// Lifecycle of one child run. Mirrors the strings stored in
-/// `children/runs.jsonl`.
-pub mod status {
-    pub const QUEUED: &str = "queued";
-    pub const RUNNING: &str = "running";
-    pub const COMPLETED: &str = "completed";
-    pub const FAILED: &str = "failed";
-    pub const ABORTED: &str = "aborted";
-}
-
 /// Why a non-completed run stopped.
 pub mod stop_reason {
     pub const USER: &str = "user";
@@ -67,8 +57,7 @@ pub struct SubagentRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SubagentOutcome {
     pub child_id: ChildId,
-    /// One of [`status`].
-    pub status: String,
+    pub status: ark_common::ChildRunStatus,
     /// The child's final answer. This is what the parent model reads: not the
     /// child's whole event log.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -88,7 +77,10 @@ pub struct SubagentOutcome {
 impl SubagentOutcome {
     /// True when the child produced a terminal answer the parent can use.
     pub fn is_usable(&self) -> bool {
-        self.status == status::COMPLETED || self.status == status::ABORTED
+        matches!(
+            self.status,
+            ark_common::ChildRunStatus::Completed | ark_common::ChildRunStatus::Aborted
+        )
     }
 }
 

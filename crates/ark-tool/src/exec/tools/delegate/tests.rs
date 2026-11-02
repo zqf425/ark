@@ -126,7 +126,7 @@ fn ctx() -> ToolContext {
 fn completed(summary: &str) -> SubagentOutcome {
     SubagentOutcome {
         child_id: ChildId::new(),
-        status: ark_ports::child_status::COMPLETED.to_string(),
+        status: ark_common::ChildRunStatus::Completed,
         summary: Some(summary.to_string()),
         error: None,
         usage: Usage::default(),
@@ -343,7 +343,7 @@ async fn an_empty_summary_is_not_silently_rendered_as_success_content() {
 #[tokio::test]
 async fn a_failed_child_reports_its_error_text_to_the_parent() {
     let mut outcome = completed("");
-    outcome.status = ark_ports::child_status::FAILED.to_string();
+    outcome.status = ark_common::ChildRunStatus::Failed;
     outcome.summary = None;
     outcome.error = Some("model refused".to_string());
     let runner = FakeRunner::new(true, outcome);
@@ -361,7 +361,7 @@ async fn a_failed_child_reports_its_error_text_to_the_parent() {
 #[tokio::test]
 async fn an_aborted_child_still_returns_what_it_produced() {
     let mut outcome = completed("partial findings");
-    outcome.status = ark_ports::child_status::ABORTED.to_string();
+    outcome.status = ark_common::ChildRunStatus::Aborted;
     let runner = FakeRunner::new(true, outcome);
     let tool = DelegateTaskTool::new(runner);
 

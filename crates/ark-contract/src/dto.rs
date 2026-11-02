@@ -575,8 +575,7 @@ pub struct ChildRunSummary {
     pub parent_thread_id: ThreadId,
     pub parent_turn_id: TurnId,
     pub label: String,
-    /// `queued` | `running` | `completed` | `failed` | `aborted`.
-    pub status: String,
+    pub status: ark_common::ChildRunStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -654,9 +653,9 @@ pub struct ResumeChildRequest {
 #[ts(optional_fields)]
 pub struct ChildRunActionResult {
     pub id: ark_common::ChildId,
-    /// Echo of the new state: `aborted`, `running`, ...
+    /// Echo of the new state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
+    pub status: Option<ark_common::ChildRunStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ok: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -689,5 +688,4 @@ mod tests {
         assert_eq!(payload.get("tool_invocations"), Some(&serde_json::json!(3)));
         assert!(payload.get("toolInvocations").is_none());
     }
-
 }
