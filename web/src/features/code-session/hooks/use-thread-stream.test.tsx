@@ -11,15 +11,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ThreadDetail, ThreadItem } from '../../../shared/contracts'
 import { installBrowserStubs, mountWithProviders, settle, type ReactHarness } from '../../../shared/testing/react-harness'
-import { getThread } from '../api/threads-api'
+import { getThread, getThreadUsage } from '../api/threads-api'
 import { subscribeThreadEvents } from '../api/events-api'
 import { useCodeSessionStore } from '../state/store'
 import { useThreadStream } from './use-thread-stream'
 
-vi.mock('../api/threads-api', () => ({ getThread: vi.fn() }))
+vi.mock('../api/threads-api', () => ({ getThread: vi.fn(), getThreadUsage: vi.fn() }))
 vi.mock('../api/events-api', () => ({ subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined)) }))
 
 const getThreadMock = vi.mocked(getThread)
+const getThreadUsageMock = vi.mocked(getThreadUsage)
 const subscribeMock = vi.mocked(subscribeThreadEvents)
 
 const THREAD_A = '00000000-0000-0000-0000-00000000000a'
@@ -68,6 +69,9 @@ describe('useThreadStream thread ownership', () => {
   beforeEach(() => {
     installBrowserStubs()
     getThreadMock.mockReset()
+    getThreadUsageMock.mockReset()
+    // The usage seed is best effort; tests only assert the stream projection.
+    getThreadUsageMock.mockReturnValue(new Promise<never>(() => undefined))
     subscribeMock.mockClear()
     useCodeSessionStore.getState().resetItems()
   })
@@ -151,5 +155,56 @@ describe('useThreadStream thread ownership', () => {
     expect(state.lastSeq).toBe(9)
     expect(state.itemOrder).toHaveLength(1)
     expect(state.itemsById['00000000-0000-0000-0000-0000000000i2']?.text).toBe('thread B message')
+  })
+
+  it('seeds the usage aggregate after the detail load', async () => {
+    getThreadMock.mockImplementation(() => Promise.resolve(detail(THREAD_A, 41, [item({})])))
+    getThreadUsageMock.mockResolvedValue({
+      thread_id: THREAD_A,
+      turns: 1,
+      samples: 2,
+      prompt_tokens: 100,
+      completion_tokens: 20,
+      total_tokens: 120
+    })
+    harness = await mountWithProviders(<Probe threadId={THREAD_A} />)
+    await settle()
+
+    const usage = useCodeSessionStore.getState().usage
+    expect(usage?.totalTokens).toBe(120)
+    expect(usage?.samples).toBe(2)
+  })
+
+  it('leaves the usage channel empty when the usage seed fails', async () => {
+    getThreadMock.mockImplementation(() => Promise.resolve(detail(THREAD_A, 41, [item({})])))
+    getThreadUsageMock.mockRejectedValue(new Error('usage unavailable'))
+    harness = await mountWithProviders(<Probe threadId={THREAD_A} />)
+    await settle()
+
+    expect(useCodeSessionStore.getState().usage).toBeNull()
+    // The stream itself must be unaffected by the failed seed.
+    expect(useCodeSessionStore.getState().itemOrder).toHaveLength(1)
+  })
+
+  it('re-seeds usage per thread without leaking values across switches', async () => {
+    getThreadMock.mockImplementation((threadId) => Promise.resolve(
+      threadId === THREAD_A
+        ? detail(THREAD_A, 41, [item({})])
+        : detail(THREAD_B, 9, [])
+    ))
+    getThreadUsageMock.mockImplementation((threadId) => Promise.resolve(
+      threadId === THREAD_A
+        ? { thread_id: THREAD_A, turns: 1, samples: 2, prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 }
+        : { thread_id: THREAD_B, turns: 1, samples: 1, prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 }
+    ))
+
+    harness = await mountWithProviders(<Probe threadId={THREAD_A} />)
+    await settle()
+    expect(useCodeSessionStore.getState().usage?.totalTokens).toBe(120)
+
+    await harness.render(<Probe threadId={THREAD_B} />)
+    await settle()
+    // B's own aggregate, never A's leftover.
+    expect(useCodeSessionStore.getState().usage?.totalTokens).toBe(7)
   })
 })

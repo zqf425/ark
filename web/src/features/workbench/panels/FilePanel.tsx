@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { describeError } from '../../../shared/api/error-describe'
 import { translateNow } from '../../../shared/i18n/current'
 import type { FilePreview } from '../../../shared/contracts'
-import { EmptyState } from '../../../shared/ui'
+import { EmptyState, highlightSource } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../../code-session/state/store'
 import { getFilePreview } from '../api/workbench-api'
@@ -50,5 +50,15 @@ export function FilePanel(): JSX.Element {
     )
   }
   if (!file) return <p className="ark-panel__hint">{t('workbench.filePreviewLoading')}</p>
-  return <section className="ark-panel"><header className="ark-panel__head"><h2>{file.path}</h2><span>seq {file.source_seq}</span></header><pre className="ark-panel__code">{file.content}</pre></section>
+  return (
+    <section className="ark-panel">
+      <header className="ark-panel__head">
+        <h2>{file.path}</h2>
+        <span>seq {file.source_seq}</span>
+      </header>
+      <pre className="ark-panel__code ark-codehl">
+        <code className="hljs" dangerouslySetInnerHTML={{ __html: highlightSource(file.content, file.path) }} />
+      </pre>
+    </section>
+  )
 }

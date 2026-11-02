@@ -137,6 +137,8 @@ impl WorkspaceInspector {
         attach_patch(
             &canonical,
             &[
+                "-c",
+                "core.quotePath=false",
                 "diff",
                 "--cached",
                 "--no-ext-diff",
@@ -150,7 +152,14 @@ impl WorkspaceInspector {
         let mut unstaged = std::mem::take(&mut diff.unstaged);
         attach_patch(
             &canonical,
-            &["diff", "--no-ext-diff", "--no-textconv", "--no-color"],
+            &[
+                "-c",
+                "core.quotePath=false",
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-color",
+            ],
             &mut unstaged,
             &mut diff,
         );
@@ -264,14 +273,211 @@ fn attach_patch(
     } else {
         (output, false)
     };
-    diff.patch_bytes += patch.len() as u64;
     diff.truncated |= truncated;
-    let binary = patch.contains("Binary files ") || patch.contains("GIT binary patch");
-    for file in files {
-        file.binary = binary;
-        file.patch = (!binary).then(|| patch.clone());
+    // Each file row must carry only its own `diff --git` segment: a renderer
+    // expands a row to show that file's changes, so handing every row the whole
+    // group diff would repeat the other files' edits under each path.
+    let segments = split_patch_segments(&patch);
+    let mut assigned_bytes = 0usize;
+    for file in files.iter_mut() {
+        // The byte cap truncates the group output, not a single segment, so a
+        // missing/short segment for one row still means "output was cut".
         file.truncated = truncated;
+        let Some(segment) = segments.iter().find(|segment| segment.path == file.path) else {
+            continue;
+        };
+        let binary =
+            segment.text.contains("Binary files ") || segment.text.contains("GIT binary patch");
+        file.binary = binary;
+        file.patch = (!binary).then(|| segment.text.clone());
+        // Only assigned segments are kept, so the byte counter reports the
+        // payload actually shipped to the renderer, not the raw git output.
+        assigned_bytes += segment.text.len();
     }
+    diff.patch_bytes += assigned_bytes as u64;
+}
+
+/// A per-file slice of a group `git diff`, keyed by the path its headers name.
+struct PatchSegment {
+    path: String,
+    text: String,
+}
+
+/// Split group `git diff` output into per-file segments.
+///
+/// Boundaries are lines *starting* with `diff --git ` (a content line can
+/// contain that substring mid-hunk). The key path prefers `+++ b/<path>`
+/// (every content change), then `--- a/<path>` (deletions, `+++` is
+/// `/dev/null`), then the b-side of the `diff --git a/X b/Y` header itself —
+/// that last fallback is what attributes binary-only segments, which carry no
+/// `---`/`+++` pair at all. The caller runs git with `core.quotePath=false`,
+/// so non-ASCII paths arrive raw; `unquote_path` only handles the c-style
+/// quoting git still applies to control characters and embedded quotes.
+fn split_patch_segments(patch: &str) -> Vec<PatchSegment> {
+    let lines: Vec<&str> = patch.split_inclusive('\n').collect();
+    let mut bounds: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.starts_with("diff --git "))
+        .map(|(idx, _)| idx)
+        .collect();
+    bounds.push(lines.len());
+
+    let mut segments = Vec::new();
+    for window in bounds.windows(2) {
+        let (start, end) = (window[0], window[1]);
+        if start == end {
+            continue;
+        }
+        let text = lines[start..end].concat();
+        if let Some(path) = segment_path(&lines[start..end]) {
+            segments.push(PatchSegment { path, text });
+        }
+    }
+    segments
+}
+
+/// Attribute one segment to a file path, preferring the most specific header.
+fn segment_path(segment: &[&str]) -> Option<String> {
+    let mut fallback: Option<String> = None;
+    for line in segment {
+        let line = line.trim_end();
+        if let Some(path) = header_path(line, "+++ b/") {
+            return Some(path);
+        }
+        if fallback.is_none() {
+            if let Some(path) = header_path(line, "rename to ") {
+                // A pure rename (100% similarity) has no `---`/`+++` pair, and
+                // the `diff --git` header is ambiguous when a path contains
+                // ` b/`; `rename to` names the new path unambiguously.
+                fallback = Some(path);
+            } else if let Some(path) = header_path(line, "--- a/") {
+                fallback = Some(path);
+            } else if let Some(path) = diff_git_header_path(line) {
+                fallback = Some(path);
+            }
+        }
+    }
+    fallback
+}
+
+/// Extract the path from a `--- a/x` / `+++ b/x` / `rename to x` header.
+///
+/// Handles both the raw form and the c-quoted form git still uses when the
+/// path itself contains quotes (`+++ "b/name\""`).
+fn header_path(line: &str, marker: &str) -> Option<String> {
+    let body = line.strip_prefix(marker)?;
+    if let Some(raw) = body.strip_prefix("b/").or_else(|| body.strip_prefix("a/")) {
+        return Some(unquote_path(raw));
+    }
+    let quoted = body.strip_prefix('"')?;
+    let end = quoted.rfind('"')?;
+    let inner = quoted[..end]
+        .strip_prefix("b/")
+        .or_else(|| quoted[..end].strip_prefix("a/"))?;
+    Some(unescape_c_style(inner))
+}
+
+/// Path from a `diff --git a/<old> b/<new>` header, in raw or quoted form.
+///
+/// For identical paths pick the reading where both sides match (spaces in a
+/// path make the line ambiguous); renames fall back to the b-side. This is
+/// the only header binary-only segments carry, so it is what attributes them.
+fn diff_git_header_path(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("diff --git ")?;
+    if let Some(raw) = rest.strip_prefix("a/") {
+        let mut search_from = 0;
+        while let Some(offset) = raw[search_from..].find(" b/") {
+            let at = search_from + offset;
+            let (old, new) = (&raw[..at], &raw[at + 3..]);
+            if old == new {
+                return Some(unquote_path(old));
+            }
+            search_from = at + 1;
+        }
+        let at = raw.rfind(" b/")?;
+        return Some(unquote_path(&raw[at + 3..]));
+    }
+    let quoted = rest.strip_prefix('"')?;
+    let close = unescaped_quote(quoted)?;
+    let old = &quoted[..close];
+    let new_side = quoted[close + 1..].trim_start();
+    let new_side = new_side.strip_prefix('"').unwrap_or(new_side);
+    let new_side = new_side.strip_prefix("b/").unwrap_or(new_side);
+    let new_side = new_side.strip_suffix('"').unwrap_or(new_side);
+    if old == new_side {
+        return Some(unescape_c_style(old));
+    }
+    Some(unescape_c_style(new_side))
+}
+
+/// First `"` that actually closes a quoted git path: escaped characters
+/// (`\"`, `\\`) are skipped, so an embedded `\"` cannot end the scan early.
+fn unescaped_quote(quoted: &str) -> Option<usize> {
+    let bytes = quoted.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index += 2,
+            b'"' => return Some(index),
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+/// Git still c-quotes control characters and embedded quotes in diff headers
+/// even with `core.quotePath=false`; strip the wrapper and decode the escapes.
+fn unquote_path(path: &str) -> String {
+    let trimmed = path.trim_end();
+    match trimmed
+        .strip_prefix('"')
+        .and_then(|inner| inner.strip_suffix('"'))
+    {
+        Some(inner) => unescape_c_style(inner),
+        None => trimmed.to_string(),
+    }
+}
+
+/// Decode the c-style escapes git uses inside quoted paths (`\"`, `\\`,
+/// `\n`/`\t`/`\r` and `\NNN` octal bytes).
+fn unescape_c_style(quoted: &str) -> String {
+    let mut out = String::with_capacity(quoted.len());
+    let mut chars = quoted.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('"') => out.push('"'),
+            Some('\\') => out.push('\\'),
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some(first) if ('0'..='7').contains(&first) => {
+                let mut value = first.to_digit(8).unwrap_or(0);
+                for _ in 0..2 {
+                    match chars.peek().and_then(|next| next.to_digit(8)) {
+                        Some(digit) if value * 8 + digit <= u8::MAX as u32 => {
+                            value = value * 8 + digit;
+                            chars.next();
+                        }
+                        _ => break,
+                    }
+                }
+                // With `core.quotePath=false` octal escapes only appear for
+                // control characters and quotes, never for UTF-8 sequences.
+                out.push(char::from_u32(value).unwrap_or('\u{FFFD}'));
+            }
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 /// `git rev-parse --is-inside-work-tree` prints exactly `true` inside a work

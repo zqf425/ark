@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { RuntimeEvent } from '../../../shared/contracts'
 import { childCompletionStatusKey } from '../child-completion-status'
 import { applyEvent, emptyItemsState, seedFromItems } from './items-reducer'
+import { seedUsage } from './usage'
 
 function childCompleted(seq: number): RuntimeEvent {
   return {
@@ -290,5 +291,99 @@ describe('items reducer reference stability', () => {
     expect(completed.itemsById[ITEM_B]?.text).toBe('a')
     expect(completed.itemsById[ITEM_B]?.status).toBe('completed')
     expect(completed.itemsById[ITEM_A]).toBe(start.itemsById[ITEM_A])
+  })
+})
+
+describe('items reducer usage and compaction', () => {
+  const THREAD_ID = '00000000-0000-0000-0000-000000000001'
+  const TURN_ID = '00000000-0000-0000-0000-000000000003'
+
+  function usageEvent(seq: number, promptTokens: number, completionTokens: number, costUsd?: number): RuntimeEvent {
+    return {
+      kind: 'usage',
+      seq,
+      thread_id: THREAD_ID,
+      turn_id: TURN_ID,
+      timestamp: '2026-11-02T00:00:00Z',
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: promptTokens + completionTokens,
+        ...(costUsd != null ? { cost_usd: costUsd } : {})
+      }
+    }
+  }
+
+  it('按事件累加用量并记录最近一次 prompt 规模', () => {
+    let state = emptyItemsState()
+    state = applyEvent(state, usageEvent(1, 1000, 200))
+    // No sample has carried a cost yet: the aggregate stays costless instead
+    // of presenting 0 as a total.
+    expect(state.usage?.costUsd).toBeNull()
+    state = applyEvent(state, usageEvent(2, 1500, 300, 0.02))
+
+    expect(state.usage).toEqual({
+      samples: 2,
+      promptTokens: 2500,
+      completionTokens: 500,
+      totalTokens: 3000,
+      costUsd: 0.02,
+      lastPromptTokens: 1500
+    })
+  })
+
+  it('成本按 sum_opt_f 语义累加：带 cost 的首样本即生效，缺失样本保留累计值', () => {
+    let state = emptyItemsState()
+    state = applyEvent(state, usageEvent(1, 100, 10, 0.01))
+    expect(state.usage?.costUsd).toBeCloseTo(0.01)
+    state = applyEvent(state, usageEvent(2, 100, 10))
+    expect(state.usage?.costUsd).toBeCloseTo(0.01)
+    state = applyEvent(state, usageEvent(3, 100, 10, 0.01))
+    expect(state.usage?.costUsd).toBeCloseTo(0.02)
+  })
+
+  it('记录最近一次压缩通知', () => {
+    let state = emptyItemsState()
+    state = applyEvent(state, {
+      kind: 'compaction_completed',
+      seq: 5,
+      thread_id: THREAD_ID,
+      turn_id: TURN_ID,
+      timestamp: '2026-11-02T00:00:00Z',
+      removed_items: 12,
+      checkpoint_chars: 4800
+    })
+
+    expect(state.lastCompaction).toEqual({ removedItems: 12, checkpointChars: 4800, seq: 5 })
+  })
+
+  it('seedUsage 只填充空通道，不覆盖实时事件累加结果', () => {
+    const live = applyEvent(emptyItemsState(), usageEvent(1, 1000, 200))
+    const seeded = seedUsage(live, {
+      thread_id: THREAD_ID,
+      turns: 3,
+      samples: 9,
+      prompt_tokens: 9000,
+      completion_tokens: 1000,
+      total_tokens: 10000
+    })
+    expect(seeded.usage).toBe(live.usage)
+
+    const fromServer = seedUsage(emptyItemsState(), {
+      thread_id: THREAD_ID,
+      turns: 3,
+      samples: 9,
+      prompt_tokens: 9000,
+      completion_tokens: 1000,
+      total_tokens: 10000
+    })
+    expect(fromServer.usage).toEqual({
+      samples: 9,
+      promptTokens: 9000,
+      completionTokens: 1000,
+      totalTokens: 10000,
+      costUsd: null,
+      lastPromptTokens: null
+    })
   })
 })

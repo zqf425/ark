@@ -79,6 +79,7 @@ export type {
   ThreadId,
   ThreadItem,
   ThreadSummary,
+  ThreadUsageResponse,
   TerminalEntriesResponse,
   TerminalEntry,
   ToolPayload,

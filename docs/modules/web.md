@@ -28,6 +28,16 @@
   输出，浏览器不得直接读取工作区。子代理控制请求始终带父线程 query，不能只凭 child id 操作。
 - Changes 同时展示活动工作区的服务端受限 Git 投影（暂存、未暂存、未跟踪）；切换请求仅提交路径给
   `arkd`，运行中存在父回合或子代理时服务端拒绝切换。浏览器不读取目录、Git 或未跟踪文件内容。
+  差异文件行默认折叠，展开后渲染服务端 `patch` 字段的行级 diff（解析仅在展开时进行，面板打开
+  不全量解析所有 patch）；`patch` 缺失（二进制或超出字节上限）时明确提示，浏览器不自行 diff。
+- 会话流 footer 展示线程用量与上下文水位：用量由权威 `usage` 事件逐条累加，打开线程时以
+  `GET /v1/threads/{id}/usage` 播种且只填充空通道（避免与实时事件重复计数）；上下文水位取最近一次
+  样本的 `prompt_tokens` 对 tuning `context_limit_tokens` 的占比，仅作展示，不参与运行时决策。
+  限额缓存带 TTL 并定时重取（footer 常驻挂载、跨线程不重挂，一次性获取会在设置页修改后永久陈旧）。
+  `compaction_completed` 以摘要形式显示最近一次压缩规模。
+- 模型输出的 markdown 渲染集中在 `shared/ui` 的 `Markdown`（marked + DOMPurify 消毒后注入）与
+  `code-highlight`（文件预览高亮）：模型输出是不可信输入，任何进入 `dangerouslySetInnerHTML` 的
+  HTML 必须先经 DOMPurify；这是展示层能力，不与 Rust 侧业务逻辑双实现。
 - 设置页的 tuning、provider 与 MCP 都使用生成契约；API key、MCP env/header 值只写不回读，编辑时的空
   secret 字段表示保留，不表示删除。
 - 新增/编辑 provider 可显式查询模型目录，在用户选择后才把远端明确声明的 context window 与识图能力写入

@@ -13,7 +13,7 @@
  * object, so the row memo still bails out.
  */
 import type { ItemId, ThreadItem, TurnId, TurnState } from '../../../shared/contracts'
-import type { ChildCompletionNotice, ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
+import type { ChildCompletionNotice, CompactionNotice, ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput, UsageAggregate } from './types'
 
 export type ItemsDraft = {
   base: ItemsSnapshot
@@ -29,6 +29,8 @@ export type ItemsDraft = {
   childRunRevision: number
   rewindRevision: number
   rewoundFromSeq: number | null
+  usage: UsageAggregate | null
+  lastCompaction: CompactionNotice | null
 }
 
 export function draftOf(base: ItemsSnapshot): ItemsDraft {
@@ -45,7 +47,9 @@ export function draftOf(base: ItemsSnapshot): ItemsDraft {
     childCompletions: null,
     childRunRevision: base.childRunRevision,
     rewindRevision: base.rewindRevision,
-    rewoundFromSeq: base.rewoundFromSeq
+    rewoundFromSeq: base.rewoundFromSeq,
+    usage: base.usage,
+    lastCompaction: base.lastCompaction
   }
 }
 
@@ -98,7 +102,9 @@ export function commitDraft(draft: ItemsDraft): ItemsSnapshot {
     childCompletions: draft.childCompletions ?? base.childCompletions,
     childRunRevision: draft.childRunRevision,
     rewindRevision: draft.rewindRevision,
-    rewoundFromSeq: draft.rewoundFromSeq
+    rewoundFromSeq: draft.rewoundFromSeq,
+    usage: draft.usage,
+    lastCompaction: draft.lastCompaction
   }
 }
 

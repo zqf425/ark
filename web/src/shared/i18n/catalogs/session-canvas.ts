@@ -75,6 +75,13 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.footer.closed': ['未连接', 'Disconnected'],
   'canvas.footer.generating': ['生成中', 'Generating'],
 
+  'canvas.usage.title': ['模型用量（来自权威 usage 事件）', 'Model usage (from authoritative usage events)'],
+  'canvas.usage.tokens': ['输入 {prompt} · 输出 {completion}', 'prompt {prompt} · completion {completion}'],
+  'canvas.usage.contextTitle': ['最近一次模型请求的上下文占用', 'Context fill of the most recent model request'],
+  'canvas.usage.context': ['上下文 {used}/{limit}（{percent}%）', 'Context {used}/{limit} ({percent}%)'],
+  'canvas.compaction.title': ['最近一次上下文压缩', 'Most recent context compaction'],
+  'canvas.compaction.notice': ['已压缩：移除 {removed} 条，检查点 {chars} 字符', 'Compacted: removed {removed} items, checkpoint {chars} chars'],
+
   'canvas.relative.justNow': ['刚刚', 'just now'],
   'canvas.relative.minutes': ['{count} 分钟前', '{count}m ago'],
   'canvas.relative.hours': ['{count} 小时前', '{count}h ago'],
