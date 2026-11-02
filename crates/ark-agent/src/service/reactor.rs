@@ -217,6 +217,7 @@ impl Reactor {
         );
         loop {
             let action = step(self.machine.state(), &input);
+            let action = self.rescue_pending_steering(action).await?;
             self.machine
                 .enter(&action)
                 .map_err(|err| ArkError::internal(err.to_string()))?;
@@ -341,6 +342,31 @@ impl Reactor {
             self.writer.append(self.events.item_created(item)).await?;
         }
         Ok(())
+    }
+
+    fn has_pending_steering(&self) -> bool {
+        self.steer.as_ref().is_some_and(|queue| !queue.is_empty())
+    }
+
+    /// A correction that lands during the *final* model round would otherwise be
+    /// lost: the queue only drains at round starts, and a tool-less settle ends
+    /// the turn without another round — while the server has already answered
+    /// 202 to the steer. Convert the finish into a zero-batch dispatch so the
+    /// correction is journaled and the next round consumes it, still bounded by
+    /// the round budget. Interrupt and failure finishes keep aborting; a steer
+    /// must not resurrect a turn that is already failing or cancelled.
+    async fn rescue_pending_steering(&mut self, action: Action) -> Result<Action> {
+        let completing = matches!(
+            action,
+            Action::Finish {
+                outcome: TurnOutcome::Completed
+            }
+        );
+        if !completing || !self.has_pending_steering() {
+            return Ok(action);
+        }
+        self.apply_steering().await?;
+        Ok(Action::Dispatch(DispatchPlan::default()))
     }
 
     /// Stream one model round, folding deltas into one response.
@@ -804,6 +830,95 @@ mod tests {
         assert_eq!(
             reactor.approved[0].sandbox,
             Some(SandboxDecision::WorkspaceWrite)
+        );
+    }
+
+    /// Streams an empty response, but during the first (and would-be final)
+    /// round a steer arrives — the race that used to drop the correction.
+    #[derive(Debug)]
+    struct SteerMidStreamModel {
+        queue: Arc<SteerQueue>,
+        rounds: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl ModelClient for SteerMidStreamModel {
+        fn provider_id(&self) -> &str {
+            "test"
+        }
+
+        fn model(&self) -> &str {
+            "test"
+        }
+
+        async fn stream(
+            &self,
+            _request: ModelRequest,
+            _sink: mpsc::Sender<ModelChunk>,
+        ) -> Result<ModelResponse> {
+            let round = self
+                .rounds
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if round == 0 {
+                self.queue.push("late correction");
+            }
+            Ok(ModelResponse::default())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_steer_landing_in_the_final_round_is_not_dropped() {
+        let events = TurnEvents::new(ThreadId::new(), TurnId::new());
+        let writer = Arc::new(MemoryWriter::for_turn(events.clone()));
+        let queue = Arc::new(SteerQueue::new());
+        let model = Arc::new(SteerMidStreamModel {
+            queue: Arc::clone(&queue),
+            rounds: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let mut reactor = Reactor::new(ReactorConfig {
+            model: Arc::clone(&model) as Arc<dyn ModelClient>,
+            tools: Arc::new(MapToolRunner::new()),
+            writer: Arc::clone(&writer) as Arc<dyn SessionWriter>,
+            gates: Arc::new(AllowAllGates),
+            sandbox: Arc::new(ReadOnlySandbox),
+            events,
+            cancel: CancelToken::new(),
+            seed: ModelSeed::default(),
+            machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+            chunk_buffer: 1,
+        })
+        .with_steering(queue);
+
+        let outcome = reactor.run().await.unwrap();
+
+        assert_eq!(outcome, TurnOutcome::Completed);
+        // The correction forced a second model round instead of ending the turn.
+        assert_eq!(
+            model.rounds.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "the rescued steer must drive one more round"
+        );
+        let recorded = writer.recorded();
+        assert!(
+            recorded
+                .iter()
+                .any(|event| matches!(event, RuntimeEvent::TurnSteered { .. })),
+            "turn_steered must be journaled"
+        );
+        assert!(
+            recorded.iter().any(|event| matches!(
+                event,
+                RuntimeEvent::ItemCreated { item, .. }
+                    if item.kind == ark_contract::item::ItemKind::UserMessage
+                        && item.text.as_deref() == Some("late correction")
+            )),
+            "the correction must land in the history as a user item"
+        );
+        assert!(
+            recorded
+                .iter()
+                .any(|event| matches!(event, RuntimeEvent::TurnCompleted { .. })),
+            "the turn still completes"
         );
     }
 

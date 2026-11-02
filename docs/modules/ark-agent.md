@@ -40,7 +40,9 @@ re-export，刻意不引入 tokio-util 依赖）与 `select!` 完成；
   后续模型历史。会话级工作空间、模型和权限覆盖只在创建新回合时读取，运行中回合保留其创建快照。
 - parent steer 的有界 `SteerQueue` 由 server registry 创建并由 `arkd` 注入同一个 reactor；reactor 只在
   轮次边界 drain：先把 steer 文本写入用户历史（并落一条 `UserMessage` item），随后才写 `turn_steered`
-  事件——journal 不能声称一条模型尚未见到的更正。
+  事件——journal 不能声称一条模型尚未见到的更正。steer 落在最后一个模型轮内时（无工具调用的 settle 直接
+  终结回合，队列不再有 drain 机会），reactor 在 `Finish(Completed)` 前把待投递更正补 drain 并转入一个
+  零批次 dispatch，驱动下一个轮次消费该文本；中断与失败终态不补投，abort 语义优先于迟到的更正。
 - 子代理完成 inbox 从父线程权威事件投影为带标记的 system source，而非用户消息；按稳定通知 ID 去重，
   跳过已确认项，并且每个父回合最多交付 8 条、每条最多 1,200 UTF-8 字节，避免完成风暴突破上下文
   预算。同一条通知最多自动投递 2 次（`MAX_AUTO_DELIVERY_ATTEMPTS`），超限后只在用户显式回合投递；
