@@ -115,6 +115,10 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.composer.attachmentTooLarge': ['「{name}」超出大小上限', '"{name}" exceeds the size limit'],
   'canvas.composer.attachmentRemove': ['移除附件 {name}', 'Remove attachment {name}'],
   'canvas.composer.attachmentsAria': ['已添加附件', 'Added attachments'],
+  'canvas.composer.imageVisionHint': [
+    '图片仅在模型声明识图能力时才会真正发送；未声明时模型只看到占位文本。',
+    'Images reach the model only when it declares vision; otherwise the model sees a placeholder.'
+  ],
   'canvas.composer.attachLiveHint': ['回合进行中不支持添加附件；请排队消息，结束后再附。', 'Attachments cannot be added mid-turn; queue a message instead.'],
   'canvas.composer.queue': ['排队', 'Queue'],
   'canvas.composer.queuedChip': ['#{index} 排队', '#{index} queued'],
