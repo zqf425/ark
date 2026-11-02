@@ -1,4 +1,9 @@
-/** Product settings, deliberately quieter than the task workspace. */
+/**
+ * Settings layout, ported from the smart-ark SettingsView: a glass nav rail
+ * beside a narrow content column. Component styles (cards, fields, notices)
+ * live in settings.css; this file owns only the shell. Colours come from the
+ * shared tokens — a literal hex here is a review blocker.
+ */
 
 .ark-settings {
   display: flex;
@@ -9,129 +14,131 @@
   background: var(--ark-bg);
 }
 
+/* ---------- nav rail (smart-ark SettingsSidebar) ---------- */
+
 .ark-settings__rail {
+  position: relative;
   display: flex;
   flex: none;
   flex-direction: column;
-  width: 224px;
-  padding: 24px 10px;
-  border-right-color: var(--ark-border);
-  background: var(--ark-bg-raised);
+  width: 248px;
+  padding: 18px 10px 14px;
+  border-right: 1px solid var(--ark-sidebar-border);
+  background: var(--ark-sidebar-gradient);
+  overflow: hidden;
+}
+
+.ark-settings__rail::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--ark-sidebar-haze);
+  pointer-events: none;
+}
+
+.ark-settings__rail > * {
+  position: relative;
 }
 
 .ark-settings__rail-head {
-  padding: 0 10px 20px;
+  padding: 0 12px 16px;
 }
 
 .ark-settings__rail-head strong {
   color: var(--ark-text);
   font-size: 15px;
-  font-weight: 620;
+  font-weight: 650;
   letter-spacing: -0.01em;
 }
 
 .ark-settings__rail-head p {
-  margin-top: 5px;
-  font-size: 11px;
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  color: var(--ark-text-faint);
 }
 
 .ark-settings__nav {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
+/* Nav rows: 14px-radius pill rows; active = subtle fill + hairline ring +
+   tiny shadow, the smart-ark sidebar formula (no accent bar). */
 .ark-settings__nav button {
   display: flex;
   flex-direction: column;
+  gap: 1px;
   width: 100%;
-  border: 1px solid transparent;
+  border: 0;
   background: transparent;
   color: var(--ark-text-dim);
   cursor: pointer;
   text-align: left;
-  border-radius: 5px;
-  padding: 8px 10px;
-}
-
-.ark-settings__nav button.is-active {
-  border-color: transparent;
-  box-shadow: inset 2px 0 0 var(--ark-accent);
-  background: var(--ark-selection);
+  border-radius: var(--ark-radius-lg);
+  padding: 9px 12px;
 }
 
 .ark-settings__nav button:hover {
-  background: var(--ark-bg-hover);
+  background: var(--ark-sidebar-row-hover);
+  color: var(--ark-text);
+}
+
+.ark-settings__nav button.is-active {
+  background: var(--ark-bg-inset);
+  color: var(--ark-text);
+  box-shadow: var(--ark-shadow-ctl), inset 0 0 0 1px var(--ark-sidebar-row-ring);
 }
 
 .ark-settings__nav span {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 560;
 }
+
+.ark-settings__nav small {
+  font-size: 11px;
+  color: var(--ark-text-faint);
+}
+
+.ark-settings__nav button.is-active small {
+  color: var(--ark-text-dim);
+}
+
+/* ---------- content column (smart-ark: px-10 py-10, max-w-3xl) ---------- */
 
 .ark-settings__scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 34px clamp(24px, 5vw, 72px) 54px;
+  padding: 36px clamp(24px, 5vw, 56px) 56px;
 }
 
 .ark-settings__body {
   display: flex;
   flex-direction: column;
-  width: min(100%, 920px);
-  gap: 14px;
+  width: min(100%, 768px);
+  gap: 20px;
+  margin: 0 auto;
 }
 
 .ark-settings__hero {
-  padding: 2px 0 18px;
-  border-bottom-color: var(--ark-border);
+  margin-bottom: 8px;
 }
 
 .ark-settings__hero h1 {
-  font-size: 25px;
+  margin: 0;
+  font-size: 24px;
   font-weight: 620;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
+  color: var(--ark-text);
 }
 
 .ark-settings__hero p {
-  margin-top: 4px;
-}
-
-.ark-settings__section {
-  border-color: var(--ark-border);
-  border-radius: 7px;
-  background: var(--ark-bg-raised);
-  box-shadow: none;
-  padding: 16px;
-}
-
-.ark-settings__head {
-  padding-bottom: 9px;
-  border-bottom-color: var(--ark-border);
-}
-
-.ark-settings__title {
-  font-size: 13px;
-}
-
-.ark-field__input,
-.ark-field__select,
-.ark-field__area {
-  border-color: var(--ark-border);
-  border-radius: 5px;
-  background: var(--ark-bg-inset);
-}
-
-.ark-card {
-  border-color: var(--ark-border);
-  border-radius: 6px;
-  background: var(--ark-bg-inset);
-}
-
-.ark-card--editing {
-  border-color: var(--ark-accent-dim);
-  box-shadow: none;
+  margin: 5px 0 0;
+  font-size: 13.5px;
+  color: var(--ark-text-dim);
 }
 
 @media (max-width: 760px) {
@@ -141,9 +148,9 @@
 
   .ark-settings__rail {
     width: 100%;
-    padding: 12px;
+    padding: 10px;
     border-right: 0;
-    border-bottom-color: var(--ark-border);
+    border-bottom: 1px solid var(--ark-sidebar-border);
   }
 
   .ark-settings__rail-head {
