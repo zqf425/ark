@@ -7,6 +7,7 @@
  * runtime decides that language, the client only owns its own labels.
  */
 export const SESSION_CANVAS_MESSAGES = {
+  'canvas.empty.kicker': ['ARK · CODE', 'ARK · CODE'],
   'canvas.empty.title': ['开始一个会话', 'Start a session'],
   'canvas.empty.hint': ['新建或选择一个会话，再描述希望 ark 完成的工作。', 'Create or select a thread, then describe what ark should do.'],
   'canvas.empty.create': ['新建会话', 'New thread'],

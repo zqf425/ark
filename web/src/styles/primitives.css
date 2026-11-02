@@ -1,0 +1,287 @@
+/**
+ * Shared primitives owned by shared/ui (Button, Tabs, chip/dot helpers,
+ * EmptyState, textarea, error boundary). Smart-ark look: pill-friendly radii,
+ * soft navy shadows, gradient primary action.
+ */
+
+/* ---------- buttons ---------- */
+
+.ark-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius-sm);
+  background: var(--ark-card-strong);
+  color: var(--ark-text);
+  cursor: pointer;
+  font-weight: 500;
+  box-shadow: var(--ark-shadow-ctl);
+  transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease,
+    box-shadow 120ms ease, filter 120ms ease;
+  white-space: nowrap;
+}
+
+.ark-btn--sm {
+  padding: 4px 11px;
+  font-size: 12px;
+}
+
+.ark-btn--md {
+  padding: 7px 15px;
+}
+
+.ark-btn--block {
+  width: 100%;
+}
+
+.ark-btn:hover:not(:disabled) {
+  background: var(--ark-bg-raised);
+  border-color: var(--ark-border-strong);
+}
+
+.ark-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ark-btn:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: 1px;
+}
+
+/* Primary actions carry the whale gradient, like smart-ark's send/CTA. */
+.ark-btn--primary {
+  background: var(--ark-gradient-primary);
+  border-color: transparent;
+  color: var(--ark-primary-text);
+  box-shadow: var(--ark-primary-shadow);
+}
+
+.ark-btn--primary:hover:not(:disabled) {
+  background: var(--ark-gradient-primary);
+  border-color: transparent;
+  filter: brightness(1.05);
+}
+
+.ark-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ark-text-dim);
+  box-shadow: none;
+}
+
+.ark-btn--ghost:hover:not(:disabled) {
+  background: var(--ark-bg-hover);
+  border-color: transparent;
+  color: var(--ark-text);
+}
+
+.ark-btn--danger {
+  background: transparent;
+  border-color: var(--ark-border);
+  color: var(--ark-error);
+  box-shadow: none;
+}
+
+.ark-btn--danger:hover:not(:disabled) {
+  background: var(--ark-error-wash);
+  border-color: var(--ark-error);
+}
+
+.ark-linkbtn {
+  border: 0;
+  background: none;
+  color: var(--ark-text-dim);
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ark-linkbtn:hover {
+  color: var(--ark-accent);
+}
+
+.ark-linkbtn--danger {
+  color: var(--ark-error);
+}
+
+.ark-linkbtn--danger:hover {
+  color: var(--ark-error-strong);
+}
+
+/* ---------- empty state ---------- */
+
+.ark-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 28px 20px;
+  text-align: center;
+  color: var(--ark-text-dim);
+}
+
+.ark-empty__title {
+  margin: 0;
+  color: var(--ark-text);
+  font-weight: 600;
+}
+
+.ark-empty__hint {
+  margin: 0;
+  max-width: 34ch;
+  font-size: 12px;
+  color: var(--ark-text-faint);
+}
+
+/* ---------- tabs ---------- */
+
+.ark-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--ark-border-muted);
+  padding: 0 8px;
+  flex: none;
+}
+
+.ark-tabs__tab {
+  border: 0;
+  background: none;
+  color: var(--ark-text-dim);
+  padding: 9px 10px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.ark-tabs__tab:hover {
+  color: var(--ark-text);
+}
+
+.ark-tabs__tab.is-active {
+  color: var(--ark-accent);
+  border-bottom-color: var(--ark-accent);
+}
+
+.ark-tabs__badge {
+  margin-left: 6px;
+  color: var(--ark-text-faint);
+}
+
+/* ---------- chips & dots ---------- */
+
+.ark-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ark-chip-border);
+  background: var(--ark-chip-bg);
+  font-size: 11px;
+  line-height: 17px;
+  color: var(--ark-text-dim);
+}
+
+.ark-chip--ok {
+  color: var(--ark-ok);
+  background: var(--ark-ok-wash);
+  border-color: transparent;
+}
+
+.ark-chip--error {
+  color: var(--ark-error);
+  background: var(--ark-error-wash);
+  border-color: transparent;
+}
+
+.ark-chip--live {
+  color: var(--ark-accent);
+  background: var(--ark-accent-soft);
+  border-color: transparent;
+}
+
+.ark-chip--muted {
+  color: var(--ark-text-faint);
+  background: transparent;
+  border-color: transparent;
+}
+
+.ark-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--ark-text-faint);
+  flex: none;
+}
+
+.ark-dot--ok {
+  background: var(--ark-ok);
+  box-shadow: 0 0 0 2px var(--ark-ok-wash);
+}
+
+.ark-dot--warn {
+  background: var(--ark-warn);
+}
+
+.ark-dot--bad {
+  background: var(--ark-error);
+  box-shadow: 0 0 0 2px var(--ark-error-wash);
+}
+
+.ark-dot--idle {
+  background: var(--ark-text-faint);
+}
+
+/* ---------- form primitives ---------- */
+
+.ark-textarea {
+  width: 100%;
+  resize: vertical;
+  background: var(--ark-bg-inset);
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius-sm);
+  padding: 7px 9px;
+  color: var(--ark-text);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.ark-textarea:focus-visible,
+.ark-textarea:focus {
+  outline: none;
+  border-color: var(--ark-accent-dim);
+  box-shadow: 0 0 0 3px var(--ark-selection);
+}
+
+/* ---------- error boundary ---------- */
+
+.ark-error-boundary {
+  border: 1px solid var(--ark-error);
+  background: var(--ark-error-wash);
+  border-radius: var(--ark-radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.ark-error-boundary__title {
+  margin: 0;
+  color: var(--ark-error);
+  font-weight: 600;
+}
+
+.ark-error-boundary__message {
+  margin: 0;
+  color: var(--ark-text-dim);
+  font-family: var(--ark-mono);
+  font-size: 12px;
+  word-break: break-word;
+}

@@ -1,22 +1,28 @@
 /**
- * Tool cards, tool results, error and notice rows.
+ * Tool cards, tool results, error and notice rows, restyled after the
+ * smart-ark tool entry: soft rounded cards with a floating shadow, mono tool
+ * names and uppercase section labels.
  *
  * Part of the Code screen stylesheet; split to stay under the 400-line
- * per-file limit (design §7.10.2). Code-session.css is the entry.
+ * per-file limit (design §7.10.2). Code-session.css is the entry. Colors come
+ * from styles/tokens.css (theme.css for dark) only — a literal hex here is a
+ * review blocker because it breaks light/dark parity.
  */
+
 /* ---------- tool cards ---------- */
 
 .ark-tool,
 .ark-toolresult {
-  border: 1px solid var(--ark-border);
-  border-radius: var(--ark-radius);
-  background: var(--ark-bg-inset);
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius-lg);
+  background: var(--ark-card-soft);
+  box-shadow: var(--ark-shadow-ctl);
   overflow: hidden;
   max-width: 100%;
 }
 
 .ark-tool.is-open {
-  border-color: var(--ark-border-strong);
+  border-color: var(--ark-border);
 }
 
 .ark-tool--bare {
@@ -34,7 +40,7 @@
   width: 100%;
   border: 0;
   background: none;
-  padding: 6px 8px;
+  padding: 8px 12px;
   cursor: pointer;
   text-align: left;
 }
@@ -48,12 +54,14 @@
   color: var(--ark-text-faint);
   width: 12px;
   flex: none;
+  font-size: 10px;
 }
 
 .ark-tool__name,
 .ark-toolresult__name {
   font-family: var(--ark-mono);
   font-size: 12px;
+  font-weight: 600;
   color: var(--ark-text);
   flex: none;
 }
@@ -77,8 +85,8 @@
 }
 
 .ark-tool__body {
-  border-top: 1px solid var(--ark-border);
-  padding: 8px;
+  border-top: 1px solid var(--ark-border-muted);
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -94,22 +102,24 @@
   margin: 0;
   font-size: 10.5px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.12em;
   color: var(--ark-text-faint);
   font-weight: 600;
 }
 
 .ark-tool__output {
   margin: 0;
-  padding: 6px 8px;
+  padding: 8px 10px;
   background: var(--ark-terminal-bg);
-  border: 1px solid var(--ark-border);
-  border-radius: 4px;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius-sm);
   max-height: 340px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--ark-terminal-text);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .ark-tool__note {
@@ -124,10 +134,11 @@
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  border: 1px solid var(--ark-error);
+  border: 1px solid transparent;
   background: var(--ark-error-wash);
-  border-radius: var(--ark-radius);
-  padding: 6px 8px;
+  border-radius: var(--ark-radius-lg);
+  padding: 8px 12px;
+  max-width: 100%;
 }
 
 .ark-errorrow__mark {
@@ -173,6 +184,7 @@
 .ark-errorline__code {
   color: var(--ark-error);
   flex: none;
+  font-family: var(--ark-mono);
 }
 
 .ark-errorline__message {

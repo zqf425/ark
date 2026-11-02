@@ -1,14 +1,8 @@
-/** Layout refinements layered over workbench.css. */
-
-.ark-shell,
-.ark-shell .ark-cols,
-.ark-shell .ark-col--center {
-  background: var(--ark-bg);
-}
-
-.ark-shell .ark-col--left {
-  border-right: 1px solid var(--ark-border);
-}
+/**
+ * Layout refinements layered over workbench.css. The workbench now paints its
+ * own glass sidebar and stage gradient, so this file only styles the panel
+ * slot chrome on top of the drawer.
+ */
 
 .ark-shell .ark-panelslot {
   background: var(--ark-bg-raised);
@@ -20,7 +14,7 @@
   justify-content: space-between;
   min-height: 44px;
   padding: 0 11px 0 14px;
-  border-bottom: 1px solid var(--ark-border);
+  border-bottom: 1px solid var(--ark-border-muted);
 }
 
 .ark-shell .ark-panelslot__head h2 {

@@ -1,40 +1,97 @@
 /* Theme tokens only. The renderer switches this selector through I18nProvider.
  *
- * Dark palette: near-black neutral surfaces with a single restrained accent.
+ * Dark palette: the "deep ocean" theme ported from the smart-ark Code UI —
+ * navy-outline-of-the-whale backgrounds with the light-blue whale accent.
  * Every component style must consume tokens, never these hex values, so both
  * themes stay in sync by construction.
  */
 :root[data-ark-theme='dark'] {
   color-scheme: dark;
-  --ark-bg: #141413;
-  --ark-bg-raised: #1d1d1c;
-  --ark-bg-inset: #101010;
-  --ark-bg-hover: #262625;
-  --ark-border: #2b2b2a;
-  --ark-border-strong: #40403e;
-  --ark-text: #ececea;
-  --ark-text-dim: #b6b6b0;
-  --ark-text-faint: #8f8f89;
-  --ark-accent: #8fb0f0;
-  --ark-accent-dim: #3f5c96;
-  --ark-ok: #74c094;
-  --ark-warn: #d4ab5f;
-  --ark-error: #e28b8b;
-  --ark-selection: #2a3a54;
-  /* Solid actions invert in the dark theme: a light button on dark canvas. */
-  --ark-primary: #ececea;
-  --ark-primary-hover: #ffffff;
-  --ark-primary-text: #161615;
-  /* Washes: intent-tinted surfaces for notices, gates and chips. */
-  --ark-ok-wash: #182720;
-  --ark-warn-wash: #272115;
-  --ark-error-wash: #2b1819;
-  --ark-error-strong: #f0b6b6;
-  --ark-user-message: #232322;
-  --ark-user-border: #323230;
-  --ark-terminal-bg: #0c0c0c;
-  --ark-terminal-text: #c6c9cf;
-  --ark-overlay: rgba(0, 0, 0, 0.55);
-  --ark-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --ark-shadow-2: 0 12px 32px rgba(0, 0, 0, 0.5);
+
+  --ark-bg: #0f1422;
+  --ark-bg-canvas: #161d30;
+  --ark-bg-raised: #1b2338;
+  --ark-bg-inset: #212b44;
+  --ark-bg-hover: rgba(151, 192, 235, 0.1);
+
+  --ark-border: rgba(151, 192, 235, 0.13);
+  --ark-border-muted: rgba(151, 192, 235, 0.1);
+  --ark-border-strong: rgba(151, 192, 235, 0.2);
+
+  --ark-text: #f0f5fc;
+  --ark-text-dim: #bdc9de;
+  --ark-text-faint: #8593b1;
+  --ark-text-placeholder: #76839e;
+
+  --ark-accent: #6fb0e8;
+  --ark-accent-dim: rgba(111, 176, 232, 0.55);
+  --ark-accent-soft: rgba(111, 176, 232, 0.18);
+  --ark-selection: rgba(111, 176, 232, 0.26);
+  --ark-ok: #40c977;
+  --ark-warn: #e8a94f;
+  --ark-error: #f8736a;
+  --ark-error-strong: #f8b0aa;
+  --ark-ok-wash: rgba(64, 201, 119, 0.18);
+  --ark-warn-wash: rgba(242, 162, 63, 0.18);
+  --ark-error-wash: rgba(248, 115, 106, 0.18);
+  --ark-skill: #a89bf5;
+  --ark-skill-soft: rgba(168, 155, 245, 0.16);
+
+  --ark-user-message: rgba(133, 193, 241, 0.13);
+  --ark-user-border: rgba(133, 193, 241, 0.24);
+
+  /* The whale gradient keeps its daylight values on dark, like smart-ark. */
+  --ark-gradient-primary: linear-gradient(135deg, #4f90d6, #6ca2dd);
+  --ark-primary: #3b82d8;
+  --ark-primary-hover: #4f90d6;
+  --ark-primary-text: #ffffff;
+  --ark-primary-shadow: 0 6px 14px rgba(2, 6, 16, 0.45);
+
+  --ark-card-soft: linear-gradient(180deg, rgba(27, 35, 56, 0.94), rgba(21, 28, 45, 0.9));
+  --ark-card-strong: linear-gradient(180deg, rgba(33, 43, 68, 0.98), rgba(24, 32, 51, 0.96));
+  --ark-card-ghost: rgba(15, 20, 34, 0.72);
+  --ark-chip-bg: rgba(27, 35, 56, 0.94);
+  --ark-chip-border: rgba(151, 192, 235, 0.13);
+  --ark-chip-active: linear-gradient(180deg, rgba(111, 176, 232, 0.2), rgba(111, 176, 232, 0.11));
+
+  --ark-code-block-bg: #101827;
+  --ark-code-block-border: rgba(151, 192, 235, 0.1);
+  --ark-inline-code-bg: rgba(151, 192, 235, 0.09);
+  --ark-terminal-bg: #151c2e;
+  --ark-terminal-text: #bdc9de;
+
+  --ark-sidebar-gradient: linear-gradient(
+    180deg,
+    rgba(24, 31, 50, 0.96) 0%,
+    rgba(19, 25, 42, 0.94) 48%,
+    rgba(14, 19, 32, 0.96) 100%
+  );
+  --ark-sidebar-haze:
+    radial-gradient(circle at 58% -12%, rgba(111, 176, 232, 0.14), transparent 36%),
+    linear-gradient(180deg, rgba(151, 192, 235, 0.05), rgba(151, 192, 235, 0) 28%);
+  --ark-sidebar-border: rgba(151, 192, 235, 0.12);
+  --ark-sidebar-divider: rgba(151, 192, 235, 0.12);
+  --ark-sidebar-row-hover: rgba(151, 192, 235, 0.09);
+  --ark-sidebar-row-active: rgba(151, 192, 235, 0.13);
+  --ark-sidebar-row-ring: rgba(151, 192, 235, 0.1);
+  --ark-sidebar-field-bg: rgba(151, 192, 235, 0.06);
+
+  --ark-stage-gradient: linear-gradient(180deg, #1c2440 0%, #161d30 48%, #0f1422 100%);
+  --ark-body-wash: linear-gradient(180deg, #131a2c, #0f1422);
+  --ark-body-glow:
+    radial-gradient(52rem 30rem at 82% -12%, rgba(111, 176, 232, 0.1), transparent 60%),
+    linear-gradient(160deg, rgba(151, 192, 235, 0.04), rgba(151, 192, 235, 0) 42%);
+
+  --ark-shadow-ctl: 0 2px 6px rgba(2, 6, 16, 0.3);
+  --ark-shadow-1: var(--ark-shadow-ctl);
+  --ark-shadow-card: 0 4px 14px rgba(2, 6, 16, 0.32);
+  --ark-shadow-2: 0 18px 46px rgba(2, 6, 16, 0.45), 0 5px 16px rgba(2, 6, 16, 0.3);
+  --ark-composer-shadow: 0 28px 78px rgba(2, 6, 16, 0.45), 0 0 0 1px rgba(151, 192, 235, 0.07);
+  --ark-composer-shadow-focus:
+    0 0 0 3px rgba(111, 176, 232, 0.12), 0 28px 78px rgba(2, 6, 16, 0.45),
+    0 0 0 1px rgba(151, 192, 235, 0.12);
+  --ark-overlay: rgba(2, 6, 16, 0.55);
+
+  --ark-scrollbar-thumb: rgba(151, 178, 215, 0.28);
+  --ark-scrollbar-thumb-hover: rgba(171, 198, 233, 0.38);
 }
