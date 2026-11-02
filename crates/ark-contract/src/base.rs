@@ -57,6 +57,12 @@ pub struct UpdateMemoryRequest {
     /// `Option` handling collapses an explicit JSON `null` into the outer
     /// `None` ("untouched") even for `Option<Option<T>>`, so without it the
     /// clear intent silently disappears at the HTTP boundary.
+    ///
+    /// This asymmetry is deserialize-only: serialization still writes `None`
+    /// and `Some(None)` identically as `null`, so a serialized form of this
+    /// struct must never be fed back through the API — an "untouched" would
+    /// silently upgrade to "clear". It is a request DTO, not a round-trip
+    /// payload.
     #[serde(default, deserialize_with = "source_update::deserialize")]
     pub source: Option<Option<String>>,
 }
@@ -115,15 +121,21 @@ mod source_update_tests {
         let untouched: UpdateMemoryRequest = serde_json::from_str("{}").expect("empty body");
         assert_eq!(untouched.source, None);
 
-        let cleared: UpdateMemoryRequest = serde_json::from_str(r#"{"source": null}"#).expect("null");
+        let cleared: UpdateMemoryRequest =
+            serde_json::from_str(r#"{"source": null}"#).expect("null");
         assert_eq!(cleared.source, Some(None));
 
-        let set: UpdateMemoryRequest = serde_json::from_str(r#"{"source": "web"}"#).expect("string");
+        let set: UpdateMemoryRequest =
+            serde_json::from_str(r#"{"source": "web"}"#).expect("string");
         assert_eq!(set.source, Some(Some("web".to_string())));
     }
 
     #[test]
-    fn cleared_source_serializes_back_as_null() {
+    fn serialization_collapses_untouched_and_cleared_to_null() {
+        // Deliberate asymmetry with deserialization: the wire only needs to
+        // carry intents *into* the runtime, and `null` on output covers both
+        // "untouched" and "clear". Documented on `source` — this struct must
+        // not be round-tripped, or an untouched field silently clears.
         let request = UpdateMemoryRequest {
             source: Some(None),
             ..UpdateMemoryRequest::default()
