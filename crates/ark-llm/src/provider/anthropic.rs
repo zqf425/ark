@@ -284,7 +284,9 @@ pub fn parse_usage(usage: &Value) -> Usage {
 /// becomes an explicit disabled block (the only way to force thinking off for
 /// a model whose default enables it). Extended thinking requires
 /// `max_tokens > budget_tokens`, so the budget reserves headroom when the
-/// caller did not set a larger limit itself.
+/// caller did not set a larger limit itself. The API pins `temperature` to 1
+/// while thinking is enabled, so any caller-set value is overridden here
+/// rather than sent and rejected.
 fn apply_anthropic_thinking(body: &mut Value, effort: Option<&str>) {
     let budget: u32 = match effort {
         Some("low") => 2_048,
@@ -305,12 +307,31 @@ fn apply_anthropic_thinking(body: &mut Value, effort: Option<&str>) {
         _ => budget + 4_096,
     };
     body["max_tokens"] = json!(max_tokens);
+    body["temperature"] = json!(1);
     body["thinking"] = json!({ "type": "enabled", "budget_tokens": budget });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thinking_enabled_pins_temperature_to_one() {
+        // The API rejects any other temperature while extended thinking is on;
+        // a caller-set value must be overridden, not sent and rejected.
+        let body = build_body(
+            &config(),
+            &ModelRequest {
+                messages: vec![ModelMessage::user("hi")],
+                temperature: Some(0.3),
+                reasoning_effort: Some("medium".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(body["temperature"], json!(1));
+        assert_eq!(body["thinking"]["type"], json!("enabled"));
+    }
 
     #[test]
     fn thinking_budgets_follow_the_effort_and_off_disables() {

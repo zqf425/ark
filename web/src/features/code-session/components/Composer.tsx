@@ -62,10 +62,17 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   // the turn this triggers ends later and drains the next one the same way.
   const wasLive = useRef(false)
   useEffect(() => {
-    if (wasLive.current && !live && queued.length > 0) {
-      const [first, ...rest] = queued
-      setQueued(rest)
-      if (first !== undefined) void send(first)
+    if (wasLive.current && !live && queued[0] !== undefined) {
+      const first = queued[0]
+      // Dequeue only after the send is accepted: a failed drain stays in the
+      // queue (with the command error shown) so the text is never lost.
+      void send(first).then((ok) => {
+        if (!ok) return
+        setQueued((current) => {
+          const index = current.indexOf(first)
+          return index === -1 ? current : [...current.slice(0, index), ...current.slice(index + 1)]
+        })
+      })
     }
     wasLive.current = live
   }, [live, queued, send])
