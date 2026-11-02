@@ -16,9 +16,14 @@ export function SessionRuntimeControls({ threadId }: { threadId: string }): JSX.
   const toast = useToast()
   const providers = useProviders()
   const [runtime, setRuntime] = useState<ThreadRuntimeSettings>(DEFAULT_RUNTIME)
-  // Model suggestions come from the selected provider's inventory: the default
+  // The provider a turn would actually use: the thread override, else the
+  // store's default. Model suggestions and the vision warning both key off it.
+  const selectedProvider =
+    providers.providers.find((provider) => provider.id === (runtime.provider_id ?? '')) ??
+    providers.providers.find((provider) => provider.is_default) ??
+    null
+  // Model suggestions come from the effective provider's inventory: the default
   // model plus everything batch-imported for it.
-  const selectedProvider = providers.providers.find((provider) => provider.id === (runtime.provider_id ?? '')) ?? null
   const modelOptions = selectedProvider
     ? [selectedProvider.model, ...selectedProvider.models].filter((id) => id && id !== (runtime.model ?? ''))
     : []
