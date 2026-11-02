@@ -16,6 +16,7 @@ pub const FIELD_CLASSES: &[(&str, ReloadClass)] = &[
     ("default_workspace", ReloadClass::Hot),
     ("default_autonomy", ReloadClass::Hot),
     ("subagents", ReloadClass::Hot),
+    ("skills", ReloadClass::Restart),
     ("hooks", ReloadClass::Hot),
     ("schedules", ReloadClass::Hot),
     ("tuning", ReloadClass::Hot),
@@ -49,6 +50,10 @@ pub fn restart_fields(patch: &ConfigPatch) -> Vec<FieldPath> {
     let mut out = Vec::new();
     if patch.port.is_some() {
         out.push(FieldPath::new("port"));
+    }
+    if patch.skills.is_some() {
+        // The skill runtime snapshots its config at process start.
+        out.push(FieldPath::new("skills"));
     }
     out
 }

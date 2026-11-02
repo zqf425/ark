@@ -147,10 +147,20 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         args.data_dir.clone(),
         ark_llm::ModelCatalogClient::new(crate::model::governed_transport()),
     ));
-    let skills = Arc::new(ark_skills::SkillRuntime::new(
-        ark_skills::SkillsConfig::default(),
-        roots.current(),
-    ));
+    // Skills config is a `Restart` field: the runtime snapshots it here, and a
+    // settings patch reports `restart_required` instead of pretending to apply.
+    let skills = {
+        let settings = &config.snapshot().skills;
+        let mut skills_config = ark_skills::SkillsConfig::default();
+        skills_config.enabled = settings.enabled;
+        skills_config
+            .roots
+            .extend(settings.extra_dirs.iter().map(std::path::PathBuf::from));
+        Arc::new(ark_skills::SkillRuntime::new(
+            skills_config,
+            roots.current(),
+        ))
+    };
     let workspace = Arc::new(ark_workspace::WorkspaceInspector::new());
     let mcp = Arc::new(ark_mcp::McpServerRegistry::new(args.data_dir.clone()));
     let memory = Arc::new(ark_store::MemoryFileStore::open(&args.data_dir)?);

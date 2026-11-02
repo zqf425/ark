@@ -43,8 +43,8 @@ pub use capability::{
 };
 pub use config::{
     ApplyResult, ConfigPatch, FieldPath, HookRule, HookSettings, ReloadClass, RuntimeConfigView,
-    ScheduleSettings, SubagentSettings, TuningSettings, SUBAGENT_CONCURRENCY_MAX,
-    SUBAGENT_CONCURRENCY_MIN,
+    ScheduleSettings, SkillsSettings, SubagentSettings, TuningSettings, SKILLS_EXTRA_DIR_MAX_CHARS,
+    SKILLS_EXTRA_DIRS_MAX, SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
 };
 pub use dto::{
     ChildRunActionResult, ChildRunAggregates, ChildRunEventsResponse, ChildRunListResponse,

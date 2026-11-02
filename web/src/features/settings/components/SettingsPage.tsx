@@ -69,7 +69,7 @@ export function SettingsPage(): JSX.Element {
       case 'skills':
         return (
           <ErrorBoundary label={t('settings.boundary.skills')}>
-            <SkillsSection />
+            <SkillsSection settings={settings} />
           </ErrorBoundary>
         )
       case 'schedules':

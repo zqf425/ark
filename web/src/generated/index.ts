@@ -79,6 +79,7 @@ export type { RuntimeConfigView } from "./RuntimeConfigView";
 export type { ConfigPatch } from "./ConfigPatch";
 export type { ApplyResult } from "./ApplyResult";
 export type { SubagentSettings } from "./SubagentSettings";
+export type { SkillsSettings } from "./SkillsSettings";
 export type { TuningSettings } from "./TuningSettings";
 export type { ProviderEntry } from "./ProviderEntry";
 export type { ProviderView } from "./ProviderView";

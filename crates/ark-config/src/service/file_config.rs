@@ -235,11 +235,12 @@ mod tests {
 
         let loaded = load_report(&path).unwrap();
         let diagnostics = loaded.diagnostics().expect("a present file is diagnosed");
-        // `hooks` absence is deliberately silent (additive optional section).
+        // `hooks` and `skills` absences are deliberately silent (additive
+        // optional sections).
         let expected_missing: Vec<&str> = crate::domain::CONFIG_KEYS
             .iter()
             .copied()
-            .filter(|key| *key != "hooks")
+            .filter(|key| *key != "hooks" && *key != "skills")
             .collect();
         assert_eq!(diagnostics.missing(), expected_missing);
         assert_eq!(

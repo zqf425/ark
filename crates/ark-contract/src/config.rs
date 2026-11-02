@@ -60,6 +60,9 @@ pub struct ConfigPatch {
     /// Sub-agent switch plus the concurrency cap.
     #[serde(default)]
     pub subagents: Option<SubagentSettings>,
+    /// Skills discovery switch and extra scan roots (docs/modules/ark-skills.md).
+    #[serde(default)]
+    pub skills: Option<SkillsSettings>,
     /// Agent lifecycle hooks (requirements/hooks.md). Hot: the next tool call
     /// reads the new snapshot.
     #[serde(default)]
@@ -154,6 +157,38 @@ pub struct SubagentSettings {
 pub const SUBAGENT_CONCURRENCY_MIN: u32 = 1;
 pub const SUBAGENT_CONCURRENCY_MAX: u32 = 8;
 
+/// Skills discovery policy (docs/modules/ark-skills.md).
+///
+/// `enabled: false` empties every skills view. `extra_dirs` are additional
+/// scan roots — absolute or `~`-prefixed paths; the workspace-relative
+/// directories the runtime already scans are not addressable here, because a
+/// workspace-relative config entry would silently change meaning when the
+/// workspace switches. Restart-classified: the skill runtime snapshots this
+/// at process start, so a patch reports `restart_required`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct SkillsSettings {
+    pub enabled: bool,
+    /// Always serialized: the settings view reads it as a list, and a missing
+    /// key would force every consumer into `?? []` fallbacks.
+    #[serde(default)]
+    pub extra_dirs: Vec<String>,
+}
+
+/// Bounds on `extra_dirs`. Beyond 16 roots the per-request rescan cost and the
+/// instruction budget stop being predictable, so the ceiling is enforced.
+pub const SKILLS_EXTRA_DIRS_MAX: usize = 16;
+pub const SKILLS_EXTRA_DIR_MAX_CHARS: usize = 512;
+
+impl Default for SkillsSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            extra_dirs: Vec::new(),
+        }
+    }
+}
+
 impl Default for SubagentSettings {
     fn default() -> Self {
         Self {
@@ -219,6 +254,7 @@ pub struct RuntimeConfigView {
     pub default_workspace: Option<String>,
     pub default_autonomy: String,
     pub subagents: SubagentSettings,
+    pub skills: SkillsSettings,
     pub schedules: ScheduleSettings,
     pub tuning: TuningSettings,
 }

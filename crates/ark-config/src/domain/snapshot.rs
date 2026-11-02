@@ -6,8 +6,9 @@
 //! value, so a rejected patch cannot leave the live snapshot half updated.
 
 use ark_contract::{
-    ConfigPatch, FieldPath, HookSettings, ScheduleSettings, SubagentSettings, TuningSettings,
-    SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
+    ConfigPatch, FieldPath, HookSettings, ScheduleSettings, SkillsSettings, SubagentSettings,
+    TuningSettings, SKILLS_EXTRA_DIR_MAX_CHARS, SKILLS_EXTRA_DIRS_MAX, SUBAGENT_CONCURRENCY_MAX,
+    SUBAGENT_CONCURRENCY_MIN,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -123,6 +124,9 @@ pub struct RuntimeConfig {
     pub default_autonomy: String,
     /// Sub-agent switch and concurrency cap (design §7.8).
     pub subagents: SubagentSettings,
+    /// Skills discovery switch and extra scan roots (docs/modules/ark-skills.md).
+    /// Classed `Restart`: the skill runtime snapshots this at process start.
+    pub skills: SkillsSettings,
     /// Agent lifecycle hooks (requirements/hooks.md). Classed `Hot`: every tool
     /// call reads the live snapshot, so a patch applies to the very next call.
     pub hooks: HookSettings,
@@ -143,6 +147,7 @@ impl Default for RuntimeConfig {
             default_workspace: None,
             default_autonomy: "workspace_write".to_string(),
             subagents: SubagentSettings::default(),
+            skills: SkillsSettings::default(),
             hooks: HookSettings::default(),
             schedules: ScheduleSettings::default(),
             tuning: TuningConfig::default(),
@@ -187,6 +192,7 @@ impl RuntimeConfig {
                 "subagents.max_concurrency must be between {SUBAGENT_CONCURRENCY_MIN} and {SUBAGENT_CONCURRENCY_MAX}"
             ));
         }
+        validate_skills(&self.skills)?;
         let tuning = self.tuning.clone().sanitized();
         if tuning != self.tuning {
             return Err("tuning contains an out-of-range value".to_string());
@@ -247,6 +253,12 @@ impl RuntimeConfig {
                 changed.push(FieldPath::new("subagents"));
             }
         }
+        if let Some(value) = &patch.skills {
+            if next.skills != *value {
+                next.skills = value.clone();
+                changed.push(FieldPath::new("skills"));
+            }
+        }
         if let Some(value) = &patch.hooks {
             if next.hooks != *value {
                 next.hooks = value.clone();
@@ -286,6 +298,33 @@ fn validate_hooks(hooks: &HookSettings) -> Result<(), String> {
                 return Err(format!("hooks.{phase} timeout_ms must not exceed 60_000"));
             }
         }
+    }
+    Ok(())
+}
+
+/// Skills scan-root bounds: empty or oversized entries are configuration
+/// mistakes, and beyond 16 roots the per-request rescan cost stops being
+/// predictable (docs/modules/ark-skills.md).
+fn validate_skills(skills: &SkillsSettings) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    for dir in &skills.extra_dirs {
+        let trimmed = dir.trim();
+        if trimmed.is_empty() {
+            return Err("skills.extra_dirs contains an empty path".to_string());
+        }
+        if trimmed.chars().count() > SKILLS_EXTRA_DIR_MAX_CHARS {
+            return Err(format!(
+                "skills.extra_dirs entry exceeds {SKILLS_EXTRA_DIR_MAX_CHARS} characters"
+            ));
+        }
+        if !seen.insert(trimmed.to_string()) {
+            return Err(format!("skills.extra_dirs contains a duplicate: {trimmed}"));
+        }
+    }
+    if skills.extra_dirs.len() > SKILLS_EXTRA_DIRS_MAX {
+        return Err(format!(
+            "skills.extra_dirs has more than {SKILLS_EXTRA_DIRS_MAX} entries"
+        ));
     }
     Ok(())
 }

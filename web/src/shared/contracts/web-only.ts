@@ -38,6 +38,9 @@ export type EndpointFormat = (typeof ENDPOINT_FORMATS)[number]
 export const SUBAGENT_MIN_CONCURRENCY = 1
 export const SUBAGENT_MAX_CONCURRENCY = 8
 
+/** Mirrors the runtime clamp (`SKILLS_EXTRA_DIRS_MAX`). */
+export const SKILLS_EXTRA_DIRS_MAX = 16
+
 /** Renderer-only appearance preferences; intentionally not a Rust wire contract. */
 export type UiLocale = 'zh-CN' | 'en-US'
 export type UiFontSize = 'small' | 'medium' | 'large'

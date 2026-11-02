@@ -56,6 +56,7 @@ function config(enabled = true): RuntimeConfigView {
     log_level: 'info',
     default_autonomy: 'workspace_write',
     subagents: { enabled: true, max_concurrency: 2, auto_continue: false },
+    skills: { enabled: true, extra_dirs: [] },
     schedules: { enabled },
     tuning: {
       max_rounds: 40,

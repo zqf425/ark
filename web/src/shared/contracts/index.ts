@@ -75,6 +75,7 @@ export type {
   SkillDiagnostics,
   SkillLoadWarning,
   SkillSummary,
+  SkillsSettings,
   SubagentSettings,
   TuningSettings,
   UpdateMemoryRequest,

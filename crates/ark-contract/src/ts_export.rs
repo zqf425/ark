@@ -37,7 +37,8 @@ use crate::{
     ResolveUserInputRequest, ResumeChildRequest, ReviewRequest, RewindRequest, RewindResponse,
     RunStatus, RuntimeConfigView, RuntimeEvent, RuntimeInfo, ScheduleKind, ScheduledRunRecord,
     ScheduledTask, ScheduledTaskListResponse, SessionResumeResponse, SkillDiagnostics,
-    SkillLoadWarning, SkillSource, SkillSummary, SteerChildRequest, SubagentSettings,
+    SkillLoadWarning, SkillSource, SkillSummary, SkillsSettings, SteerChildRequest,
+    SubagentSettings,
     SwitchWorkspaceRequest, TaskSchedule, TerminalEntriesResponse, TerminalEntry, ThreadDetail,
     ThreadExport, ThreadItem, ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot,
     ThreadSkillsResponse, ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest,
@@ -153,6 +154,7 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     ConfigPatch::export_all_to(dir)?;
     ApplyResult::export_all_to(dir)?;
     SubagentSettings::export_all_to(dir)?;
+    SkillsSettings::export_all_to(dir)?;
     TuningSettings::export_all_to(dir)?;
     ProviderEntry::export_all_to(dir)?;
     ProviderView::export_all_to(dir)?;
@@ -302,6 +304,7 @@ const ROOT_NAMES: &[&str] = &[
     "ConfigPatch",
     "ApplyResult",
     "SubagentSettings",
+    "SkillsSettings",
     "TuningSettings",
     "ProviderEntry",
     "ProviderView",

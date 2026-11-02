@@ -1,15 +1,128 @@
 /**
- * Skills section: read-only listing plus the validation errors verbatim.
+ * Skills section: the discovery config (switch + extra roots) plus a read-only
+ * listing with the validation errors verbatim.
  *
- * Skills are discovered from disk roots; there is nothing to edit here, so the
- * section reports `enabled`, `roots`, each skill and every load failure.
+ * Skills are discovered from disk roots. The config is restart-classified on
+ * the runtime side, so a successful save may still carry `restart_required` —
+ * it is rendered, never swallowed.
  */
-import { Button, EmptyState } from '../../../shared/ui'
+import { useEffect, useState } from 'react'
+import { Button, EmptyState, useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
+import type { ApplyResult, SkillsSettings } from '../../../shared/contracts'
+import { SKILLS_EXTRA_DIRS_MAX } from '../../../shared/contracts/web-only'
 import { useSkills } from '../hooks/use-skills'
+import type { SettingsApi } from '../hooks/use-settings'
+import { describeOutcome, type Outcome } from '../api/outcome'
+import { CheckField, Field } from './Field'
 import { LoadError, Notice, SettingsSection, Skeleton } from './SectionShell'
 
-export function SkillsSection(): JSX.Element {
+function parseExtraDirs(input: string): string[] {
+  const seen = new Set<string>()
+  for (const line of input.split('\n')) {
+    const dir = line.trim()
+    if (dir.length === 0) continue
+    seen.add(dir)
+  }
+  return [...seen]
+}
+
+/** The editable half: master switch plus extra scan roots. */
+function SkillsConfigCard({ settings }: { settings: SettingsApi }): JSX.Element | null {
+  const { t } = useI18n()
+  const toast = useToast()
+  const { config, saving, save } = settings
+  const [enabled, setEnabled] = useState(true)
+  const [dirsDraft, setDirsDraft] = useState('')
+  const [rejection, setRejection] = useState<{ reason: string; restartRequired: string[] } | null>(null)
+
+  useEffect(() => {
+    if (!config) return
+    setEnabled(config.skills.enabled)
+    setDirsDraft(config.skills.extra_dirs.join('\n'))
+  }, [config])
+
+  if (!config) return null
+
+  const parsed = parseExtraDirs(dirsDraft)
+  const tooMany = parsed.length > SKILLS_EXTRA_DIRS_MAX
+  const invalid = tooMany
+  const busy = saving === 'skills'
+  const dirty = enabled !== config.skills.enabled || dirsDraft !== config.skills.extra_dirs.join('\n')
+
+  const persist = async (payload: SkillsSettings): Promise<void> => {
+    setRejection(null)
+    const outcome: Outcome<ApplyResult> = await save({ skills: payload }, 'skills')
+    if (!outcome.ok) {
+      toast.push('error', t('settings.skills.saveFailed'), describeOutcome(outcome))
+      return
+    }
+    if (outcome.value.result === 'rejected') {
+      setRejection({ reason: outcome.value.reason, restartRequired: outcome.value.restart_required })
+      toast.push('error', t('settings.skills.rejected'), outcome.value.reason)
+      return
+    }
+    toast.push('success', t('settings.skills.saveSucceeded'), t('settings.skills.restartHint'))
+  }
+
+  return (
+    <div className="ark-settings__stack">
+      <div className="ark-card__foot">
+        <CheckField
+          label={t('settings.skills.configEnabled')}
+          checked={enabled}
+          disabled={busy}
+          onChange={(next) => {
+            setEnabled(next)
+            void persist({ enabled: next, extra_dirs: parsed })
+          }}
+        />
+        <span className="ark-settings__hint">{t('settings.skills.configEnabledHint')}</span>
+      </div>
+
+      <Field
+        label={t('settings.skills.extraDirs')}
+        htmlFor="skills-extra-dirs"
+        hint={t('settings.skills.extraDirsHint', { max: SKILLS_EXTRA_DIRS_MAX })}
+      >
+        <textarea
+          id="skills-extra-dirs"
+          rows={3}
+          spellCheck={false}
+          value={dirsDraft}
+          disabled={busy}
+          placeholder={t('settings.skills.extraDirsPlaceholder')}
+          onChange={(event) => setDirsDraft(event.target.value)}
+        />
+      </Field>
+      {tooMany ? (
+        <p className="ark-settings__hint ark-settings__hint--error">
+          {t('settings.skills.extraDirsTooMany', { max: SKILLS_EXTRA_DIRS_MAX })}
+        </p>
+      ) : null}
+
+      <div className="ark-card__actions">
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={busy || invalid || !dirty}
+          onClick={() => void persist({ enabled, extra_dirs: parsed })}
+        >
+          {busy ? t('common.saving') : t('common.save')}
+        </Button>
+      </div>
+      <p className="ark-settings__hint">{t('settings.skills.restartHint')}</p>
+
+      {rejection ? (
+        <Notice tone="error" title={t('settings.skills.rejectedTitle')}>
+          <span>{t('settings.skills.reason', { reason: rejection.reason })}</span>
+        </Notice>
+      ) : null}
+    </div>
+  )
+}
+
+export function SkillsSection({ settings }: { settings: SettingsApi }): JSX.Element {
   const { t } = useI18n()
   const api = useSkills()
 
@@ -58,6 +171,8 @@ export function SkillsSection(): JSX.Element {
         </Button>
       }
     >
+      <SkillsConfigCard settings={settings} />
+
       {api.roots.length > 0 ? (
         <div className="ark-card__meta">
           <span>roots:</span>
