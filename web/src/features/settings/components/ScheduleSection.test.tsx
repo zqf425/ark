@@ -57,6 +57,7 @@ function config(enabled = true): RuntimeConfigView {
     default_autonomy: 'workspace_write',
     subagents: { enabled: true, max_concurrency: 2, auto_continue: false },
     schedules: { enabled },
+    im: { enabled: false },
     tuning: {
       max_rounds: 40,
       max_tokens: 1_000_000,

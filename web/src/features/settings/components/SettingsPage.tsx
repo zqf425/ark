@@ -17,6 +17,7 @@ import { ProvidersSection } from './ProvidersSection'
 import { McpSection } from './McpSection'
 import { SkillsSection } from './SkillsSection'
 import { ScheduleSection } from './ScheduleSection'
+import { ImSection } from './ImSection'
 import { SETTINGS_SECTIONS, type SettingsSectionId } from './settings-navigation'
 import '../settings.css'
 import '../settings-agent.css'
@@ -69,6 +70,12 @@ export function SettingsPage(): JSX.Element {
         return (
           <ErrorBoundary label={t('settings.boundary.schedules')}>
             <ScheduleSection settings={settings} />
+          </ErrorBoundary>
+        )
+      case 'im':
+        return (
+          <ErrorBoundary label={t('settings.im.boundary')}>
+            <ImSection settings={settings} />
           </ErrorBoundary>
         )
     }

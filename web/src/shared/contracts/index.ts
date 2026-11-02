@@ -103,7 +103,27 @@ export type {
   WorkspaceStatus,
   WorkspaceValidateResponse,
   RewindRequest,
-  RewindResponse
+  RewindResponse,
+  ImChannelKind,
+  FeishuDomain,
+  ImChannelId,
+  ImCredentials,
+  ImCredentialsView,
+  ImChannel,
+  CreateImChannelRequest,
+  UpdateImChannelRequest,
+  ImChannelView,
+  ImChannelState,
+  ImChannelRuntime,
+  ImChannelListItem,
+  ImChannelListResponse,
+  ImVerifyResponse,
+  ImBinding,
+  ImBindingListResponse,
+  ImSettings,
+  ImWeixinLoginStatus,
+  ImWeixinLoginStartResponse,
+  ImWeixinLoginWaitResponse
 } from '../../generated'
 export type {
   EndpointFormat,

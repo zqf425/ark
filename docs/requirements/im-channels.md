@@ -317,4 +317,14 @@ confirmed;`need_verifycode`/`verify_code_blocked` 显式失败):HTTP 路由
 async-trait(`start` 需网络 IO)。3 个单测(文本提取、业务错误、confirmed 映射)。
 退出条件未触发:协议完整可用。
 
-未实现:阶段 5(设置页)。
+阶段 5(管理界面)已实现:设置页新增「IM 接入」section——渠道列表(平台/标题/启停/
+连接状态/最近错误/校验身份/绑定列表可打开线程)、新建编辑表单(按平台渲染凭证与策略,
+密文不回显、空白=保留)、微信扫码对话框(取码→2s 轮询→确认后展示新建渠道)、总开关
+`im.enabled`(默认关,只门控连接)。API client `im-api.ts`、hook `use-im.ts`、表单映射
+`im-form.ts`(凭证变更检测:非空密文即变更,空白密文保留原值,非密字段直接比对;4 个
+单测);i18n 新增 `settings-im` 目录(中英双语文案,导航与 settings-navigation 测试同步)。
+web 142 用例全绿,typecheck 与硬规则(单文件 400 行,ImSection 拆分为
+ImChannelForm/WeixinLoginDialog)通过。
+
+至此五个阶段全部落地。真实平台端到端(真实 Telegram bot/飞书应用/微信扫码)属发布验收,
+本机未执行。

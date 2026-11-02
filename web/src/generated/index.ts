@@ -113,6 +113,7 @@ export type { ScheduledTask } from "./ScheduledTask";
 export type { ScheduledTaskListResponse } from "./ScheduledTaskListResponse";
 export type { CreateScheduleRequest } from "./CreateScheduleRequest";
 export type { UpdateScheduleRequest } from "./UpdateScheduleRequest";
+export type { ImSettings } from "./ImSettings";
 export type { ImChannelKind } from "./ImChannelKind";
 export type { FeishuDomain } from "./FeishuDomain";
 export type { ImChannelId } from "./ImChannelId";
