@@ -27,9 +27,14 @@ ark 的模型已有能力做代码审查,但缺少一个**明确目标 + 只读�
 3. **审查指令**(模型可见,英文,与工具描述同风格):要求只报告发现,不修改文件;每条发现
    按 P0(正确性/安全,必须修)/P1(疑似缺陷)/P2(打磨)分级,引用文件与行号;没有发现时
    明确说明。
-4. **输出与退出码**:沿用 `arkd run` 既有语义——findings 流式写 stdout,`turn_completed` → 0,
+4. **提示词必须自包含**(2026-11-02 补强):strict 下模型的任何工具调用都会把无人值守回合
+   永久停在审批 gate 上(实测模型在审查中调用 `bash git status` 触发)。因此指令显式禁止
+   调用工具,并由 CLI 预取 `git status --porcelain=v1` 与 `git log --oneline -5` 作为
+   「仓库快照」随 diff 一起进入提示词(两条均为 best-effort,取不到不阻断启动),使模型
+   不需要 shell 就能完成审查。工具调用的自动拒绝(auto-deny gate)是后续能力,未实现。
+5. **输出与退出码**:沿用 `arkd run` 既有语义——findings 流式写 stdout,`turn_completed` → 0,
    失败/中止 → 1,启动失败 → 2。
-5. **不做双实现**:diff 计算只依赖 git CLI 与既有的 `arkd run` 回合路径,不新增工具、不改
+6. **不做双实现**:diff 计算只依赖 git CLI 与既有的 `arkd run` 回合路径,不新增工具、不改
    sandbox 策略;`--review` 与位置 prompt 互斥(CLI 层拒绝)。
 
 ## 验收
@@ -51,3 +56,6 @@ ark 的模型已有能力做代码审查,但缺少一个**明确目标 + 只读�
 - 冒烟与真实校验:临时 git 仓库上 `arkd run --review uncommitted` 完成建线程 → strict pin →
   diff → 审查回合 → 流式输出 → exit 0;真实网关模型对预埋缺陷产出 P0/P1 findings(证据见
   release-readiness.md 校验轮记录)。
+- **2026-11-02 自包含提示词补强**:真实模型(DeepSeek)在审查中调用 `bash git status`,
+  strict 无人值守下审批 gate 永挂,回合无法收敛。修复:`review_prompt` 显式禁止工具调用,
+  CLI 预取仓库快照(`repo_context`)并入提示词;单测同步(禁工具语句、快照段落)。

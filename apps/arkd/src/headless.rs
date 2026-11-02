@@ -151,6 +151,7 @@ async fn one_turn(args: &RunArgs, addr: std::net::SocketAddr) -> Result<(), Fail
     let turn_text = match &args.review {
         Some(target) => {
             let diff = compute_diff(target, &args.workspace)?;
+            let context = repo_context(&args.workspace);
             let pinned = client
                 .patch(format!("{base}/v1/threads/{thread_id}"))
                 .json(&json!({ "runtime": { "autonomy": "strict" } }))
@@ -163,7 +164,7 @@ async fn one_turn(args: &RunArgs, addr: std::net::SocketAddr) -> Result<(), Fail
                     pinned.status()
                 )));
             }
-            review_prompt(&target.label(), &diff)
+            review_prompt(&target.label(), &diff, &context)
         }
         None => args.prompt.clone(),
     };
@@ -299,15 +300,29 @@ fn git_capture(workspace: &Path, args: Vec<String>) -> Result<String, Failure> {
     git_run(workspace, &args).map(|out| out.trim().to_string())
 }
 
+/// Read-only repository snapshot embedded in the review prompt so the model
+/// never needs a shell: with the thread pinned to `strict`, a `bash` call
+/// parks the unattended turn on an approval gate that nobody can resolve
+/// (real review runs did exactly that with `git status`). Both commands are
+/// best-effort — a missing snapshot must not fail the review startup.
+fn repo_context(workspace: &Path) -> String {
+    let status = git_capture(workspace, git_args(["status", "--porcelain=v1"])).unwrap_or_default();
+    let log = git_capture(workspace, git_args(["log", "--oneline", "-5"])).unwrap_or_default();
+    format!("git status --porcelain=v1:\n{status}\n\ngit log --oneline -5:\n{log}")
+}
+
 /// The model-visible instruction for one review turn.
-fn review_prompt(label: &str, diff: &str) -> String {
+fn review_prompt(label: &str, diff: &str, repo_context: &str) -> String {
     format!(
         "You are performing a read-only code review of the {label}. \
-Report findings only; do not modify any file. \
+Report findings only. Do not call any tool: the repository snapshot and the \
+diff below are the complete inputs, and this turn runs unattended, so a tool \
+call would stall it forever. \
 Classify each finding as P0 (correctness or security, must fix), \
 P1 (likely bug or clear defect) or P2 (polish). \
 Cite the file and line for every finding. \
 If there are no findings, say so explicitly.\n\
+Repository snapshot:\n{repo_context}\n\
 Below is the diff under review:\n\
 ```diff\n{diff}```"
     )
@@ -683,9 +698,13 @@ mod tests {
 
     #[test]
     fn the_review_prompt_carries_the_target_and_constraints() {
-        let prompt = review_prompt("uncommitted changes", "+line two");
+        let prompt = review_prompt("uncommitted changes", "+line two", "git status:\n M a.txt");
         assert!(prompt.contains("read-only code review"));
-        assert!(prompt.contains("do not modify any file"));
+        // Tool calls must be explicitly ruled out: with `strict` autonomy a
+        // bash call parks the unattended turn on an unresolvable gate.
+        assert!(prompt.contains("Do not call any tool"));
+        assert!(prompt.contains("Repository snapshot"));
+        assert!(prompt.contains("M a.txt"));
         assert!(prompt.contains("P0"));
         assert!(prompt.contains("uncommitted changes"));
         assert!(prompt.contains("+line two"));
