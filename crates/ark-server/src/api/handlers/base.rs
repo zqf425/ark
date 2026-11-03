@@ -10,10 +10,11 @@ use axum::Json;
 use serde::Deserialize;
 
 use ark_contract::{
-    McpServerEntry, McpServerListResponse, McpServerTestResponse, PluginHostReport, ProviderEntry,
-    ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
-    ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SwitchWorkspaceRequest,
-    ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
+    FolderPickResponse, McpServerEntry, McpServerListResponse, McpServerTestResponse,
+    PluginHostReport, ProviderEntry, ProviderListResponse, ProviderModelCatalogRequest,
+    ProviderModelCatalogResponse, ProviderTestRequest, ProviderTestResponse, SkillDiagnostics,
+    SwitchWorkspaceRequest, ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus,
+    WorkspaceValidateResponse, WorkspaceView,
 };
 
 use crate::api::error::ApiError;
@@ -204,6 +205,33 @@ pub async fn workspace_validate(
     Ok(Json(WorkspaceValidateResponse {
         ok: true,
         path: ark_common::path::normalize(&resolved.to_string_lossy()),
+    }))
+}
+
+/// `POST /v1/workspace/pick` — open the host's native folder chooser.
+///
+/// The dialog is modal on the host machine, so the blocking picker runs in
+/// `spawn_blocking`; cancellation of the HTTP request does not close an
+/// already-open dialog. `path` is `None` when the user cancelled.
+pub async fn workspace_pick(
+    State(state): State<AppState>,
+) -> Result<Json<FolderPickResponse>, ApiError> {
+    let service = state
+        .base
+        .folder_dialog
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| missing("folder dialog"))?;
+    let picked = tokio::task::spawn_blocking(move || service.pick_folder())
+        .await
+        .map_err(|error| {
+            ApiError::new(
+                ark_common::ArkErrorCode::InternalError,
+                format!("folder dialog task failed: {error}"),
+            )
+        })?;
+    Ok(Json(FolderPickResponse {
+        path: picked.map(|path| path.to_string_lossy().into_owned()),
     }))
 }
 
@@ -576,5 +604,17 @@ mod tests {
 
         assert_eq!(error.0.code, ark_common::ArkErrorCode::ValidationError);
         assert!(error.0.message.contains("does not exist"));
+    }
+
+    #[tokio::test]
+    async fn folder_pick_without_the_port_is_runtime_unavailable() {
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
+        let error = workspace_pick(State(state(&data_dir)))
+            .await
+            .expect_err("no folder dialog service is wired in this state");
+
+        assert_eq!(error.0.code, ark_common::ArkErrorCode::RuntimeUnavailable);
+        assert!(error.0.message.contains("folder dialog"));
     }
 }

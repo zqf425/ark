@@ -81,6 +81,9 @@
   `POST /v1/threads/{id}/turns` 在注册回合前拒绝超过 `ark_contract::MAX_TURN_TEXT_BYTES` 的 UTF-8 文本。
 - `POST /v1/workspace/validate` 只转发 `WorkspaceService::validate` 的目录存在性校验，并使用
   `ark_common::path::normalize` 返回规范化路径；handler 不得复制工作区解析规则。
+- `POST /v1/workspace/pick` 在 `spawn_blocking` 中调用 `FolderDialogService::pick_folder`（原生对话框是
+  模态 UI，请求取消不关闭已弹出的对话框）；端口未装配时 `runtime_unavailable`/503，返回
+  `FolderPickResponse`，`path` 省略即用户取消。见 [workspace-switch 需求](../requirements/workspace-switch-and-git-diff.md)。
 - `GET /v1/threads/{id}/usage` 与 `GET /v1/debug/llm-rounds` 只从权威 `usage` 事件投影（每轮模型调用
   恰好一条），不维护第二套用量真源。llm-rounds 以 `limit`（缺省
   `LLM_ROUNDS_DEFAULT_LIMIT`，clamp 到 `LLM_ROUNDS_MAX_LIMIT`）与 `offset` 分页，无 `thread_id`

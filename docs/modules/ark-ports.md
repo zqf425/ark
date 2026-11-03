@@ -49,6 +49,10 @@ cursor }`，端口自有的落盘类型，同 `ThreadMeta` 先例，不进 ts_ex
 - 插件只能经 `HttpCapability`、`McpCapability` 和 `UiCapability` 与基础设施或其它插件交互。
 - `McpServerService` 的 upsert/delete 是异步边界：实现可以在返回前发现远程工具并原子刷新运行时 catalog，
   但不得在 registry 锁持有期间 await。
+- `FolderDialogService`（`base.rs`）是原生文件夹选择框的阻塞端口：实现负责在平台 UI 线程上渲染对话框，
+  HTTP 边界负责 `spawn_blocking`。`None` 只表示"用户取消"，端口不返回错误；workspace 合法性校验仍归
+  `WorkspaceService`。headless/远程构建不注入该端口，路由必须回答 `runtime_unavailable` 而不是在无人
+  可见的机器上弹窗。
 - `MemoryService` 管理用户明确维护的跨会话长期偏好/事实。未注入的构建必须让 HTTP 层返回结构化
   `runtime_unavailable`，不得返回伪造的空成功结果。
 - `PluginHostService`（`base.rs`）只暴露一个 `report()`，产出 `PluginHostReport`，让 `ark-server` 在不链接

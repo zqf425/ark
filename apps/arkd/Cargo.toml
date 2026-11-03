@@ -36,6 +36,8 @@ chrono = { workspace = true }
 async-trait = { workspace = true }
 # Data-URL encoding of image bytes injected into the turn seed (attachment v2 phase 2).
 base64 = "0.22"
+# Native folder chooser behind `FolderDialogService` (POST /v1/workspace/pick).
+rfd = "0.15"
 # `arkd run` drives its own runtime over the real HTTP/SSE boundary.
 reqwest = { workspace = true }
 

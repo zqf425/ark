@@ -344,6 +344,16 @@ pub struct SwitchWorkspaceRequest {
     pub path: String,
 }
 
+/// `POST /v1/workspace/pick` — native folder chooser result. `path` is `None`
+/// when the user cancelled or the host has no native dialog; it is a real
+/// existing directory chosen by the user, not a validated workspace.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct FolderPickResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
 /// One Git status entry. `patch` is optional because binary and capped output
 /// are represented explicitly rather than silently reading arbitrary files.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

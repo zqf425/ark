@@ -18,7 +18,9 @@
 `BaseServices`。业务校验、JSON 恢复及并发控制不位于组合根。
 附件由组合根以同一个 `data_dir` 创建 `ark_store::AttachmentStore`，并以 `AttachmentStore` 端口注入
 `AppState`；大小上限使用存储 crate 的 `DEFAULT_MAX_ATTACHMENT_BYTES`。组合根不解析上传内容或决定
-附件路径。
+附件路径。原生文件夹选择框同样由组合根提供实现：`NativeFolderDialog`（`base.rs`）在 macOS 走
+`osascript choose folder`（rfd 需要 `NSApplication.run()` 事件循环，而 arkd 主线程运行 tokio）、其余
+平台走 `rfd`，经 `FolderDialogService` 端口注入 `BaseServices`；取消与启动失败折叠为 `None` 并记 warn。
 
 回合启动时，组合根把 `TurnJob.attachment_ids`（已由边界层按 `attachment_associated` 事件校验过）
 交给 `TurnEvents::with_attachments` 写入 `turn_started` 作审计。附件 v2 第二期起，组合根另以

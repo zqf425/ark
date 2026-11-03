@@ -341,7 +341,8 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         )))
         .with_memory(Arc::new(MemoryAdapter::new(Arc::clone(&memory))))
         .with_ui(Arc::clone(&ui_bus) as Arc<dyn ark_ports::UiCapability>)
-        .with_plugins(Arc::clone(plugins.host()) as Arc<dyn ark_ports::PluginHostService>);
+        .with_plugins(Arc::clone(plugins.host()) as Arc<dyn ark_ports::PluginHostService>)
+        .with_folder_dialog(Arc::new(crate::base::NativeFolderDialog));
 
     let state = AppState::new(
         store_port,

@@ -34,7 +34,17 @@ timeout、真实路径 containment、`--porcelain -z`、文件/字节/行数/单
 
 Tauri 保持薄宿主：不新增 command、dialog、shell plugin 或 WebView 文件访问；工作区切换始终经 arkd HTTP。
 
-## 当前实现（2026-10-29）
+### 原生文件夹选择（2026-11-03 补充）
+
+工作区路径（全局切换与会话级覆盖）不再要求手动输入：`POST /v1/workspace/pick` 由 arkd 打开宿主平台的
+原生文件夹选择框，返回 `FolderPickResponse { path?: string }`，用户取消或宿主无对话框时 `path` 省略。
+对话框是宿主机器上的模态 UI：handler 在 `spawn_blocking` 中调用端口，浏览器侧取消请求不会关闭已弹出
+的对话框。能力经 `ark-ports` 新端口 `FolderDialogService` 注入（无实现时结构化 `runtime_unavailable`），
+headless/远程构建不装配，避免在无人可见的机器上弹窗。macOS 因 rfd 依赖 `NSApplication.run()` 事件循环
+（arkd 主线程运行 tokio）改用 `osascript choose folder`；其余平台保持 `rfd`。选择结果只是用户选中的真实
+存在目录，不做 workspace 校验；保存仍走既有 validate/switch/PATCH 路径。
+
+## 当前实现（2026-11-03 更新）
 
 - `WorkspaceRoots` 持有 canonical root 与 generation；父 turn 在 runner 入口获取 lease，prompt 与每次
   工具调用均使用同一 root，delegation child 从父 tool context 继承 workspace。
@@ -42,6 +52,9 @@ Tauri 保持薄宿主：不新增 command、dialog、shell plugin 或 WebView �
   根据 parent turn 与 child run 活跃数返回 409，不取消已有任务。
 - `ark-workspace` 以 `status --porcelain=v1 -z` 和受限 diff 生成 staged/unstaged/untracked；untracked
   内容不读取，patch 总量限制 256 KiB、文件数限制 200。
+- `POST /v1/workspace/pick` 已接入：`FolderDialogService` 端口 + arkd `NativeFolderDialog` 适配器
+  （macOS 走 `osascript choose folder`，取消与启动失败都折叠为 `path` 省略并记 warn）；web 会话运行配置
+  面板提供「浏览…」按钮填充输入框。
 - recent descriptors 以 canonical 路径 best-effort 原子写入 `<data-dir>/workspace-recent.json`，arkd 启动时
   恢复；文件缺失或损坏时降级为空集合，已失效、非目录、重复及当前 active 条目会被忽略。写入失败只记录
   告警，不阻断 workspace switch。recent 仅是可重建的展示数据，不参与 workspace lease 或工具授权判断。
