@@ -1,0 +1,86 @@
+/**
+ * 「定时任务」 create dialog, opened from the thread rail.
+ *
+ * Split from code-session-gates.css to stay under the 1000-line per-file limit
+ * (design §7.10.2). It reuses the shared card language: overlay scrim, 18px
+ * panel, muted hairlines. Colors come from styles/tokens.css (theme.css for
+ * dark) only — a literal hex here would break light/dark parity.
+ */
+
+.ark-scheduledialog {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.ark-scheduledialog__scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: var(--ark-overlay);
+  cursor: pointer;
+}
+
+.ark-scheduledialog__panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(640px, 100%);
+  max-height: min(720px, 100%);
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius-xl);
+  background: var(--ark-bg-raised);
+  box-shadow: var(--ark-shadow-2);
+  overflow: hidden;
+}
+
+.ark-scheduledialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--ark-border-muted);
+}
+
+.ark-scheduledialog__head strong {
+  font-size: 14.5px;
+  color: var(--ark-text);
+}
+
+.ark-scheduledialog__close {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--ark-radius-sm);
+  background: transparent;
+  color: var(--ark-text-faint);
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.ark-scheduledialog__close:hover {
+  background: var(--ark-bg-hover);
+  color: var(--ark-text);
+}
+
+/* The settings form brings its own card chrome; the dialog only owns scroll. */
+.ark-scheduledialog__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px 18px;
+}
+
+.ark-scheduledialog__body .ark-card {
+  margin: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}

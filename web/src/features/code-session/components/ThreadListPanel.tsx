@@ -7,6 +7,7 @@ import { useCodeSessionStore } from '../state/store'
 import { useThreadList } from '../hooks/use-thread-list'
 import { exportThread } from '../api/threads-api'
 import { filterThreads, type ThreadListScope } from './thread-list-filter'
+import { ScheduleCreateDialog } from './ScheduleCreateDialog'
 
 function ThreadRow({
   thread,
@@ -122,6 +123,8 @@ export function ThreadListPanel(): JSX.Element {
   const { create, select, refresh, rename, archive, restore, remove, fork, busy } = useThreadList()
   const [scope, setScope] = useState<ThreadListScope>('recent')
   const [query, setQuery] = useState('')
+  /** The scheduled-task entry opens a dialog; the rail itself never navigates. */
+  const [scheduleOpen, setScheduleOpen] = useState(false)
   const visibleThreads = useMemo(() => filterThreads(threads, query, scope), [threads, query, scope])
   const recentCount = useMemo(() => threads.filter((thread) => !thread.archived).length, [threads])
   const archivedCount = threads.length - recentCount
@@ -132,9 +135,31 @@ export function ThreadListPanel(): JSX.Element {
         <div>
           <h1 className="ark-threadlist__title">{t('thread.list.title')}</h1>
         </div>
-        <Button variant="primary" size="sm" disabled={busy} onClick={() => void create()}>
-          {busy ? t('thread.list.creating') : t('thread.list.create')}
-        </Button>
+        <div className="ark-threadlist__head-actions">
+          <button
+            type="button"
+            className="ark-threadlist__schedule"
+            title={t('thread.list.scheduleHint')}
+            aria-label={t('thread.list.scheduleHint')}
+            onClick={() => setScheduleOpen(true)}
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.7" />
+              <path
+                d="M12 7.8V12l2.9 1.8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span>{t('thread.list.schedule')}</span>
+          </button>
+          <Button variant="primary" size="sm" disabled={busy} onClick={() => void create()}>
+            {busy ? t('thread.list.creating') : t('thread.list.create')}
+          </Button>
+        </div>
       </header>
 
       <div className="ark-threadlist__controls">
@@ -221,6 +246,8 @@ export function ThreadListPanel(): JSX.Element {
           {t('thread.list.count', { visible: visibleThreads.length, total: threads.length })}
         </span>
       </footer>
+
+      {scheduleOpen ? <ScheduleCreateDialog onClose={() => setScheduleOpen(false)} /> : null}
     </aside>
   )
 }
