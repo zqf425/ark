@@ -325,8 +325,8 @@ async-trait(`start` 需网络 IO)。3 个单测(文本提取、业务错误、co
 `im.enabled`(默认关,只门控连接)。API client `im-api.ts`、hook `use-im.ts`、表单映射
 `im-form.ts`(凭证变更检测:非空密文即变更,空白密文保留原值,非密字段直接比对;4 个
 单测);i18n 新增 `settings-im` 目录(中英双语文案,导航与 settings-navigation 测试同步)。
-web 142 用例全绿,typecheck 与硬规则(单文件 400 行,ImSection 拆分为
-ImChannelForm/WeixinLoginDialog)通过。
+web 142 用例全绿,typecheck 与硬规则(当时单文件上限 400 行,ImSection 拆分为
+ImChannelForm/WeixinLoginDialog;上限后放宽至 1000 行)通过。
 
 至此五个阶段全部落地。真实平台端到端(真实 Telegram bot/飞书应用/微信扫码)属发布验收,
 本机未执行。

@@ -1,7 +1,7 @@
 /**
  * Provider draft state and the form→wire builder.
  *
- * Split from ProviderForm.tsx to respect the 400-line file limit; the
+ * Split from ProviderForm.tsx to respect the 1000-line file limit; the
  * component owns only React state, every mapping rule stays here and is
  * unit-testable without a renderer.
  */
