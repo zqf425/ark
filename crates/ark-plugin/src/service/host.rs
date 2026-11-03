@@ -19,6 +19,7 @@ use crate::domain::isolation::{plan_local_load, PluginDrop};
 use crate::domain::manifest::PluginManifest;
 use crate::service::context::HostHandles;
 use crate::service::directory::{scan, DirectoryPlugin, ScannedPlugin};
+use crate::service::hook_audit::{HookAuditRecord, InMemoryHookAudit};
 use crate::service::plugin::Plugin;
 use crate::service::registry::{
     LoadReport, MemoryPluginDiagnostics, PluginDiagnostic, PluginDiagnosticSink, PluginRegistry,
@@ -37,6 +38,10 @@ pub struct PluginHost {
     registry: Mutex<PluginRegistry>,
     diagnostics: Arc<MemoryPluginDiagnostics>,
     http_diagnostics: Arc<InMemoryDiagnosticSink>,
+    /// Bounded ring for hook decisions (requirements/plugin-hook-bus.md).
+    /// Owned here so the P2 broker multiplexer can write without rewiring;
+    /// until then it stays empty and the report field is an empty list.
+    hook_audit: Arc<InMemoryHookAudit>,
     http: Arc<HttpBus>,
     mcp: Option<Arc<McpBus>>,
     report: LoadReport,
@@ -53,6 +58,10 @@ impl std::fmt::Debug for PluginHost {
             .finish_non_exhaustive()
     }
 }
+
+/// Bounded audit retention: enough to answer "why was this refused" for a
+/// support session, small enough that a chatty plugin cannot grow the process.
+const HOOK_AUDIT_CAPACITY: usize = 128;
 
 /// Load every plugin under `root`.
 ///
@@ -135,6 +144,7 @@ pub fn load_host(
         registry: Mutex::new(registry),
         diagnostics: diagnostics_sink,
         http_diagnostics,
+        hook_audit: Arc::new(InMemoryHookAudit::new(HOOK_AUDIT_CAPACITY)),
         http,
         mcp: None,
         report,
@@ -212,7 +222,19 @@ impl PluginHost {
                 })
                 .collect(),
             http_denials: self.http_denials(),
+            hook_audit: self
+                .hook_audit
+                .records()
+                .into_iter()
+                .map(hook_audit_view)
+                .collect(),
         }
+    }
+
+    /// The audit sink the hook broker writes into. Host-only: a plugin can read
+    /// its own decisions on the wire report, never write the audit log.
+    pub fn hook_audit_sink(&self) -> Arc<InMemoryHookAudit> {
+        Arc::clone(&self.hook_audit)
     }
 
     /// Refused outbound requests, newest last.
@@ -280,6 +302,18 @@ impl PluginHost {
 impl ark_ports::PluginHostService for PluginHost {
     fn report(&self) -> PluginHostReport {
         self.host_report()
+    }
+}
+
+/// Fold one audit record into its wire view.
+fn hook_audit_view(record: HookAuditRecord) -> ark_contract::HookAuditView {
+    ark_contract::HookAuditView {
+        kind: record.kind,
+        plugin_id: record.plugin_id,
+        hook_point: record.hook_point,
+        decision: record.decision,
+        detail: record.detail,
+        duration_ms: record.duration_ms,
     }
 }
 

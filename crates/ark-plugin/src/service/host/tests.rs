@@ -190,6 +190,35 @@ fn hello_plugin() -> serde_json::Value {
 }
 
 #[test]
+fn the_host_report_exposes_hook_audit_records() {
+    let fixture = Fixture::new();
+    fixture.write("ark.example.hello", hello_plugin());
+    let (host, _sink) = fixture.load();
+
+    // No hook-capable plugin exists yet, so the report carries an empty list —
+    // the field is additive and old readers see nothing new.
+    let report = host.host_report();
+    assert!(report.hook_audit.is_empty());
+
+    // The sink the P2 broker will write into is reachable and the next report
+    // reflects what it recorded, bounded by the ring.
+    let sink = host.hook_audit_sink();
+    use crate::service::hook_audit::HookAuditSink as _;
+    sink.record(crate::service::hook_audit::HookAuditRecord {
+        kind: "hook_decide".into(),
+        plugin_id: "ark.builtin.digital-life".into(),
+        hook_point: "llm.request".into(),
+        decision: "tune".into(),
+        detail: "temperature 0.7 -> 0.9".into(),
+        duration_ms: 2,
+    });
+    let report = host.host_report();
+    assert_eq!(report.hook_audit.len(), 1);
+    assert_eq!(report.hook_audit[0].hook_point, "llm.request");
+    assert_eq!(report.hook_audit[0].decision, "tune");
+}
+
+#[test]
 fn a_minimal_plugin_becomes_visible_on_both_buses() {
     let fixture = Fixture::new();
     fixture.write("ark.example.hello", hello_plugin());
