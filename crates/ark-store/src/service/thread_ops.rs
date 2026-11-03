@@ -70,8 +70,22 @@ impl FileSessionStore {
         Ok(file.to_meta())
     }
 
-    /// Highest durable `seq` read straight from the log (no writer needed).
+    /// Highest durable `seq` for a metadata refresh: the index watermark first,
+    /// the log read only as fallback.
+    ///
+    /// The index watermark only ever lags: appends refresh it right after the
+    /// durable append, rewind resets it to `last_seq`, and startup reconcile
+    /// catches a stale row up. Reading the whole log here would make every
+    /// rename/archive/settings edit pay an O(transcript) scan for a number the
+    /// index already carries. A missing row (deleted index snapshot, fresh
+    /// process before reconcile) falls back to the log so the refresh still
+    /// writes the real watermark instead of regressing the index to 0.
     pub(crate) fn highest_seq_of(&self, thread: ThreadId) -> u64 {
+        if let Ok(index) = self.lock_index() {
+            if let Some(entry) = index.get(&thread) {
+                return entry.indexed_seq;
+            }
+        }
         crate::store::event_log::read_log_blocking(&self.thread_paths(thread))
             .map(|parsed| parsed.max_seq)
             .unwrap_or(0)
@@ -578,5 +592,96 @@ mod tests {
         store.append_child_run(record).await.unwrap();
         store.delete_thread(meta.thread_id).await.unwrap();
         assert!(!store.thread_paths(meta.thread_id).dir().exists());
+    }
+
+    #[tokio::test]
+    async fn rename_carries_the_index_watermark_after_appends() {
+        let dir = TempDir::new("thread-ops-index-watermark");
+        let store = test_store(&dir);
+        let meta = store.create_thread("t").await.unwrap();
+        for _ in 0..3 {
+            store
+                .append_event(meta.thread_id, event_at(meta.thread_id, 1))
+                .await
+                .unwrap();
+        }
+
+        store
+            .rename_thread(meta.thread_id, "renamed")
+            .await
+            .unwrap();
+
+        let entry = store
+            .lock_index()
+            .unwrap()
+            .get(&meta.thread_id)
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            entry.indexed_seq, 3,
+            "rename must persist the index watermark, not reset it"
+        );
+    }
+
+    #[tokio::test]
+    async fn rename_falls_back_to_the_log_when_the_index_row_is_missing() {
+        let dir = TempDir::new("thread-ops-index-missing");
+        let store = test_store(&dir);
+        let meta = store.create_thread("t").await.unwrap();
+        store
+            .append_event(meta.thread_id, event_at(meta.thread_id, 1))
+            .await
+            .unwrap();
+        assert!(store.index_remove(meta.thread_id).unwrap().is_some());
+
+        store
+            .rename_thread(meta.thread_id, "renamed")
+            .await
+            .unwrap();
+
+        let entry = store
+            .lock_index()
+            .unwrap()
+            .get(&meta.thread_id)
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            entry.indexed_seq, 1,
+            "without an index row the watermark must come from the log"
+        );
+    }
+
+    #[tokio::test]
+    async fn rename_keeps_the_watermark_after_a_store_reopen() {
+        let dir = TempDir::new("thread-ops-index-reopen");
+        let meta = {
+            let store = test_store(&dir);
+            let meta = store.create_thread("t").await.unwrap();
+            for _ in 0..2 {
+                store
+                    .append_event(meta.thread_id, event_at(meta.thread_id, 1))
+                    .await
+                    .unwrap();
+            }
+            meta
+        };
+        let reopened = test_store(&dir);
+        // Deleting the log makes the discriminator sharp: a fallback to the log
+        // would see 0, so a correct watermark here can only come from the
+        // persisted index snapshot.
+        std::fs::remove_file(reopened.thread_paths(meta.thread_id).events_jsonl()).unwrap();
+
+        reopened
+            .rename_thread(meta.thread_id, "renamed")
+            .await
+            .unwrap();
+
+        let entry = reopened
+            .lock_index()
+            .unwrap()
+            .get(&meta.thread_id)
+            .cloned()
+            .unwrap();
+        assert_eq!(entry.indexed_seq, 2, "the watermark must survive a reopen");
     }
 }

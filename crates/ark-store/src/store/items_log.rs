@@ -4,7 +4,7 @@
 //! blindly: a missing or empty file is rebuilt from `events.jsonl`, and a
 //! damaged line is skipped rather than failing the load.
 
-use crate::domain::items::{fold_item_snapshots, project_items};
+use crate::domain::items::{delta_item_id, fold_item_snapshots, project_items};
 use crate::domain::layout::ThreadPaths;
 use crate::store::event_log::{append_text, encode_line, read_log_blocking};
 use ark_common::{Result, TurnId, Usage};
@@ -33,50 +33,138 @@ impl UsageRecord {
     }
 }
 
-/// Append one item snapshot to `items.jsonl`.
-pub fn append_item_blocking(paths: &ThreadPaths, item: &ThreadItem, fsync: bool) -> Result<()> {
-    append_text(&paths.items_jsonl(), &encode_line(item)?, fsync)
+/// One decoded `items.jsonl` row.
+///
+/// `Watermarked` is the current format: an item snapshot plus the event
+/// interval the row already covers. `Bare` is a pre-watermark row holding only
+/// the item. The distinction decides whether the file can be read
+/// incrementally or must be rebuilt from the whole event log.
+#[derive(Debug, Clone)]
+pub enum ItemRow {
+    Watermarked(crate::domain::items::ItemSnapshotRecord),
+    Bare(ThreadItem),
 }
 
-/// Rewrite `items.jsonl` from an authoritative item stream.
-pub fn write_items_blocking(paths: &ThreadPaths, items: &[ThreadItem]) -> Result<()> {
+impl ItemRow {
+    fn is_legacy(&self) -> bool {
+        match self {
+            ItemRow::Watermarked(record) => record.is_legacy_shape(),
+            ItemRow::Bare(_) => true,
+        }
+    }
+}
+
+/// Append one watermarked item snapshot to `items.jsonl`.
+pub fn append_item_record_blocking(
+    paths: &ThreadPaths,
+    record: &crate::domain::items::ItemSnapshotRecord,
+    fsync: bool,
+) -> Result<()> {
+    append_text(&paths.items_jsonl(), &encode_line(record)?, fsync)
+}
+
+/// Rewrite `items.jsonl` from watermarked snapshot rows (atomic temp file).
+pub fn write_items_records_blocking(
+    paths: &ThreadPaths,
+    records: &[crate::domain::items::ItemSnapshotRecord],
+) -> Result<()> {
     let mut body = String::new();
-    for item in items {
-        body.push_str(&encode_line(item)?);
+    for record in records {
+        body.push_str(&encode_line(record)?);
     }
     crate::store::fs_util::write_atomic(&paths.items_jsonl(), body.as_bytes())
 }
 
-/// Read every parsable item snapshot (damaged lines are skipped).
+/// Rewrite `items.jsonl` from the authoritative event log and return the items.
 ///
-/// Decoding goes through the shared policy so a BOM at the head of the file
-/// cannot hide the first (or every) record from a strict JSON parser.
-pub fn read_item_snapshots_blocking(paths: &ThreadPaths) -> Vec<ThreadItem> {
+/// The rewrite emits watermarked rows, so a legacy or stale file is upgraded in
+/// place instead of forcing every later read through a full-log replay. Used by
+/// the rebuild paths (fork, rewind, reconcile) which already hold the events.
+pub fn rewrite_items_from_events_blocking(
+    paths: &ThreadPaths,
+    events: &[RuntimeEvent],
+) -> Result<Vec<ThreadItem>> {
+    let mut projector = crate::domain::items::ItemProjector::new();
+    for event in events {
+        projector.apply(event);
+    }
+    let records = projector.snapshot_records();
+    write_items_records_blocking(paths, &records)?;
+    Ok(records.into_iter().map(|record| record.item).collect())
+}
+
+/// Read every parsable row (damaged lines are skipped).
+///
+/// Each line is first tried as a watermarked record and then as a bare
+/// pre-watermark item, so an old file still decodes instead of failing.
+pub fn read_item_rows_blocking(paths: &ThreadPaths) -> Vec<ItemRow> {
     let raw = match ark_common::read_text_opt(&paths.items_jsonl()) {
         Some(raw) => raw,
         None => return Vec::new(),
     };
     raw.lines()
-        .filter_map(|line| serde_json::from_str::<ThreadItem>(line).ok())
+        .filter_map(|line| {
+            serde_json::from_str::<crate::domain::items::ItemSnapshotRecord>(line)
+                .map(ItemRow::Watermarked)
+                .or_else(|_| serde_json::from_str::<ThreadItem>(line).map(ItemRow::Bare))
+                .ok()
+        })
         .collect()
 }
 
 /// Rebuild `items.jsonl` from the event log and return the rebuilt stream.
 pub fn rebuild_items_blocking(paths: &ThreadPaths) -> Result<Vec<ThreadItem>> {
     let events = read_log_blocking(paths)?.events;
-    let items = project_items(&events);
-    write_items_blocking(paths, &items)?;
-    Ok(items)
+    rewrite_items_from_events_blocking(paths, &events)
 }
 
 /// Items for the thread: prefer `items.jsonl`, fall back to a projection.
+///
+/// One legacy row (a bare item or a zero watermark) means the whole file was
+/// written before watermarking; its rows already contain every delta, so a
+/// replay on top of them would double-count text. With a non-empty event log
+/// the log is authoritative and the file is ignored entirely. When the log
+/// itself is empty (for example a damaged log next to a recoverable items
+/// file) the surviving rows are folded instead, so recovery keeps returning
+/// the items the projection used to see. A pure watermarked file is read
+/// incrementally: rows seed the projection, then only delta events past each
+/// row's watermark are replayed. The watermark is per item, not one global
+/// cutoff: an item that never earned a row may have its first delta before
+/// another item's watermark, and a global cutoff would drop it. Non-delta
+/// events are never replayed — the writer never skipped them, so their effect
+/// is already inside the rows.
 pub fn read_items_blocking(paths: &ThreadPaths) -> Result<Vec<ThreadItem>> {
-    let snapshots = read_item_snapshots_blocking(paths);
-    if !snapshots.is_empty() {
-        return Ok(fold_item_snapshots(snapshots));
+    let rows = read_item_rows_blocking(paths);
+    if rows.is_empty() || rows.iter().any(ItemRow::is_legacy) {
+        let events = read_log_blocking(paths)?.events;
+        if events.is_empty() {
+            // Damaged-log recovery: `items.jsonl` is the only surviving source.
+            return Ok(fold_item_snapshots(rows.into_iter().map(|row| match row {
+                ItemRow::Watermarked(record) => record.item,
+                ItemRow::Bare(item) => item,
+            })));
+        }
+        return Ok(project_items(&events));
     }
     let events = read_log_blocking(paths)?.events;
-    Ok(project_items(&events))
+    let mut projector = crate::domain::items::ItemProjector::new();
+    for row in rows {
+        match row {
+            ItemRow::Watermarked(record) => {
+                projector.seed_snapshot(record.first_seq, record.watermark_seq, record.item)
+            }
+            // The legacy branch above already returned for bare rows.
+            ItemRow::Bare(_) => {}
+        }
+    }
+    for event in &events {
+        if let Some(item_id) = delta_item_id(event) {
+            if event.seq() > projector.watermark_of(&item_id) {
+                projector.apply(event);
+            }
+        }
+    }
+    Ok(projector.finish_in_event_order())
 }
 
 /// Append one usage increment to `usage.jsonl`.
@@ -182,9 +270,126 @@ mod tests {
         body.push_str("{\"item_id\": broken\n");
         std::fs::write(paths.items_jsonl(), body).unwrap();
 
-        let snapshots = read_item_snapshots_blocking(&paths);
-        assert_eq!(snapshots.len(), 1);
+        let rows = read_item_rows_blocking(&paths);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].is_legacy(), "a bare row is the legacy shape");
         assert_eq!(read_items_blocking(&paths).unwrap().len(), 1);
+    }
+
+    /// Append `item` as a bare pre-watermark row (the old `items.jsonl` shape).
+    fn append_legacy_row(paths: &ThreadPaths, item: &ThreadItem) {
+        let existing = ark_common::read_text_opt(&paths.items_jsonl()).unwrap_or_default();
+        std::fs::write(
+            paths.items_jsonl(),
+            format!("{}{}", existing, encode_line(item).unwrap()),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_legacy_bare_row_file_replays_the_whole_log() {
+        // A pre-watermark row already contains every delta, so replaying the
+        // log on top of it would double the text. The read must therefore
+        // ignore the file entirely and project from the authoritative events.
+        let dir = TempDir::new("items-legacy");
+        let paths = paths(&dir);
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let item = ItemId::new();
+        let events = vec![
+            turn_started(thread, turn, 1),
+            text_delta(thread, turn, item, 2, "a"),
+            text_delta(thread, turn, item, 3, "b"),
+        ];
+        crate::store::fs_util::ensure_dir(paths.dir()).unwrap();
+        append_legacy_row(&paths, &project_items(&events)[0]);
+        std::fs::write(
+            paths.events_jsonl(),
+            events
+                .iter()
+                .map(|event| encode_line(event).unwrap())
+                .collect::<String>(),
+        )
+        .unwrap();
+
+        let items = read_items_blocking(&paths).unwrap();
+        assert_eq!(items, project_items(&events));
+        assert_eq!(items[0].text.as_deref(), Some("ab"));
+    }
+
+    #[test]
+    fn watermarked_rows_read_back_equal_a_full_replay() {
+        // Covers the three shapes that decide correctness of the incremental
+        // read: a delta-only item (no row at all), a delta-then-keypoint item
+        // (row plus later delta replay) and multiple interleaved items.
+        let dir = TempDir::new("items-watermarked");
+        let paths = paths(&dir);
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let text_item = ItemId::new();
+        let tool_call = "call-1";
+        let events = vec![
+            turn_started(thread, turn, 1),
+            // Delta-only so far: no row may exist for it yet.
+            text_delta(thread, turn, text_item, 2, "he"),
+            RuntimeEvent::ToolCallStarted {
+                seq: 3,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: Utc::now(),
+                call_id: tool_call.into(),
+                tool: "bash".into(),
+                arguments: serde_json::json!({}),
+            },
+            RuntimeEvent::ToolCallFinished {
+                seq: 4,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: Utc::now(),
+                call_id: tool_call.into(),
+                tool: "bash".into(),
+                ok: true,
+                duration_ms: 12,
+                output: "ok".into(),
+                detail: None,
+            },
+            // A late delta after the item's row: replay must append exactly it.
+            text_delta(thread, turn, text_item, 5, "llo"),
+            // A second delta-only item created after other items' watermarks.
+            text_delta(thread, turn, ItemId::new(), 6, "second"),
+        ];
+        crate::store::fs_util::ensure_dir(paths.dir()).unwrap();
+        std::fs::write(
+            paths.events_jsonl(),
+            events
+                .iter()
+                .map(|event| encode_line(event).unwrap())
+                .collect::<String>(),
+        )
+        .unwrap();
+
+        // Mirror the writer policy: only non-delta item events append rows.
+        let mut projector = crate::domain::items::ItemProjector::new();
+        for event in &events {
+            if let Some(item) = projector.apply(event) {
+                if !crate::domain::items::is_delta_event(event) {
+                    append_item_record_blocking(
+                        &paths,
+                        &crate::domain::items::ItemSnapshotRecord::from_projection(
+                            projector.first_seq_of(&item.item_id),
+                            projector.watermark_of(&item.item_id),
+                            &item,
+                        ),
+                        false,
+                    )
+                    .unwrap();
+                }
+            }
+        }
+
+        let items = read_items_blocking(&paths).unwrap();
+        assert_eq!(items, project_items(&events));
+        assert_eq!(items[0].text.as_deref(), Some("hello"));
     }
 
     #[test]
