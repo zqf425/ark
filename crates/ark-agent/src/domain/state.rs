@@ -75,9 +75,14 @@ impl TurnState {
             (DispatchingTools, AwaitingUserInput) => true,
             (DispatchingTools, Finalizing) => true,
             (AwaitingApproval, DispatchingTools) => true,
+            (AwaitingApproval, AwaitingApproval) => true,
             (AwaitingApproval, Finalizing) => true,
             (AwaitingUserInput, DispatchingTools) => true,
             (AwaitingUserInput, AwaitingModel) => true,
+            (AwaitingUserInput, AwaitingUserInput) => true,
+            // Asks are answered before approvals within one round, so the ask
+            // chain hands over to the approval chain (A2).
+            (AwaitingUserInput, AwaitingApproval) => true,
             (AwaitingUserInput, Finalizing) => true,
             (Compacting, AwaitingModel) => true,
             (Compacting, Finalizing) => true,
@@ -127,6 +132,17 @@ mod tests {
     fn cannot_await_model_from_awaiting_model() {
         // Guards the "no two concurrent model calls per turn" invariant.
         assert!(!TurnState::AwaitingModel.can_enter(TurnState::AwaitingModel));
+    }
+
+    #[test]
+    fn gate_states_reenter_their_own_state() {
+        // A mixed model round queues several gates; each resolved gate asks the
+        // next one while the turn stays blocked on the same gate kind. Without
+        // these self transitions the second ask of a chain is an illegal move.
+        assert!(TurnState::AwaitingApproval.can_enter(TurnState::AwaitingApproval));
+        assert!(TurnState::AwaitingUserInput.can_enter(TurnState::AwaitingUserInput));
+        // The ask chain of one round ends in its approval chain (A2).
+        assert!(TurnState::AwaitingUserInput.can_enter(TurnState::AwaitingApproval));
     }
 
     #[test]

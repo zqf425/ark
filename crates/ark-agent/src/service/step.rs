@@ -199,10 +199,37 @@ fn after_tools(input: &TurnInput) -> Action {
     call_model(input)
 }
 
-/// The user answered: the answer already became the tool result, so the turn
-/// simply continues with the next model round.
+/// One ask was answered and its answer already became the tool result. The
+/// remaining asks of the same round each get their own round, then the
+/// approval asks follow, then the parked plain calls dispatch — nothing of
+/// the round is dropped (A1, A2).
 fn after_user_input(input: &TurnInput) -> Action {
-    call_model(input)
+    let InputKind::UserInputResolved {
+        remaining_asks,
+        approvals,
+        pending_dispatch,
+        repeats,
+        ..
+    } = &input.kind
+    else {
+        return invalid(TurnState::AwaitingUserInput, &input.kind);
+    };
+    if let Some(next) = remaining_asks.first() {
+        return Action::AskUser {
+            call: next.call.clone(),
+            prompt: next.prompt.clone(),
+        };
+    }
+    if let Some(ask) = approvals.first() {
+        return Action::RequestApproval {
+            call: ask.call.clone(),
+            summary: ask.summary.clone(),
+        };
+    }
+    if pending_dispatch.is_empty() {
+        return call_model(input);
+    }
+    dispatch(pending_dispatch, repeats, input, DispatchYield::default())
 }
 
 fn after_compaction(input: &TurnInput) -> Action {
@@ -273,10 +300,77 @@ mod tests {
             InputKind::UserInputResolved {
                 call: call.clone(),
                 answer: "main".into(),
+                remaining_asks: Vec::new(),
+                approvals: Vec::new(),
+                pending_dispatch: Vec::new(),
+                repeats: Vec::new(),
             },
         );
         let action = step(TurnState::AwaitingUserInput, &turn);
         assert_eq!(action, Action::CallModel { round: 1 });
+    }
+
+    #[test]
+    fn remaining_asks_each_get_their_own_round() {
+        let ask = |id: &str, prompt: &str| {
+            crate::domain::input::UserInputAsk::new(
+                ToolCallRequest::new(id, "request_user_input", serde_json::json!({})),
+                prompt,
+            )
+        };
+        let turn = input(
+            Progress::default(),
+            InputKind::UserInputResolved {
+                call: ask("a1", "first?").call,
+                answer: "first".into(),
+                remaining_asks: vec![ask("a2", "second?")],
+                approvals: Vec::new(),
+                pending_dispatch: Vec::new(),
+                repeats: Vec::new(),
+            },
+        );
+        let action = step(TurnState::AwaitingUserInput, &turn);
+        assert_eq!(
+            action,
+            Action::AskUser {
+                call: ToolCallRequest::new("a2", "request_user_input", serde_json::json!({})),
+                prompt: "second?".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn approvals_follow_the_answered_asks() {
+        let turn = input(
+            Progress::default(),
+            InputKind::UserInputResolved {
+                call: ToolCallRequest::new("a1", "request_user_input", serde_json::json!({})),
+                answer: "main".into(),
+                remaining_asks: Vec::new(),
+                approvals: vec![ApprovalAsk::new(call("c1", "bash", "x"), "run bash")],
+                pending_dispatch: Vec::new(),
+                repeats: Vec::new(),
+            },
+        );
+        let action = step(TurnState::AwaitingUserInput, &turn);
+        assert!(matches!(action, Action::RequestApproval { .. }));
+    }
+
+    #[test]
+    fn plain_calls_dispatch_once_every_gate_of_the_round_is_resolved() {
+        let turn = input(
+            Progress::default(),
+            InputKind::UserInputResolved {
+                call: ToolCallRequest::new("a1", "request_user_input", serde_json::json!({})),
+                answer: "main".into(),
+                remaining_asks: Vec::new(),
+                approvals: Vec::new(),
+                pending_dispatch: vec![call("c1", "read", "a")],
+                repeats: vec![0],
+            },
+        );
+        let action = step(TurnState::AwaitingUserInput, &turn);
+        assert!(matches!(action, Action::Dispatch(_)));
     }
 
     #[test]
