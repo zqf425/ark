@@ -99,9 +99,20 @@ pub enum InputKind {
         repeats: Vec<u32>,
     },
     /// A user-input gate was answered; the answer becomes the tool result.
+    /// The sibling asks, the approval asks and the plain calls of the same
+    /// round travel with the event, so every ask gets its own round and no
+    /// `tool_call` of the assistant row is dropped.
     UserInputResolved {
         call: ToolCallRequest,
         answer: String,
+        /// Asks still waiting for an answer after this one.
+        remaining_asks: Vec<UserInputAsk>,
+        /// Approval asks of the same round, asked once every ask is answered.
+        approvals: Vec<ApprovalAsk>,
+        /// Calls that may run once every gate of this round is resolved.
+        pending_dispatch: Vec<ToolCallRequest>,
+        /// Repeat counters aligned with `pending_dispatch`.
+        repeats: Vec<u32>,
     },
     /// Compaction finished.
     CompactionSettled { removed_items: u32 },

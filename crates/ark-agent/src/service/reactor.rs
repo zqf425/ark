@@ -110,6 +110,15 @@ pub struct Reactor {
     pending_calls: Vec<ToolCallRequest>,
     /// Gates not yet resolved, in model order.
     pending_approvals: Vec<ApprovalAsk>,
+    /// `request_user_input` calls of the current round, in model order. Each
+    /// one is asked in its own round so every ask gets its own answer row
+    /// (A2).
+    pending_user_inputs: Vec<UserInputAsk>,
+    /// Gate-free calls of the current round. They are parked while the turn
+    /// is blocked on a sibling gate and dispatch together with the chain
+    /// resolution: dropping them would orphan their ids in the assistant row
+    /// (A1).
+    plain_calls: Vec<ToolCallRequest>,
     /// Calls already approved during the current gate chain.
     approved: Vec<ToolCallRequest>,
     /// Synthetic results produced by earlier denials in the chain.
@@ -154,6 +163,8 @@ impl Reactor {
             reasoning_item: None,
             pending_calls: Vec::new(),
             pending_approvals: Vec::new(),
+            pending_user_inputs: Vec::new(),
+            plain_calls: Vec::new(),
             approved: Vec::new(),
             denied: Vec::new(),
             steer: None,
@@ -531,9 +542,28 @@ impl Reactor {
         self.complete_stream_items().await?;
 
         self.pending_calls = calls.clone();
+        self.pending_user_inputs = user_inputs.clone();
         self.approved.clear();
         self.denied.clear();
         self.pending_approvals = self.approval_asks(&calls);
+        // Everything that is neither an approval ask nor a user-input ask
+        // runs without a gate; it must survive the gate chain untouched,
+        // otherwise its ids stay orphaned in the assistant row (A1).
+        let gated: std::collections::HashSet<&str> = self
+            .pending_approvals
+            .iter()
+            .map(|ask| ask.call.call_id.as_str())
+            .chain(
+                self.pending_user_inputs
+                    .iter()
+                    .map(|ask| ask.call.call_id.as_str()),
+            )
+            .collect();
+        self.plain_calls = calls
+            .iter()
+            .filter(|call| !gated.contains(call.call_id.as_str()))
+            .cloned()
+            .collect();
         let repeats = self.machine.repeats_for(&calls);
         let approvals = self.pending_approvals.clone();
         Ok(self
@@ -681,6 +711,12 @@ mod tests {
     // doubles and the private `ask_approval`/`ask_user`.
     #[path = "reactor_gate_tests.rs"]
     mod gate_tests;
+
+    // Regression tests for the review findings (A1 mixed rounds, A2 ask
+    // chains, A3 cancelled batches) reuse the doubles through the same
+    // descendant-module pattern.
+    #[path = "reactor_regression_tests.rs"]
+    mod regression_tests;
 
     #[derive(Debug)]
     struct NoopModel;

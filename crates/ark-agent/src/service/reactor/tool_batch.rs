@@ -91,7 +91,36 @@ impl Reactor {
         let calls = batch.to_vec();
         let tools = Arc::clone(&self.tools);
         let results = tokio::select! {
-            _ = self.cancel.cancelled() => return Ok((Vec::new(), true)),
+            _ = self.cancel.cancelled() => {
+                // Every started call must get its paired `finished` row before
+                // the turn unwinds: started-without-finished reads as a hung
+                // execution in the journal and ark-store, and the assistant
+                // row already carries these call ids, so the history needs
+                // result rows to stay provider-legal.
+                for call in batch {
+                    let detail = "cancelled before the call completed".to_string();
+                    self.writer
+                        .append(self.events.tool_call_finished(
+                            &call.call_id,
+                            &call.tool,
+                            false,
+                            0,
+                            String::new(),
+                            Some(detail.clone()),
+                        ))
+                        .await?;
+                    let execution = ToolExecution {
+                        call_id: call.call_id.clone(),
+                        tool: call.tool.clone(),
+                        ok: false,
+                        content: String::new(),
+                        duration_ms: 0,
+                        detail: Some(detail),
+                    };
+                    self.append_tool_history(call, &execution);
+                }
+                return Ok((Vec::new(), true));
+            }
             results = crate::service::dispatch::run_calls(tools, calls) => results,
         };
         let mut executions = Vec::new();

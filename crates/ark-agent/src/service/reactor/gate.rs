@@ -84,7 +84,13 @@ impl Reactor {
         let pending_dispatch = if next_ask.is_some() {
             Vec::new()
         } else {
-            already_approved
+            // The gate chain is done: the round's gate-free calls ride along
+            // with the resolution. Dropping them would leave their
+            // `tool_call` entries in the assistant row without a result row,
+            // which providers reject (A1).
+            let mut pending = self.plain_calls.clone();
+            pending.extend(already_approved);
+            pending
         };
         let mut aligned = pending_dispatch.clone();
         aligned.push(call.clone());
@@ -147,9 +153,26 @@ impl Reactor {
                 None,
             ))
             .await?;
+        // Chain bookkeeping for the sibling gates of the same round: every ask
+        // is answered in its own round, approvals follow once the asks are
+        // done, and only then may anything dispatch (A2).
+        self.pending_user_inputs
+            .retain(|ask| ask.call.call_id != call.call_id);
+        let remaining_asks = self.pending_user_inputs.clone();
+        let approvals = self.pending_approvals.clone();
+        let pending_dispatch = if remaining_asks.is_empty() && approvals.is_empty() {
+            self.plain_calls.clone()
+        } else {
+            Vec::new()
+        };
+        let repeats = self.machine.repeats_for(&pending_dispatch);
         Ok(self.input_of(InputKind::UserInputResolved {
             call: call.clone(),
             answer,
+            remaining_asks,
+            approvals,
+            pending_dispatch,
+            repeats,
         }))
     }
 }
