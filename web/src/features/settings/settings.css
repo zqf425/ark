@@ -371,3 +371,17 @@
     animation: none;
   }
 }
+
+/* WeChat login QR: white padding keeps the code scannable on dark themes. */
+.ark-im-qr {
+  display: inline-block;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff;
+  line-height: 0;
+}
+
+.ark-im-qr img,
+.ark-im-qr svg {
+  display: block;
+}
