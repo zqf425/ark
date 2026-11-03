@@ -27,9 +27,10 @@
 持久化异常都只影响该子任务，不得毒化后续队列。
 
 终态记录写入后，运行时向父线程发布带稳定通知 ID 的 `child_completed` 事件，供 SSE/UI 和后续
-主线程收件箱消费。hydrate 会补发缺失通知，但先扫描父事件以避免重复投递。事件持久化成功后还会向
-进程内 broadcast 通道发送父 thread id；该通道只负责唤醒 server supervisor，丢失或 lag 时由持久 inbox
-扫描恢复，不能成为通知真源。
+主线程收件箱消费。hydrate 会补发缺失通知，但去重探针只经 `replay_child_completion_events` 的窄
+投影扫描父线程的完成词汇（`child_completed`/`child_completion_acknowledged`），既避免重复投递，
+也避免为匹配一个事件克隆整条转录。事件持久化成功后还会向进程内 broadcast 通道发送父 thread id；
+该通道只负责唤醒 server supervisor，丢失或 lag 时由持久 inbox 扫描恢复，不能成为通知真源。
 
 ## 验证
 

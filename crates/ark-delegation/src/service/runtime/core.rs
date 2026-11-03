@@ -396,12 +396,22 @@ impl RuntimeCore {
         }
     }
 
+    /// Whether this exact terminal notification is already durable on the
+    /// parent thread.
+    ///
+    /// The probe reads only the completion vocabulary
+    /// (`replay_child_completion_events`): publishing runs on every hydrate and
+    /// every run finish, so scanning the whole transcript here would clone every
+    /// streamed delta per child just to match on `child_completed`.
     async fn completion_already_published(
         &self,
         record: &ChildRunRecord,
         notification_id: &str,
     ) -> Result<bool> {
-        let events = self.store.replay_events(record.parent_thread_id, 0).await?;
+        let events = self
+            .store
+            .replay_child_completion_events(record.parent_thread_id)
+            .await?;
         Ok(events.into_iter().any(|event| {
             matches!(
                 event,

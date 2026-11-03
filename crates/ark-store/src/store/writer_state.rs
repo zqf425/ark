@@ -7,14 +7,14 @@
 
 use crate::config::StoreLimits;
 use crate::domain::diagnostics::{DiagnosticKind, DiagnosticSink, StoreDiagnostic};
-use crate::domain::items::ItemProjector;
+use crate::domain::items::{is_delta_event, ItemProjector};
 use crate::domain::layout::ThreadPaths;
 use crate::domain::session_state::SessionState;
 use crate::store::event_log::{
     append_text, encode_event, plan_compaction, read_markers_blocking, repair_log_blocking,
 };
 use crate::store::fs_util::{read_json_opt, remove_dir_all, write_atomic, write_json_atomic};
-use crate::store::items_log::{append_item_blocking, append_usage_blocking, UsageRecord};
+use crate::store::items_log::{append_item_record_blocking, append_usage_blocking, UsageRecord};
 use ark_common::{ArkError, Result, ThreadId};
 use ark_contract::{RewindResponse, RuntimeEvent};
 use chrono::Utc;
@@ -33,6 +33,18 @@ pub struct Snapshot {
     pub backlog: Vec<RuntimeEvent>,
     pub watermark: u64,
     pub live: mpsc::Receiver<RuntimeEvent>,
+}
+
+/// Whether one event's log append must be fsynced.
+///
+/// Streaming deltas are recoverable by construction: a crash loses at most the
+/// torn tail of `events.jsonl`, the item projection replays from the log, and
+/// the client refetches the transcript instead of relying on the flushed
+/// delta. Skipping the flush removes most fsyncs of a streaming turn; the
+/// `fsync_on_append` limit still wins so deployments and tests can turn
+/// durability off entirely.
+fn append_fsync(limits: &StoreLimits, event: &RuntimeEvent) -> bool {
+    limits.fsync_on_append && !is_delta_event(event)
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -128,7 +140,7 @@ impl WriterState {
         append_text(
             &self.paths.events_jsonl(),
             &text,
-            self.limits.fsync_on_append,
+            append_fsync(&self.limits, &stored),
         )?;
         self.needs_newline = false;
         self.seq = seq;
@@ -262,10 +274,10 @@ impl WriterState {
         for event in &self.events {
             self.projector.apply(event);
         }
-        crate::store::items_log::write_items_blocking(
-            &self.paths,
-            &crate::domain::items::project_items(&self.events),
-        )?;
+        // The rewrite must emit watermarked rows: a plain item rewrite would
+        // restore legacy-shape rows and push every later read back to a
+        // full-log replay.
+        crate::store::items_log::rewrite_items_from_events_blocking(&self.paths, &self.events)?;
         self.session = SessionState::replay(&self.events);
         write_json_atomic(&self.paths.session_json(), &self.session)?;
         self.needs_newline = false;
@@ -414,8 +426,20 @@ impl WriterState {
     /// rather than errors: the event log remains authoritative.
     fn project_derived(&mut self, stored: &RuntimeEvent) {
         if let Some(item) = self.projector.apply(stored) {
-            if let Err(err) = append_item_blocking(&self.paths, &item, false) {
-                self.report_derived("items.jsonl", &err);
+            // Delta events must not append a row: each row carries the
+            // accumulated text, so a row per fragment made `items.jsonl`
+            // quadratic in the reply length. The row's watermark instead lets
+            // a read replay only the deltas that are still missing. The
+            // position fields are read *after* `apply`, which advanced them.
+            if !is_delta_event(stored) {
+                let record = crate::domain::items::ItemSnapshotRecord::from_projection(
+                    self.projector.first_seq_of(&item.item_id),
+                    self.projector.watermark_of(&item.item_id),
+                    &item,
+                );
+                if let Err(err) = append_item_record_blocking(&self.paths, &record, false) {
+                    self.report_derived("items.jsonl", &err);
+                }
             }
         }
         if let RuntimeEvent::Usage {
@@ -483,8 +507,8 @@ impl WriterState {
 mod tests {
     use super::*;
     use crate::domain::diagnostics::MemoryDiagnostics;
-    use crate::store::tests::{event_at, TempDir};
-    use ark_common::ChildId;
+    use crate::store::tests::{event_at, text_delta, TempDir};
+    use ark_common::{ChildId, ItemId, TurnId};
     use chrono::Utc;
 
     fn state(dir: &TempDir, thread: ThreadId) -> WriterState {
@@ -725,5 +749,29 @@ mod tests {
                     if notification_id == "child:duplicate"
             )
         }));
+    }
+
+    #[test]
+    fn append_fsync_skips_deltas_and_respects_the_limit() {
+        let mut limits = StoreLimits::for_tests();
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let delta = text_delta(thread, turn, ItemId::new(), 1, "chunk");
+        let key_point = event_at(thread, 2);
+
+        // With fsync enabled, streaming deltas skip the flush (a crash loses at
+        // most the torn tail and the projection replays from the log); every
+        // other event keeps the flush.
+        limits.fsync_on_append = true;
+        assert!(
+            !super::append_fsync(&limits, &delta),
+            "delta must skip fsync"
+        );
+        assert!(super::append_fsync(&limits, &key_point));
+
+        // The limit still wins: turning it off disables fsync entirely.
+        limits.fsync_on_append = false;
+        assert!(!super::append_fsync(&limits, &delta));
+        assert!(!super::append_fsync(&limits, &key_point));
     }
 }

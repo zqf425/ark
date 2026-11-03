@@ -13,6 +13,7 @@ use ark_common::{ItemId, TurnId};
 use ark_contract::item::{ItemKind, ToolPayload};
 use ark_contract::{ItemStatus, RuntimeEvent, ThreadItem};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -67,11 +68,80 @@ struct ToolFinished<'a> {
     detail: Option<&'a str>,
 }
 
+/// One `items.jsonl` line: an item snapshot plus the log positions it covers.
+///
+/// Delta events intentionally do not append rows (a row per delta carried the
+/// accumulated full text and made the file quadratic in the reply length), so
+/// the two sequence numbers are what lets a read rebuild the missing tail:
+///
+/// * `first_seq` — the first event that touched the item; it decides render
+///   order even when only later key points ever wrote a row for it;
+/// * `watermark_seq` — the last event folded into `item`; a read replays a
+///   logged delta only past this point, so text already in the snapshot is
+///   never appended twice.
+///
+/// Rows written before watermarking existed deserialize with both fields at 0;
+/// `is_legacy_shape` sends such files to a full-log rebuild instead.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItemSnapshotRecord {
+    #[serde(default)]
+    pub first_seq: u64,
+    #[serde(default)]
+    pub watermark_seq: u64,
+    #[serde(flatten)]
+    pub item: ThreadItem,
+}
+
+impl ItemSnapshotRecord {
+    /// Whether the row carries no position information (pre-watermark file).
+    ///
+    /// Real event seqs start at 1, so 0 can only come from an old row whose
+    /// text already contains every delta — replaying would duplicate it.
+    pub fn is_legacy_shape(&self) -> bool {
+        self.watermark_seq == 0
+    }
+
+    /// Wrap a freshly projected item with the positions this projection
+    /// already covers, so a later read can replay only what is missing.
+    pub fn from_projection(first_seq: u64, watermark_seq: u64, item: &ThreadItem) -> Self {
+        Self {
+            first_seq,
+            watermark_seq,
+            item: item.clone(),
+        }
+    }
+}
+
+/// Whether this event is a streaming delta append.
+///
+/// Only the two assistant delta kinds carry one text fragment per event; every
+/// other kind is a key point the derived files may persist directly. Keep this
+/// in sync with the projector's delta handlers.
+pub fn is_delta_event(event: &RuntimeEvent) -> bool {
+    matches!(
+        event,
+        RuntimeEvent::AssistantTextDelta { .. } | RuntimeEvent::AssistantReasoningDelta { .. }
+    )
+}
+
+/// The item a delta event appends to.
+pub fn delta_item_id(event: &RuntimeEvent) -> Option<ItemId> {
+    match event {
+        RuntimeEvent::AssistantTextDelta { item_id, .. }
+        | RuntimeEvent::AssistantReasoningDelta { item_id, .. } => Some(*item_id),
+        _ => None,
+    }
+}
+
 /// Incremental folder: keeps item order and the latest snapshot per item.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ItemProjector {
     order: Vec<ItemId>,
     items: HashMap<ItemId, ThreadItem>,
+    /// First event `seq` that touched each item (render order on rebuild).
+    first: HashMap<ItemId, u64>,
+    /// Last event `seq` folded into each item (snapshot watermark).
+    touched: HashMap<ItemId, u64>,
     current_turn: Option<TurnId>,
 }
 
@@ -80,9 +150,26 @@ impl ItemProjector {
         Self::default()
     }
 
+    /// Seed the projector with the newest row read back from `items.jsonl`,
+    /// together with the event interval that row already covers.
+    ///
+    /// Replaying only events past the row's watermark then continues the
+    /// projection exactly where the snapshot stopped, so a read does not have
+    /// to fold the whole log again.
+    pub fn seed_snapshot(&mut self, first_seq: u64, watermark_seq: u64, item: ThreadItem) {
+        let item_id = item.item_id;
+        if !self.items.contains_key(&item_id) {
+            self.order.push(item_id);
+        }
+        self.first.entry(item_id).or_insert(first_seq);
+        self.items.insert(item_id, item);
+        self.touched.insert(item_id, watermark_seq);
+    }
+
     /// Apply one event; returns the updated snapshot of the touched item.
     pub fn apply(&mut self, event: &RuntimeEvent) -> Option<ThreadItem> {
         self.note_turn(event);
+        let seq = event.seq();
         let item = match event {
             RuntimeEvent::ItemCreated { item, .. } | RuntimeEvent::ItemUpdated { item, .. } => {
                 self.upsert(item.clone())
@@ -181,7 +268,19 @@ impl ItemProjector {
             } => self.apply_compaction(*turn_id, *removed_items, *timestamp),
             _ => return None,
         };
+        self.first.entry(item.item_id).or_insert(seq);
+        self.touched.insert(item.item_id, seq);
         Some(item)
+    }
+
+    /// First event `seq` that touched the item (render order on rebuild).
+    pub fn first_seq_of(&self, item_id: &ItemId) -> u64 {
+        self.first.get(item_id).copied().unwrap_or(0)
+    }
+
+    /// Last event `seq` folded into the item (0 when it was never touched).
+    pub fn watermark_of(&self, item_id: &ItemId) -> u64 {
+        self.touched.get(item_id).copied().unwrap_or(0)
     }
 
     /// Fold every event and return items in first-appearance order.
@@ -190,6 +289,42 @@ impl ItemProjector {
             .into_iter()
             .filter_map(|id| self.items.get(&id).cloned())
             .collect()
+    }
+
+    /// The final snapshot row per item, in first-appearance order.
+    ///
+    /// Each row carries the event interval this projection already covered, so
+    /// a watermark-aware reader can resume from the row instead of folding the
+    /// whole log again (used when `items.jsonl` is rewritten wholesale).
+    pub fn snapshot_records(self) -> Vec<ItemSnapshotRecord> {
+        self.order
+            .into_iter()
+            .filter_map(|id| {
+                let item = self.items.get(&id)?;
+                Some(ItemSnapshotRecord::from_projection(
+                    self.first.get(&id).copied().unwrap_or(0),
+                    self.touched.get(&id).copied().unwrap_or(0),
+                    item,
+                ))
+            })
+            .collect()
+    }
+
+    /// Final items in event order, for a projection seeded from snapshot rows.
+    ///
+    /// Seeding happens in file order and the delta replay then touches items
+    /// scattered across the log, so the incremental `order` vector no longer
+    /// reflects the event stream. Sorting by the first touching event keeps the
+    /// read-back equal to a full `project_items` replay; `first_seq == 0` can
+    /// only come from a legacy row, which never reaches this path.
+    pub fn finish_in_event_order(self) -> Vec<ThreadItem> {
+        let mut entries: Vec<(u64, ThreadItem)> = self
+            .items
+            .into_iter()
+            .map(|(id, item)| (self.first.get(&id).copied().unwrap_or(0), item))
+            .collect();
+        entries.sort_by_key(|(first, _)| *first);
+        entries.into_iter().map(|(_, item)| item).collect()
     }
 
     pub fn len(&self) -> usize {

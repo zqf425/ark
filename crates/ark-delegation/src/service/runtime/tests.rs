@@ -847,6 +847,80 @@ async fn hydrate_replays_a_missing_terminal_completion_notification() {
 }
 
 #[tokio::test]
+async fn completion_dedup_ignores_transcript_noise_and_other_children() {
+    // The dedup probe must key on the completion vocabulary only: unrelated
+    // streaming deltas and another child's notification may neither suppress
+    // this child's completion nor duplicate it across repeated hydrates.
+    let harness = harness_async(FakeExecutor::new("unused"), (true, 2, 4)).await;
+    let child = ChildId::new();
+    let mut terminal = ark_ports::ChildRunRecord::queued(
+        child,
+        harness.parent,
+        harness.parent_turn,
+        "noisy",
+        chrono::Utc::now(),
+    );
+    terminal.status = ark_common::ChildRunStatus::Completed;
+    terminal.ended_at = Some(chrono::Utc::now());
+    terminal.summary = Some("noisy report".to_string());
+    SessionStore::append_child_run(&*harness.store, terminal)
+        .await
+        .unwrap();
+
+    let turn = ark_common::TurnId::new();
+    for _seq in 0..32 {
+        SessionStore::append_event(
+            &*harness.store,
+            harness.parent,
+            RuntimeEvent::AssistantTextDelta {
+                seq: 0,
+                thread_id: harness.parent,
+                turn_id: turn,
+                item_id: ark_common::ItemId::new(),
+                timestamp: chrono::Utc::now(),
+                delta: "noise".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+    SessionStore::append_event(
+        &*harness.store,
+        harness.parent,
+        RuntimeEvent::ChildCompleted {
+            seq: 0,
+            thread_id: harness.parent,
+            timestamp: chrono::Utc::now(),
+            notification_id: "child:other".to_string(),
+            child_id: ChildId::new(),
+            label: "other".to_string(),
+            status: ark_common::ChildRunStatus::Completed,
+            summary: None,
+            error: None,
+            usage: None,
+            tool_invocations: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    harness.runtime.hydrate().await.unwrap();
+    harness.runtime.hydrate().await.unwrap();
+
+    let events = SessionStore::replay_events(&*harness.store, harness.parent, 0)
+        .await
+        .unwrap();
+    let completions = events
+        .iter()
+        .filter(|event| matches!(event, RuntimeEvent::ChildCompleted { .. }))
+        .count();
+    assert_eq!(
+        completions, 2,
+        "one completion per child: transcript noise must not suppress or duplicate"
+    );
+}
+
+#[tokio::test]
 async fn a_finished_run_frees_its_slot_and_reports_not_active() {
     let harness = harness_async(FakeExecutor::new("ok"), (true, 1, 1)).await;
     for index in 0..3 {

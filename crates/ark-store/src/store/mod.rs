@@ -36,9 +36,9 @@ pub use index::{
     IndexSnapshot, ReconcileAction, ThreadIndex,
 };
 pub use items_log::{
-    append_item_blocking, append_usage_blocking, read_item_snapshots_blocking, read_items_blocking,
-    read_usage_blocking, rebuild_items_blocking, thread_usage_blocking, usage_totals,
-    write_items_blocking, UsageRecord,
+    append_item_record_blocking, append_usage_blocking, read_item_rows_blocking,
+    read_items_blocking, read_usage_blocking, rebuild_items_blocking, thread_usage_blocking,
+    usage_totals, write_items_records_blocking, ItemRow, UsageRecord,
 };
 pub use notifier::{IndexNotifier, NoopNotifier};
 pub use writer_actor::{WriterCmd, WriterHandle};
