@@ -168,6 +168,23 @@ pub struct McpSection {
     pub consume: Vec<String>,
 }
 
+/// `manifest.hooks` (requirements/plugin-hook-bus.md).
+///
+/// Declaring hooks is an authorization *request*, never a grant: the host turns
+/// each declared point into a typed handle only for plugins it trusts (v1:
+/// `ark.builtin.*`). A directory plugin has no code to receive a callback, so
+/// the loader skips any directory plugin that ships this section (fail closed).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookSection {
+    /// Hook ABI the plugin was written against; the host refuses a mismatch
+    /// instead of partially honouring a payload shape it does not know.
+    #[serde(default)]
+    pub hook_abi: u32,
+    /// Requested hook points, e.g. `["llm.request", "tool.pre_call"]`.
+    #[serde(default)]
+    pub points: Vec<String>,
+}
+
 /// The declaration a plugin ships.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginManifest {
@@ -188,6 +205,10 @@ pub struct PluginManifest {
     pub http: HttpSection,
     #[serde(default)]
     pub mcp: McpSection,
+    /// Hook authorization request. Absent on every manifest written before the
+    /// hook bus existed, so old plugins parse exactly as they did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<HookSection>,
 }
 
 impl PluginManifest {
@@ -202,6 +223,7 @@ impl PluginManifest {
             requires: BTreeMap::new(),
             http: HttpSection::default(),
             mcp: McpSection::default(),
+            hooks: None,
         };
         manifest.validate()?;
         Ok(manifest)
@@ -223,7 +245,27 @@ impl PluginManifest {
                 return Err(ArkError::validation("empty mcp entry in manifest"));
             }
         }
+        if let Some(hooks) = &self.hooks {
+            if hooks.hook_abi != ark_ports::HOOK_ABI {
+                return Err(ArkError::validation(format!(
+                    "unsupported hook_abi {} (host speaks {})",
+                    hooks.hook_abi,
+                    ark_ports::HOOK_ABI
+                )));
+            }
+            if hooks.points.is_empty() {
+                return Err(ArkError::validation("hooks section without any hook point"));
+            }
+        }
         Ok(())
+    }
+
+    /// Hook points the manifest declares; empty when it declares none.
+    pub fn hook_points(&self) -> Vec<String> {
+        self.hooks
+            .as_ref()
+            .map(|section| section.points.clone())
+            .unwrap_or_default()
     }
 
     /// Parsed requirements, in deterministic order.
@@ -287,6 +329,54 @@ mod tests {
         assert!(manifest.validate().is_err(), "URL in allowlist must fail");
         manifest.http.allow = vec!["api.example.com".into()];
         assert!(manifest.validate().is_ok());
+    }
+
+    #[test]
+    fn the_hooks_section_is_an_additive_optional_request() {
+        let mut manifest =
+            PluginManifest::new("ark.example.life", "1.0.0", PluginKind::Backend).unwrap();
+        manifest.hooks = Some(HookSection {
+            hook_abi: ark_ports::HOOK_ABI,
+            points: vec!["llm.request".into(), "tool.pre_call".into()],
+        });
+        let json = serde_json::to_value(&manifest).unwrap();
+        assert_eq!(json["hooks"]["hook_abi"], ark_ports::HOOK_ABI);
+        let back: PluginManifest = serde_json::from_value(json).unwrap();
+        assert_eq!(back, manifest);
+        assert_eq!(back.hook_points(), vec!["llm.request", "tool.pre_call"]);
+
+        // A manifest without the section must not grow a hooks field on the
+        // wire, and an old manifest must keep parsing.
+        let plain = PluginManifest::new("ark.example.plain", "1.0.0", PluginKind::Tool).unwrap();
+        let json = serde_json::to_value(&plain).unwrap();
+        assert!(json.get("hooks").is_none());
+        let legacy =
+            r#"{"id":"ark.example.old","version":{"major":1,"minor":0,"patch":0},"kind":"tool"}"#;
+        let parsed: PluginManifest = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.hooks, None);
+        assert!(parsed.hook_points().is_empty());
+    }
+
+    #[test]
+    fn the_hooks_section_is_validated_fail_closed() {
+        let mut manifest =
+            PluginManifest::new("ark.example.life", "1.0.0", PluginKind::Backend).unwrap();
+        manifest.hooks = Some(HookSection {
+            hook_abi: ark_ports::HOOK_ABI + 1,
+            points: vec!["llm.request".into()],
+        });
+        assert!(
+            manifest.validate().is_err(),
+            "an unknown ABI must be refused"
+        );
+        manifest.hooks = Some(HookSection {
+            hook_abi: ark_ports::HOOK_ABI,
+            points: Vec::new(),
+        });
+        assert!(
+            manifest.validate().is_err(),
+            "an empty point list declares nothing"
+        );
     }
 
     #[test]

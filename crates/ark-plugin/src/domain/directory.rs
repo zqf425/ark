@@ -21,7 +21,9 @@ use ark_ports::McpToolSpec;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::domain::manifest::{HttpSection, McpSection, PluginKind, PluginManifest, Version};
+use crate::domain::manifest::{
+    HookSection, HttpSection, McpSection, PluginKind, PluginManifest, Version,
+};
 
 /// `plugin.json` as written on disk.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -44,6 +46,10 @@ pub struct DirectoryManifest {
     pub ui: UiSection,
     #[serde(default)]
     pub tools: Vec<ToolDecl>,
+    /// Parsed so the loader can see the declaration and skip the plugin (fail
+    /// closed): a declarative plugin has no code to receive a hook callback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<HookSection>,
 }
 
 impl DirectoryManifest {
@@ -58,6 +64,7 @@ impl DirectoryManifest {
             requires: self.requires.clone(),
             http: self.http.clone(),
             mcp: self.mcp.clone(),
+            hooks: self.hooks.clone(),
         };
         manifest.validate()?;
         Ok(manifest)

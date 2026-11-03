@@ -64,14 +64,34 @@ pub fn load_host(
     http: Arc<HttpBus>,
     http_diagnostics: Arc<InMemoryDiagnosticSink>,
 ) -> Result<PluginHost> {
-    let (scanned, scan_diagnostics) = scan(root);
-    let versions = versions_by_id(&scanned);
-    let plan = plan_local_load(&manifests(&scanned))?;
-
+    let (mut scanned, scan_diagnostics) = scan(root);
     let diagnostics_sink = Arc::new(MemoryPluginDiagnostics::new());
     for record in &scan_diagnostics {
         diagnostics_sink.record(record.clone());
     }
+
+    // A directory plugin is declarative: it has no code to receive a hook
+    // callback, so a `hooks` section cannot be honoured and the plugin is
+    // skipped before planning (fail closed, requirements/plugin-hook-bus.md).
+    // Removing it here also drops its dependents for the ordinary
+    // missing-dependency reason instead of leaving a phantom in the topology.
+    let version_of = |item: &ScannedPlugin| item.manifest.version.to_string();
+    scanned.retain(|item| {
+        if item.manifest.hooks.is_some() {
+            diagnostics_sink.record(PluginDiagnostic::new(
+                "plugin_skipped",
+                &item.manifest.id,
+                &version_of(item),
+                "directory plugins cannot declare hooks; the section is reserved                  for builtin plugins",
+            ));
+            false
+        } else {
+            true
+        }
+    });
+
+    let versions = versions_by_id(&scanned);
+    let plan = plan_local_load(&manifests(&scanned))?;
     for dropped in &plan.dropped {
         diagnostics_sink.record(drop_diagnostic(dropped, &versions));
     }
@@ -233,6 +253,9 @@ impl PluginHost {
             pages: registration.map(|r| r.page_ids()).unwrap_or_default(),
             panels: registration.map(|r| r.panel_ids()).unwrap_or_default(),
             tools: self.published_tools(&manifest.id),
+            // The declared request, not the grant: a user reads here what the
+            // plugin asked for (requirements/plugin-hook-bus.md, 权限与安全).
+            hook_points: manifest.hook_points(),
         })
     }
 

@@ -661,6 +661,12 @@ pub struct PluginEntry {
     /// Qualified tool names, `<plugin_id>.<tool>`.
     #[serde(default)]
     pub tools: Vec<String>,
+    /// Hook points the manifest declares. Declared is not granted: the wire
+    /// keeps the request so a user can see what a plugin asks for
+    /// (requirements/plugin-hook-bus.md). Additive field: absent in older
+    /// readers, which is why it defaults to empty.
+    #[serde(default)]
+    pub hook_points: Vec<String>,
 }
 
 /// One startup diagnostic or audit record.

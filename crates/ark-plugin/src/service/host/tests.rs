@@ -112,6 +112,65 @@ impl Fixture {
     }
 }
 
+#[test]
+fn a_directory_plugin_declaring_hooks_is_skipped_fail_closed() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "ark.example.hooked",
+        serde_json::json!({
+            "id": "ark.example.hooked",
+            "version": "1.0.0",
+            "kind": "tool",
+            "hooks": { "hook_abi": 1, "points": ["llm.request"] },
+            "mcp": { "expose": ["probe"] },
+            "tools": [{
+                "name": "probe",
+                "description": "must never load",
+                "action": { "kind": "static", "content": { "text": "hi" } }
+            }]
+        }),
+    );
+    // A dependent of the skipped plugin is dropped for the ordinary
+    // missing-dependency reason, so the topology stays explainable.
+    fixture.write(
+        "ark.example.dependent",
+        serde_json::json!({
+            "id": "ark.example.dependent",
+            "version": "1.0.0",
+            "kind": "tool",
+            "requires": { "ark.example.hooked": "^1" }
+        }),
+    );
+
+    let (host, _sink) = fixture.load();
+    // Plan-stage drops surface as diagnostics, exactly like a dependency cycle.
+    assert!(
+        host.report().loaded.is_empty(),
+        "neither the hook-declaring plugin nor its dependent may load"
+    );
+    let dropped: Vec<String> = host
+        .diagnostics()
+        .iter()
+        .filter(|d| d.kind == "plugin_skipped")
+        .map(|d| d.plugin_id.clone())
+        .collect();
+    assert_eq!(dropped, vec!["ark.example.hooked".to_string()]);
+    let record = host
+        .diagnostics()
+        .into_iter()
+        .find(|d| d.plugin_id == "ark.example.hooked")
+        .expect("the skip carries an explained diagnostic");
+    assert!(record.detail.contains("cannot declare hooks"));
+    // The hook request never reaches the wire as a grant.
+    assert!(
+        host.host_report()
+            .plugins
+            .iter()
+            .all(|entry| entry.hook_points.is_empty()),
+        "no directory plugin may report hook points"
+    );
+}
+
 fn hello_plugin() -> serde_json::Value {
     serde_json::json!({
         "id": "ark.example.hello",
