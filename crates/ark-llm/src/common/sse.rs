@@ -94,8 +94,18 @@ fn find_separator(buffer: &str) -> Option<Separator> {
         }
         // Case 2: "\r\n\r\n" — end the frame before the CRLF pair.
         if bytes.get(index + 1) == Some(&b'\r') && bytes.get(index + 2) == Some(&b'\n') {
+            // Only step back over the opening newline when it is itself
+            // CR-terminated. A bare `\n\r\n` (LF data line + CRLF blank line)
+            // must keep `start` at `index`: stepping back unconditionally both
+            // dropped the last data byte and, when index == 0, underflowed
+            // `index - 1` into a wrapped slice start.
+            let start = if index > 0 && bytes[index - 1] == b'\r' {
+                index - 1
+            } else {
+                index
+            };
             return Some(Separator {
-                start: index - 1,
+                start,
                 end: index + 3,
             });
         }
@@ -218,6 +228,38 @@ mod tests {
     fn empty_frames_are_skipped() {
         let mut parser = SseParser::new();
         assert!(parser.push("\n\n").is_empty());
+    }
+
+    #[test]
+    fn buffer_starting_with_lf_crlf_crlf_does_not_underflow() {
+        // Regression: `find_separator` computed `index - 1` unconditionally, so
+        // a buffer beginning with `\n\r\n` wrapped `start` around (debug panic
+        // / out-of-bounds slice in release) instead of yielding an empty frame.
+        let mut parser = SseParser::new();
+        let events = parser.push("\n\r\ndata: x\r\n\r\n");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data, "x");
+    }
+
+    #[test]
+    fn lf_data_line_before_crlf_blank_line_keeps_its_last_byte() {
+        // Regression: mixed line endings (`data: a\n\r\n`) moved the frame
+        // start back one byte, silently dropping the last data byte.
+        let mut parser = SseParser::new();
+        let events = parser.push("data: a\n\r\n");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data, "a");
+    }
+
+    #[test]
+    fn crlf_separator_split_across_chunks_is_reassembled() {
+        // The CRLF blank line may straddle two reads: the opening CR arrives
+        // with the data line, the rest with the next chunk.
+        let mut parser = SseParser::new();
+        assert!(parser.push("data: x\r").is_empty());
+        let events = parser.push("\n\r\n");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data, "x");
     }
 
     #[test]

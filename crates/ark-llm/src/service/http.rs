@@ -265,7 +265,8 @@ impl HttpModelClient {
         let mut family = Family::of(&self.config);
         let mut accumulator = StreamAccumulator::new();
         let mut published = false;
-        let mut buffer = String::new();
+        let mut text = String::new();
+        let mut pending: Vec<u8> = Vec::new();
 
         while let Some(chunk) = stream.next().await {
             let bytes = chunk.map_err(|error| AttemptError {
@@ -275,17 +276,31 @@ impl HttpModelClient {
                 // Mid-stream there is no fresh Retry-After to read.
                 retry_after: None,
             })?;
-            // SSE is UTF-8 text; a multi-byte codepoint split across chunks is
-            // re-assembled because `from_utf8_lossy` would corrupt it. The
-            // parser therefore receives complete lines only.
-            buffer.push_str(&String::from_utf8_lossy(&bytes));
-            let drained = std::mem::take(&mut buffer);
+            // Bytes are decoded only down to the longest valid UTF-8 prefix:
+            // a multi-byte codepoint split across TCP chunks must survive
+            // into a later chunk, which per-chunk `from_utf8_lossy` would
+            // have corrupted into U+FFFD.
+            pending.extend_from_slice(&bytes);
+            decode_utf8_prefix(&mut pending, &mut text);
+            let drained = std::mem::take(&mut text);
             let (complete, rest) = split_at_last_complete_line(&drained);
-            buffer.push_str(rest);
+            text.push_str(rest);
             for frame in sse.push(complete) {
                 let events = family.parse(&frame);
                 published |= forward(&mut accumulator, events, sink).await?;
             }
+        }
+        if !pending.is_empty() {
+            // EOF with a truncated trailing codepoint: keep the old lossy
+            // tail behaviour instead of silently dropping those bytes.
+            text.push_str(&String::from_utf8_lossy(&pending));
+        }
+        let drained = std::mem::take(&mut text);
+        // Hand the remaining lines to the parser so `finish` below can still
+        // flush a final frame whose blank line never arrived.
+        for frame in sse.push(&drained) {
+            let events = family.parse(&frame);
+            published |= forward(&mut accumulator, events, sink).await?;
         }
         for frame in sse.finish() {
             let events = family.parse(&frame);
@@ -298,6 +313,39 @@ impl HttpModelClient {
         let _ = accumulator.finish();
         let _ = published;
         Ok(accumulator.response())
+    }
+}
+
+/// Decode the longest valid UTF-8 prefix of `pending` into `text`.
+///
+/// SSE bodies are UTF-8, but TCP chunks cut multi-byte codepoints at
+/// arbitrary offsets. Per-chunk lossy decoding would turn those into
+/// U+FFFD, so an incomplete trailing codepoint is kept for the next chunk.
+/// Genuinely invalid bytes are replaced in place so one bad byte cannot
+/// wedge the stream (matching the old lossy behaviour for that case).
+fn decode_utf8_prefix(pending: &mut Vec<u8>, text: &mut String) {
+    loop {
+        match std::str::from_utf8(pending) {
+            Ok(decoded) => {
+                text.push_str(decoded);
+                pending.clear();
+                return;
+            }
+            Err(error) => {
+                let valid = error.valid_up_to();
+                text.push_str(std::str::from_utf8(&pending[..valid]).unwrap_or(""));
+                pending.drain(..valid);
+                match error.error_len() {
+                    // Truncated trailing codepoint: wait for the next chunk.
+                    None => return,
+                    // Truly invalid bytes: lossy-replace and keep decoding.
+                    Some(bad) => {
+                        pending.drain(..bad);
+                        text.push('\u{FFFD}');
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -577,6 +625,97 @@ mod tests {
             !second_connection,
             "a published-then-broken stream must not trigger a retry request"
         );
+    }
+
+    /// A multi-byte codepoint cut by a TCP chunk boundary must be re-assembled
+    /// from the next chunk instead of becoming U+FFFD. Regression: the pump
+    /// used to `from_utf8_lossy` every chunk independently.
+    #[tokio::test]
+    async fn codepoint_split_across_chunks_is_reassembled() {
+        use std::io::{Read as _, Write as _};
+        use std::net::TcpListener;
+
+        // Cut two bytes into the 3-byte "中" (E4 B8 | AD) so the first chunk
+        // ends with a truncated codepoint.
+        let frame = "data: {\"choices\":[{\"delta\":{\"content\":\"中\"}}]}\n\n";
+        let bytes = frame.as_bytes();
+        let cut = frame.find('中').unwrap() + 2;
+        let mut wire = Vec::new();
+        for piece in [&bytes[..cut], &bytes[cut..]] {
+            wire.extend_from_slice(format!("{:x}\r\n", piece.len()).as_bytes());
+            wire.extend_from_slice(piece);
+            wire.extend_from_slice(b"\r\n");
+        }
+        wire.extend_from_slice(b"0\r\n\r\n");
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4_096];
+            let _ = socket.read(&mut request).unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+            socket.write_all(&wire).unwrap();
+        });
+        let client = HttpModelClient::with_config(
+            ProviderConfig::new("test", "test-model")
+                .with_base_url(format!("http://{address}"))
+                .with_api_key("test-key"),
+        );
+        let (sink, mut drain) = mpsc::channel(16);
+
+        client.stream(request(), sink).await.unwrap();
+        server.join().unwrap();
+
+        let mut text = String::new();
+        while let Ok(chunk) = drain.try_recv() {
+            if let ModelChunk::TextDelta { delta } = chunk {
+                text.push_str(&delta);
+            }
+        }
+        assert_eq!(text, "中", "split codepoint must not become U+FFFD");
+    }
+
+    #[test]
+    fn truncated_trailing_codepoint_waits_for_the_next_chunk() {
+        let full = "中".as_bytes();
+        let mut text = String::new();
+        let mut pending: Vec<u8> = full[..2].to_vec();
+        decode_utf8_prefix(&mut pending, &mut text);
+        assert!(text.is_empty(), "nothing may be emitted for a partial char");
+        assert_eq!(pending, full[..2].to_vec());
+
+        pending.extend_from_slice(&full[2..]);
+        decode_utf8_prefix(&mut pending, &mut text);
+        assert_eq!(text, "中");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn four_byte_emoji_split_across_chunks_survives() {
+        let bytes = "\u{1F600}".as_bytes().to_vec();
+        let mut text = String::new();
+        let mut pending: Vec<u8> = bytes[..3].to_vec();
+        decode_utf8_prefix(&mut pending, &mut text);
+        assert!(text.is_empty());
+        pending.extend_from_slice(&bytes[3..]);
+        decode_utf8_prefix(&mut pending, &mut text);
+        assert_eq!(text, "\u{1F600}");
+    }
+
+    #[test]
+    fn invalid_bytes_are_replaced_without_stalling() {
+        // A genuinely invalid byte must be replaced in place and decoding
+        // continue, or one bad byte would wedge the whole stream.
+        let mut text = String::new();
+        let mut pending: Vec<u8> = b"a\xFFb".to_vec();
+        decode_utf8_prefix(&mut pending, &mut text);
+        assert_eq!(text, "a\u{FFFD}b");
+        assert!(pending.is_empty());
     }
 
     #[test]

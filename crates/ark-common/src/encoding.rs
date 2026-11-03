@@ -146,6 +146,124 @@ pub fn read_text(path: &Path) -> Result<String> {
     read_text_file(path).map(|decoded| decoded.text)
 }
 
+/// Stream a text file line by line, strictly decoding UTF-8.
+///
+/// `visit` receives each line without its terminator; a leading BOM is
+/// dropped exactly like [`read_text`]. Returns `Ok(true)` when every line
+/// was visited, so peak memory is the longest line, not the file. Returns
+/// `Ok(false)` when the bytes are not valid UTF-8: in that case an
+/// unspecified subset of lines may already have been visited and the caller
+/// must redo the whole file with [`read_text`], whose fallback chain
+/// (GB18030, Big5, ...) owns the legacy-codepage policy.
+pub fn try_stream_utf8_lines(path: &Path, visit: &mut dyn FnMut(&str)) -> Result<bool> {
+    match stream_utf8_lines(path, visit)? {
+        Utf8Stream::Complete => Ok(true),
+        Utf8Stream::NotUtf8 => Ok(false),
+    }
+}
+
+/// Outcome of the strict UTF-8 streaming pass.
+enum Utf8Stream {
+    /// Every line was visited.
+    Complete,
+    /// The bytes are not valid UTF-8; some lines may already be visited.
+    NotUtf8,
+}
+
+/// Single-pass strict UTF-8 line streamer.
+///
+/// Validity is checked per newline-terminated segment, which equals
+/// whole-file validity because a multi-byte sequence never contains a
+/// newline byte — no cross-segment state is needed.
+fn stream_utf8_lines(path: &Path, visit: &mut dyn FnMut(&str)) -> Result<Utf8Stream> {
+    use std::io::Read as _;
+
+    let file = std::fs::File::open(path).map_err(|err| io_error("read", path, err))?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut tail: Vec<u8> = Vec::new();
+    let mut chunk: Vec<u8> = vec![0_u8; 64 * 1024];
+    let mut first_segment = true;
+    loop {
+        let read = reader
+            .read(&mut chunk)
+            .map_err(|err| io_error("read", path, err))?;
+        if read == 0 {
+            break;
+        }
+        tail.extend_from_slice(&chunk[..read]);
+        // Bind the scan first: a match on a call borrowing `tail` would keep
+        // that borrow alive for the whole match and block `tail.drain` below.
+        let scan = visit_complete_lines(&tail, visit, first_segment);
+        match scan {
+            SegmentScan::Consumed(consumed) => {
+                tail.drain(..consumed);
+                // The BOM only ever heads the first visited segment.
+                first_segment = false;
+            }
+            // No newline yet: the line may complete in a later chunk.
+            SegmentScan::Incomplete => {}
+            SegmentScan::Invalid => return Ok(Utf8Stream::NotUtf8),
+        }
+    }
+    // No trailing newline: the tail is the final line and must still be
+    // visited, or the line count would not match `read_text(..).lines()`.
+    if !tail.is_empty() {
+        let text = match decode_segment(&tail, first_segment) {
+            Some(text) => text,
+            None => return Ok(Utf8Stream::NotUtf8),
+        };
+        for line in text.lines() {
+            visit(line);
+        }
+    }
+    Ok(Utf8Stream::Complete)
+}
+
+/// Outcome of scanning the bytes buffered after one read.
+enum SegmentScan {
+    /// No newline yet: the first buffered line may complete in a later chunk.
+    Incomplete,
+    /// The leading newline-terminated part was visited; that many bytes
+    /// were consumed.
+    Consumed(usize),
+    /// The buffered part is not valid UTF-8.
+    Invalid,
+}
+
+/// Visit every line inside the leading newline-terminated part of `bytes`
+/// and report how far the scan advanced.
+///
+/// When no newline is present nothing is visited and the line may still be
+/// completed by a later chunk; that is a normal mid-file state, distinct
+/// from invalid UTF-8.
+fn visit_complete_lines(
+    bytes: &[u8],
+    visit: &mut dyn FnMut(&str),
+    first_segment: bool,
+) -> SegmentScan {
+    let Some(last) = bytes.iter().rposition(|byte| *byte == b'\n') else {
+        return SegmentScan::Incomplete;
+    };
+    let complete = &bytes[..=last];
+    let Some(text) = decode_segment(complete, first_segment) else {
+        return SegmentScan::Invalid;
+    };
+    for line in text.lines() {
+        visit(line);
+    }
+    SegmentScan::Consumed(complete.len())
+}
+
+/// Decode one segment strictly, dropping the BOM in the first one.
+fn decode_segment(bytes: &[u8], first_segment: bool) -> Option<&str> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    if first_segment {
+        // Same BOM rule as `read_text`: a leading U+FEFF is dropped.
+        return Some(strip_bom_str(text));
+    }
+    Some(text)
+}
+
 /// Read a text file, returning `None` when it does not exist.
 pub fn read_text_opt(path: &Path) -> Option<String> {
     match std::fs::read(path) {
@@ -373,6 +491,112 @@ mod tests {
         let path = dir.join("nested").join("doc.txt");
         write_text_atomic(&path, "\u{FEFF}content").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"content");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Scratch directory for the line-streaming tests; `suffix` keeps the
+    /// parallel tests from sharing one directory.
+    fn lines_dir(suffix: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("ark-enc-lines-{suffix}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn streamed_lines_match_whole_file_read() {
+        let dir = lines_dir("match");
+        let path = dir.join("many.txt");
+        // Larger than the 64 KiB read chunk so several reads are needed.
+        let body: String = (0..9_000).map(|index| format!("line {index}\n")).collect();
+        std::fs::write(&path, body.as_bytes()).unwrap();
+
+        let mut streamed: Vec<String> = Vec::new();
+        let complete =
+            try_stream_utf8_lines(&path, &mut |line| streamed.push(line.to_string())).unwrap();
+        assert!(complete);
+        let whole = read_text(&path).unwrap();
+        let expected: Vec<&str> = whole.lines().collect();
+        assert_eq!(streamed, expected);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn streamed_lines_keep_codepoints_across_read_boundaries() {
+        // The file is larger than one read and a 3-byte codepoint sits right
+        // at the chunk boundary, so a naive per-read decode would corrupt it.
+        // Splitting on newlines is always a char boundary in UTF-8, so the
+        // streamed lines must be byte-identical to a whole-file read.
+        let dir = lines_dir("multibyte");
+        let path = dir.join("multibyte.txt");
+        let head = "a".repeat(64 * 1024 - 2);
+        let body = format!("{head}中\ntail\n");
+        std::fs::write(&path, body.as_bytes()).unwrap();
+
+        let mut streamed: Vec<String> = Vec::new();
+        let complete =
+            try_stream_utf8_lines(&path, &mut |line| streamed.push(line.to_string())).unwrap();
+        assert!(complete);
+        assert_eq!(streamed.len(), 2);
+        assert_eq!(streamed[0], format!("{head}中"));
+        assert_eq!(streamed[1], "tail");
+        assert!(!streamed[0].contains('\u{FFFD}'));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn streamed_bom_is_stripped_like_whole_file_read() {
+        let dir = lines_dir("bom");
+        let path = dir.join("bom.txt");
+        let mut bytes = UTF8_BOM_BYTES.to_vec();
+        bytes.extend_from_slice(b"a\nb\n");
+        std::fs::write(&path, &bytes).unwrap();
+
+        let mut streamed: Vec<String> = Vec::new();
+        let complete =
+            try_stream_utf8_lines(&path, &mut |line| streamed.push(line.to_string())).unwrap();
+        assert!(complete);
+        assert_eq!(streamed, vec!["a".to_string(), "b".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn non_utf8_file_is_reported_for_whole_file_fallback() {
+        let dir = lines_dir("gbk");
+        let path = dir.join("gbk.txt");
+        // "中文" in GBK is not valid UTF-8; the caller must redo the file
+        // with `read_text`, whose fallback chain decodes it.
+        std::fs::write(&path, [0xD6_u8, 0xD0, 0xCE, 0xC4, b'\n']).unwrap();
+
+        let mut streamed: Vec<String> = Vec::new();
+        let complete =
+            try_stream_utf8_lines(&path, &mut |line| streamed.push(line.to_string())).unwrap();
+        assert!(!complete);
+        assert_eq!(read_text(&path).unwrap(), "中文\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_without_trailing_newline_keeps_its_last_line() {
+        let dir = lines_dir("tail");
+        let path = dir.join("tail.txt");
+        std::fs::write(&path, b"a\nb").unwrap();
+
+        let mut streamed: Vec<String> = Vec::new();
+        let complete =
+            try_stream_utf8_lines(&path, &mut |line| streamed.push(line.to_string())).unwrap();
+        assert!(complete);
+        assert_eq!(streamed, vec!["a".to_string(), "b".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_file_is_a_streaming_error() {
+        let dir = lines_dir("missing");
+        let path = dir.join("nope.txt");
+        let mut streamed: Vec<String> = Vec::new();
+        assert!(try_stream_utf8_lines(&path, &mut |line| streamed.push(line.to_string())).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

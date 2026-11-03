@@ -22,8 +22,9 @@ pub use cancel::CancelReason;
 pub use child_run::ChildRunStatus;
 pub use encoding::{
     decode, decode_to_string, read_json_file, read_json_file_opt, read_text, read_text_file,
-    read_text_opt, strip_bom_bytes, strip_bom_str, utf8_bytes_no_bom, write_json_file, write_text,
-    write_text_atomic, DecodedText, TextEncoding, UTF8_BOM_BYTES, UTF8_BOM_CHAR,
+    read_text_opt, strip_bom_bytes, strip_bom_str, try_stream_utf8_lines, utf8_bytes_no_bom,
+    write_json_file, write_text, write_text_atomic, DecodedText, TextEncoding, UTF8_BOM_BYTES,
+    UTF8_BOM_CHAR,
 };
 pub use error::{ArkError, ArkErrorCode, ArkErrorPayload, Result};
 pub use ids::{AttachmentId, ChildId, ItemId, RunId, ThreadId, TurnId};

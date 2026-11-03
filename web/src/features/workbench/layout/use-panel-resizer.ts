@@ -3,7 +3,7 @@
  * The context drawer has a fixed width (it overlays the canvas), so only the
  * sidebar rail is resizable.
  */
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 
 const MIN_WIDTH = 200
@@ -18,6 +18,17 @@ function clamp(width: number): number {
  * grows the rail.
  */
 export function usePanelResizer(width: number, onResize: (width: number) => void) {
+  // A drag can end without pointerup: if the panel unmounts mid-drag, the
+  // window listeners registered below must go with it instead of leaking.
+  const detachRef = useRef<(() => void) | null>(null)
+
+  useEffect(
+    () => () => {
+      detachRef.current?.()
+    },
+    []
+  )
+
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       event.preventDefault()
@@ -30,13 +41,19 @@ export function usePanelResizer(width: number, onResize: (width: number) => void
         onResize(clamp(startWidth + (moveEvent.clientX - startX)))
       }
 
-      const finish = (): void => {
-        target.releasePointerCapture(event.pointerId)
+      const detach = (): void => {
+        detachRef.current = null
         window.removeEventListener('pointermove', move)
         window.removeEventListener('pointerup', finish)
         window.removeEventListener('pointercancel', finish)
       }
 
+      const finish = (): void => {
+        detach()
+        target.releasePointerCapture(event.pointerId)
+      }
+
+      detachRef.current = detach
       window.addEventListener('pointermove', move)
       window.addEventListener('pointerup', finish)
       window.addEventListener('pointercancel', finish)
