@@ -605,4 +605,16 @@ mod tests {
         assert_eq!(error.0.code, ark_common::ArkErrorCode::ValidationError);
         assert!(error.0.message.contains("does not exist"));
     }
+
+    #[tokio::test]
+    async fn folder_pick_without_the_port_is_runtime_unavailable() {
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
+        let error = workspace_pick(State(state(&data_dir)))
+            .await
+            .expect_err("no folder dialog service is wired in this state");
+
+        assert_eq!(error.0.code, ark_common::ArkErrorCode::RuntimeUnavailable);
+        assert!(error.0.message.contains("folder dialog"));
+    }
 }

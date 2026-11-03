@@ -293,8 +293,10 @@ impl FolderDialogService for NativeFolderDialog {
                     Some(PathBuf::from(path))
                 }
             }
-            // Exit -128 is the user cancelling the dialog; anything else is an
-            // environment failure that must not masquerade as a cancel.
+            // Exit -128 is the user cancelling the dialog. The port has no
+            // error channel, so environment failures (osascript missing,
+            // automation permission denied) are folded into `None` as well —
+            // the warn log is what keeps them diagnosable.
             Ok(output) if output.status.code() == Some(-128) => None,
             Ok(output) => {
                 tracing::warn!(
