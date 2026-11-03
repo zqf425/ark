@@ -116,6 +116,7 @@ export type {
   WorkspaceDiff,
   WorkspaceStatus,
   WorkspaceValidateResponse,
+  FolderPickResponse,
   RewindRequest,
   RewindResponse,
   ImChannelKind,

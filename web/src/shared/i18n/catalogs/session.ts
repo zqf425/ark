@@ -7,6 +7,7 @@
 export const SESSION_MESSAGES = {
   'session.runtime.title': ['本会话运行配置', 'Session runtime'],
   'session.runtime.workspace': ['工作空间', 'Workspace'],
+  'session.runtime.browse': ['浏览…', 'Browse…'],
   'session.runtime.provider': ['供应商', 'Provider'],
   'session.runtime.model': ['模型覆盖', 'Model override'],
   'session.runtime.autonomy': ['权限', 'Permissions'],

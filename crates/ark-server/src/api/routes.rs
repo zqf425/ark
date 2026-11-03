@@ -218,6 +218,10 @@ fn protected_routes() -> Router<AppState> {
             post(crate::api::handlers::base::workspace_validate),
         )
         .route(
+            "/v1/workspace/pick",
+            post(crate::api::handlers::base::workspace_pick),
+        )
+        .route(
             "/v1/mcp/servers",
             get(crate::api::handlers::base::mcp_list).post(crate::api::handlers::base::mcp_upsert),
         )

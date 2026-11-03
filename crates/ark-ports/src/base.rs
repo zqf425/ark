@@ -143,6 +143,19 @@ pub trait PluginHostService: Send + Sync {
     fn report(&self) -> PluginHostReport;
 }
 
+/// Native folder chooser for local UI flows (workspace switch, thread runtime
+/// override).
+///
+/// Blocking on purpose: a native dialog is modal, so the HTTP boundary must
+/// wrap the call in `spawn_blocking`. `None` means the user cancelled. The
+/// returned path is a real existing directory the user picked; workspace
+/// validation stays with `WorkspaceService`. The port is `None` in headless or
+/// remote builds — those must answer `runtime_unavailable` instead of popping
+/// a dialog on a machine nobody is looking at.
+pub trait FolderDialogService: Send + Sync {
+    fn pick_folder(&self) -> Option<PathBuf>;
+}
+
 /// The platform services, as one injectable bundle.
 ///
 /// A field is `Option` so a minimal build (or a test) can serve only some of
@@ -162,6 +175,10 @@ pub struct BaseServices {
     /// makes `GET /v1/runtime/plugins` report an unavailable service rather
     /// than an empty, indistinguishable plugin list.
     pub plugins: Option<Arc<dyn PluginHostService>>,
+    /// Native folder dialog. Absent in headless/remote builds, which makes
+    /// `POST /v1/workspace/pick` report `runtime_unavailable` rather than
+    /// opening a dialog where nobody can click it.
+    pub folder_dialog: Option<Arc<dyn FolderDialogService>>,
 }
 
 impl BaseServices {
@@ -201,6 +218,11 @@ impl BaseServices {
 
     pub fn with_plugins(mut self, service: Arc<dyn PluginHostService>) -> Self {
         self.plugins = Some(service);
+        self
+    }
+
+    pub fn with_folder_dialog(mut self, service: Arc<dyn FolderDialogService>) -> Self {
+        self.folder_dialog = Some(service);
         self
     }
 }

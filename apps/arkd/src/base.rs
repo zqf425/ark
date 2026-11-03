@@ -21,8 +21,8 @@ use ark_contract::{
     ThreadSkillsResponse, UpdateMemoryRequest, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
 };
 use ark_ports::{
-    McpServerService, MemoryService, ModelEndpoint, ProviderService, SkillService, Tool,
-    WorkspaceService,
+    FolderDialogService, McpServerService, MemoryService, ModelEndpoint, ProviderService,
+    SkillService, Tool, WorkspaceService,
 };
 use ark_tool::ToolRegistry;
 
@@ -257,5 +257,62 @@ impl McpServerService for McpServerAdapter {
 
     async fn connect_all(&self) -> Vec<Arc<dyn Tool>> {
         self.inner.connect_all().await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Native folder dialog
+// ---------------------------------------------------------------------------
+
+/// Opens the host platform's native folder chooser.
+///
+/// macOS delegates to `osascript choose folder`: `rfd` can only hop to the
+/// AppKit main thread while `NSApplication` is inside `run()`, and arkd's main
+/// thread runs the tokio runtime, so an `rfd` dialog panics ("NonWindowed
+/// environment"). `osascript` renders the same native chooser from any
+/// background process. Other platforms keep `rfd`, which owns its own per-thread
+/// COM/GTK setup. Both paths block until the dialog closes — the contract
+/// `FolderDialogService` documents — and the HTTP boundary runs them in
+/// `spawn_blocking`. No title or start directory is pinned so the dialog
+/// behaves like the OS default.
+pub struct NativeFolderDialog;
+
+impl FolderDialogService for NativeFolderDialog {
+    #[cfg(target_os = "macos")]
+    fn pick_folder(&self) -> Option<PathBuf> {
+        let output = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg("POSIX path of (choose folder)")
+            .output();
+        match output {
+            Ok(output) if output.status.success() => {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if path.is_empty() {
+                    None
+                } else {
+                    Some(PathBuf::from(path))
+                }
+            }
+            // Exit -128 is the user cancelling the dialog; anything else is an
+            // environment failure that must not masquerade as a cancel.
+            Ok(output) if output.status.code() == Some(-128) => None,
+            Ok(output) => {
+                tracing::warn!(
+                    code = ?output.status.code(),
+                    stderr = %String::from_utf8_lossy(&output.stderr),
+                    "folder chooser failed; treating as cancelled"
+                );
+                None
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to launch folder chooser; treating as cancelled");
+                None
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn pick_folder(&self) -> Option<PathBuf> {
+        rfd::FileDialog::new().pick_folder()
     }
 }
