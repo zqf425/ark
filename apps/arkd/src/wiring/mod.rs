@@ -238,6 +238,13 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         None => model::select(&config.snapshot(), Arc::clone(&usage)),
     };
 
+    // The hook bus (requirements/plugin-hook-bus.md, P1). The composition root
+    // installs exactly one broker for the whole process; until a plugin supplies
+    // authorized hooks this is the no-op implementation, which is what keeps the
+    // hook decorators byte-for-byte transparent. The real multiplexer (P2+) is
+    // built here from the plugin host's authorizations — never per route.
+    let hooks: Arc<dyn ark_ports::HookBroker> = Arc::new(ark_ports::NoHooks);
+
     // ---- sub-agent surface (design §7.8) ----
     //
     // Construction order is deliberate:
@@ -267,6 +274,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         Arc::clone(&policy),
         Arc::clone(&roots),
         Arc::clone(&skills),
+        Arc::clone(&hooks),
     ));
     let delegation = Arc::new(ark_delegation::DelegationRuntime::new(
         Arc::clone(&store_port),
@@ -322,6 +330,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         memory: Arc::clone(&memory),
         attachments: Arc::clone(&attachments),
         gates: gate_broker,
+        hooks: Arc::clone(&hooks),
     });
 
     let base = BaseServices::new()
@@ -361,7 +370,8 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     .with_gates(gates)
     .with_schedules(Arc::clone(&schedules))
     .with_im(Arc::clone(&im))
-    .with_auth_token(args.auth_token.clone());
+    .with_auth_token(args.auth_token.clone())
+    .with_hooks(hooks);
 
     spawn_completion_listener(state.clone(), completion_notifications);
     // Recover unacknowledged completions that were durable before this process

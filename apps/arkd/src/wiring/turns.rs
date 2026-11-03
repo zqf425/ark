@@ -29,6 +29,9 @@ pub(super) struct AgentTurnRunner {
     pub(super) attachments: Arc<dyn ark_ports::AttachmentStore>,
     /// Human gate broker shared with the HTTP command surface.
     pub(super) gates: Arc<dyn GateBroker>,
+    /// Hook bus (requirements/plugin-hook-bus.md). Shared with the child
+    /// executor and the AppState, so one broker instance owns every decision.
+    pub(super) hooks: Arc<dyn ark_ports::HookBroker>,
 }
 
 impl AgentTurnRunner {
@@ -41,11 +44,14 @@ impl AgentTurnRunner {
         &self,
         snapshot: &RuntimeConfig,
         provider: Option<ark_llm::ProviderConfig>,
+        thread_id: ThreadId,
+        turn_id: TurnId,
     ) -> Arc<dyn ModelClient> {
-        match provider {
+        let inner = match provider {
             Some(endpoint) => model::select_from_config(endpoint, Arc::clone(&self.usage)).0,
             None => model::select(snapshot, Arc::clone(&self.usage)).0,
-        }
+        };
+        model::hooked(Arc::clone(&self.hooks), thread_id, turn_id, inner)
     }
 }
 
@@ -225,12 +231,19 @@ impl TurnRunner for AgentTurnRunner {
         let policy: Arc<dyn SandboxPolicy> = Arc::new(BuiltinSandboxPolicy::new(
             autonomy_from_override_or_default(thread.runtime.autonomy.as_deref(), &snapshot)?,
         ));
-        let tools: Arc<dyn AgentToolRunner> = Arc::new(super::turn_common::HookedToolRunner::new(
-            Arc::clone(&self.tools),
-            Arc::clone(&self.config),
-            workspace.clone(),
+        // Plugin decide first, then the shell `pre_tool_use` hook, then
+        // dispatch (requirements/plugin-hook-bus.md, pinned order).
+        let tools: Arc<dyn AgentToolRunner> = Arc::new(super::turn_common::HookToolRunner::new(
+            Arc::clone(&self.hooks),
             job.thread_id,
             job.turn_id,
+            super::turn_common::HookedToolRunner::new(
+                Arc::clone(&self.tools),
+                Arc::clone(&self.config),
+                workspace.clone(),
+                job.thread_id,
+                job.turn_id,
+            ),
         ));
         let seed_messages = self.parent_seed(&workspace, history, &source_text, &inbox);
         // One snapshot per turn: every value below is derived from the same
@@ -241,7 +254,7 @@ impl TurnRunner for AgentTurnRunner {
             thread.runtime.model,
             thread.runtime.reasoning_effort,
         )?;
-        let model = self.model_for_turn(&snapshot, provider.clone());
+        let model = self.model_for_turn(&snapshot, provider.clone(), job.thread_id, job.turn_id);
         let mut reactor = super::turn_common::build_reactor(super::turn_common::ReactorSpec {
             model,
             tools,

@@ -189,6 +189,68 @@ impl AgentToolRunner for HookedToolRunner {
     }
 }
 
+/// Plugin-hook decorator around [`HookedToolRunner`] (requirements/
+/// plugin-hook-bus.md, P1).
+///
+/// The order is pinned and tested: plugin decide first, then the shell
+/// `pre_tool_use` hook, then dispatch. With [`ark_ports::NoHooks`] installed
+/// this layer forwards the call unchanged, so the shell-hook semantics the
+/// runtime ships today are untouched.
+pub(crate) struct HookToolRunner {
+    hooks: Arc<dyn ark_ports::HookBroker>,
+    thread_id: ThreadId,
+    turn_id: TurnId,
+    inner: HookedToolRunner,
+}
+
+impl HookToolRunner {
+    pub(crate) fn new(
+        hooks: Arc<dyn ark_ports::HookBroker>,
+        thread_id: ThreadId,
+        turn_id: TurnId,
+        inner: HookedToolRunner,
+    ) -> Self {
+        Self {
+            hooks,
+            thread_id,
+            turn_id,
+            inner,
+        }
+    }
+}
+
+/// Serialized argument head for the hook payload, capped at the design budget.
+///
+/// Arguments stay opaque JSON to the hook: a plugin that wants a path reads it
+/// from the head, never from a parsed copy the host would have to trust.
+fn args_head(arguments: &serde_json::Value) -> (String, bool) {
+    let serialized = arguments.to_string();
+    let (head, truncated) = ark_ports::truncate_utf8(&serialized, ark_ports::TOOL_ARGS_HEAD_BYTES);
+    (head.to_string(), truncated)
+}
+
+#[async_trait::async_trait]
+impl AgentToolRunner for HookToolRunner {
+    async fn execute(&self, call: &ToolCallRequest) -> Result<ToolOutput> {
+        let scope = ark_ports::HookScope {
+            thread_id: &self.thread_id,
+            turn_id: &self.turn_id,
+        };
+        let (args_head, args_truncated) = args_head(&call.arguments);
+        match self
+            .hooks
+            .on_tool_pre_call(scope, &call.tool, &args_head, args_truncated)
+            .await?
+        {
+            ark_ports::ToolPreCallVerdict::Allow => self.inner.execute(call).await,
+            ark_ports::ToolPreCallVerdict::Block { reason } => Err(ark_common::ArkError::new(
+                ark_common::ArkErrorCode::Conflict,
+                format!("plugin hook blocked tool `{}`: {reason}", call.tool),
+            )),
+        }
+    }
+}
+
 /// Everything one reactor instance needs, assembled by either turn path.
 ///
 /// Both paths build the same shape; collecting it here keeps the construction
@@ -259,5 +321,172 @@ mod tests {
         // message: nothing else may differ before the dynamic tail.
         assert_ne!(child[2].content, parent[2].content);
         assert_eq!(child[2].content, CHILD_ROLE_LINE);
+    }
+
+    /// A one-line broker for order tests: appends a marker to the shared log
+    /// file and returns the configured verdict.
+    struct OrderBroker {
+        log: PathBuf,
+        verdict: ark_ports::ToolPreCallVerdict,
+    }
+
+    #[async_trait::async_trait]
+    impl ark_ports::HookBroker for OrderBroker {
+        async fn on_turn_pre_start(
+            &self,
+            _scope: ark_ports::HookScope<'_>,
+            _source: &str,
+        ) -> ark_common::Result<()> {
+            Ok(())
+        }
+
+        async fn on_model_request(
+            &self,
+            _scope: ark_ports::HookScope<'_>,
+            _request: &ark_ports::ModelRequest,
+        ) -> ark_common::Result<ark_ports::ModelRequestTuning> {
+            Ok(ark_ports::ModelRequestTuning::default())
+        }
+
+        async fn on_tool_pre_call(
+            &self,
+            _scope: ark_ports::HookScope<'_>,
+            _tool: &str,
+            _args_head: &str,
+            _args_truncated: bool,
+        ) -> ark_common::Result<ark_ports::ToolPreCallVerdict> {
+            let mut log = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.log)
+                .unwrap();
+            use std::io::Write;
+            log.write_all(b"plugin\n").unwrap();
+            Ok(self.verdict.clone())
+        }
+
+        async fn observe_turn_end(
+            &self,
+            _scope: ark_ports::HookScope<'_>,
+            _outcome: &ark_ports::TurnOutcomeFact,
+        ) {
+        }
+
+        async fn observe_llm_call(
+            &self,
+            _scope: ark_ports::HookScope<'_>,
+            _fact: &ark_ports::LlmCallFact<'_>,
+        ) {
+        }
+    }
+
+    /// Pinned order (requirements/plugin-hook-bus.md, 验收场景 6): a plugin
+    /// decide runs BEFORE the shell `pre_tool_use` hook, which runs BEFORE the
+    /// dispatch. Both sides append to one log file so the sequence is
+    /// observable end to end; the empty registry makes the dispatch fail,
+    /// which is enough to prove it ran last.
+    #[tokio::test]
+    async fn plugin_decide_runs_before_the_shell_hook_and_the_dispatch() {
+        let log = std::env::temp_dir().join(format!(
+            "ark-hook-order-{}-{}.log",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_file(&log);
+        let workspace = std::env::temp_dir().join("ark-hook-order-ws");
+        let _ = std::fs::create_dir_all(&workspace);
+
+        let config = Arc::new(ConfigStore::new(RuntimeConfig {
+            hooks: ark_contract::HookSettings {
+                pre_tool_use: vec![ark_contract::HookRule {
+                    command: format!("echo shell >> {}", log.display()),
+                    tools: Vec::new(),
+                    timeout_ms: 0,
+                }],
+                ..ark_contract::HookSettings::default()
+            },
+            ..RuntimeConfig::default()
+        }));
+        let policy: Arc<dyn SandboxPolicy> =
+            Arc::new(BuiltinSandboxPolicy::new(ark_common::Autonomy::Strict));
+        let inner = HookedToolRunner::new(
+            Arc::new(RegistryToolRunner::new(
+                Arc::new(ToolRegistry::new()),
+                Arc::clone(&policy),
+                workspace.clone(),
+            )),
+            Arc::clone(&config),
+            workspace.clone(),
+            ThreadId::new(),
+            TurnId::new(),
+        );
+        let runner = HookToolRunner::new(
+            Arc::new(OrderBroker {
+                log: log.clone(),
+                verdict: ark_ports::ToolPreCallVerdict::Allow,
+            }),
+            ThreadId::new(),
+            TurnId::new(),
+            inner,
+        );
+        let call = ToolCallRequest::new("c1", "no_such_tool", serde_json::json!({"path": "x"}));
+        // The empty registry cannot dispatch; the call's failure is expected
+        // and irrelevant — the log order is what this test asserts.
+        let _ = runner.execute(&call).await;
+        let recorded = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(
+            recorded, "plugin\nshell\n",
+            "decide → shell hook → dispatch"
+        );
+        let _ = std::fs::remove_file(&log);
+    }
+
+    /// A blocking decide must stop the call before the shell hook and the
+    /// dispatch ever run — otherwise the plugin veto is decorative.
+    #[tokio::test]
+    async fn a_blocking_decide_stops_the_call_before_the_shell_hook() {
+        let log = std::env::temp_dir().join(format!(
+            "ark-hook-order-{}-{}.log",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_file(&log);
+        let workspace = std::env::temp_dir().join("ark-hook-order-ws");
+        let _ = std::fs::create_dir_all(&workspace);
+        let config = Arc::new(ConfigStore::new(RuntimeConfig::default()));
+        let policy: Arc<dyn SandboxPolicy> =
+            Arc::new(BuiltinSandboxPolicy::new(ark_common::Autonomy::Strict));
+        let inner = HookedToolRunner::new(
+            Arc::new(RegistryToolRunner::new(
+                Arc::new(ToolRegistry::new()),
+                Arc::clone(&policy),
+                workspace.clone(),
+            )),
+            Arc::clone(&config),
+            workspace.clone(),
+            ThreadId::new(),
+            TurnId::new(),
+        );
+        let runner = HookToolRunner::new(
+            Arc::new(OrderBroker {
+                log: log.clone(),
+                verdict: ark_ports::ToolPreCallVerdict::Block {
+                    reason: "not today".into(),
+                },
+            }),
+            ThreadId::new(),
+            TurnId::new(),
+            inner,
+        );
+        let call = ToolCallRequest::new("c1", "bash", serde_json::json!({"command": "ls"}));
+        let err = runner
+            .execute(&call)
+            .await
+            .expect_err("a blocked call is an error");
+        assert!(err.message.contains("plugin hook blocked"));
+        // The broker's own marker is there (it logged before deciding), but the
+        // shell hook and the dispatch must never have appended anything.
+        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
+        assert_eq!(recorded, "plugin\n", "nothing after the veto may run");
     }
 }

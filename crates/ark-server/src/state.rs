@@ -15,7 +15,8 @@ use ark_config::{ConfigStore, TuningConfig};
 use ark_contract::{RuntimeEvent, TurnSummary, UsageResponse};
 use ark_obs::UsageRecorder;
 use ark_ports::{
-    AttachmentStore, BaseServices, SessionStore, SubagentRegistry, SubagentRunner, ToolRegistryPort,
+    AttachmentStore, BaseServices, HookBroker, NoHooks, SessionStore, SubagentRegistry,
+    SubagentRunner, ToolRegistryPort,
 };
 use chrono::{DateTime, Utc};
 use tokio::sync::{broadcast, Mutex as AsyncMutex};
@@ -153,6 +154,10 @@ pub struct AppState {
     /// `None` in a build without IM, which makes the `/v1/im` routes answer a
     /// structured `unavailable` instead of panicking.
     pub im: Option<Arc<ImService>>,
+    /// Hook bus (requirements/plugin-hook-bus.md). The composition root installs
+    /// the one process-wide broker; the default is the no-op implementation, so
+    /// every hook seam this crate touches is invisible without it.
+    pub hooks: Arc<dyn HookBroker>,
     shutdown: Arc<broadcast::Sender<&'static str>>,
     turns_completed: Arc<AtomicU64>,
 }
@@ -201,9 +206,19 @@ impl AppState {
             workspace_gate: Arc::new(AsyncMutex::new(())),
             schedules: None,
             im: None,
+            hooks: Arc::new(NoHooks),
             shutdown: Arc::new(shutdown),
             turns_completed: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Attach the hook bus (requirements/plugin-hook-bus.md).
+    ///
+    /// Only `arkd` calls this, with the same broker instance the turn runner and
+    /// the child executor received, so every seam shares one implementation.
+    pub fn with_hooks(mut self, hooks: Arc<dyn HookBroker>) -> Self {
+        self.hooks = hooks;
+        self
     }
 
     /// Attach the immutable attachment-store implementation.

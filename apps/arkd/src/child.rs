@@ -31,7 +31,7 @@ use ark_tool::{RegistryToolRunner, ToolRegistry};
 use crate::model;
 use crate::wiring::turn_common::{
     build_reactor, chunk_buffer_for_turn, limits_for_turn, resolve_workspace, seed_prefix,
-    skill_tail, HookedToolRunner, ReactorSpec, CHILD_ROLE_LINE,
+    skill_tail, HookToolRunner, HookedToolRunner, ReactorSpec, CHILD_ROLE_LINE,
 };
 use crate::workspace::WorkspaceRoots;
 
@@ -53,7 +53,12 @@ pub struct ChildTurnExecutorImpl {
     /// which is what enforces `max_depth = 1` structurally instead of relying on
     /// the depth check alone.
     tools: Arc<RegistryToolRunner>,
-    tool_schemas: Vec<serde_json::Value>,
+    /// Kept so the catalogue is evaluated **per turn** (requirements/
+    /// plugin-hook-bus.md, P1): a static copy captured at construction would
+    /// bypass the P2 `tool_catalog.filter` hook for every child run.
+    child_tools: Arc<ToolRegistry>,
+    /// Hook bus shared with the parent runner and AppState.
+    hooks: Arc<dyn ark_ports::HookBroker>,
     sink: Arc<dyn EventSink>,
     store: Arc<dyn SessionStore>,
     roots: Arc<WorkspaceRoots>,
@@ -139,10 +144,10 @@ impl ChildTurnExecutorImpl {
         policy: Arc<dyn SandboxPolicy>,
         roots: Arc<WorkspaceRoots>,
         skills: Arc<ark_skills::SkillRuntime>,
+        hooks: Arc<dyn ark_ports::HookBroker>,
     ) -> Self {
-        let tool_schemas = child_tools.schemas();
         let runner = Arc::new(RegistryToolRunner::new(
-            child_tools,
+            Arc::clone(&child_tools),
             Arc::clone(&policy),
             roots.current(),
         ));
@@ -152,7 +157,8 @@ impl ChildTurnExecutorImpl {
             usage,
             parent_model,
             tools: runner,
-            tool_schemas,
+            child_tools,
+            hooks,
             sink,
             store,
             roots,
@@ -286,12 +292,19 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
         let workspace = settings.workspace;
         let sandbox: Arc<dyn SandboxPolicy> =
             Arc::new(ark_tool::BuiltinSandboxPolicy::new(settings.autonomy));
-        let tools: Arc<dyn ark_agent::ToolRunner> = Arc::new(HookedToolRunner::new(
-            Arc::clone(&self.tools),
-            Arc::clone(&self.config),
-            workspace.clone(),
+        // Plugin decide first, then the shell `pre_tool_use` hook, then
+        // dispatch — the same pinned order the parent path uses.
+        let tools: Arc<dyn ark_agent::ToolRunner> = Arc::new(HookToolRunner::new(
+            Arc::clone(&self.hooks),
             thread_id,
             turn_id,
+            HookedToolRunner::new(
+                Arc::clone(&self.tools),
+                Arc::clone(&self.config),
+                workspace.clone(),
+                thread_id,
+                turn_id,
+            ),
         ));
 
         let seed_messages = self.child_seed(&workspace, &ctx.prompt);
@@ -301,8 +314,14 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             settings.provider_id.as_deref(),
             settings.model_override.as_deref(),
         )?;
+        let model = model::hooked(
+            Arc::clone(&self.hooks),
+            thread_id,
+            turn_id,
+            self.model_for(provider.clone()),
+        );
         let mut reactor = build_reactor(ReactorSpec {
-            model: self.model_for(provider.clone()),
+            model,
             tools,
             writer,
             gates: Arc::new(ark_agent::AllowAllGates),
@@ -311,7 +330,9 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             cancel: (*cancel).clone(),
             seed: ModelSeed {
                 messages: seed_messages,
-                tools: self.tool_schemas.clone(),
+                // Evaluated per turn so a tool-catalog hook (P2) always sees the
+                // current registry; the parent path already does exactly this.
+                tools: self.child_tools.schemas(),
                 temperature: provider.as_ref().and_then(|provider| provider.temperature),
                 max_tokens: provider.as_ref().and_then(|provider| provider.max_tokens),
                 reasoning_effort: provider
