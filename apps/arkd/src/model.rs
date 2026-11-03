@@ -8,11 +8,14 @@
 
 use std::sync::Arc;
 
-use ark_common::{Result, Usage};
+use ark_common::{Result, ThreadId, TurnId, Usage};
 use ark_config::RuntimeConfig;
 use ark_llm::{HttpModelClient, ProviderConfig};
 use ark_obs::UsageRecorder;
-use ark_ports::{ModelChunk, ModelClient, ModelRequest, ModelResponse};
+use ark_ports::{
+    truncate_utf8, HookBroker, HookScope, LlmCallFact, ModelChunk, ModelClient, ModelRequest,
+    ModelResponse, LLM_TAIL_BYTES,
+};
 use tokio::sync::mpsc;
 
 /// Provider table keys understood by [`select`].
@@ -179,6 +182,103 @@ impl ModelClient for MeteredModel {
     }
 }
 
+/// Hook decorator: the *outermost* model wrapper (requirements/plugin-hook-bus.md).
+///
+/// Sitting outside [`MeteredModel`] is load-bearing: a call a hook denies must
+/// never be metered, and a tuning hook must see the request before it is
+/// serialized. With [`ark_ports::NoHooks`] installed this layer forwards the
+/// request byte-for-byte — the zero-behavior promise of the P1 wiring.
+///
+/// The scope is captured at construction because both turn paths build a fresh
+/// client per turn; a process-lifetime client could not know which turn it
+/// serves.
+pub struct HookModel {
+    hooks: Arc<dyn HookBroker>,
+    thread_id: ThreadId,
+    turn_id: TurnId,
+    inner: Arc<dyn ModelClient>,
+}
+
+impl HookModel {
+    pub fn new(
+        hooks: Arc<dyn HookBroker>,
+        thread_id: ThreadId,
+        turn_id: TurnId,
+        inner: Arc<dyn ModelClient>,
+    ) -> Self {
+        Self {
+            hooks,
+            thread_id,
+            turn_id,
+            inner,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ModelClient for HookModel {
+    fn provider_id(&self) -> &str {
+        self.inner.provider_id()
+    }
+
+    fn model(&self) -> &str {
+        self.inner.model()
+    }
+
+    async fn stream(
+        &self,
+        mut request: ModelRequest,
+        sink: mpsc::Sender<ModelChunk>,
+    ) -> Result<ModelResponse> {
+        let scope = HookScope {
+            thread_id: &self.thread_id,
+            turn_id: &self.turn_id,
+        };
+        let tuning = self.hooks.on_model_request(scope, &request).await?;
+        if let Some(temperature) = tuning.temperature {
+            request.temperature = Some(temperature);
+        }
+        if let Some(max_tokens) = tuning.max_tokens {
+            request.max_tokens = Some(max_tokens);
+        }
+        match self.inner.stream(request, sink).await {
+            Ok(response) => {
+                let (text_tail, truncated) = truncate_utf8(&response.text, LLM_TAIL_BYTES);
+                self.hooks
+                    .observe_llm_call(
+                        scope,
+                        &LlmCallFact {
+                            provider_id: self.inner.provider_id(),
+                            model: self.inner.model(),
+                            usage: response.usage.clone(),
+                            text_tail,
+                            truncated,
+                            error: None,
+                        },
+                    )
+                    .await;
+                Ok(response)
+            }
+            Err(err) => {
+                self.hooks
+                    .observe_llm_call(
+                        scope,
+                        &LlmCallFact {
+                            provider_id: self.inner.provider_id(),
+                            model: self.inner.model(),
+                            usage: Usage::default(),
+                            text_tail: "",
+                            truncated: false,
+                            error: Some(&err.message),
+                        },
+                    )
+                    .await;
+                Err(err)
+            }
+        }
+    }
+}
+
 /// Deterministic local client: streams a short answer built from the last user
 /// message, so a turn always produces real events without a provider.
 ///
@@ -261,6 +361,20 @@ fn estimate_tokens(text: &str) -> u64 {
     (text.len() as u64).div_ceil(4).max(1)
 }
 
+/// Wrap a per-turn client in the hook decorator (requirements/plugin-hook-bus.md).
+///
+/// Both turn paths call this after [`MeteredModel`] has been applied, so the
+/// chain is `HookModel(MeteredModel(client))` — hooks see and may deny a call
+/// before it is metered.
+pub fn hooked(
+    hooks: Arc<dyn HookBroker>,
+    thread_id: ThreadId,
+    turn_id: TurnId,
+    client: Arc<dyn ModelClient>,
+) -> Arc<dyn ModelClient> {
+    Arc::new(HookModel::new(hooks, thread_id, turn_id, client))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,5 +451,172 @@ mod tests {
             MeteredModel::new(Arc::new(LocalModel::new()), Arc::new(UsageRecorder::new()));
         assert_eq!(metered.provider_id(), "ark-local");
         assert_eq!(metered.model(), "ark-local-echo");
+    }
+
+    /// A recording broker for decorator tests: it notes every hook it saw and
+    /// can optionally retune or deny the model request.
+    struct RecordingBroker {
+        tuning: Option<ark_ports::ModelRequestTuning>,
+        deny_model_request: bool,
+        requests_seen: std::sync::Mutex<Vec<ModelRequest>>,
+        observes: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl RecordingBroker {
+        fn new() -> Self {
+            Self {
+                tuning: None,
+                deny_model_request: false,
+                requests_seen: std::sync::Mutex::new(Vec::new()),
+                observes: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn requests_seen(&self) -> Vec<ModelRequest> {
+            self.requests_seen.lock().unwrap().clone()
+        }
+
+        fn observes(&self) -> Vec<String> {
+            self.observes.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ark_ports::HookBroker for RecordingBroker {
+        async fn on_turn_pre_start(
+            &self,
+            _scope: ark_ports::HookScope<'_>,
+            _source: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn on_model_request(
+            &self,
+            _scope: ark_ports::HookScope<'_>,
+            request: &ModelRequest,
+        ) -> Result<ark_ports::ModelRequestTuning> {
+            self.requests_seen.lock().unwrap().push(request.clone());
+            if self.deny_model_request {
+                return Err(ark_common::ArkError::new(
+                    ark_common::ArkErrorCode::ValidationError,
+                    "hook denied the model request",
+                ));
+            }
+            Ok(self.tuning.clone().unwrap_or_default())
+        }
+
+        async fn on_tool_pre_call(
+            &self,
+            _scope: ark_ports::HookScope<'_>,
+            _tool: &str,
+            _args_head: &str,
+            _args_truncated: bool,
+        ) -> Result<ark_ports::ToolPreCallVerdict> {
+            Ok(ark_ports::ToolPreCallVerdict::Allow)
+        }
+
+        async fn observe_turn_end(
+            &self,
+            _scope: ark_ports::HookScope<'_>,
+            outcome: &ark_ports::TurnOutcomeFact,
+        ) {
+            self.observes.lock().unwrap().push(format!("{outcome:?}"));
+        }
+
+        async fn observe_llm_call(
+            &self,
+            _scope: ark_ports::HookScope<'_>,
+            fact: &ark_ports::LlmCallFact<'_>,
+        ) {
+            let label = if fact.error.is_some() { "failed" } else { "ok" };
+            self.observes.lock().unwrap().push(label.to_string());
+        }
+    }
+
+    fn scope_pair() -> (ThreadId, TurnId) {
+        (ThreadId::new(), TurnId::new())
+    }
+
+    fn request_for(text: &str) -> ModelRequest {
+        ModelRequest {
+            messages: vec![ark_ports::ModelMessage::user(text)],
+            ..ModelRequest::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn hook_decorator_forwards_the_request_byte_for_byte_without_opinions() {
+        let broker = Arc::new(RecordingBroker::new());
+        let thread_turn = scope_pair();
+        let client = hooked(
+            broker.clone(),
+            thread_turn.0,
+            thread_turn.1,
+            Arc::new(LocalModel::new()),
+        );
+        let request = request_for("hello");
+        let expected = request.clone();
+        let (sender, _receiver) = mpsc::channel(16);
+        let response = client.stream(request, sender).await.unwrap();
+        assert!(response.text.contains("hello"));
+        // NoHooks semantics: the inner client must see exactly the request the
+        // reactor built, and the observe hook must have reported success.
+        let seen = broker.requests_seen();
+        assert_eq!(seen.len(), 1);
+        // Byte comparison, not PartialEq: what matters is exactly what the
+        // inner client would serialize.
+        assert_eq!(
+            serde_json::to_string(&seen[0]).unwrap(),
+            serde_json::to_string(&expected).unwrap()
+        );
+        assert_eq!(broker.observes(), vec!["ok".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn hook_decorator_applies_tuning_and_a_denial_is_never_metered() {
+        let recorder = Arc::new(UsageRecorder::new());
+        // Baseline usage on this recorder: the denied call must not add to it.
+        let mut broker = RecordingBroker::new();
+        broker.tuning = Some(ark_ports::ModelRequestTuning {
+            temperature: Some(0.9),
+            max_tokens: Some(64),
+        });
+        let thread_turn = scope_pair();
+        let tuned = hooked(
+            Arc::new(broker),
+            thread_turn.0,
+            thread_turn.1,
+            Arc::new(MeteredModel::new(
+                Arc::new(LocalModel::new()),
+                recorder.clone(),
+            )),
+        );
+        let (sender, _receiver) = mpsc::channel(16);
+        let response = tuned.stream(request_for("hi"), sender).await.unwrap();
+        assert!(response.text.contains("hi"));
+        let baseline = recorder.usage().total_tokens;
+        assert!(baseline > 0, "the tuned call was metered");
+
+        let mut broker = RecordingBroker::new();
+        broker.deny_model_request = true;
+        let thread_turn = scope_pair();
+        let denying = hooked(
+            Arc::new(broker),
+            thread_turn.0,
+            thread_turn.1,
+            Arc::new(MeteredModel::new(
+                Arc::new(LocalModel::new()),
+                Arc::clone(&recorder),
+            )),
+        );
+        let (sender, _receiver) = mpsc::channel(16);
+        let err = denying
+            .stream(request_for("hi"), sender)
+            .await
+            .expect_err("the hook denial must stop the call");
+        assert!(err.message.contains("hook denied"));
+        // The denied call never reached the metering wrapper.
+        assert_eq!(recorder.usage().total_tokens, baseline);
     }
 }

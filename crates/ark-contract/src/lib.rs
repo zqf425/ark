@@ -29,14 +29,14 @@ pub use attachment::{
     AttachmentEntry, AttachmentUploadRequest, AttachmentUploadResponse,
 };
 pub use base::{
-    CreateMemoryRequest, McpServerEntry, McpServerListResponse, McpServerTestResponse,
-    McpServerView, McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse,
-    PluginDiagnosticView, PluginEntry, PluginHostReport, ProviderEntry, ProviderListResponse,
-    ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
-    ProviderModelSummary, ProviderTestRequest, ProviderTestResponse, ProviderView, SkillActivation,
-    SkillDiagnostics, SkillLoadWarning, SkillManifest, SkillSource, SkillSummary, SkillTriggers,
-    SkillTurnResolution, ThreadSkillsResponse, UpdateMemoryRequest, WorkspaceStatus,
-    WorkspaceValidateResponse,
+    CreateMemoryRequest, HookAuditView, McpServerEntry, McpServerListResponse,
+    McpServerTestResponse, McpServerView, McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry,
+    MemoryListResponse, PluginDiagnosticView, PluginEntry, PluginHostReport, ProviderEntry,
+    ProviderListResponse, ProviderModelCatalogConnection, ProviderModelCatalogRequest,
+    ProviderModelCatalogResponse, ProviderModelSummary, ProviderTestRequest, ProviderTestResponse,
+    ProviderView, SkillActivation, SkillDiagnostics, SkillLoadWarning, SkillManifest, SkillSource,
+    SkillSummary, SkillTriggers, SkillTurnResolution, ThreadSkillsResponse, UpdateMemoryRequest,
+    WorkspaceStatus, WorkspaceValidateResponse,
 };
 pub use capability::{
     CapabilitiesResponse, Capability, PageId, PageSpec, PanelEntry, PanelSlot, PanelSpec,

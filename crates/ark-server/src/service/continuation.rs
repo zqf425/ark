@@ -385,6 +385,23 @@ async fn start_if_eligible(
     }
 
     let turn_id = TurnId::new();
+    // Same pre-start seam as the explicit-input path (requirements/
+    // plugin-hook-bus.md): outside the workspace gate, no retry on denial.
+    // An auto-continuation denied by a hook simply stays unscheduled.
+    if state
+        .hooks
+        .on_turn_pre_start(
+            ark_ports::HookScope {
+                thread_id: &thread_id,
+                turn_id: &turn_id,
+            },
+            crate::service::turns::turn_source_label(&TurnSource::AutoContinuation),
+        )
+        .await
+        .is_err()
+    {
+        return false;
+    }
     let Some(registration) = state.turns.try_register(thread_id, turn_id, cancel.clone()) else {
         return false;
     };

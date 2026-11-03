@@ -28,7 +28,7 @@ use crate::{
     ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
     CreateImChannelRequest, CreateMemoryRequest, CreateScheduleRequest, CreateThreadRequest,
     EventKind, FeishuDomain, FieldPath, FilePreview, FolderPickResponse, GoalRequest,
-    HealthResponse, ImBinding, ImBindingListResponse, ImChannel, ImChannelId, ImChannelKind,
+    HealthResponse, HookAuditView, ImBinding, ImBindingListResponse, ImChannel, ImChannelId, ImChannelKind,
     ImChannelListItem, ImChannelListResponse, ImChannelPolicy, ImChannelRuntime, ImChannelState,
     ImChannelView, ImCredentials, ImCredentialsView, ImSettings, ImVerifyResponse,
     ImWeixinLoginStartResponse, ImWeixinLoginStatus, ImWeixinLoginWaitResponse, ItemStatus,
@@ -183,6 +183,7 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     SkillDiagnostics::export_all_to(dir)?;
     ThreadSkillsResponse::export_all_to(dir)?;
     FieldPath::export_all_to(dir)?;
+    HookAuditView::export_all_to(dir)?;
     PluginEntry::export_all_to(dir)?;
     PluginDiagnosticView::export_all_to(dir)?;
     PluginHostReport::export_all_to(dir)?;

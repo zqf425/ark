@@ -19,6 +19,7 @@ use crate::domain::isolation::{plan_local_load, PluginDrop};
 use crate::domain::manifest::PluginManifest;
 use crate::service::context::HostHandles;
 use crate::service::directory::{scan, DirectoryPlugin, ScannedPlugin};
+use crate::service::hook_audit::{HookAuditRecord, InMemoryHookAudit};
 use crate::service::plugin::Plugin;
 use crate::service::registry::{
     LoadReport, MemoryPluginDiagnostics, PluginDiagnostic, PluginDiagnosticSink, PluginRegistry,
@@ -37,6 +38,10 @@ pub struct PluginHost {
     registry: Mutex<PluginRegistry>,
     diagnostics: Arc<MemoryPluginDiagnostics>,
     http_diagnostics: Arc<InMemoryDiagnosticSink>,
+    /// Bounded ring for hook decisions (requirements/plugin-hook-bus.md).
+    /// Owned here so the P2 broker multiplexer can write without rewiring;
+    /// until then it stays empty and the report field is an empty list.
+    hook_audit: Arc<InMemoryHookAudit>,
     http: Arc<HttpBus>,
     mcp: Option<Arc<McpBus>>,
     report: LoadReport,
@@ -54,6 +59,10 @@ impl std::fmt::Debug for PluginHost {
     }
 }
 
+/// Bounded audit retention: enough to answer "why was this refused" for a
+/// support session, small enough that a chatty plugin cannot grow the process.
+const HOOK_AUDIT_CAPACITY: usize = 128;
+
 /// Load every plugin under `root`.
 ///
 /// `http` is the same bus the plugins receive; it is a separate argument because
@@ -64,14 +73,34 @@ pub fn load_host(
     http: Arc<HttpBus>,
     http_diagnostics: Arc<InMemoryDiagnosticSink>,
 ) -> Result<PluginHost> {
-    let (scanned, scan_diagnostics) = scan(root);
-    let versions = versions_by_id(&scanned);
-    let plan = plan_local_load(&manifests(&scanned))?;
-
+    let (mut scanned, scan_diagnostics) = scan(root);
     let diagnostics_sink = Arc::new(MemoryPluginDiagnostics::new());
     for record in &scan_diagnostics {
         diagnostics_sink.record(record.clone());
     }
+
+    // A directory plugin is declarative: it has no code to receive a hook
+    // callback, so a `hooks` section cannot be honoured and the plugin is
+    // skipped before planning (fail closed, requirements/plugin-hook-bus.md).
+    // Removing it here also drops its dependents for the ordinary
+    // missing-dependency reason instead of leaving a phantom in the topology.
+    let version_of = |item: &ScannedPlugin| item.manifest.version.to_string();
+    scanned.retain(|item| {
+        if item.manifest.hooks.is_some() {
+            diagnostics_sink.record(PluginDiagnostic::new(
+                "plugin_skipped",
+                &item.manifest.id,
+                &version_of(item),
+                "directory plugins cannot declare hooks; the section is reserved                  for builtin plugins",
+            ));
+            false
+        } else {
+            true
+        }
+    });
+
+    let versions = versions_by_id(&scanned);
+    let plan = plan_local_load(&manifests(&scanned))?;
     for dropped in &plan.dropped {
         diagnostics_sink.record(drop_diagnostic(dropped, &versions));
     }
@@ -115,6 +144,7 @@ pub fn load_host(
         registry: Mutex::new(registry),
         diagnostics: diagnostics_sink,
         http_diagnostics,
+        hook_audit: Arc::new(InMemoryHookAudit::new(HOOK_AUDIT_CAPACITY)),
         http,
         mcp: None,
         report,
@@ -192,7 +222,19 @@ impl PluginHost {
                 })
                 .collect(),
             http_denials: self.http_denials(),
+            hook_audit: self
+                .hook_audit
+                .records()
+                .into_iter()
+                .map(hook_audit_view)
+                .collect(),
         }
+    }
+
+    /// The audit sink the hook broker writes into. Host-only: a plugin can read
+    /// its own decisions on the wire report, never write the audit log.
+    pub fn hook_audit_sink(&self) -> Arc<InMemoryHookAudit> {
+        Arc::clone(&self.hook_audit)
     }
 
     /// Refused outbound requests, newest last.
@@ -233,6 +275,9 @@ impl PluginHost {
             pages: registration.map(|r| r.page_ids()).unwrap_or_default(),
             panels: registration.map(|r| r.panel_ids()).unwrap_or_default(),
             tools: self.published_tools(&manifest.id),
+            // The declared request, not the grant: a user reads here what the
+            // plugin asked for (requirements/plugin-hook-bus.md, 权限与安全).
+            hook_points: manifest.hook_points(),
         })
     }
 
@@ -257,6 +302,18 @@ impl PluginHost {
 impl ark_ports::PluginHostService for PluginHost {
     fn report(&self) -> PluginHostReport {
         self.host_report()
+    }
+}
+
+/// Fold one audit record into its wire view.
+fn hook_audit_view(record: HookAuditRecord) -> ark_contract::HookAuditView {
+    ark_contract::HookAuditView {
+        kind: record.kind,
+        plugin_id: record.plugin_id,
+        hook_point: record.hook_point,
+        decision: record.decision,
+        detail: record.detail,
+        duration_ms: record.duration_ms,
     }
 }
 

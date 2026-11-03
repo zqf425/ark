@@ -16,4 +16,11 @@ kind: string, capabilities: Array<Capability>, pages: Array<string>, panels: Arr
 /**
  * Qualified tool names, `<plugin_id>.<tool>`.
  */
-tools: Array<string>, };
+tools: Array<string>, 
+/**
+ * Hook points the manifest declares. Declared is not granted: the wire
+ * keeps the request so a user can see what a plugin asks for
+ * (requirements/plugin-hook-bus.md). Additive field: absent in older
+ * readers, which is why it defaults to empty.
+ */
+hook_points: Array<string>, };

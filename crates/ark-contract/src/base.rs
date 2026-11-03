@@ -661,6 +661,12 @@ pub struct PluginEntry {
     /// Qualified tool names, `<plugin_id>.<tool>`.
     #[serde(default)]
     pub tools: Vec<String>,
+    /// Hook points the manifest declares. Declared is not granted: the wire
+    /// keeps the request so a user can see what a plugin asks for
+    /// (requirements/plugin-hook-bus.md). Additive field: absent in older
+    /// readers, which is why it defaults to empty.
+    #[serde(default)]
+    pub hook_points: Vec<String>,
 }
 
 /// One startup diagnostic or audit record.
@@ -696,4 +702,23 @@ pub struct PluginHostReport {
     /// Refused outbound requests (`http_denied`), newest last.
     #[serde(default)]
     pub http_denials: Vec<PluginDiagnosticView>,
+    /// Hook invocations the broker served, newest retained last. Empty until a
+    /// plugin supplies hooks (requirements/plugin-hook-bus.md, 审计).
+    #[serde(default)]
+    pub hook_audit: Vec<HookAuditView>,
+}
+
+/// One audited hook invocation, as `GET /v1/runtime/plugins` reports it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct HookAuditView {
+    /// `hook_decide` for a synchronous verdict, `hook_observe` for a delivery.
+    pub kind: String,
+    pub plugin_id: String,
+    pub hook_point: String,
+    pub decision: String,
+    #[serde(default)]
+    pub detail: String,
+    #[serde(default)]
+    pub duration_ms: u64,
 }

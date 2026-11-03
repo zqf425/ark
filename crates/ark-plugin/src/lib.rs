@@ -38,8 +38,9 @@ pub use domain::{
     TopologyErrorKind, UiSection, Version, VersionReq,
 };
 pub use service::{
-    load_host, scan, DirectoryPlugin, HostHandles, LoadReport, MemoryPluginDiagnostics, Plugin,
-    PluginContext, PluginDiagnostic, PluginDiagnosticSink, PluginHost, PluginRegistry,
-    Registration, ScannedPlugin, ScopedConfig, ScopedCredentials, ScopedFiles, ScopedKv, ScopedLog,
+    load_host, scan, DirectoryPlugin, HookAuditRecord, HookAuditSink, HostHandles,
+    InMemoryHookAudit, LoadReport, MemoryPluginDiagnostics, Plugin, PluginContext,
+    PluginDiagnostic, PluginDiagnosticSink, PluginHost, PluginRegistry, Registration,
+    ScannedPlugin, ScopedConfig, ScopedCredentials, ScopedFiles, ScopedKv, ScopedLog,
     ScopedMetrics, ScopedNotify, ScopedTrace, MANIFEST_FILE,
 };
