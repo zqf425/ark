@@ -1,13 +1,18 @@
 /**
  * Composer: attachments, skill mentions, queueing and steering.
  *
+ * Layout follows the smart-ark Code composer: a 24px frosted shell whose first
+ * row is the auto-growing textarea, a hairline-separated toolbar underneath
+ * (round attach button, quiet runtime pickers on the left; queue/interrupt and
+ * the circular gradient send button on the right), and a chevron that unfolds
+ * the per-thread details (workspace, compaction) above the textarea instead of
+ * a permanently docked panel.
+ *
  * Enter sends, Shift+Enter inserts a newline. During a live turn the send
  * button becomes a steering action (追加) and a second action queues the draft
  * locally; queued drafts flush automatically when the turn ends, in order.
  * Message state is local: the runtime owns conversation state, and the user's
- * own message returns as a `ThreadItem`. The tools row also hosts the quick
- * runtime overrides (model, permission mode, reasoning effort); the detailed
- * panel above keeps workspace and compaction.
+ * own message returns as a `ThreadItem`.
  */
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../../shared/ui'
@@ -20,6 +25,7 @@ import { associateAttachment, uploadAttachment } from '../api/attachments-api'
 import { listSkills, listThreadSkills, refreshThreadSkills } from '../api/skills-api'
 import { canEditComposer, canSendToThread } from './composer-availability'
 import { ComposerRuntimeControls } from './ComposerRuntimeControls'
+import { SessionRuntimeControls } from './SessionRuntimeControls'
 import type { SkillSummary } from '../../../shared/contracts'
 
 const MAX_ROWS = 8
@@ -35,6 +41,29 @@ function toBase64(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error('read failed'))
     reader.readAsDataURL(file)
   })
+}
+
+/** Round toolbar glyphs, drawn inline so no icon dependency is added. */
+function SendGlyph(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+      <path
+        d="M4.5 12 20 4.5 15.5 20l-3.2-6.1L4.5 12Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function StopGlyph(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false">
+      <rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor" />
+    </svg>
+  )
 }
 
 export function Composer({ threadId }: { threadId: string | null }): JSX.Element {
@@ -56,10 +85,11 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const [skills, setSkills] = useState<SkillSummary[] | null>(null)
   const [skillsOpen, setSkillsOpen] = useState(false)
   const [skillWarnings, setSkillWarnings] = useState(0)
+  /** Per-thread details (workspace, compaction) stay folded until asked for. */
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   const inputDisabled = !canEditComposer(threadId, draft)
   const sendDisabled = !canSendToThread(threadId, draft, streamStatus)
-  const notOpen = streamStatus !== 'open'
   const live = canInterrupt
 
   // A live→idle transition is the queue's drain signal. One message per drain:
@@ -81,6 +111,13 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     wasLive.current = live
   }, [live, queued, send])
 
+  const resetInput = (): void => {
+    const node = inputRef.current
+    if (!node) return
+    node.value = ''
+    node.style.height = 'auto'
+  }
+
   const submit = async (): Promise<void> => {
     const node = inputRef.current
     if (!node) return
@@ -100,8 +137,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     }
     const ok = live ? await steer(text) : await send(text, ids)
     if (ok) {
-      node.value = ''
-      node.style.height = 'auto'
+      resetInput()
       if (!live) setAttachments([])
       setCommandError(null)
       set(false)
@@ -114,8 +150,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     const text = node.value.trim()
     if (!text) return
     setQueued((current) => [...current, text])
-    node.value = ''
-    node.style.height = 'auto'
+    resetInput()
   }
 
   const pickFiles = async (files: FileList | null): Promise<void> => {
@@ -187,6 +222,12 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     setSkillsOpen(false)
   }
 
+  const placeholder = threadId
+    ? live
+      ? t('canvas.composer.steerPlaceholder')
+      : t('canvas.composer.sendPlaceholder')
+    : t('canvas.composer.noThreadPlaceholder')
+
   return (
     <div className="ark-composer">
       {commandError ? (
@@ -217,13 +258,38 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
         </div>
       ) : null}
 
-      <div className="ark-composer__box">
-        <div className="ark-composer__lead">
-          <span>{live ? t('canvas.composer.steerLead') : t('canvas.composer.describeLead')}</span>
-          <span className="ark-composer__keys">
-            <kbd>Enter</kbd> {t('canvas.composer.keys')} <kbd>Shift + Enter</kbd> {t('canvas.composer.newline')}
-          </span>
+      {/* Unfolded session details float above the shell, exactly like the
+          smart-ark 「会话信息」 card: the composer never grows for them. */}
+      {detailsOpen && threadId ? (
+        <div className="ark-composer__details">
+          <SessionRuntimeControls threadId={threadId} />
         </div>
+      ) : null}
+
+      <div className="ark-composer__box">
+        {threadId ? (
+          <button
+            type="button"
+            className={`ark-composer__chevron${detailsOpen ? ' is-open' : ''}`}
+            aria-expanded={detailsOpen}
+            aria-label={
+              detailsOpen ? t('canvas.composer.detailsHide') : t('canvas.composer.detailsShow')
+            }
+            title={detailsOpen ? t('canvas.composer.detailsHide') : t('canvas.composer.detailsShow')}
+            onClick={() => setDetailsOpen((open) => !open)}
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+              <path
+                d="m6 9.5 6 6 6-6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        ) : null}
 
         {attachments.length > 0 ? (
           <div className="ark-composer__attachments" role="list" aria-label={t('canvas.composer.attachmentsAria')}>
@@ -249,14 +315,8 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
         <textarea
           ref={inputRef}
           className="ark-composer__input"
-          rows={3}
-          placeholder={
-            threadId
-              ? live
-                ? t('canvas.composer.steerPlaceholder')
-                : t('canvas.composer.sendPlaceholder')
-              : t('canvas.composer.noThreadPlaceholder')
-          }
+          rows={1}
+          placeholder={placeholder}
           aria-label={live ? t('canvas.composer.steerAria') : t('canvas.composer.sendAria')}
           disabled={inputDisabled}
           onChange={(event) => {
@@ -317,37 +377,65 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
               aria-hidden="true"
               onChange={(event) => void pickFiles(event.target.files)}
             />
-            <Button
-              variant="ghost"
-              size="sm"
+            <button
+              type="button"
+              className="ark-composer__round"
               disabled={inputDisabled || uploading || live}
-              title={live ? t('canvas.composer.attachLiveHint') : undefined}
+              title={live ? t('canvas.composer.attachLiveHint') : t('canvas.composer.attach')}
+              aria-label={uploading ? t('canvas.composer.attachUploading') : t('canvas.composer.attach')}
               onClick={() => fileRef.current?.click()}
             >
-              {uploading ? t('canvas.composer.attachUploading') : t('canvas.composer.attach')}
-            </Button>
-            <Button variant="ghost" size="sm" disabled={inputDisabled} onClick={() => void toggleSkills()}>
+              {uploading ? (
+                <span className="ark-composer__round-text">…</span>
+              ) : (
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                  <path
+                    d="M12 5v14M5 12h14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              )}
+            </button>
+            <button
+              type="button"
+              className="ark-composer__chipbtn"
+              disabled={inputDisabled}
+              onClick={() => void toggleSkills()}
+            >
               {t('canvas.composer.skills')}
-            </Button>
+            </button>
             <ComposerRuntimeControls threadId={threadId} />
           </div>
           <div className="ark-composer__send">
-            <span className={`ark-composer__status${notOpen ? ' is-warn' : ''}`}>
-              {notOpen ? t('canvas.composer.streamDown') : t('canvas.composer.streamUp')}
-            </span>
             {live ? (
               <Button variant="default" size="sm" disabled={inputDisabled} onClick={queueDraft}>
                 {t('canvas.composer.queue')}
               </Button>
             ) : null}
             {live ? (
-              <Button variant="default" size="sm" onClick={() => void interrupt()}>
-                {t('canvas.composer.interrupt')}
-              </Button>
+              <button
+                type="button"
+                className="ark-composer__round ark-composer__round--stop"
+                aria-label={t('canvas.composer.interrupt')}
+                title={t('canvas.composer.interrupt')}
+                onClick={() => void interrupt()}
+              >
+                <StopGlyph />
+              </button>
             ) : null}
-            <Button variant="primary" size="sm" disabled={sendDisabled} onClick={() => void submit()}>
-              {draft ? t('common.submitting') : live ? t('canvas.composer.steer') : t('canvas.composer.send')}
-            </Button>
+            <button
+              type="button"
+              className="ark-composer__sendbtn"
+              disabled={sendDisabled}
+              aria-label={live ? t('canvas.composer.steer') : t('canvas.composer.send')}
+              title={live ? t('canvas.composer.steer') : t('canvas.composer.send')}
+              onClick={() => void submit()}
+            >
+              {draft ? <span className="ark-composer__round-text">…</span> : <SendGlyph />}
+            </button>
           </div>
         </div>
       </div>

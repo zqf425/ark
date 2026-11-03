@@ -8,6 +8,8 @@ export const THREAD_LIST_MESSAGES = {
   'thread.list.title': ['会话', 'Threads'],
   'thread.list.create': ['新会话', 'New thread'],
   'thread.list.creating': ['创建中…', 'Creating…'],
+  'thread.list.schedule': ['定时任务', 'Scheduled task'],
+  'thread.list.scheduleHint': ['新建一个按节奏自动执行的定时任务', 'Create a task that runs a prompt on a cadence'],
   'thread.list.search': ['搜索已加载会话', 'Search loaded threads'],
   'thread.list.scopeAria': ['会话范围', 'Thread scope'],
   'thread.list.scopeRecent': ['最近', 'Recent'],

@@ -23,7 +23,6 @@ import { Composer } from './Composer'
 import { StreamFooter } from './StreamFooter'
 import { ChildRunsPanel } from './ChildRunsPanel'
 import { rewindAvailabilityByTurn } from './rewind-flow'
-import { SessionRuntimeControls } from './SessionRuntimeControls'
 import { startReview } from '../api/turns-api'
 
 /** Pixels of slack that still count as "at the bottom" (caret/last-pixel noise). */
@@ -299,14 +298,14 @@ export function ThreadStream({
 
       <StreamFooter />
       {/*
-        The runtime overrides dock sits with the composer: the user adjusts
-        workspace/provider/model/reasoning right where they type. Keyed by
-        thread so switching sessions remounts the textarea: the composer keeps
-        its message locally, and an unkeyed one would carry the previous
-        thread's unsent draft (ready to be sent to the new one).
+        Runtime overrides live inside the composer: model/permission/reasoning
+        in its toolbar and workspace/compaction behind the 「会话信息」 chevron,
+        so nothing is permanently docked above the input. Keyed by thread so
+        switching sessions remounts the textarea: the composer keeps its
+        message locally, and an unkeyed one would carry the previous thread's
+        unsent draft (ready to be sent to the new one).
       */}
       <div className="ark-composer-stack">
-        <SessionRuntimeControls threadId={threadId} />
         <Composer key={threadId ?? ''} threadId={threadId} />
       </div>
     </section>
