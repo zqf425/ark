@@ -1,7 +1,7 @@
 /**
  * Code screen stylesheet entry (design §7.10.2).
  *
- * Split so no single file exceeds the 400-line CI limit:
+ * Split so no single file exceeds the 1000-line CI limit:
  *   - code-session-stream.css   stream canvas, turns, jump pill, usage footer
  *   - code-session-bubbles.css  message bubbles and reasoning rows
  *   - code-session-tools.css    tool cards, tool results, error / notice rows

@@ -1,6 +1,6 @@
 /**
  * Context drawer content primitives (Plan/Changes/File/Terminal slots).
- * Split from workbench.css to respect the 400-line file limit.
+ * Split from workbench.css to respect the 1000-line file limit.
  */
 
 /* ---------- right panel slot (inside the drawer) ---------- */

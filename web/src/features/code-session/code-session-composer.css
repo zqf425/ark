@@ -2,7 +2,7 @@
  * Composer quick runtime pickers: model/provider, permission mode and
  * reasoning effort. Styled as quiet pills inside the composer toolbar with a
  * floating card popover above, mirroring smart-ark's composer pickers.
- * Split from code-session-gates.css to stay under the 400-line per-file limit
+ * Split from code-session-gates.css to stay under the 1000-line per-file limit
  * (design §7.10.2).
  */
 

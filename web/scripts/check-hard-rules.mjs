@@ -10,7 +10,7 @@ import { join, relative, sep } from 'node:path'
 
 const ROOT = process.cwd()
 const SRC = join(ROOT, 'src')
-const MAX_LINES = 400
+const MAX_LINES = 1000
 
 /** @type {{rule: string, file: string, detail: string}[]} */
 const violations = []
@@ -35,7 +35,8 @@ for (const file of files) {
   const source = readFileSync(file, 'utf8')
   const lines = source.split('\n')
 
-  // Rule 1: single file <= 400 lines (eslint-max-lines equivalent).
+  // Rule 1: single file <= 1000 lines (eslint-max-lines equivalent; matches the
+  // repo-wide AGENTS.md limit).
   if (lines.length > MAX_LINES) {
     violations.push({ rule: 'max-lines', file: rel, detail: `${lines.length} 行 > ${MAX_LINES}` })
   }

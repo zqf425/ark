@@ -3,7 +3,7 @@
  * smart-ark tool entry: soft rounded cards with a floating shadow, mono tool
  * names and uppercase section labels.
  *
- * Part of the Code screen stylesheet; split to stay under the 400-line
+ * Part of the Code screen stylesheet; split to stay under the 1000-line
  * per-file limit (design §7.10.2). Code-session.css is the entry. Colors come
  * from styles/tokens.css (theme.css for dark) only — a literal hex here is a
  * review blocker because it breaks light/dark parity.
