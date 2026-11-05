@@ -28,9 +28,9 @@ use crate::{
     ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
     CreateImChannelRequest, CreateMemoryRequest, CreateScheduleRequest, CreateThreadRequest,
     EventKind, FeishuDomain, FieldPath, FilePreview, FolderPickResponse, GoalRequest,
-    HealthResponse, HookAuditView, ImBinding, ImBindingListResponse, ImChannel, ImChannelId, ImChannelKind,
-    ImChannelListItem, ImChannelListResponse, ImChannelPolicy, ImChannelRuntime, ImChannelState,
-    ImChannelView, ImCredentials, ImCredentialsView, ImSettings, ImVerifyResponse,
+    HealthResponse, HookAuditView, ImBinding, ImBindingListResponse, ImChannel, ImChannelId,
+    ImChannelKind, ImChannelListItem, ImChannelListResponse, ImChannelPolicy, ImChannelRuntime,
+    ImChannelState, ImChannelView, ImCredentials, ImCredentialsView, ImSettings, ImVerifyResponse,
     ImWeixinLoginStartResponse, ImWeixinLoginStatus, ImWeixinLoginWaitResponse, ItemStatus,
     LlmRound, LlmRoundError, LlmRoundsResponse, McpServerEntry, McpServerListResponse,
     McpServerTestResponse, McpServerView, McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry,
@@ -363,6 +363,7 @@ const ROOT_NAMES: &[&str] = &[
     "SkillDiagnostics",
     "ThreadSkillsResponse",
     "FieldPath",
+    "HookAuditView",
     "ScheduleKind",
     "RunStatus",
     "TaskSchedule",
@@ -397,6 +398,77 @@ const ROOT_NAMES: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// A dependency-free scratch directory, removed on drop. The generator
+    /// already writes into the repository; isolating one `export_roots` run
+    /// must not add a third-party dev dependency to the contract crate.
+    struct ScratchDir(std::path::PathBuf);
+
+    impl ScratchDir {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let id = NEXT.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "ark-contract-export-roots-{}-{id}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&path).expect("create scratch export dir");
+            Self(path)
+        }
+
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Names explicitly passed to `export_all_to` by [`export_roots`].
+    ///
+    /// `ts-rs` also writes dependency types (e.g. `HookRule`) that are not
+    /// roots, so the generated directory is deliberately larger than the
+    /// barrel. Parsing the calls keeps the two lists in lockstep without
+    /// hard-coding a second copy of 139 names.
+    fn exported_root_names() -> BTreeSet<String> {
+        let source = include_str!("ts_export.rs");
+        let body = source
+            .split("fn export_roots(dir: &std::path::Path)")
+            .nth(1)
+            .expect("export_roots exists")
+            .split("\nfn generate")
+            .next()
+            .expect("export_roots body is terminated");
+        body.match_indices("::export_all_to(dir)")
+            .map(|(end, _)| {
+                let prefix = &body[..end];
+                let start = prefix
+                    .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == ':'))
+                    .map_or(0, |i| i + 1);
+                prefix[start..]
+                    .rsplit("::")
+                    .next()
+                    .expect("qualified type name")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    /// Read the root names the generated barrel re-exports.
+    fn barrel_names(index: &str) -> BTreeSet<String> {
+        index
+            .lines()
+            .filter_map(|line| {
+                let name = line.strip_prefix("export type { ")?;
+                Some(name.split(" }").next()?.to_string())
+            })
+            .collect()
+    }
 
     /// Regenerate the bindings, then assert what was written.
     ///
@@ -409,15 +481,57 @@ mod tests {
     /// parallel, so it could observe a half-written directory.
     #[test]
     fn regenerate_typescript_bindings() {
+        // Bidirectional drift check: every explicit `export_roots` call must
+        // be registered in ROOT_NAMES and vice versa. The old one-way check
+        // only proved ROOT_NAMES ⊆ generated files, so a generated-but-
+        // unregistered type (HookAuditView) silently missed the barrel.
+        let exported = exported_root_names();
+        let registered: BTreeSet<String> = ROOT_NAMES.iter().map(|name| name.to_string()).collect();
+        assert_eq!(
+            registered.len(),
+            ROOT_NAMES.len(),
+            "ROOT_NAMES has duplicates"
+        );
+        assert_eq!(
+            exported, registered,
+            "export_roots and ROOT_NAMES must describe the same root set"
+        );
+
+        // Re-run `export_roots` into an isolated directory and assert that
+        // every root produced its .ts file. Dependency-only files are allowed;
+        // every ROOT_NAMES entry must be among the generated files.
+        let scratch = ScratchDir::new();
+        export_roots(scratch.path()).expect("roots export into scratch dir");
+        let generated: BTreeSet<String> = std::fs::read_dir(scratch.path())
+            .expect("scratch dir is readable")
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                name.strip_suffix(".ts").map(str::to_string)
+            })
+            .collect();
+        let missing: Vec<&str> = ROOT_NAMES
+            .iter()
+            .copied()
+            .filter(|name| !generated.contains(*name))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "ROOT_NAMES without a generated .ts file: {missing:?}"
+        );
+
         let dir = std::path::Path::new(OUT_DIR);
         let files = generate(dir).expect("bindings must be generatable");
         assert!(
-            files >= ROOT_NAMES.len(),
-            "expected at least one file per root type, wrote {files}"
+            files > ROOT_NAMES.len(),
+            "expected root files plus dependency types and index.ts, wrote {files}"
         );
-        assert!(
-            dir.join("index.ts").is_file(),
-            "the barrel must exist after generation"
+        let index = std::fs::read_to_string(dir.join("index.ts"))
+            .expect("the barrel must exist after generation");
+        assert_eq!(
+            barrel_names(&index),
+            registered,
+            "index.ts must re-export every ROOT_NAMES entry and nothing else"
         );
 
         // Every name in the barrel must have a file behind it, or the renderer

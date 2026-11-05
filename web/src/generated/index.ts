@@ -109,6 +109,7 @@ export type { SkillLoadWarning } from "./SkillLoadWarning";
 export type { SkillDiagnostics } from "./SkillDiagnostics";
 export type { ThreadSkillsResponse } from "./ThreadSkillsResponse";
 export type { FieldPath } from "./FieldPath";
+export type { HookAuditView } from "./HookAuditView";
 export type { ScheduleKind } from "./ScheduleKind";
 export type { RunStatus } from "./RunStatus";
 export type { TaskSchedule } from "./TaskSchedule";

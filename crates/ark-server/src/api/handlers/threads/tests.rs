@@ -691,3 +691,56 @@ async fn detail_lists_one_child_id_per_delegated_child() {
         "the projection must fold the log to one id per child"
     );
 }
+
+#[tokio::test]
+async fn removing_a_thread_forgets_its_turn_epoch_but_keeps_other_threads() {
+    let dir = test_dir("forget-epoch");
+    let data_dir = dir.path().to_path_buf();
+    let state = state(&data_dir);
+
+    let doomed = state
+        .store
+        .create_thread("doomed")
+        .await
+        .expect("thread")
+        .thread_id;
+    let survivor = state
+        .store
+        .create_thread("survivor")
+        .await
+        .expect("thread")
+        .thread_id;
+    let doomed_turn = TurnId::new();
+    let survivor_turn = TurnId::new();
+    state
+        .turns
+        .try_register(doomed, doomed_turn, ark_agent::CancelToken::new())
+        .expect("register doomed");
+    state
+        .turns
+        .try_register(survivor, survivor_turn, ark_agent::CancelToken::new())
+        .expect("register survivor");
+    // `remove` refuses while a turn is running, so settle both registrations.
+    state.turns.finish(doomed_turn, &crate::TurnEnd::Completed);
+    state
+        .turns
+        .finish(survivor_turn, &crate::TurnEnd::Completed);
+
+    assert_eq!(state.turns.latest_for(doomed), Some(doomed_turn));
+    assert_eq!(state.turns.latest_for(survivor), Some(survivor_turn));
+
+    let status = remove(State(state.clone()), Path(doomed.to_string()))
+        .await
+        .expect("remove succeeds");
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        state.turns.latest_for(doomed),
+        None,
+        "a durable delete must reclaim the leaked epoch marker"
+    );
+    assert_eq!(
+        state.turns.latest_for(survivor),
+        Some(survivor_turn),
+        "other threads keep their epoch marker"
+    );
+}

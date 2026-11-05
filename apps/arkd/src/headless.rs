@@ -177,7 +177,7 @@ async fn one_turn(args: &RunArgs, addr: std::net::SocketAddr) -> Result<(), Fail
         .json()
         .await
         .map_err(startup_of("thread detail decode"))?;
-    let last_seq = detail["last_seq"].as_u64().unwrap_or(0);
+    let last_seq = detail_last_seq(&detail);
 
     let started = client
         .post(format!("{base}/v1/threads/{thread_id}/turns"))
@@ -193,6 +193,20 @@ async fn one_turn(args: &RunArgs, addr: std::net::SocketAddr) -> Result<(), Fail
     }
 
     stream_turn(&client, &base, &thread_id, last_seq).await
+}
+
+/// Read the durable event watermark from `GET /v1/threads/{id}`.
+///
+/// The wire shape is `ark_contract::ThreadDetail`: `last_seq` lives under the
+/// nested `summary`, and there is no `#[serde(flatten)]`. The old top-level
+/// `detail["last_seq"]` read therefore always yielded 0, which made the SSE
+/// subscription replay the entire history. Decode the contract DTO as the
+/// single source of truth; fall back to the documented nested read for partial
+/// payloads so a shape change can never silently reset the cursor to 0 again.
+fn detail_last_seq(detail: &Value) -> u64 {
+    serde_json::from_value::<ark_contract::ThreadDetail>(detail.clone())
+        .map(|parsed| parsed.summary.last_seq.unwrap_or(0))
+        .unwrap_or_else(|_| detail["summary"]["last_seq"].as_u64().unwrap_or(0))
 }
 
 fn startup_of(what: &'static str) -> impl Fn(reqwest::Error) -> Failure {
@@ -564,6 +578,37 @@ fn handle_frame(frame: &str) -> Result<Option<Result<(), Failure>>, Failure> {
 mod tests {
     use super::*;
     use crate::cli::ReviewTarget;
+
+    #[test]
+    fn thread_detail_last_seq_reads_the_nested_summary_watermark() {
+        use ark_common::ThreadId;
+        use ark_contract::{ThreadDetail, ThreadRuntimeSnapshot, ThreadSummary};
+        use chrono::Utc;
+
+        // Build the real wire DTO (ark-contract is the single source of truth),
+        // so a field rename or shape change breaks this test.
+        let detail = ThreadDetail {
+            summary: ThreadSummary {
+                thread_id: ThreadId::new(),
+                title: "headless".into(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                last_seq: Some(7),
+                archived: false,
+            },
+            items: Vec::new(),
+            child_ids: Vec::new(),
+            child_completions: Vec::new(),
+            attachment_ids: Vec::new(),
+            runtime: Default::default(),
+            runtime_snapshot: ThreadRuntimeSnapshot::default(),
+        };
+        let wire = serde_json::to_value(&detail).expect("ThreadDetail serializes");
+        // Regression: the wire has no top-level `last_seq`, so the old
+        // `detail["last_seq"]` read produced 0 and replayed history.
+        assert!(wire.get("last_seq").is_none(), "no top-level last_seq");
+        assert_eq!(detail_last_seq(&wire), 7);
+    }
 
     #[test]
     fn sse_frames_are_parsed_for_deltas_and_terminals() {
