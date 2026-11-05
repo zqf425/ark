@@ -205,10 +205,12 @@ pub struct ProviderEntry {
     #[serde(default)]
     pub supports_vision: Option<bool>,
     /// Model inventory imported from the provider catalog (or pasted in), one
-    /// id each. `model` remains the default a turn uses when the thread does
-    /// not override it; the inventory is what the session model picker offers.
-    /// Normalized on save: trimmed, deduplicated (case-sensitive — model ids
-    /// are case-sensitive upstream), `model` itself removed.
+    /// entry per model. `model` remains the default a turn uses when the
+    /// thread does not override it; the inventory is what the session model
+    /// picker offers, and each entry carries the context window / vision
+    /// metadata the operator or the catalog explicitly recorded for that
+    /// model. Normalized on save: trimmed, deduplicated (case-sensitive —
+    /// model ids are case-sensitive upstream), `model` itself removed.
     ///
     /// `Option`, not `Vec`: an omitted key means "keep the stored inventory"
     /// (the MCP `provider_upsert` tool and other partial-edit clients never
@@ -216,7 +218,61 @@ pub struct ProviderEntry {
     /// could not tell the two apart and would let an unrelated label edit
     /// silently wipe an imported inventory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub models: Option<Vec<String>>,
+    pub models: Option<Vec<ProviderModelInventoryItem>>,
+}
+
+/// One entry of a provider's imported model inventory.
+///
+/// The id is the wire model id; the metadata fields are what the operator or
+/// the catalog explicitly recorded for *this* model, so a thread override can
+/// compact against the right context window and gate images on the right
+/// modality flag. `None` means unknown, never inferred from the name.
+///
+/// Deserialization also accepts a bare string: inventories persisted before
+/// per-model metadata (and partial-edit clients that still send
+/// `["id", …]`) keep loading unchanged and simply read as unknown metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ProviderModelInventoryItem {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub context_window_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_vision: Option<bool>,
+}
+
+impl<'de> Deserialize<'de> for ProviderModelInventoryItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Id(String),
+            Full {
+                id: String,
+                #[serde(default)]
+                context_window_tokens: Option<u64>,
+                #[serde(default)]
+                supports_vision: Option<bool>,
+            },
+        }
+        match Raw::deserialize(deserializer)? {
+            Raw::Id(id) => Ok(Self {
+                id,
+                context_window_tokens: None,
+                supports_vision: None,
+            }),
+            Raw::Full {
+                id,
+                context_window_tokens,
+                supports_vision,
+            } => Ok(Self {
+                id,
+                context_window_tokens,
+                supports_vision,
+            }),
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -271,7 +327,7 @@ pub struct ProviderView {
     pub supports_vision: Option<bool>,
     /// Redacted inventory mirror of [`ProviderEntry::models`].
     #[serde(default)]
-    pub models: Vec<String>,
+    pub models: Vec<ProviderModelInventoryItem>,
 }
 
 /// `GET /v1/runtime/model-providers`.

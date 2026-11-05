@@ -240,6 +240,7 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
           editing={editing}
           initial={draft}
           busy={api.busy !== null}
+          catalogBusy={api.catalogBusy}
           onCancel={close}
           onSubmit={submit}
           onTest={(entry) => runTest({ entry }, `test:${entry.id}`)}

@@ -90,7 +90,7 @@ export function SettingsPage(): JSX.Element {
       case 'im':
         return (
           <ErrorBoundary label={t('settings.im.boundary')}>
-            <ImSection settings={settings} />
+            <ImSection settings={settings} providers={providers} />
           </ErrorBoundary>
         )
     }
