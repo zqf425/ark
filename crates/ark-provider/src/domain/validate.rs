@@ -5,7 +5,7 @@
 //! values, so the GUI can show it verbatim.
 
 use ark_common::{ArkError, Result};
-use ark_contract::ProviderEntry;
+use ark_contract::{ProviderEntry, ProviderModelInventoryItem};
 use ark_llm::EndpointFormat;
 
 use crate::config::ID_MAX_LEN;
@@ -167,14 +167,24 @@ pub fn normalize_entry(entry: ProviderEntry) -> Result<ProviderEntry> {
 /// Canonicalize the model inventory: trim, drop empties and duplicates
 /// (including duplicates of the default `model`), then enforce the ceiling so
 /// an oversized paste fails transactionally instead of truncating silently.
-fn normalize_models(model: &str, models: Vec<String>) -> Result<Vec<String>> {
-    let mut out: Vec<String> = Vec::new();
+/// Per-model metadata rides along unchanged; `validate_context_window_tokens`
+/// keeps a reported window positive.
+fn normalize_models(
+    model: &str,
+    models: Vec<ProviderModelInventoryItem>,
+) -> Result<Vec<ProviderModelInventoryItem>> {
+    let mut out: Vec<ProviderModelInventoryItem> = Vec::new();
     for raw in models {
-        let id = raw.trim();
-        if id.is_empty() || id == model || out.iter().any(|seen| seen == id) {
+        let id = raw.id.trim();
+        if id.is_empty() || id == model || out.iter().any(|seen| seen.id == id) {
             continue;
         }
-        out.push(id.to_string());
+        let context_window_tokens = validate_context_window_tokens(raw.context_window_tokens)?;
+        out.push(ProviderModelInventoryItem {
+            id: id.to_string(),
+            context_window_tokens,
+            supports_vision: raw.supports_vision,
+        });
     }
     if out.len() > ProviderEntry::MODELS_MAX {
         return Err(ArkError::validation(format!(
@@ -189,6 +199,15 @@ fn normalize_models(model: &str, models: Vec<String>) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bare-string inventory rows, matching the pre-metadata wire shape.
+    fn item(id: &str) -> ProviderModelInventoryItem {
+        ProviderModelInventoryItem {
+            id: id.to_string(),
+            context_window_tokens: None,
+            supports_vision: None,
+        }
+    }
 
     #[test]
     fn ids_are_restricted_to_the_documented_alphabet() {
@@ -220,16 +239,50 @@ mod tests {
     fn model_inventory_is_trimmed_deduplicated_and_defaults_dropped() {
         let mut entry = ProviderEntry::new("p", "deepseek-chat");
         entry.models = Some(vec![
-            " deepseek-reasoner ".into(),
-            "deepseek-reasoner".into(),
-            "".into(),
-            "deepseek-chat".into(),
-            "glm-5".into(),
+            item(" deepseek-reasoner "),
+            item("deepseek-reasoner"),
+            item(""),
+            item("deepseek-chat"),
+            item("glm-5"),
         ]);
         let out = normalize_entry(entry).unwrap();
         assert_eq!(
             out.models,
-            Some(vec!["deepseek-reasoner".to_string(), "glm-5".to_string()])
+            Some(vec![item("deepseek-reasoner"), item("glm-5")])
+        );
+    }
+
+    /// Per-model metadata survives normalization; a non-positive window is
+    /// rejected by the same validator the entry-level field uses.
+    #[test]
+    fn model_inventory_keeps_metadata_and_validates_the_window() {
+        let mut entry = ProviderEntry::new("p", "deepseek-chat");
+        entry.models = Some(vec![ProviderModelInventoryItem {
+            id: "glm-5".into(),
+            context_window_tokens: Some(128_000),
+            supports_vision: Some(true),
+        }]);
+        let out = normalize_entry(entry).unwrap();
+        assert_eq!(
+            out.models,
+            Some(vec![ProviderModelInventoryItem {
+                id: "glm-5".into(),
+                context_window_tokens: Some(128_000),
+                supports_vision: Some(true),
+            }])
+        );
+
+        let mut bad = ProviderEntry::new("p", "deepseek-chat");
+        bad.models = Some(vec![ProviderModelInventoryItem {
+            id: "glm-5".into(),
+            context_window_tokens: Some(0),
+            supports_vision: None,
+        }]);
+        let err = normalize_entry(bad).unwrap_err();
+        assert!(
+            err.message.contains("context_window_tokens"),
+            "{}",
+            err.message
         );
     }
 
@@ -238,7 +291,7 @@ mod tests {
         let mut entry = ProviderEntry::new("p", "m");
         entry.models = Some(
             (0..ProviderEntry::MODELS_MAX + 1)
-                .map(|i| format!("m{idx}", idx = i))
+                .map(|i| item(&format!("m{idx}", idx = i)))
                 .collect(),
         );
         let err = normalize_entry(entry).unwrap_err();

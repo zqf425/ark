@@ -192,6 +192,7 @@ impl FileSessionStore {
             file.thread_id,
             file.title.clone(),
             self.paths.thread_rel(&file.thread_id),
+            file.created_at,
         );
         entry.updated_at = file.updated_at;
         entry.archived = file.archived;

@@ -22,6 +22,7 @@ import { SETTINGS_IM_MESSAGES } from './catalogs/settings-im'
 import { SETTINGS_SCHEDULES_MESSAGES } from './catalogs/settings-schedules'
 import { THREAD_LIST_MESSAGES } from './catalogs/thread-list'
 import { WORKBENCH_MESSAGES } from './catalogs/workbench'
+import { CONSOLE_MESSAGES } from './catalogs/console'
 
 export const MESSAGES = {
   ...COMMON_MESSAGES,
@@ -38,7 +39,8 @@ export const MESSAGES = {
   ...SETTINGS_SCHEDULES_MESSAGES,
   ...SETTINGS_IM_MESSAGES,
   ...THREAD_LIST_MESSAGES,
-  ...WORKBENCH_MESSAGES
+  ...WORKBENCH_MESSAGES,
+  ...CONSOLE_MESSAGES
 } as const
 
 export type MessageKey = keyof typeof MESSAGES

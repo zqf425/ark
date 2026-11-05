@@ -6,8 +6,10 @@
  */
 import type {
   ProviderModelCatalogRequest,
+  ProviderModelInventoryItem,
   ProviderModelSummary
 } from '../../../shared/contracts'
+import { PROVIDER_MODELS_MAX } from '../../../shared/contracts/web-only'
 import { translateNow } from '../../../shared/i18n/current'
 import type { ProviderDraft } from './ProviderDraft'
 
@@ -29,16 +31,6 @@ export function parseProviderHeaders(headersText: string): BuiltHeaders {
     return { ok: true, headers }
   } catch {
     return { ok: false, error: translateNow('settings.providerForm.error.headersNotJson') }
-  }
-}
-
-/** Apply only remote metadata that the catalog explicitly returned. */
-export function applyCatalogModel(draft: ProviderDraft, model: ProviderModelSummary): ProviderDraft {
-  return {
-    ...draft,
-    model: model.id,
-    context_window_tokens: model.context_window_tokens?.toString() ?? '',
-    supports_vision: model.supports_vision ?? null
   }
 }
 
@@ -83,13 +75,21 @@ export function catalogLabel(model: ProviderModelSummary): string {
 // Batch model import (adapted from smart-ark's import dialog, sized to arkd)
 // ---------------------------------------------------------------------------
 
-/** One selectable row of the import dialog. */
+/**
+ * One selectable row of the import dialog.
+ *
+ * Catalog-sourced rows carry the metadata the remote explicitly reported, so
+ * confirming an import records the context window / vision flag together with
+ * the id instead of losing it between dialog and form.
+ */
 export type ImportCandidate = {
   id: string
   /** Catalog metadata label, when the row came from the fetched catalog. */
   label: string | null
   /** Already the default model or inside the saved inventory. */
   alreadyPresent: boolean
+  context_window_tokens?: number
+  supports_vision?: boolean
 }
 
 /** Parse a paste box: one id per line, trimmed, empties and duplicates dropped. */
@@ -114,13 +114,26 @@ export function buildImportCandidates(
   pastedText: string,
   draft: Pick<ProviderDraft, 'model' | 'models'>
 ): ImportCandidate[] {
-  const present = new Set<string>([draft.model.trim(), ...draft.models.map((id) => id.trim())].filter(Boolean))
+  const present = new Set<string>([
+    draft.model.trim(),
+    ...draft.models.map((item) => item.id.trim())
+  ].filter(Boolean))
   const rows: ImportCandidate[] = []
   const seen = new Set<string>()
   for (const model of catalog) {
     if (seen.has(model.id)) continue
     seen.add(model.id)
-    rows.push({ id: model.id, label: catalogLabel(model), alreadyPresent: present.has(model.id) })
+    rows.push({
+      id: model.id,
+      label: catalogLabel(model),
+      alreadyPresent: present.has(model.id),
+      ...(model.context_window_tokens !== undefined
+        ? { context_window_tokens: model.context_window_tokens }
+        : {}),
+      ...(model.supports_vision !== undefined
+        ? { supports_vision: model.supports_vision }
+        : {})
+    })
   }
   for (const id of parsePastedModelIds(pastedText)) {
     if (seen.has(id)) continue
@@ -130,28 +143,91 @@ export function buildImportCandidates(
   return rows
 }
 
-/** Default selection: every row that is not already in the provider. */
+/**
+ * Default selection: every row that is not already in the provider, capped at
+ * the inventory ceiling.
+ *
+ * A catalog routinely returns hundreds of ids while `models` holds at most
+ * `PROVIDER_MODELS_MAX`. Pre-selecting everything would open the dialog with a
+ * permanently disabled confirm button, so the default is the first N selectable
+ * rows and the user can still deselect or pick a different subset.
+ */
 export function defaultImportSelection(rows: ImportCandidate[]): Set<string> {
-  return new Set(rows.filter((row) => !row.alreadyPresent).map((row) => row.id))
+  return new Set(
+    rows
+      .filter((row) => !row.alreadyPresent)
+      .slice(0, PROVIDER_MODELS_MAX)
+      .map((row) => row.id)
+  )
 }
 
 /**
  * Fold a confirmed selection into the draft. The default model is only
  * backfilled when empty (the form requires one), and the inventory keeps the
- * dialog's order.
+ * dialog's order. Catalog metadata rides along so the per-model context
+ * window / vision flag survives the import without a second editing pass.
  */
 export function mergeImportedModels(
   draft: ProviderDraft,
-  selectedIds: readonly string[]
+  selected: readonly ImportCandidate[]
 ): ProviderDraft {
   // The backfilled default must not also sit in the inventory: the store
   // normalizes duplicates of `model` away, so mirror that here.
-  const defaultModel = draft.model.trim() || selectedIds.find((id) => id.trim())?.trim() || ''
+  const defaultModel = draft.model.trim() || selected.find((row) => row.id.trim())?.id.trim() || ''
   const models = [...draft.models]
-  for (const raw of selectedIds) {
-    const id = raw.trim()
-    if (!id || id === defaultModel || models.includes(id)) continue
-    models.push(id)
+  let context_window_tokens = draft.context_window_tokens
+  let supports_vision = draft.supports_vision
+  for (const row of selected) {
+    const id = row.id.trim()
+    if (!id || id === defaultModel || models.some((seen) => seen.id === id)) continue
+    models.push({
+      id,
+      ...(row.context_window_tokens !== undefined
+        ? { context_window_tokens: row.context_window_tokens }
+        : {}),
+      ...(row.supports_vision !== undefined
+        ? { supports_vision: row.supports_vision }
+        : {})
+    })
   }
-  return { ...draft, models, model: defaultModel }
+  // The default model's metadata lives at entry level — that is what the
+  // runtime reads for the stored model, and the store strips `model` from the
+  // inventory — so a catalog row for the default model mirrors its metadata up.
+  const defaultRow = selected.find((row) => row.id.trim() === defaultModel)
+  if (defaultRow) {
+    if (defaultRow.context_window_tokens !== undefined) {
+      context_window_tokens = defaultRow.context_window_tokens.toString()
+    }
+    if (defaultRow.supports_vision !== undefined) {
+      supports_vision = defaultRow.supports_vision
+    }
+  }
+  return { ...draft, models, model: defaultModel, context_window_tokens, supports_vision }
+}
+
+/**
+ * Patch one inventory row's metadata in place (the id never changes).
+ *
+ * Fields the patch does not mention keep their current value; an explicit
+ * `undefined` clears the field back to "unknown" — the key is dropped rather
+ * than written as `null`, so the wire shape stays minimal.
+ */
+export function updateInventoryItem(
+  draft: ProviderDraft,
+  id: string,
+  patch: { context_window_tokens?: number; supports_vision?: boolean }
+): ProviderDraft {
+  return {
+    ...draft,
+    models: draft.models.map((item) => {
+      if (item.id !== id) return item
+      const next: ProviderModelInventoryItem = { id }
+      const contextWindow =
+        'context_window_tokens' in patch ? patch.context_window_tokens : item.context_window_tokens
+      if (contextWindow !== undefined) next.context_window_tokens = contextWindow
+      const vision = 'supports_vision' in patch ? patch.supports_vision : item.supports_vision
+      if (vision !== undefined) next.supports_vision = vision
+      return next
+    })
+  }
 }

@@ -1,0 +1,10 @@
+/**
+ * ARK Console stylesheet entry.
+ *
+ * Split so no file exceeds the 1000-line CI limit:
+ *   - console-shell.css   shell frame, top bar, rail, workbench, inspector, status bar
+ *   - console-scenes.css  command palette, new-task page, changes review, responsive
+ * Order matters: scenes refine the shell.
+ */
+@import './console-shell.css';
+@import './console-scenes.css';

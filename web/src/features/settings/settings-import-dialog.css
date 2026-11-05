@@ -122,3 +122,14 @@
   padding: 12px 18px 14px;
   border-top: 1px solid var(--ark-border-muted);
 }
+
+/* Per-model metadata rows in the provider form's inventory list. */
+.ark-importdialog__row .ark-provider-model__context {
+  width: 140px;
+  margin-left: auto;
+  flex: none;
+}
+
+.ark-importdialog__row .ark-check {
+  flex: none;
+}

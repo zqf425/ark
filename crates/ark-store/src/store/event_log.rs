@@ -1,7 +1,9 @@
 //! `events.jsonl`: append-only log with tail repair and compaction markers.
 //!
 //! Design 7.4.3 / 7.4.4. Parsing is a pure function over bytes so crash recovery
-//! (half-written last line) is unit-testable without a real crash.
+//! (half-written last line) is unit-testable without a real crash. Only a torn
+//! **tail** is repairable; a complete non-JSON line is mid-file corruption that
+//! every production read must reject (see `LogParse::reject_malformed`).
 
 use crate::domain::compaction::CompactionMarker;
 use crate::domain::layout::ThreadPaths;
@@ -17,17 +19,40 @@ pub struct LogParse {
     pub max_seq: u64,
     /// Bytes to keep when the tail must be repaired (`None` = nothing to cut).
     pub truncate_at: Option<u64>,
-    /// Lines inside the file that were not valid events.
+    /// Complete lines inside the file that were not valid events. This is
+    /// mid-file corruption, never a repairable torn tail; production readers
+    /// must turn it into a hard error instead of skipping the line.
     pub malformed: usize,
     /// The last line parsed but has no trailing newline; append must add one.
     pub needs_newline: bool,
+}
+
+impl LogParse {
+    /// Reject mid-file corruption before any production read or repair.
+    ///
+    /// A torn tail is reported via `truncate_at` and may be cut; a complete line
+    /// that is not a `RuntimeEvent` is corruption in the authoritative log and
+    /// must never be skipped, truncated, projected from or appended to.
+    pub fn reject_malformed(&self, path: &Path) -> Result<()> {
+        if self.malformed == 0 {
+            return Ok(());
+        }
+        Err(ArkError::store(format!(
+            "event log {} contains {} malformed complete line(s) in the middle; \
+             refusing to read, repair or append (only a torn tail may be truncated)",
+            path.display(),
+            self.malformed
+        )))
+    }
 }
 
 /// Parse a log buffer, tolerating a torn final line.
 ///
 /// A torn tail is reported through `truncate_at` instead of being silently
 /// accepted: the writer must physically cut it before appending, otherwise the
-/// next append would be glued onto the damaged bytes.
+/// next append would be glued onto the damaged bytes. Complete non-JSON lines
+/// are counted in `malformed`; `parse_log` stays pure, and `read_log_blocking`
+/// (the single disk-read entry point) turns that count into a hard error.
 pub fn parse_log(bytes: &[u8]) -> LogParse {
     let mut out = LogParse::default();
     let split = bytes
@@ -65,6 +90,8 @@ fn count_line(line: &[u8], out: &mut LogParse) {
     }
     match serde_json::from_slice::<RuntimeEvent>(line) {
         Ok(event) => push_event(event, out),
+        // Keep the parser pure: the file path needed for the diagnostic is only
+        // known by `read_log_blocking`, which rejects this count.
         Err(_) => out.malformed += 1,
     }
 }
@@ -75,10 +102,18 @@ fn push_event(event: RuntimeEvent, out: &mut LogParse) {
 }
 
 /// Read the whole log without modifying it.
+///
+/// This is the single disk-read entry point for the authoritative log: writer
+/// open/replay, startup reconcile, item/usage projections and fork all go
+/// through it, so mid-file corruption is rejected everywhere at once.
 pub fn read_log_blocking(paths: &ThreadPaths) -> Result<LogParse> {
     let path = paths.events_jsonl();
     match std::fs::read(&path) {
-        Ok(bytes) => Ok(parse_log(&bytes)),
+        Ok(bytes) => {
+            let parsed = parse_log(&bytes);
+            parsed.reject_malformed(&path)?;
+            Ok(parsed)
+        }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(LogParse::default()),
         Err(err) => Err(ArkError::store(format!(
             "read event log failed for {}: {err}",
@@ -90,8 +125,12 @@ pub fn read_log_blocking(paths: &ThreadPaths) -> Result<LogParse> {
 /// Read the log and physically cut a torn tail. Returns the parse result.
 pub fn repair_log_blocking(paths: &ThreadPaths) -> Result<LogParse> {
     let parsed = read_log_blocking(paths)?;
+    let path = paths.events_jsonl();
+    // Redundant with the read above on purpose: this is the only function that
+    // mutates the authoritative log, so it must never truncate a file that has
+    // any mid-file corruption. Only `truncate_at` (a torn tail) is repairable.
+    parsed.reject_malformed(&path)?;
     if let Some(keep) = parsed.truncate_at {
-        let path = paths.events_jsonl();
         let file = std::fs::OpenOptions::new()
             .write(true)
             .open(&path)
@@ -165,8 +204,12 @@ pub fn plan_compaction(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::StoreLimits;
+    use crate::domain::diagnostics::MemoryDiagnostics;
     use crate::store::tests::{event_at, TempDir};
+    use crate::store::writer_state::WriterState;
     use ark_common::ThreadId;
+    use std::sync::Arc;
 
     fn write(paths: &ThreadPaths, text: &str) {
         crate::store::fs_util::ensure_dir(paths.dir()).unwrap();
@@ -246,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn garbage_in_the_middle_is_skipped_but_kept_on_disk() {
+    fn garbage_in_the_middle_is_rejected_and_kept_on_disk() {
         let dir = TempDir::new("log-garbage");
         let thread = ThreadId::new();
         let paths = ThreadPaths::new(dir.path().join("thread"));
@@ -256,13 +299,64 @@ mod tests {
         text.push_str(&encode_event(&event_at(thread, 2)).unwrap());
         write(&paths, &text);
 
-        let parsed = read_log_blocking(&paths).unwrap();
-        assert_eq!(parsed.events.len(), 2);
+        // The pure parser still reports the count and does not mistake a bad
+        // complete line for a torn tail; every production reader must reject it.
+        let parsed = parse_log(text.as_bytes());
         assert_eq!(parsed.malformed, 1);
         assert!(
             parsed.truncate_at.is_none(),
             "mid-file garbage is not a torn tail"
         );
+
+        let err = read_log_blocking(&paths).unwrap_err();
+        assert_eq!(err.code, ark_common::ArkErrorCode::StoreFailure);
+        assert!(err.message.contains("1 malformed"), "{}", err.message);
+
+        // The repair path must not truncate, and the writer must not open (which
+        // would otherwise rebuild a divergent in-memory projection and append).
+        assert!(repair_log_blocking(&paths).is_err());
+        let open = WriterState::open(
+            thread,
+            paths.clone(),
+            StoreLimits::for_tests(),
+            Arc::new(MemoryDiagnostics::new()),
+        );
+        assert!(open.is_err(), "the writer must not start on a corrupt log");
+
+        // The authoritative log stays byte-identical: no truncation, no append.
+        assert_eq!(std::fs::read(paths.events_jsonl()).unwrap(), text.as_bytes());
+    }
+
+    #[test]
+    fn valid_garbage_valid_reports_the_malformed_count_and_path() {
+        let dir = TempDir::new("log-garbage-count");
+        let thread = ThreadId::new();
+        let paths = ThreadPaths::new(dir.path().join("thread"));
+        let mut text = String::new();
+        text.push_str(&encode_event(&event_at(thread, 1)).unwrap());
+        text.push_str("garbage\n");
+        text.push_str(&encode_event(&event_at(thread, 2)).unwrap());
+        write(&paths, &text);
+
+        let err = read_log_blocking(&paths).unwrap_err();
+        let path_text = paths.events_jsonl().display().to_string();
+        assert_eq!(err.code, ark_common::ArkErrorCode::StoreFailure);
+        assert!(err.message.contains("1 malformed"), "{}", err.message);
+        assert!(
+            err.message.contains(&path_text),
+            "the error must name the file: {}",
+            err.message
+        );
+
+        // Two bad complete lines must be reported as two, not folded into one.
+        let mut two = String::new();
+        two.push_str(&encode_event(&event_at(thread, 1)).unwrap());
+        two.push_str("garbage\nnot-an-event\n");
+        two.push_str(&encode_event(&event_at(thread, 2)).unwrap());
+        write(&paths, &two);
+        let err = read_log_blocking(&paths).unwrap_err();
+        assert!(err.message.contains("2 malformed"), "{}", err.message);
+        assert_eq!(std::fs::read(paths.events_jsonl()).unwrap(), two.as_bytes());
     }
 
     #[test]

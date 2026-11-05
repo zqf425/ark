@@ -6,15 +6,17 @@ function makeStore() {
   return createStore<WorkbenchSlice>()((...args) => createWorkbenchSlice(...args))
 }
 
-describe('workbench context drawer', () => {
-  it('starts collapsed so an idle task keeps the conversation canvas primary', () => {
-    expect(makeStore().getState().rightCollapsed).toBe(true)
+describe('workbench inspector', () => {
+  it('starts expanded so task context is resident next to the conversation', () => {
+    expect(makeStore().getState().rightCollapsed).toBe(false)
   })
 
   it('opens when a context view is selected', () => {
     const store = makeStore()
-    store.getState().setActivePanel('plan')
+    store.getState().toggleRight()
+    expect(store.getState().rightCollapsed).toBe(true)
 
+    store.getState().setActivePanel('plan')
     expect(store.getState().activePanel).toBe('plan')
     expect(store.getState().rightCollapsed).toBe(false)
   })
