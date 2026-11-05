@@ -28,7 +28,8 @@ provider id 的回合经 `resolve(None)` 使用该默认；`resolve_vision(id)` 
 同 id 的已存机密。目录解析出的 `context_window_tokens` 和 `supports_vision` 只有用户选择模型并保存后才
 持久化；`max_output_tokens` 仅出现在目录响应中供设置 UI 展示，不进持久化条目。缺失元数据必须保持
 unknown，禁止按模型名推断。已禁用条目仍可查询目录，便于在启用前完成配置。目录响应由 `ark-llm`
-限时、限体积、排序和去重，provider 层不缓存明文密钥或远端响应。
+限时、限体积、排序和去重，provider 层不缓存明文密钥或远端响应。目录 URL 的版本段由 `ark-llm` 与聊天
+请求共用同一规则，provider 层不得自行拼接 `/v1/models`。
 
 `headers`、`temperature`、`max_tokens` 不是仅供展示的字段：有效条目必须将它们映射到每个实际模型请求。
 目录已知的上下文窗口会在下一父/子回合收窄全局压缩阈值；若用户设置了输出上限，应先预留该输出空间。

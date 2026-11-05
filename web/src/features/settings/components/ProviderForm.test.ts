@@ -33,4 +33,22 @@ describe('provider model discovery form helpers', () => {
       }
     })
   })
+
+  it('keeps hand-typed capabilities when the catalog does not declare them', () => {
+    const draft = {
+      ...emptyDraft(),
+      id: 'gateway',
+      base_url: 'https://gateway.example/v1',
+      api_key: 'secret',
+      context_window_tokens: '200000',
+      supports_vision: false
+    }
+
+    // A bare `{ id }` row is what most `/models` endpoints actually return.
+    const chosen = applyCatalogModel(draft, { id: 'plain-model' })
+
+    expect(chosen.model).toBe('plain-model')
+    expect(chosen.context_window_tokens).toBe('200000')
+    expect(chosen.supports_vision).toBe(false)
+  })
 })

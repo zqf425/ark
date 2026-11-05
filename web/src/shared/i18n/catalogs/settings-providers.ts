@@ -59,6 +59,8 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
     'Selecting a model fills in only the context window and vision capability the catalog explicitly declares; undeclared capabilities stay unknown.'
   ],
   'settings.providerForm.catalogPlaceholder': ['选择模型后再写入草稿', 'Select a model to write it into the draft'],
+  'settings.providerForm.catalogAddAll': ['将目录中的 {count} 个模型加入清单', 'Add {count} catalog models to the inventory'],
+  'settings.providerForm.catalogAllPresent': ['目录中的模型都已写入清单。', 'Every catalog model is already in the inventory.'],
   'settings.providerForm.apiKeyPlaceholderKeep': ['留空 = 保留原 key', 'Leave blank to keep the stored key'],
   'settings.providerForm.apiKeyPlaceholderNew': ['sk-…', 'sk-…'],
   'settings.providerForm.apiKeyHintEditing': ['编辑时留空表示保留已存的 key，不会覆盖。', 'Leaving this blank while editing keeps the stored key instead of overwriting it.'],
