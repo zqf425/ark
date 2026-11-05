@@ -226,7 +226,11 @@ impl TurnRunner for AgentTurnRunner {
         )?;
         let snapshot = self.config.snapshot();
         let (attachments, events, writer) = self
-            .parent_delivery(&job, thread.runtime.provider_id.as_deref())
+            .parent_delivery(
+                &job,
+                thread.runtime.provider_id.as_deref(),
+                thread.runtime.model.as_deref(),
+            )
             .await?;
         let policy: Arc<dyn SandboxPolicy> = Arc::new(BuiltinSandboxPolicy::new(
             autonomy_from_override_or_default(thread.runtime.autonomy.as_deref(), &snapshot)?,
@@ -310,13 +314,16 @@ impl AgentTurnRunner {
         &self,
         job: &TurnJob,
         provider_id: Option<&str>,
+        model: Option<&str>,
     ) -> Result<(
         crate::attachment_seed::AttachmentSeed,
         TurnEvents,
         Arc<EventSinkWriter>,
     )> {
         let is_auto = matches!(&job.source, TurnSource::AutoContinuation);
-        let vision = self.providers.resolve_vision(provider_id);
+        // Vision follows the effective model: a thread override reads the
+        // inventory entry recorded for that model when there is one.
+        let vision = self.providers.resolve_vision(provider_id, model);
         let attachments = crate::attachment_seed::resolve_attachments(
             self.attachments.as_ref(),
             &job.attachment_ids,
@@ -375,7 +382,10 @@ fn turn_source_texts(source: &TurnSource) -> (String, Option<String>) {
 /// thread's model override.
 ///
 /// The provider table wins; `model_providers` in `config.json` remains the
-/// legacy fallback (read inside [`AgentTurnRunner::model_for_turn`]).
+/// legacy fallback (read inside [`AgentTurnRunner::model_for_turn`]). The
+/// model override also picks up the inventory entry recorded for that model
+/// (context window, vision flag): metadata belongs to the model id, so an
+/// override compacts against its own limit, never the stored model's.
 fn resolve_thread_provider(
     providers: &ark_provider::ProviderStore,
     provider_id: Option<&str>,
@@ -383,15 +393,18 @@ fn resolve_thread_provider(
     reasoning_effort: Option<String>,
 ) -> Result<Option<ark_llm::ProviderConfig>> {
     let mut provider = match provider_id {
-        Some(id) => Some(providers.resolve(Some(id)).ok_or_else(|| {
-            ark_common::ArkError::validation(format!("thread provider is unavailable: {id}"))
-        })?),
-        None => providers.resolve(None),
+        Some(id) => Some(
+            providers
+                .resolve_for_model(Some(id), model.clone())
+                .ok_or_else(|| {
+                    ark_common::ArkError::validation(format!(
+                        "thread provider is unavailable: {id}"
+                    ))
+                })?,
+        ),
+        None => providers.resolve_for_model(None, model),
     };
     if let Some(provider) = &mut provider {
-        if let Some(model) = model {
-            provider.model = model;
-        }
         // An empty override means "unset": drop it instead of sending an empty
         // reasoning hint to the provider mapper.
         provider.reasoning_effort = reasoning_effort.filter(|value| !value.is_empty());

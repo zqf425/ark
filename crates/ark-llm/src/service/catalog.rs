@@ -78,11 +78,15 @@ impl ModelCatalogClient {
             .map_err(|_| catalog_transport_failure(&config.provider_id))?;
         let status = response.status();
         if !status.is_success() {
+            // Carry the upstream status so the settings UI can tell an auth
+            // failure (401/403) from a wrong endpoint (404) instead of showing
+            // one generic "model request failed" for every case.
             return Err(ArkError::model(format!(
                 "model catalog request for provider `{}` returned HTTP {}",
                 config.provider_id,
                 status.as_u16()
-            )));
+            ))
+            .with_upstream_status(status.as_u16()));
         }
         if response.content_length().is_some_and(|size| {
             usize::try_from(size).map_or(true, |size| size > MAX_CATALOG_BODY_BYTES)
@@ -123,25 +127,15 @@ fn catalog_transport_failure(provider_id: &str) -> ArkError {
     ))
 }
 
-/// Resolve the standard `GET /v1/models` endpoint from a provider base URL.
+/// Resolve the standard `{base}/models` endpoint from a provider base URL.
 ///
-/// A base ending in `/v1` (including gateway paths such as `/api/v1`) is not
-/// given a second version segment. Query parameters are preserved for providers
-/// that explicitly place routing data there, but this helper never exposes the
-/// URL in an error message.
+/// The version-segment rule lives in [`crate::config::url::model_catalog_url`],
+/// shared with the chat families: discovery must hit the same version prefix a
+/// turn would, otherwise a provider that answers `/v4/chat/completions` also
+/// answers 404 for `/v4/v1/models`. This wrapper only supplies the resolved base
+/// URL and never exposes the URL in an error message.
 fn model_catalog_url(config: &ProviderConfig) -> String {
-    let base = config.resolved_base_url();
-    let Ok(mut url) = reqwest::Url::parse(&base) else {
-        return format!("{}/v1/models", base.trim_end_matches('/'));
-    };
-    let path = url.path().trim_end_matches('/');
-    let catalog_path = if path.ends_with("/v1") {
-        format!("{path}/models")
-    } else {
-        format!("{path}/v1/models")
-    };
-    url.set_path(&catalog_path);
-    url.to_string()
+    crate::config::url::model_catalog_url(&config.resolved_base_url())
 }
 
 /// Parse common provider catalog shapes into the stable wire response.
@@ -180,9 +174,13 @@ pub(crate) fn parse_model_catalog_response(body: &str) -> Result<ProviderModelCa
                         &["context_window"],
                         &["context_window_tokens"],
                         &["max_context_length"],
+                        &["max_model_len"],
                         &["limits", "context_length"],
+                        &["top_provider", "context_length"],
+                        &["metadata", "context_length"],
                     ],
-                ),
+                )
+                .or_else(|| provider_array_context_length(value)),
                 supports_vision: vision_at(value),
                 max_output_tokens: number_at(
                     value,
@@ -224,9 +222,18 @@ fn number_at(value: &Value, paths: &[&[&str]]) -> Option<u64> {
 }
 
 fn vision_at(value: &Value) -> Option<bool> {
-    bool_at(value, &[&["supports_vision"], &["capabilities", "vision"]]).or_else(|| {
+    bool_at(
+        value,
+        &[
+            &["supports_vision"],
+            &["capabilities", "vision"],
+            &["supports_image_in"],
+        ],
+    )
+    .or_else(|| {
         modalities_at(value, &["architecture", "input_modalities"])
             .or_else(|| modalities_at(value, &["input_modalities"]))
+            .or_else(|| modalities_at(value, &["modalities", "input"]))
             .map(|modalities| {
                 modalities
                     .iter()
@@ -243,6 +250,16 @@ fn bool_at(value: &Value, paths: &[&[&str]]) -> Option<bool> {
         }
         current.as_bool()
     })
+}
+
+/// HuggingFace Router style: each upstream entry in `providers[]` carries its
+/// own `context_length`; take the first positive one. Aggregators otherwise
+/// publish no top-level window, so without this the model would read as unknown.
+fn provider_array_context_length(value: &Value) -> Option<u64> {
+    let providers = value.get("providers")?.as_array()?;
+    providers
+        .iter()
+        .find_map(|provider| number_at(provider, &[&["context_length"], &["max_model_len"]]))
 }
 
 fn modalities_at<'a>(value: &'a Value, path: &[&str]) -> Option<Vec<&'a str>> {
@@ -291,6 +308,32 @@ mod tests {
     }
 
     #[test]
+    fn aggregator_context_and_vision_aliases_are_probed() {
+        let catalog = parse_model_catalog_response(
+            r#"{
+                "data": [
+                    {"id": "hf", "providers": [{"context_length": 32768}]},
+                    {"id": "vllm", "max_model_len": 65536, "modalities": {"input": ["text", "image"]}},
+                    {"id": "alias", "top_provider": {"context_length": 8192}, "supports_image_in": true},
+                    {"id": "metadata", "metadata": {"context_length": "4096"}}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let by_id = |id: &str| catalog.models.iter().find(|m| m.id == id).unwrap();
+        assert_eq!(by_id("hf").context_window_tokens, Some(32_768));
+        assert_eq!(by_id("vllm").context_window_tokens, Some(65_536));
+        assert_eq!(by_id("vllm").supports_vision, Some(true));
+        assert_eq!(by_id("alias").context_window_tokens, Some(8_192));
+        assert_eq!(by_id("alias").supports_vision, Some(true));
+        assert_eq!(by_id("metadata").context_window_tokens, Some(4_096));
+        // A bare /models row still reports unknown, not a guessed window.
+        let bare = parse_model_catalog_response(r#"{"data": [{"id": "bare"}]}"#).unwrap();
+        assert_eq!(bare.models[0].context_window_tokens, None);
+    }
+
+    #[test]
     fn catalog_url_reuses_an_existing_version_prefix() {
         let v1 = ProviderConfig::new("catalog", "unused")
             .with_base_url("https://gateway.example/api/v1/");
@@ -314,5 +357,47 @@ mod tests {
         assert!(error.message.contains("catalog"));
         assert!(!error.message.contains("api_key"));
         assert!(!error.message.contains("secret"));
+    }
+
+    /// A non-2xx catalog answer must carry the upstream status, so the settings
+    /// UI can tell a bad key (401) from a wrong base URL (404) instead of
+    /// showing the same generic message for both.
+    #[tokio::test]
+    async fn a_failed_catalog_keeps_the_upstream_status() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4_096];
+            let _ = socket.read(&mut request).unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        });
+
+        let config = ProviderConfig::new("catalog", "unused")
+            .with_base_url(format!("http://{address}/v1"))
+            .with_api_key("secret");
+        let error = super::ModelCatalogClient::default()
+            .list(&config)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.upstream_status, Some(401));
+        assert!(error.message.contains("401"), "{}", error.message);
+        // The transport layer's own status stays the documented 502 for a
+        // proxied model failure; only `upstream_status` names the provider.
+        assert_eq!(
+            error.code,
+            ark_common::ArkErrorCode::ModelRequestFailed,
+            "{}",
+            error.message
+        );
+        server.join().unwrap();
     }
 }

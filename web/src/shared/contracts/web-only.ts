@@ -58,6 +58,14 @@ export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 export const PROVIDER_MODELS_MAX = 64
 
 /**
+ * Context window used when a `/models` entry publishes no usable limit.
+ * Mirrors smart-ark's `DEFAULT_PROVIDER_CONTEXT_WINDOW_TOKENS` (256K): every
+ * model row therefore gets a concrete value instead of an empty field.
+ * 非 Rust 契约：纯 UI 兜底值，不进 wire 类型。
+ */
+export const PROVIDER_DEFAULT_CONTEXT_WINDOW = 256_000
+
+/**
  * `GET /v1/runtime/tools` 的响应视图。非 Rust 契约：ark-server 对该路由仍返回
  * 未建模 JSON（`serde_json::Value`），这里只固化渲染所需的字段名；Rust 侧一旦
  * 建模应迁移到生成类型。

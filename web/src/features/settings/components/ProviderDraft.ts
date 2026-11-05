@@ -7,8 +7,14 @@
  */
 import { translateNow } from '../../../shared/i18n/current'
 import { parseProviderHeaders } from './ProviderCatalog'
-import { ENDPOINT_FORMATS, type EndpointFormat, type ProviderEntry, type ProviderView } from '../../../shared/contracts'
-import { PROVIDER_MODELS_MAX } from '../../../shared/contracts/web-only'
+import {
+  ENDPOINT_FORMATS,
+  type EndpointFormat,
+  type ProviderEntry,
+  type ProviderModelInventoryItem,
+  type ProviderView
+} from '../../../shared/contracts'
+import { PROVIDER_DEFAULT_CONTEXT_WINDOW, PROVIDER_MODELS_MAX } from '../../../shared/contracts/web-only'
 
 export type ProviderDraft = {
   id: string
@@ -24,7 +30,7 @@ export type ProviderDraft = {
   context_window_tokens: string
   supports_vision: boolean | null
   /** Imported model inventory; `model` stays the thread-visible default. */
-  models: string[]
+  models: ProviderModelInventoryItem[]
 }
 
 export function emptyDraft(): ProviderDraft {
@@ -39,7 +45,7 @@ export function emptyDraft(): ProviderDraft {
     headers_text: '',
     max_tokens: '',
     temperature: '',
-    context_window_tokens: '',
+    context_window_tokens: String(PROVIDER_DEFAULT_CONTEXT_WINDOW),
     supports_vision: null,
     models: []
   }
@@ -61,7 +67,7 @@ export function draftFromView(view: ProviderView): ProviderDraft {
     headers_text: '',
     max_tokens: '',
     temperature: '',
-    context_window_tokens: view.context_window_tokens?.toString() ?? '',
+    context_window_tokens: String(view.context_window_tokens ?? PROVIDER_DEFAULT_CONTEXT_WINDOW),
     supports_vision: view.supports_vision ?? null,
     models: view.models ?? []
   }
@@ -123,15 +129,24 @@ export function buildEntry(draft: ProviderDraft, editing: boolean): BuiltEntry {
   }
   if (draft.supports_vision !== null) entry.supports_vision = draft.supports_vision
 
-  const models = new Set<string>()
+  const models = new Map<string, ProviderModelInventoryItem>()
   for (const raw of draft.models) {
-    const id = raw.trim()
-    if (id && id !== model) models.add(id)
+    const id = raw.id.trim()
+    if (!id || id === model || models.has(id)) continue
+    let context_window_tokens: number | undefined
+    if (raw.context_window_tokens !== undefined) {
+      const parsed = Number(raw.context_window_tokens)
+      if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+        return { ok: false, error: translateNow('settings.providerForm.error.contextWindowPositive') }
+      }
+      context_window_tokens = parsed
+    }
+    models.set(id, { id, context_window_tokens, supports_vision: raw.supports_vision })
   }
   if (models.size > PROVIDER_MODELS_MAX) {
     return { ok: false, error: translateNow('settings.providerForm.error.tooManyModels', { max: PROVIDER_MODELS_MAX }) }
   }
-  entry.models = [...models]
+  entry.models = [...models.values()]
 
   return { ok: true, entry }
 }

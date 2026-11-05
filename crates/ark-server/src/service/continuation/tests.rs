@@ -1,12 +1,15 @@
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use ark_common::{ChildId, Result, Usage};
 use ark_config::{ConfigStore, RuntimeConfig};
 use ark_contract::RuntimeEvent;
 use ark_obs::UsageRecorder;
-use ark_ports::{SessionStore, ToolRegistryPort};
+use ark_ports::{
+    HookBroker, HookScope, LlmCallFact, ModelRequest, ModelRequestTuning, NoHooks, SessionStore,
+    ToolPreCallVerdict, ToolRegistryPort, TurnOutcomeFact,
+};
 use ark_store::{FileSessionStore, StoreConfig};
 use chrono::Utc;
 
@@ -793,4 +796,94 @@ async fn failed_continuations_keep_a_complete_lifecycle_until_the_breaker_holds(
     );
 
     state.begin_shutdown();
+}
+
+/// A broker that mimics a plugin callback re-entering the host through a
+/// `workspace_gate`-protected route. If the pre-start hook is awaited while the
+/// gate is held, `try_lock` fails and `lock().await` never resolves.
+struct GateReenteringHooks {
+    gate: Arc<tokio::sync::Mutex<()>>,
+    gate_was_free: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl HookBroker for GateReenteringHooks {
+    async fn on_turn_pre_start(&self, _scope: HookScope<'_>, _source: &str) -> Result<()> {
+        self.gate_was_free
+            .store(self.gate.try_lock().is_ok(), Ordering::SeqCst);
+        // A real broker callback may await an HTTP route that needs this gate.
+        let _guard = self.gate.lock().await;
+        Ok(())
+    }
+
+    async fn on_model_request(
+        &self,
+        scope: HookScope<'_>,
+        request: &ModelRequest,
+    ) -> Result<ModelRequestTuning> {
+        NoHooks.on_model_request(scope, request).await
+    }
+
+    async fn on_tool_pre_call(
+        &self,
+        scope: HookScope<'_>,
+        tool: &str,
+        args_head: &str,
+        args_truncated: bool,
+    ) -> Result<ToolPreCallVerdict> {
+        NoHooks
+            .on_tool_pre_call(scope, tool, args_head, args_truncated)
+            .await
+    }
+
+    async fn observe_turn_end(&self, scope: HookScope<'_>, outcome: &TurnOutcomeFact) {
+        NoHooks.observe_turn_end(scope, outcome).await
+    }
+
+    async fn observe_llm_call(&self, scope: HookScope<'_>, fact: &LlmCallFact<'_>) {
+        NoHooks.observe_llm_call(scope, fact).await
+    }
+}
+
+#[tokio::test]
+async fn pre_start_hook_runs_before_the_global_workspace_gate_is_held() {
+    let harness = Harness::new(true);
+    let thread = harness.thread_with_completion().await;
+    let gate_was_free = Arc::new(AtomicBool::new(false));
+    let hooks = Arc::new(GateReenteringHooks {
+        gate: Arc::clone(&harness.state.workspace_gate),
+        gate_was_free: Arc::clone(&gate_was_free),
+    });
+    let state = harness.state.clone().with_hooks(hooks);
+    let Some((generation, cancel)) = state.continuations.try_schedule(thread) else {
+        panic!("a fresh thread can reserve a continuation");
+    };
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(2),
+        start_if_eligible(&state, thread, generation, cancel),
+    )
+    .await
+    .expect("pre-start hook with a protected-route callback must not deadlock");
+    assert!(
+        !outcome,
+        "start_if_eligible completed its one scheduling pass"
+    );
+    assert!(
+        gate_was_free.load(Ordering::SeqCst),
+        "the hook must observe an unlocked workspace_gate"
+    );
+    assert!(
+        state.turns.latest_for(thread).is_some(),
+        "the eligible continuation is still registered after the hook"
+    );
+    // `spawn_turn` schedules the runner asynchronously; wait for it rather
+    // than asserting an immediate count, which would be scheduler-dependent.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while harness.runner.0.load(Ordering::SeqCst) < 1 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the eligible continuation turn starts");
 }

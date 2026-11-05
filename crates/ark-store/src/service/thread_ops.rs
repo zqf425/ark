@@ -36,7 +36,7 @@ impl FileSessionStore {
         file.title = crate::domain::thread_file::normalize_title(title);
         file.touch();
         crate::store::fs_util::write_json_atomic(&self.thread_paths(thread).thread_json(), &file)?;
-        self.index_upsert(&file, self.highest_seq_of(thread))?;
+        self.index_upsert(&file, self.highest_seq_of(thread)?)?;
         Ok(file.to_meta())
     }
 
@@ -49,7 +49,7 @@ impl FileSessionStore {
         file.archived = archived;
         file.touch();
         crate::store::fs_util::write_json_atomic(&self.thread_paths(thread).thread_json(), &file)?;
-        self.index_upsert(&file, self.highest_seq_of(thread))?;
+        self.index_upsert(&file, self.highest_seq_of(thread)?)?;
         Ok(file.to_meta())
     }
 
@@ -66,7 +66,7 @@ impl FileSessionStore {
         file.reasoning_effort = runtime.reasoning_effort;
         file.touch();
         crate::store::fs_util::write_json_atomic(&self.thread_paths(thread).thread_json(), &file)?;
-        self.index_upsert(&file, self.highest_seq_of(thread))?;
+        self.index_upsert(&file, self.highest_seq_of(thread)?)?;
         Ok(file.to_meta())
     }
 
@@ -80,15 +80,15 @@ impl FileSessionStore {
     /// index already carries. A missing row (deleted index snapshot, fresh
     /// process before reconcile) falls back to the log so the refresh still
     /// writes the real watermark instead of regressing the index to 0.
-    pub(crate) fn highest_seq_of(&self, thread: ThreadId) -> u64 {
+    pub(crate) fn highest_seq_of(&self, thread: ThreadId) -> Result<u64> {
         if let Ok(index) = self.lock_index() {
             if let Some(entry) = index.get(&thread) {
-                return entry.indexed_seq;
+                return Ok(entry.indexed_seq);
             }
         }
-        crate::store::event_log::read_log_blocking(&self.thread_paths(thread))
-            .map(|parsed| parsed.max_seq)
-            .unwrap_or(0)
+        // Propagate the log error: falling back to 0 on a corrupt log would
+        // silently rewrite the index watermark while the bad line stays on disk.
+        Ok(crate::store::event_log::read_log_blocking(&self.thread_paths(thread))?.max_seq)
     }
 
     /// Write a forked copy of `(0, upto_seq]` into a brand-new thread directory.
@@ -158,7 +158,9 @@ fn entry_to_meta(entry: &IndexEntry) -> ThreadMeta {
     ThreadMeta {
         thread_id: entry.thread_id,
         title: entry.title.clone(),
-        created_at: entry.updated_at,
+        // The index carries the real creation time from `thread.json`; older
+        // snapshots without the field fall back to the last update time.
+        created_at: entry.created_at.unwrap_or(entry.updated_at),
         updated_at: entry.updated_at,
         archived: entry.archived,
         runtime: ark_contract::ThreadRuntimeSettings::default(),
@@ -683,5 +685,76 @@ mod tests {
             .cloned()
             .unwrap();
         assert_eq!(entry.indexed_seq, 2, "the watermark must survive a reopen");
+    }
+
+    #[tokio::test]
+    async fn list_threads_keeps_created_at_consistent_with_details_after_edits() {
+        let dir = TempDir::new("thread-ops-created-at");
+        let store = test_store(&dir);
+        let created = store.create_thread("original").await.unwrap();
+
+        // Make `updated_at` observably newer: without this the old
+        // `created_at: entry.updated_at` bug would be invisible in the assert.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        store
+            .rename_thread(created.thread_id, "renamed")
+            .await
+            .unwrap();
+        store
+            .set_archived(created.thread_id, true)
+            .await
+            .unwrap();
+
+        let listed = store.list_threads().await.unwrap();
+        let meta = listed
+            .iter()
+            .find(|meta| meta.thread_id == created.thread_id)
+            .expect("the thread is listed");
+        let detail = store.get_thread(created.thread_id).await.unwrap();
+
+        assert!(
+            meta.updated_at > meta.created_at,
+            "the edit must have moved updated_at for this assertion to be sharp"
+        );
+        assert_eq!(meta.created_at, created.created_at);
+        assert_eq!(meta.created_at, detail.created_at);
+        assert_eq!(meta.updated_at, detail.updated_at);
+
+        // The value must also survive a reopen from the persisted index snapshot.
+        let id = created.thread_id;
+        let expected = created.created_at;
+        drop(store);
+        let reopened = test_store(&dir);
+        let relisted = reopened.list_threads().await.unwrap();
+        let restored = relisted
+            .iter()
+            .find(|meta| meta.thread_id == id)
+            .expect("the thread is listed after reopen");
+        assert_eq!(restored.created_at, expected);
+        assert_eq!(restored.created_at, reopened.get_thread(id).await.unwrap().created_at);
+    }
+
+    #[test]
+    fn legacy_index_json_without_created_at_falls_back_to_updated_at() {
+        use crate::store::index::{IndexEntry, IndexSnapshot};
+
+        let row = IndexEntry::new(ThreadId::new(), "legacy", "threads/legacy", chrono::Utc::now());
+        let mut snapshot = serde_json::to_value(IndexSnapshot::from_entries(vec![row])).unwrap();
+        // Simulate an `index.json` written before `created_at` existed.
+        snapshot["threads"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("created_at");
+        let legacy_text = serde_json::to_string(&snapshot).unwrap();
+        assert!(!legacy_text.contains("created_at"));
+
+        let decoded: IndexSnapshot = serde_json::from_str(&legacy_text).unwrap();
+        assert_eq!(decoded.threads.len(), 1);
+        let row = &decoded.threads[0];
+        assert_eq!(row.created_at, None);
+
+        let meta = super::entry_to_meta(row);
+        assert_eq!(meta.created_at, row.updated_at);
+        assert_eq!(meta.updated_at, row.updated_at);
     }
 }

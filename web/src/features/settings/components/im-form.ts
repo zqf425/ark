@@ -40,6 +40,22 @@ export const IM_KINDS: readonly ImChannelKind[] = ['telegram', 'feishu', 'weixin
 
 export const IM_AUTONOMY_VALUES = ['strict', 'workspace_write', 'unattended'] as const
 
+/**
+ * Runtime values the three override fields fall back to.
+ *
+ * The form shows them filled in, so "empty = default" never renders as a blank
+ * box; on save a value equal to its default is sent as "no override", which
+ * keeps the channel following later default changes instead of pinning today's
+ * value. `NO_IM_DEFAULTS` is what a caller without runtime config sees.
+ */
+export type ImFormDefaults = {
+  workspace: string
+  providerId: string
+  model: string
+}
+
+export const NO_IM_DEFAULTS: ImFormDefaults = { workspace: '', providerId: '', model: '' }
+
 export function emptyCredentialsDraft(): ImCredentialsDraft {
   return {
     telegram: { botToken: '', botUsername: '' },
@@ -48,7 +64,7 @@ export function emptyCredentialsDraft(): ImCredentialsDraft {
   }
 }
 
-export function emptyDraft(): ImChannelDraft {
+export function emptyDraft(defaults: ImFormDefaults = NO_IM_DEFAULTS): ImChannelDraft {
   return {
     kind: 'telegram',
     title: '',
@@ -56,24 +72,30 @@ export function emptyDraft(): ImChannelDraft {
     credentials: emptyCredentialsDraft(),
     allowedChatIds: '',
     requireMention: true,
-    workspace: '',
-    model: '',
-    providerId: '',
+    workspace: defaults.workspace,
+    model: defaults.model,
+    providerId: defaults.providerId,
     autonomy: 'unattended'
   }
 }
 
-/** Secrets stay blank: the read model never carries them back. */
-export function draftFromChannel(channel: ImChannelView): ImChannelDraft {
-  const draft = emptyDraft()
+/**
+ * Secrets stay blank: the read model never carries them back. An override the
+ * channel does not carry shows the runtime default instead of an empty box.
+ */
+export function draftFromChannel(
+  channel: ImChannelView,
+  defaults: ImFormDefaults = NO_IM_DEFAULTS
+): ImChannelDraft {
+  const draft = emptyDraft(defaults)
   draft.kind = channel.kind
   draft.title = channel.title
   draft.enabled = channel.enabled
   draft.allowedChatIds = channel.policy.allowed_chat_ids.join('\n')
   draft.requireMention = channel.policy.require_mention
-  draft.workspace = channel.workspace ?? ''
-  draft.model = channel.model ?? ''
-  draft.providerId = channel.provider_id ?? ''
+  draft.workspace = channel.workspace ?? defaults.workspace
+  draft.model = channel.model ?? defaults.model
+  draft.providerId = channel.provider_id ?? defaults.providerId
   draft.autonomy = channel.autonomy ?? 'unattended'
   const credentials = channel.credentials
   if (credentials) {
@@ -132,12 +154,48 @@ function credentialsFromDraft(draft: ImChannelDraft): ImCredentials {
   }
 }
 
-function clearableText(value: string): string {
-  // The wire clears an optional field with an empty string; absent keeps it.
-  return value.trim()
+/**
+ * The override a draft carries, or `null` when it should follow the default.
+ *
+ * Blank and "exactly the default" both mean follow: the field is displayed
+ * pre-filled, so echoing the default back must not become a pinned override.
+ */
+function overrideOf(value: string, fallback: string): string | null {
+  const trimmed = value.trim()
+  if (trimmed === '' || trimmed === fallback.trim()) return null
+  return trimmed
 }
 
-export function buildCreateRequest(draft: ImChannelDraft): CreateImChannelRequest {
+/** Create: following the default is simply absent from the payload. */
+function createOverride(value: string, fallback: string): string | undefined {
+  return overrideOf(value, fallback) ?? undefined
+}
+
+/**
+ * Update: following the default clears a stored override (empty string on the
+ * wire); when nothing is stored either, the field is omitted as unchanged.
+ */
+function updateOverride(
+  value: string,
+  fallback: string,
+  stored: string | null
+): string | undefined {
+  const desired = overrideOf(value, fallback)
+  if (desired === stored) return undefined
+  return desired ?? ''
+}
+
+function storedOverride(value: string | undefined, fallback: string): string | null {
+  // A stored value that already equals the default is not an override: the
+  // form shows the same value either way, so treating it as one would report a
+  // spurious change the moment the editor opens.
+  return overrideOf(value ?? '', fallback)
+}
+
+export function buildCreateRequest(
+  draft: ImChannelDraft,
+  defaults: ImFormDefaults = NO_IM_DEFAULTS
+): CreateImChannelRequest {
   return {
     kind: draft.kind,
     title: draft.title.trim() || undefined,
@@ -147,10 +205,10 @@ export function buildCreateRequest(draft: ImChannelDraft): CreateImChannelReques
       allowed_chat_ids: parseAllowedChatIds(draft.allowedChatIds),
       require_mention: draft.requireMention
     },
-    workspace: clearableText(draft.workspace) || undefined,
-    model: clearableText(draft.model) || undefined,
-    provider_id: clearableText(draft.providerId) || undefined,
-    autonomy: clearableText(draft.autonomy) || undefined
+    workspace: createOverride(draft.workspace, defaults.workspace),
+    model: createOverride(draft.model, defaults.model),
+    provider_id: createOverride(draft.providerId, defaults.providerId),
+    autonomy: draft.autonomy.trim() || undefined
   }
 }
 
@@ -189,7 +247,8 @@ function credentialsChanged(current: ImChannelView, draft: ImChannelDraft): bool
 
 export function buildUpdateRequest(
   current: ImChannelView,
-  draft: ImChannelDraft
+  draft: ImChannelDraft,
+  defaults: ImFormDefaults = NO_IM_DEFAULTS
 ): UpdateImChannelRequest {
   const currentChatIds = current.policy.allowed_chat_ids.join('\n')
   const request: UpdateImChannelRequest = {
@@ -203,13 +262,17 @@ export function buildUpdateRequest(
             allowed_chat_ids: parseAllowedChatIds(draft.allowedChatIds),
             require_mention: draft.requireMention
           },
-    workspace: clearableText(draft.workspace) === (current.workspace ?? '') ? undefined : clearableText(draft.workspace),
-    model: clearableText(draft.model) === (current.model ?? '') ? undefined : clearableText(draft.model),
-    provider_id:
-      clearableText(draft.providerId) === (current.provider_id ?? '')
+    workspace: updateOverride(draft.workspace, defaults.workspace, storedOverride(current.workspace, defaults.workspace)),
+    model: updateOverride(draft.model, defaults.model, storedOverride(current.model, defaults.model)),
+    provider_id: updateOverride(
+      draft.providerId,
+      defaults.providerId,
+      storedOverride(current.provider_id, defaults.providerId)
+    ),
+    autonomy:
+      draft.autonomy.trim() === (current.autonomy ?? '').trim()
         ? undefined
-        : clearableText(draft.providerId),
-    autonomy: clearableText(draft.autonomy) === (current.autonomy ?? '') ? undefined : clearableText(draft.autonomy)
+        : draft.autonomy.trim()
   }
   return request
 }

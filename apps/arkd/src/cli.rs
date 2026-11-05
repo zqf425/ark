@@ -93,7 +93,7 @@ pub struct ServeArgs {
 }
 
 impl ServeArgs {
-    /// Defaults: port 18790, data in `~/.ark/data`, workspace = cwd.
+    /// Defaults: port 18790, data in `~/.arkd/data`, workspace = cwd.
     pub fn defaults() -> Self {
         Self {
             port: DEFAULT_PORT,
@@ -104,9 +104,12 @@ impl ServeArgs {
     }
 }
 
-/// `~/.ark/data`, resolved from the platform home directory.
+/// `~/.arkd/data`, resolved from the platform home directory.
+///
+/// The app owns its own home root (`.arkd`) instead of reusing smart-ark's
+/// `.ark`, so the two runtimes never write into the same data directory.
 pub fn default_data_dir() -> PathBuf {
-    home_dir().join(".ark").join("data")
+    home_dir().join(".arkd").join("data")
 }
 
 fn home_dir() -> PathBuf {
@@ -248,7 +251,7 @@ USAGE:
 
 DEFAULTS:
     --port       18790 (run: probe a free ephemeral port)
-    --data-dir   ~/.ark/data
+    --data-dir   ~/.arkd/data
     --workspace  current directory
 ";
 
@@ -262,6 +265,13 @@ mod tests {
             Command::Serve(args) => assert_eq!(args.port, DEFAULT_PORT),
             other => panic!("expected serve, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn default_data_dir_stays_inside_the_arkd_home_root() {
+        // The default must live under the app-owned `.arkd` home root so it
+        // never collides with smart-ark's `.ark` data directory.
+        assert_eq!(default_data_dir(), home_dir().join(".arkd").join("data"));
     }
 
     #[test]

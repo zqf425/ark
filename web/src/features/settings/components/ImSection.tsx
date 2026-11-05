@@ -22,6 +22,7 @@ import { listImBindings } from '../api/im-api'
 import { useCodeSessionStore } from '../../code-session/state/store'
 import { useViewStore } from '../../workbench/state/view-slice'
 import type { SettingsApi } from '../hooks/use-settings'
+import type { ProvidersApi } from '../hooks/use-providers'
 import { useIm } from '../hooks/use-im'
 import { describeOutcome, type Outcome } from '../api/outcome'
 import { CheckField } from './Field'
@@ -34,7 +35,9 @@ import {
   draftFromChannel,
   emptyDraft,
   isUpdateEmpty,
-  type ImChannelDraft
+  NO_IM_DEFAULTS,
+  type ImChannelDraft,
+  type ImFormDefaults
 } from './im-form'
 
 /** Mirrors `MAX_IM_CHANNELS`; the runtime is still the authority that rejects. */
@@ -112,11 +115,34 @@ function BindingsList({ channelId, onOpenThread }: { channelId: string; onOpenTh
   )
 }
 
-export function ImSection({ settings }: { settings: SettingsApi }): JSX.Element {
+/**
+ * The runtime values an un-overridden channel actually uses: the configured
+ * default workspace, and the provider the loop is serving (`active`, which is
+ * what a turn without an override resolves to) plus that provider's model.
+ * They are shown pre-filled so no override field ever renders as a blank box.
+ */
+function formDefaults(settings: SettingsApi, providers: ProvidersApi): ImFormDefaults {
+  const activeId = providers.activeProviderId ?? providers.defaultProviderId
+  const active = activeId ? providers.providers.find((row) => row.id === activeId) : undefined
+  return {
+    workspace: settings.config?.default_workspace ?? NO_IM_DEFAULTS.workspace,
+    providerId: active?.id ?? NO_IM_DEFAULTS.providerId,
+    model: active?.model ?? NO_IM_DEFAULTS.model
+  }
+}
+
+export function ImSection({
+  settings,
+  providers
+}: {
+  settings: SettingsApi
+  providers: ProvidersApi
+}): JSX.Element {
   const { t } = useI18n()
   const toast = useToast()
   const api = useIm()
   const { config, saving, save } = settings
+  const defaults = formDefaults(settings, providers)
   const selectThread = useCodeSessionStore((state) => state.setActiveThread)
   const setView = useViewStore((state) => state.setView)
 
@@ -190,7 +216,7 @@ export function ImSection({ settings }: { settings: SettingsApi }): JSX.Element 
     if (!draft) return
     setFormError(null)
     if (editingChannel) {
-      const request = buildUpdateRequest(editingChannel, draft)
+      const request = buildUpdateRequest(editingChannel, draft, defaults)
       if (isUpdateEmpty(request)) {
         setFormError(t('settings.im.nothingChanged'))
         return
@@ -206,7 +232,7 @@ export function ImSection({ settings }: { settings: SettingsApi }): JSX.Element 
       setEditingId(null)
       return
     }
-    const outcome = await api.create(buildCreateRequest(draft))
+    const outcome = await api.create(buildCreateRequest(draft, defaults))
     if (!outcome.ok) {
       setFormError(describeOutcome(outcome))
       toast.push('error', t('settings.im.saveFailed'), describeOutcome(outcome))
@@ -258,7 +284,7 @@ export function ImSection({ settings }: { settings: SettingsApi }): JSX.Element 
                   onClick={() => {
                     setFormError(null)
                     setEditingId(item.channel.id)
-                    setDraft(draftFromChannel(item.channel))
+                    setDraft(draftFromChannel(item.channel, defaults))
                   }}
                 >
                   {t('common.edit')}
@@ -316,7 +342,7 @@ export function ImSection({ settings }: { settings: SettingsApi }): JSX.Element 
             onClick={() => {
               setFormError(null)
               setEditingId(null)
-              setDraft(emptyDraft())
+              setDraft(emptyDraft(defaults))
             }}
           >
             {t('settings.im.create')}

@@ -32,9 +32,9 @@ export const createWorkbenchSlice: StateCreator<WorkbenchSlice, [], [], Workbenc
   activePanel: 'changes',
   leftWidth: DEFAULT_LEFT,
   leftCollapsed: false,
-  // Conversation is the primary work surface. Context projections open only
-  // when the user asks for one, rather than consuming empty-state space.
-  rightCollapsed: true,
+  // The inspector is a resident workbench column (proposal A): context stays
+  // visible next to the conversation, and the user can still collapse it.
+  rightCollapsed: false,
   selectedFilePath: null,
 
   setActivePanel: (panel) => set({ activePanel: panel, rightCollapsed: false }),

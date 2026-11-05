@@ -35,6 +35,9 @@ pub struct Prepared {
     pub credential_ref: Option<String>,
     /// Whether the request may be replayed without duplicating side effects.
     pub replayable: bool,
+    /// Effective redirect budget for this logical request. `web_fetch` sets 0
+    /// so a 3xx is returned to the model instead of being followed.
+    pub redirect_budget: u8,
 }
 
 fn failure(reason: HttpDenialReason, message: impl Into<String>) -> ArkError {
@@ -165,6 +168,11 @@ pub fn prepare(
         credential_label,
         credential_ref: req.credential.clone().filter(|r| !r.trim().is_empty()),
         replayable,
+        redirect_budget: if req.follow_redirects == Some(false) || !policy.follow_redirects {
+            0
+        } else {
+            policy.max_redirects
+        },
     })
 }
 

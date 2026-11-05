@@ -23,21 +23,27 @@ pub fn redact_secret(value: &str) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
-    let visible: String = trimmed.chars().take(4).collect();
-    format!("{visible}...{}", truncated_fingerprint(trimmed))
+    // Never reveal the whole value. A short secret used to be emitted
+    // verbatim by `take(4)`; keep at most a quarter of the characters at each
+    // end so the visible prefix and fingerprint tail can never reconstruct it.
+    let chars: Vec<char> = trimmed.chars().collect();
+    let shown = (chars.len() / 4).min(4);
+    let visible: String = chars.iter().take(shown).collect();
+    format!("{visible}...{}", truncated_fingerprint(&chars, shown, value.len()))
 }
 
-fn truncated_fingerprint(value: &str) -> String {
-    // Cheap, non-cryptographic fingerprint: stable length + tail.
-    let tail: String = value
-        .chars()
+fn truncated_fingerprint(chars: &[char], shown: usize, byte_len: usize) -> String {
+    // Cheap, non-cryptographic fingerprint: stable length + a short tail.
+    let tail: String = chars
+        .iter()
         .rev()
-        .take(4)
+        .take(shown)
+        .copied()
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
         .collect();
-    format!("{}({})", tail, value.len())
+    format!("{tail}({byte_len})")
 }
 
 #[cfg(test)]
@@ -57,5 +63,18 @@ mod tests {
         let out = redact_secret("sk-1234567890abcdef");
         assert!(!out.contains("567890"));
         assert!(out.starts_with("sk-1"));
+    }
+
+    #[test]
+    fn redaction_never_reveals_a_short_secret_in_full() {
+        for secret in ["a", "abcd", "abcde", "12345678"] {
+            let out = redact_secret(secret);
+            assert!(
+                !out.contains(secret),
+                "{secret:?} leaked in full: {out:?}"
+            );
+        }
+        // Even the visible prefix and tail together cannot cover a short value.
+        assert_eq!(redact_secret("a"), "...(1)");
     }
 }

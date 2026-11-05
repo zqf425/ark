@@ -1,8 +1,7 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { type KeyboardEvent, type ReactNode } from 'react'
 import { useI18n } from '../../../shared/i18n'
+import { Icon } from '../../../shared/ui'
 import { useCodeSessionStore } from '../../code-session/state/store'
-import { useRuntimeStatusLabels } from '../../code-session/hooks/use-runtime-status-labels'
-import { ViewSwitch } from '../components/ViewSwitch'
 import { resizerKeyDelta, usePanelResizer } from './use-panel-resizer'
 import '../workbench.css'
 
@@ -43,11 +42,10 @@ export type WorkbenchLayoutProps = {
 }
 
 /**
- * Conversation-first workbench, no global top bar: the thread rail is a
- * full-height sidebar whose footer carries the runtime status and the view
- * switch, and the context projection is a floating drawer over the canvas.
- * The drawer stays mounted while hidden (`hidden` attribute, not conditional
- * rendering) so panel drafts and server read models survive open/close.
+ * Workbench scene of the approved ARK Console shell: thread list, conversation
+ * and the resident inspector side by side. The inspector is a column, not the
+ * old floating drawer — it stays mounted while collapsed via `hidden` so panel
+ * drafts and server read models survive a toggle.
  */
 export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): JSX.Element {
   const { t } = useI18n()
@@ -58,134 +56,66 @@ export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): 
   const toggleLeft = useCodeSessionStore((s) => s.toggleLeft)
   const toggleRight = useCodeSessionStore((s) => s.toggleRight)
 
-  // The sidebar footer owns liveness: the same label mapping the settings top
-  // bar uses, rendered as one compact row instead of a full-width banner.
-  const { online, onlineLabel, refreshLabel, healthError, refresh } = useRuntimeStatusLabels()
-
-  // Drawer semantics: focus moves into the dialog on open and back to the
-  // toggle on close; Escape closes. The drawer keeps its panel state while
-  // hidden, so only focus management is event-driven here.
-  const drawerRef = useRef<HTMLElement | null>(null)
-  const drawerToggleRef = useRef<HTMLButtonElement | null>(null)
-  useEffect(() => {
-    if (rightCollapsed) {
-      drawerToggleRef.current?.focus()
-      return
-    }
-    drawerRef.current?.focus()
-    const onKey = (event: globalThis.KeyboardEvent): void => {
-      if (event.key === 'Escape') toggleRight()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [rightCollapsed, toggleRight])
-
   return (
-    <div className="ark-shell">
-      <div
-        className="ark-cols"
-        style={{ '--ark-left': `${leftWidth}px` } as React.CSSProperties}
-      >
-        {leftCollapsed ? (
-          <button
-            type="button"
-            className="ark-sidebar-tab"
-            aria-label={t('workbench.layout.showThreads')}
-            title={t('workbench.layout.showThreads')}
-            onClick={toggleLeft}
-          >
-            ‹
-          </button>
-        ) : (
-          <>
-            <div className="ark-col ark-col--left">
-              {left}
-              <footer className="ark-sidebar__foot">
-                <div className="ark-sidebar__foot-row">
-                  <div
-                    className="ark-sidebar__status"
-                    role="status"
-                    aria-live="polite"
-                    aria-label={[onlineLabel, healthError]
-                      .filter(Boolean)
-                      .join(t('status.ariaSeparator'))}
-                  >
-                    <span
-                      className={`ark-dot ark-dot--${online === 'online' ? 'ok' : online === 'offline' ? 'bad' : 'idle'}`}
-                      aria-hidden="true"
-                    />
-                    <span className="ark-sidebar__status-label">{onlineLabel}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="ark-sidebar__refresh"
-                    title={refreshLabel}
-                    aria-label={refreshLabel}
-                    onClick={() => void refresh()}
-                  >
-                    ↻
-                  </button>
-                </div>
-                <ViewSwitch />
-              </footer>
-            </div>
-            <Resizer width={leftWidth} setWidth={setLeftWidth} />
-          </>
-        )}
-
-        <div className="ark-col ark-col--center">
-          <div className="ark-workbench-tools" aria-label={t('workbench.layout.aria')}>
-            {leftCollapsed ? null : (
-              <button
-                type="button"
-                className="ark-workbench-tools__btn"
-                title={t('workbench.layout.hideThreads')}
-                aria-label={t('workbench.layout.hideThreads')}
-                onClick={toggleLeft}
-              >
-                ‹
-              </button>
-            )}
-            <button
-              ref={drawerToggleRef}
-              type="button"
-              className="ark-workbench-tools__btn"
-              aria-expanded={!rightCollapsed}
-              aria-controls="ark-context-drawer"
-              title={
-                rightCollapsed ? t('workbench.layout.openContext') : t('workbench.layout.closeContext')
-              }
-              aria-label={
-                rightCollapsed ? t('workbench.layout.openContext') : t('workbench.layout.closeContext')
-              }
-              onClick={toggleRight}
-            >
-              ›
-            </button>
-          </div>
-          {center}
-        </div>
-
+    <div
+      className="console-workbench"
+      style={{ '--ark-left': `${leftWidth}px` } as React.CSSProperties}
+    >
+      {leftCollapsed ? (
         <button
           type="button"
-          className="ark-drawer-scrim"
-          hidden={rightCollapsed}
-          aria-label={t('workbench.layout.closeContext')}
-          onClick={toggleRight}
-        />
-        <aside
-          ref={drawerRef}
-          id="ark-context-drawer"
-          className="ark-drawer"
-          hidden={rightCollapsed}
-          role="dialog"
-          aria-modal="true"
-          aria-label={t('workbench.layout.context')}
-          tabIndex={-1}
+          className="console-sidebar-tab"
+          aria-label={t('workbench.layout.showThreads')}
+          title={t('workbench.layout.showThreads')}
+          onClick={toggleLeft}
         >
-          {right}
-        </aside>
+          ‹
+        </button>
+      ) : (
+        <>
+          <div className="console-col console-col--left">{left}</div>
+          <Resizer width={leftWidth} setWidth={setLeftWidth} />
+        </>
+      )}
+
+      <div className="console-col console-col--center">
+        {rightCollapsed ? (
+          <button
+            type="button"
+            className="console-inspector-toggle"
+            title={t('console.inspector.expand')}
+            aria-label={t('console.inspector.expand')}
+            aria-expanded={false}
+            onClick={toggleRight}
+          >
+            <Icon name="panel" size={14} />
+          </button>
+        ) : null}
+        {center}
       </div>
+
+      <aside
+        id="ark-context-drawer"
+        className="console-inspector"
+        hidden={rightCollapsed}
+        aria-label={t('console.inspector.title')}
+      >
+        <div className="console-inspector__head">
+          <span className="console-inspector__title">{t('console.inspector.title')}</span>
+          <span className="console-inspector__grow" />
+          <button
+            type="button"
+            className="console-iconbtn"
+            title={t('console.inspector.collapse')}
+            aria-label={t('console.inspector.collapse')}
+            aria-expanded
+            onClick={toggleRight}
+          >
+            <Icon name="panel" size={14} />
+          </button>
+        </div>
+        <div className="console-inspector__body">{right}</div>
+      </aside>
     </div>
   )
 }

@@ -50,6 +50,15 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // A tokio Command inherits the whole arkd environment by default. That
+    // would hand model-controlled shell commands API keys, proxy credentials
+    // and database passwords. Start from an empty environment and re-add only
+    // the explicit, sanitized context snapshot plus the few variables a shell
+    // needs to find its own tools.
+    command.env_clear();
+    for (key, value) in default_shell_env() {
+        command.env(key, value);
+    }
     sanitize_env(&mut command, ctx);
     // A shell command is a tree, not a process: `sh -c 'server &'` leaves the
     // server running, and `kill_on_drop` would only signal the shell. Marking
@@ -110,6 +119,29 @@ fn shell(command: &str) -> tokio::process::Command {
         cmd.arg("-c").arg(command);
         cmd
     }
+}
+
+/// Minimal environment a shell needs to resolve its own executables.
+///
+/// Values come from the host process (never from the model), and are only
+/// forwarded when present. On Windows `SystemRoot`/`USERPROFILE` keep `cmd`
+/// and the standard utilities usable.
+fn default_shell_env() -> Vec<(&'static str, String)> {
+    const KEYS: &[&str] = &[
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "SystemRoot",
+        "USERPROFILE",
+        "COMSPEC",
+        "LANG",
+        "LC_ALL",
+    ];
+    KEYS.iter()
+        .filter_map(|key| std::env::var(key).ok().map(|value| (*key, value)))
+        .collect()
 }
 
 /// Copy the context snapshot into the child, dropping obvious secrets.
@@ -203,6 +235,21 @@ mod tests {
         assert!(!out.ok);
         assert!(out.content.contains("timed out"), "got {}", out.content);
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    async fn host_secrets_are_not_inherited() {
+        // The old code never called `env_clear()`, so any model-authored
+        // `env` command could read the whole arkd process environment.
+        std::env::set_var("ARK_TEST_SECRET", "super-secret-value");
+        let dir = temp_workspace("bash-env");
+        let out = BashTool
+            .execute(&ctx(&dir), echo(if cfg!(windows) { "set" } else { "env" }))
+            .await
+            .unwrap();
+        std::env::remove_var("ARK_TEST_SECRET");
+        assert!(!out.content.contains("super-secret-value"), "{}", out.content);
+        assert!(out.content.contains("PATH="), "PATH must remain usable");
     }
 
     #[tokio::test]

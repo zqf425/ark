@@ -27,7 +27,7 @@ export function ProviderModelImportDialog({
   catalog: ProviderModelSummary[]
   draft: ProviderDraft
   onCancel: () => void
-  onConfirm: (ids: string[]) => void
+  onConfirm: (rows: ImportCandidate[]) => void
 }): JSX.Element {
   const { t } = useI18n()
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -83,7 +83,7 @@ export function ProviderModelImportDialog({
   }
 
   const confirm = (): void => {
-    onConfirm(chosen.map((row) => row.id))
+    onConfirm(chosen)
   }
 
   // Focus is claimed once on mount; onCancel goes through a ref so a fresh

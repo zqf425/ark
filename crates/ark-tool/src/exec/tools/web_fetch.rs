@@ -48,7 +48,12 @@ impl Tool for WebFetchTool {
     }
 
     async fn execute(&self, _ctx: &ToolContext, raw: ToolArgs) -> Result<ToolOutput> {
-        let parsed: args::WebFetchArgs = args::parse("web_fetch", &raw)?;
+        // A malformed argument is a tool-level error, not a turn failure: the
+        // model can fix its arguments and try again (design ark-tool.md:29).
+        let parsed: args::WebFetchArgs = match args::parse("web_fetch", &raw) {
+            Ok(parsed) => parsed,
+            Err(err) => return Ok(ToolOutput::err(err.message)),
+        };
         let url = match Url::parse(parsed.url.trim()) {
             Ok(url) => url,
             Err(err) => {
@@ -71,6 +76,9 @@ impl Tool for WebFetchTool {
                 OutboundRequest {
                     method: "GET".into(),
                     url: parsed.url.trim().to_string(),
+                    // Only the first hop is SSRF-checked. Do not let the bus
+                    // follow a 3xx to a private/loopback host (T-01).
+                    follow_redirects: Some(false),
                     ..Default::default()
                 },
             )
@@ -122,6 +130,18 @@ fn render(status: u16, headers: &ark_ports::HeaderMap, body: &str) -> ToolOutput
 /// known TOCTOU gap between this resolution and the actual connection is
 /// accepted for the builtin path (design: requirements/web-fetch-tool.md §3).
 async fn ensure_public_host(host: &str) -> std::result::Result<(), String> {
+    // An IP literal needs no DNS: resolving e.g. `fe80::1` through
+    // `lookup_host` is platform-dependent (some stacks fail, others return a
+    // scoped address), which made the guard flaky. Judge literals directly so
+    // link-local/loopback/private addresses are always refused.
+    let literal = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = literal.parse::<IpAddr>() {
+        return if is_public_ip(ip) {
+            Ok(())
+        } else {
+            Err(format!("host `{host}` resolves to a non-public address"))
+        };
+    }
     let candidates = match tokio::net::lookup_host((host, 443)).await {
         Ok(candidates) => candidates,
         Err(err) => return Err(format!("host `{host}` does not resolve: {err}")),
@@ -368,6 +388,43 @@ mod tests {
         }
     }
 
+    /// Captures the last request so the SSRF redirect override is testable.
+    static LAST_FETCH_REQUEST: std::sync::OnceLock<std::sync::Mutex<Option<OutboundRequest>>> =
+        std::sync::OnceLock::new();
+
+    #[derive(Default)]
+    struct RecordingHttp;
+
+    impl RecordingHttp {
+        fn last() -> OutboundRequest {
+            LAST_FETCH_REQUEST
+                .get_or_init(|| std::sync::Mutex::new(None))
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+                .expect("web_fetch must issue one request")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl HttpCapability for RecordingHttp {
+        async fn request(
+            &self,
+            _plugin_id: &str,
+            req: OutboundRequest,
+        ) -> Result<OutboundResponse> {
+            *LAST_FETCH_REQUEST
+                .get_or_init(|| std::sync::Mutex::new(None))
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(req);
+            Ok(OutboundResponse {
+                status: 200,
+                headers: BTreeMap::new(),
+                body: String::new(),
+            })
+        }
+    }
+
     fn tool(body: &str, content_type: &str) -> WebFetchTool {
         WebFetchTool::new(Arc::new(FakeHttp {
             status: 200,
@@ -391,6 +448,38 @@ mod tests {
         tool.execute(&ctx(), ToolArgs(serde_json::json!({ "url": url })))
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn malformed_arguments_are_a_tool_error_not_a_turn_failure() {
+        let tool = tool("<html></html>", "text/html");
+        for raw in [
+            serde_json::json!({}),
+            serde_json::json!({"url": 123}),
+            serde_json::json!({"url": "not a url"}),
+        ] {
+            let out = tool.execute(&ctx(), ToolArgs(raw)).await.unwrap();
+            assert!(!out.ok, "a bad argument must be a structured tool failure");
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_disables_redirect_following_for_the_ssrf_guard() {
+        // A 3xx to a private host must never become a second connection: the
+        // guard only resolved the first hop. Assert the per-request override.
+        let tool = WebFetchTool::new(Arc::new(RecordingHttp::default()));
+        let _ = tool
+            .execute(
+                &ctx(),
+                ToolArgs(serde_json::json!({"url": "https://1.1.1.1/x"})),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            RecordingHttp::last().follow_redirects,
+            Some(false),
+            "web_fetch must opt out of bus-level redirects"
+        );
     }
 
     #[tokio::test]

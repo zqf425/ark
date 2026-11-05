@@ -1,97 +1,110 @@
-/* Theme tokens only. The renderer switches this selector through I18nProvider.
+/*
+ * ARK Console dark theme tokens — "Graphite" (proposal A).
  *
- * Dark palette: the "deep ocean" theme ported from the smart-ark Code UI —
- * navy-outline-of-the-whale backgrounds with the light-blue whale accent.
- * Every component style must consume tokens, never these hex values, so both
- * themes stay in sync by construction.
+ * The renderer switches this selector through I18nProvider. Paper (light) is
+ * the default in preferences.ts; this override applies only when the user
+ * explicitly picks the dark theme. Every token mirrored here must also exist
+ * in tokens.css so a component never sees an undefined variable.
  */
 :root[data-ark-theme='dark'] {
   color-scheme: dark;
 
-  --ark-bg: #0f1422;
-  --ark-bg-canvas: #161d30;
-  --ark-bg-raised: #1b2338;
-  --ark-bg-inset: #212b44;
-  --ark-bg-hover: rgba(151, 192, 235, 0.1);
+  --ark-bg: #0b0e11;
+  --ark-bg-canvas: #11151a;
+  --ark-bg-raised: #171c22;
+  --ark-bg-inset: #0d1115;
+  --ark-bg-hover: #1c2229;
 
-  --ark-border: rgba(151, 192, 235, 0.13);
-  --ark-border-muted: rgba(151, 192, 235, 0.1);
-  --ark-border-strong: rgba(151, 192, 235, 0.2);
+  --ark-border: #222a32;
+  --ark-border-muted: #1a2027;
+  --ark-border-strong: #303a44;
 
-  --ark-text: #f0f5fc;
-  --ark-text-dim: #bdc9de;
-  --ark-text-faint: #8593b1;
-  --ark-text-placeholder: #76839e;
+  --ark-text: #e8ecf1;
+  --ark-text-dim: #a7b0bc;
+  --ark-text-faint: #8a95a2;
+  --ark-text-placeholder: #8a95a2;
 
-  --ark-accent: #6fb0e8;
-  --ark-accent-dim: rgba(111, 176, 232, 0.55);
-  --ark-accent-soft: rgba(111, 176, 232, 0.18);
-  --ark-selection: rgba(111, 176, 232, 0.26);
-  --ark-ok: #40c977;
-  --ark-warn: #e8a94f;
-  --ark-error: #f8736a;
-  --ark-error-strong: #f8b0aa;
-  --ark-ok-wash: rgba(64, 201, 119, 0.18);
-  --ark-warn-wash: rgba(242, 162, 63, 0.18);
-  --ark-error-wash: rgba(248, 115, 106, 0.18);
+  --ark-accent: #5be3c4;
+  --ark-accent-dim: rgba(91, 227, 196, 0.45);
+  --ark-accent-soft: rgba(91, 227, 196, 0.1);
+  --ark-selection: rgba(91, 227, 196, 0.2);
+  --ark-ok: #7de8cd;
+  --ark-warn: #e8b04b;
+  --ark-error: #f0736a;
+  --ark-error-strong: #f0978f;
+  --ark-ok-wash: rgba(91, 227, 196, 0.11);
+  --ark-warn-wash: rgba(232, 176, 75, 0.1);
+  --ark-error-wash: rgba(240, 115, 106, 0.1);
   --ark-skill: #a89bf5;
-  --ark-skill-soft: rgba(168, 155, 245, 0.16);
+  --ark-skill-soft: rgba(168, 155, 245, 0.14);
 
-  --ark-user-message: rgba(133, 193, 241, 0.13);
-  --ark-user-border: rgba(133, 193, 241, 0.24);
+  --ark-user-message: rgba(91, 227, 196, 0.06);
+  --ark-user-border: rgba(91, 227, 196, 0.28);
 
-  /* The whale gradient keeps its daylight values on dark, like smart-ark. */
-  --ark-gradient-primary: linear-gradient(135deg, #4f90d6, #6ca2dd);
-  --ark-primary: #3b82d8;
-  --ark-primary-hover: #4f90d6;
-  --ark-primary-text: #ffffff;
-  --ark-primary-shadow: 0 6px 14px rgba(2, 6, 16, 0.45);
+  --ark-gradient-primary: #5be3c4;
+  --ark-primary: #5be3c4;
+  --ark-primary-hover: #7de8cd;
+  --ark-primary-text: #06241c;
+  --ark-primary-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 
-  --ark-card-soft: linear-gradient(180deg, rgba(27, 35, 56, 0.94), rgba(21, 28, 45, 0.9));
-  --ark-card-strong: linear-gradient(180deg, rgba(33, 43, 68, 0.98), rgba(24, 32, 51, 0.96));
-  --ark-card-ghost: rgba(15, 20, 34, 0.72);
-  --ark-chip-bg: rgba(27, 35, 56, 0.94);
-  --ark-chip-border: rgba(151, 192, 235, 0.13);
-  --ark-chip-active: linear-gradient(180deg, rgba(111, 176, 232, 0.2), rgba(111, 176, 232, 0.11));
+  --ark-card-soft: #11151a;
+  --ark-card-strong: #171c22;
+  --ark-card-ghost: rgba(17, 21, 26, 0.94);
+  --ark-chip-bg: #1b2128;
+  --ark-chip-border: #222a32;
+  --ark-chip-active: #1c2a26;
 
-  --ark-code-block-bg: #101827;
-  --ark-code-block-border: rgba(151, 192, 235, 0.1);
-  --ark-inline-code-bg: rgba(151, 192, 235, 0.09);
-  --ark-terminal-bg: #151c2e;
-  --ark-terminal-text: #bdc9de;
+  --ark-code-block-bg: #0f1419;
+  --ark-code-block-border: #222a32;
+  --ark-inline-code-bg: #1c2229;
+  --ark-terminal-bg: #0f1419;
+  --ark-terminal-text: #a7b0bc;
 
-  --ark-sidebar-gradient: linear-gradient(
-    180deg,
-    rgba(24, 31, 50, 0.96) 0%,
-    rgba(19, 25, 42, 0.94) 48%,
-    rgba(14, 19, 32, 0.96) 100%
-  );
-  --ark-sidebar-haze:
-    radial-gradient(circle at 58% -12%, rgba(111, 176, 232, 0.14), transparent 36%),
-    linear-gradient(180deg, rgba(151, 192, 235, 0.05), rgba(151, 192, 235, 0) 28%);
-  --ark-sidebar-border: rgba(151, 192, 235, 0.12);
-  --ark-sidebar-divider: rgba(151, 192, 235, 0.12);
-  --ark-sidebar-row-hover: rgba(151, 192, 235, 0.09);
-  --ark-sidebar-row-active: rgba(151, 192, 235, 0.13);
-  --ark-sidebar-row-ring: rgba(151, 192, 235, 0.1);
-  --ark-sidebar-field-bg: rgba(151, 192, 235, 0.06);
+  --ark-sidebar-gradient: #11151a;
+  --ark-sidebar-haze: none;
+  --ark-sidebar-border: #222a32;
+  --ark-sidebar-divider: #1a2027;
+  --ark-sidebar-row-hover: #1c2229;
+  --ark-sidebar-row-active: rgba(91, 227, 196, 0.13);
+  --ark-sidebar-row-ring: rgba(91, 227, 196, 0.2);
+  --ark-sidebar-field-bg: #0d1115;
 
-  --ark-stage-gradient: linear-gradient(180deg, #1c2440 0%, #161d30 48%, #0f1422 100%);
-  --ark-body-wash: linear-gradient(180deg, #131a2c, #0f1422);
-  --ark-body-glow:
-    radial-gradient(52rem 30rem at 82% -12%, rgba(111, 176, 232, 0.1), transparent 60%),
-    linear-gradient(160deg, rgba(151, 192, 235, 0.04), rgba(151, 192, 235, 0) 42%);
+  --ark-stage-gradient: #0b0e11;
+  --ark-body-wash: #0b0e11;
+  --ark-body-glow: none;
 
-  --ark-shadow-ctl: 0 2px 6px rgba(2, 6, 16, 0.3);
+  --ark-shadow-ctl: 0 1px 2px rgba(0, 0, 0, 0.4);
   --ark-shadow-1: var(--ark-shadow-ctl);
-  --ark-shadow-card: 0 4px 14px rgba(2, 6, 16, 0.32);
-  --ark-shadow-2: 0 18px 46px rgba(2, 6, 16, 0.45), 0 5px 16px rgba(2, 6, 16, 0.3);
-  --ark-composer-shadow: 0 28px 78px rgba(2, 6, 16, 0.45), 0 0 0 1px rgba(151, 192, 235, 0.07);
+  --ark-shadow-card: 0 2px 10px rgba(0, 0, 0, 0.4);
+  --ark-shadow-2: 0 18px 60px rgba(0, 0, 0, 0.55);
+  --ark-composer-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   --ark-composer-shadow-focus:
-    0 0 0 3px rgba(111, 176, 232, 0.12), 0 28px 78px rgba(2, 6, 16, 0.45),
-    0 0 0 1px rgba(151, 192, 235, 0.12);
-  --ark-overlay: rgba(2, 6, 16, 0.55);
+    0 0 0 2px rgba(91, 227, 196, 0.16), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --ark-overlay: rgba(4, 6, 8, 0.62);
 
-  --ark-scrollbar-thumb: rgba(151, 178, 215, 0.28);
-  --ark-scrollbar-thumb-hover: rgba(171, 198, 233, 0.38);
+  --ark-scrollbar-thumb: #3b444e;
+  --ark-scrollbar-thumb-hover: #4c5762;
+
+  /* new app-shell tokens, dark */
+  --console-accent-ink: #06241c;
+  --console-line: #222a32;
+  --console-line-soft: #1a2027;
+  --console-line-strong: #303a44;
+  --console-blue: #6fa8ff;
+  --console-add: rgba(91, 227, 196, 0.11);
+  --console-del: rgba(240, 115, 106, 0.11);
+  --console-add-ink: #7de8cd;
+  --console-del-ink: #f0978f;
+  --console-code: #0f1419;
+  --console-scrim: rgba(4, 6, 8, 0.62);
+  --console-warn-line: rgba(232, 176, 75, 0.4);
+  --console-warn-wash: rgba(232, 176, 75, 0.1);
+
+  --tk-kw: #7aa2f7;
+  --tk-ty: #e0af68;
+  --tk-str: #9ece6a;
+  --tk-cm: #7c8794;
+  --tk-mac: #f07a72;
+  --tk-fn: #7dcfff;
+  --tk-num: #ff9e64;
 }
