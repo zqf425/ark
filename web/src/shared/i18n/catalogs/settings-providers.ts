@@ -53,14 +53,6 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
   'settings.providerForm.labelPlaceholder': ['DeepSeek 官方', 'DeepSeek official'],
   'settings.providerForm.modelLabel': ['model', 'model'],
   'settings.providerForm.modelPlaceholder': ['deepseek-chat', 'deepseek-chat'],
-  'settings.providerForm.catalogLabel': ['供应商模型目录', 'Provider model catalog'],
-  'settings.providerForm.catalogHint': [
-    '选择后自动填入目录明确声明的上下文窗口和识图能力；未声明的能力保持未知。',
-    'Selecting a model fills in only the context window and vision capability the catalog explicitly declares; undeclared capabilities stay unknown.'
-  ],
-  'settings.providerForm.catalogPlaceholder': ['选择模型后再写入草稿', 'Select a model to write it into the draft'],
-  'settings.providerForm.catalogAddAll': ['将目录中的 {count} 个模型加入清单', 'Add {count} catalog models to the inventory'],
-  'settings.providerForm.catalogAllPresent': ['目录中的模型都已写入清单。', 'Every catalog model is already in the inventory.'],
   'settings.providerForm.apiKeyPlaceholderKeep': ['留空 = 保留原 key', 'Leave blank to keep the stored key'],
   'settings.providerForm.apiKeyPlaceholderNew': ['sk-…', 'sk-…'],
   'settings.providerForm.apiKeyHintEditing': ['编辑时留空表示保留已存的 key，不会覆盖。', 'Leaving this blank while editing keeps the stored key instead of overwriting it.'],
@@ -70,14 +62,17 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
   'settings.providerForm.advancedShow': ['展开高级选项（headers / max_tokens / temperature）', 'Show advanced options (headers / max_tokens / temperature)'],
   'settings.providerForm.advancedHide': ['收起高级选项', 'Hide advanced options'],
   'settings.providerForm.querying': ['查询中…', 'Querying…'],
-  'settings.providerForm.queryModels': ['查询模型列表', 'Query model list'],
-  'settings.providerForm.importModels': ['批量导入模型', 'Batch import models'],
+  'settings.providerForm.importModels': ['导入模型', 'Import models'],
   'settings.providerForm.inventoryLabel': ['已导入模型', 'Imported models'],
   'settings.providerForm.inventoryHint': [
-    '会话运行配置可从这份清单里选；默认模型之外的模型都会保存为清单。',
-    'The session runtime picker offers these; every model beyond the default is saved in the inventory.'
+    '会话运行配置可从这份清单里选；每个模型可单独设置上下文窗口与识图能力，未填写表示未知。',
+    'The session runtime picker offers these; each model can carry its own context window and vision flag — blank means unknown.'
   ],
   'settings.providerForm.inventoryRemove': ['移除 {model}', 'Remove {model}'],
+  'settings.providerForm.inventoryContextPlaceholder': ['上下文窗口', 'Context window'],
+  'settings.providerForm.inventoryContextLabel': ['{model} 的上下文窗口（tokens）', 'Context window for {model} (tokens)'],
+  'settings.providerForm.inventoryVision': ['识图', 'Vision'],
+  'settings.providerForm.inventoryVisionLabel': ['{model} 是否支持识图', 'Whether {model} supports vision'],
   'settings.providerForm.error.tooManyModels': [
     '模型清单超过上限 {max}，请先移除部分再保存',
     'model inventory exceeds the {max} limit; remove some before saving'

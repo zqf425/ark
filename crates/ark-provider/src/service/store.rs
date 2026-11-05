@@ -204,10 +204,12 @@ impl ProviderStore {
     /// Whether the resolved provider's model explicitly declared vision support.
     ///
     /// Same selection rules as [`Self::resolve`], but reads the catalog-reported
-    /// `supports_vision` flag. `None` (unknown) must be treated as "not
-    /// declared": image parts are only sent on an explicit positive, never on a
-    /// guess from the model name.
-    pub fn resolve_vision(&self, id: Option<&str>) -> Option<bool> {
+    /// `supports_vision` flag. When a thread overrides the model and the
+    /// inventory records metadata for that model, the per-model flag wins:
+    /// metadata belongs to the model id, not the provider entry. `None`
+    /// (unknown) must be treated as "not declared": image parts are only sent
+    /// on an explicit positive, never on a guess from the model name.
+    pub fn resolve_vision(&self, id: Option<&str>, model: Option<&str>) -> Option<bool> {
         let document = self.lock();
         let target = match id.map(str::trim).filter(|value| !value.is_empty()) {
             Some(explicit) => document.get(explicit),
@@ -215,7 +217,53 @@ impl ProviderStore {
                 .effective_default()
                 .and_then(|default| document.get(default)),
         }?;
+        if let Some(model) = model.map(str::trim).filter(|value| !value.is_empty()) {
+            if let Some(item) = target.models.iter().flatten().find(|item| item.id == model) {
+                return item.supports_vision;
+            }
+        }
         target.supports_vision
+    }
+
+    /// Resolve a provider for a turn that may override the model.
+    ///
+    /// Selection rules match [`Self::resolve`]; the override only replaces the
+    /// model, and the context window follows the inventory entry recorded for
+    /// that model. An override without an inventory entry clears the window —
+    /// the stored limit belongs to the stored model id, and compacting against
+    /// another model's limit would corrupt the threshold.
+    pub fn resolve_for_model(
+        &self,
+        id: Option<&str>,
+        model: Option<String>,
+    ) -> Option<ProviderConfig> {
+        let mut config = self.resolve(id)?;
+        let Some(model) = model
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        else {
+            return Some(config);
+        };
+        if model == config.model {
+            return Some(config);
+        }
+        let document = self.lock();
+        let target = match id.map(str::trim).filter(|value| !value.is_empty()) {
+            Some(explicit) => document.get(explicit),
+            None => document
+                .effective_default()
+                .and_then(|default| document.get(default)),
+        };
+        config.model = model;
+        config.context_window_tokens = target.and_then(|entry| {
+            entry
+                .models
+                .iter()
+                .flatten()
+                .find(|item| item.id == config.model)
+                .and_then(|item| item.context_window_tokens)
+        });
+        Some(config)
     }
 
     /// Probe connectivity with one minimal request.
@@ -446,7 +494,7 @@ fn validate_for_probe(entry: &ProviderEntry) -> std::result::Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_contract::{ProviderEntry, ProviderModelCatalogRequest};
+    use ark_contract::{ProviderEntry, ProviderModelCatalogRequest, ProviderModelInventoryItem};
     use std::path::Path;
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -707,7 +755,18 @@ mod tests {
     fn omitted_models_keep_the_stored_inventory_and_empty_clears_it() {
         let dir = temp_dir("models-retention");
         let mut seeded = entry("p", Some("sk-1234567890abcdef"));
-        seeded.models = Some(vec!["glm-4".into(), "glm-5".into()]);
+        seeded.models = Some(vec![
+            ProviderModelInventoryItem {
+                id: "glm-4".into(),
+                context_window_tokens: None,
+                supports_vision: None,
+            },
+            ProviderModelInventoryItem {
+                id: "glm-5".into(),
+                context_window_tokens: Some(128_000),
+                supports_vision: Some(true),
+            },
+        ]);
         {
             let store = store(&dir);
             store.upsert(seeded, true).unwrap();
@@ -717,14 +776,28 @@ mod tests {
             store.upsert(partial, false).unwrap();
             assert_eq!(
                 store.list().providers[0].models,
-                vec!["glm-4".to_string(), "glm-5".to_string()]
+                vec![
+                    ProviderModelInventoryItem {
+                        id: "glm-4".into(),
+                        context_window_tokens: None,
+                        supports_vision: None,
+                    },
+                    ProviderModelInventoryItem {
+                        id: "glm-5".into(),
+                        context_window_tokens: Some(128_000),
+                        supports_vision: Some(true),
+                    },
+                ]
             );
             // The settings form sends an explicit empty list: clear.
             let mut cleared = entry("p", None);
             cleared.model = "glm-4".into();
             cleared.models = Some(Vec::new());
             store.upsert(cleared, false).unwrap();
-            assert_eq!(store.list().providers[0].models, Vec::<String>::new());
+            assert_eq!(
+                store.list().providers[0].models,
+                Vec::<ProviderModelInventoryItem>::new()
+            );
         }
     }
 
@@ -787,10 +860,83 @@ mod tests {
         unknown.supports_vision = None;
         store.upsert(unknown, true).unwrap();
 
-        assert_eq!(store.resolve_vision(Some("v")), Some(true));
-        assert_eq!(store.resolve_vision(Some("b")), Some(false));
-        assert_eq!(store.resolve_vision(Some("u")), None);
-        assert_eq!(store.resolve_vision(Some("ghost")), None);
+        assert_eq!(store.resolve_vision(Some("v"), None), Some(true));
+        assert_eq!(store.resolve_vision(Some("b"), None), Some(false));
+        assert_eq!(store.resolve_vision(Some("u"), None), None);
+        assert_eq!(store.resolve_vision(Some("ghost"), None), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Per-model metadata wins over the entry-level flag: metadata belongs to
+    /// the model id, so a thread override must read the override's flag.
+    #[test]
+    fn resolve_vision_prefers_the_inventory_entry_for_the_override_model() {
+        let dir = temp_dir("resolve-vision-model");
+        let store = store(&dir);
+        let mut entry = entry("p", Some("sk-1234567890abcdef"));
+        entry.supports_vision = Some(false);
+        entry.models = Some(vec![ProviderModelInventoryItem {
+            id: "vision-model".into(),
+            context_window_tokens: Some(200_000),
+            supports_vision: Some(true),
+        }]);
+        store.upsert(entry, true).unwrap();
+
+        assert_eq!(store.resolve_vision(Some("p"), None), Some(false));
+        assert_eq!(
+            store.resolve_vision(Some("p"), Some("vision-model")),
+            Some(true)
+        );
+        // Unknown override model: fall back to the entry-level flag.
+        assert_eq!(store.resolve_vision(Some("p"), Some("other")), Some(false));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An override model with an inventory entry compacts against the recorded
+    /// window; one without clears it, because the stored limit belongs to the
+    /// stored model id.
+    #[test]
+    fn resolve_for_model_applies_the_inventory_window() {
+        let dir = temp_dir("resolve-for-model");
+        let store = store(&dir);
+        let mut entry = entry("p", Some("sk-1234567890abcdef"));
+        entry.context_window_tokens = Some(128_000);
+        entry.models = Some(vec![
+            ProviderModelInventoryItem {
+                id: "big".into(),
+                context_window_tokens: Some(1_000_000),
+                supports_vision: None,
+            },
+            ProviderModelInventoryItem {
+                id: "small".into(),
+                context_window_tokens: None,
+                supports_vision: None,
+            },
+        ]);
+        store.upsert(entry, true).unwrap();
+
+        // No override: the stored model keeps its stored window.
+        let base = store.resolve_for_model(Some("p"), None).unwrap();
+        assert_eq!(base.context_window_tokens, Some(128_000));
+
+        // Override with metadata: that model's window wins.
+        let big = store
+            .resolve_for_model(Some("p"), Some("big".to_string()))
+            .unwrap();
+        assert_eq!(big.model, "big");
+        assert_eq!(big.context_window_tokens, Some(1_000_000));
+
+        // Override without metadata: unknown, never another model's limit.
+        let small = store
+            .resolve_for_model(Some("p"), Some("small".to_string()))
+            .unwrap();
+        assert_eq!(small.context_window_tokens, None);
+
+        // Unrelated override: also unknown.
+        let other = store
+            .resolve_for_model(Some("p"), Some("other".to_string()))
+            .unwrap();
+        assert_eq!(other.context_window_tokens, None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -18,12 +18,10 @@ import {
   type ProviderModelSummary
 } from '../../../shared/contracts'
 import { CheckField, Field, SelectField, TextField } from './Field'
-import { PROVIDER_MODELS_MAX } from '../../../shared/contracts/web-only'
 import {
-  applyCatalogModel,
   buildCatalogRequest,
-  catalogLabel,
-  mergeImportedModels
+  mergeImportedModels,
+  updateInventoryItem
 } from './ProviderCatalog'
 import { ProviderModelImportDialog } from './ProviderModelImportDialog'
 import { Notice } from './SectionShell'
@@ -60,7 +58,6 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
   const [catalog, setCatalog] = useState<ProviderModelSummary[]>([])
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
-
   const patch = <K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]): void => {
     setDraft((current) => ({ ...current, [key]: value }))
   }
@@ -75,7 +72,10 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
     return built.entry
   }
 
-  const discover = async (): Promise<void> => {
+  // One merged entry point: fetch the remote catalog, then open the picker
+  // over it. A failed or empty fetch keeps the dialog closed and reports
+  // inline, so the operator never confirms against a stale list.
+  const openImport = async (): Promise<void> => {
     const built = buildCatalogRequest(draft, editing)
     if (!built.ok) {
       setCatalogError(built.error)
@@ -85,21 +85,16 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
     try {
       const response = await onDiscover(built.request)
       setCatalog(response.models)
-      if (response.models.length === 0) setCatalogError(t('settings.providers.catalogEmpty'))
+      if (response.models.length === 0) {
+        setCatalogError(t('settings.providers.catalogEmpty'))
+        return
+      }
+      setImporting(true)
     } catch (thrown) {
       setCatalog([])
       setCatalogError(thrown instanceof Error ? thrown.message : t('settings.providers.catalogQueryFailedShort'))
     }
   }
-
-  const catalogLabels = Object.fromEntries(catalog.map((model) => [model.id, catalogLabel(model)])) as Record<string, string>
-  // Discovery alone must not silently persist an inventory: the ids below are
-  // offered as an explicit action, capped so the save cannot fail on the store's
-  // ceiling. `mergeImportedModels` already drops the default model and dupes.
-  const catalogAddable = catalog
-    .map((model) => model.id)
-    .filter((id) => id !== draft.model.trim() && !draft.models.includes(id))
-    .slice(0, PROVIDER_MODELS_MAX)
 
   return (
     <div className="ark-card ark-card--editing">
@@ -159,56 +154,58 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
             htmlFor="provider-model-inventory"
             hint={t('settings.providerForm.inventoryHint')}
           >
-            <div id="provider-model-inventory" className="ark-settings__tools">
-              {draft.models.map((id) => (
-                <span key={id} className="ark-chip">
-                  {id}
+            <div id="provider-model-inventory" className="ark-importdialog__rows">
+              {draft.models.map((item) => (
+                <div key={item.id} className="ark-importdialog__row">
+                  <span className="ark-importdialog__row-id">{item.id}</span>
+                  <input
+                    className="ark-field__input ark-provider-model__context"
+                    type="number"
+                    min={1}
+                    placeholder={t('settings.providerForm.inventoryContextPlaceholder')}
+                    aria-label={t('settings.providerForm.inventoryContextLabel', { model: item.id })}
+                    value={item.context_window_tokens ?? ''}
+                    disabled={busy}
+                    onChange={(event) => {
+                      const raw = event.target.value.trim()
+                      if (raw === '') {
+                        setDraft((current) => updateInventoryItem(current, item.id, { context_window_tokens: undefined }))
+                        return
+                      }
+                      const parsed = Number(raw)
+                      if (!Number.isSafeInteger(parsed) || parsed <= 0) return
+                      setDraft((current) => updateInventoryItem(current, item.id, { context_window_tokens: parsed }))
+                    }}
+                  />
+                  <label className="ark-check">
+                    <input
+                      type="checkbox"
+                      checked={item.supports_vision === true}
+                      disabled={busy}
+                      aria-label={t('settings.providerForm.inventoryVisionLabel', { model: item.id })}
+                      onChange={(event) =>
+                        setDraft((current) => updateInventoryItem(current, item.id, { supports_vision: event.target.checked }))
+                      }
+                    />
+                    {t('settings.providerForm.inventoryVision')}
+                  </label>
                   <button
                     type="button"
                     className="ark-importdialog__chip-remove"
-                    aria-label={t('settings.providerForm.inventoryRemove', { model: id })}
+                    aria-label={t('settings.providerForm.inventoryRemove', { model: item.id })}
                     disabled={busy}
                     onClick={() =>
-                      setDraft((current) => ({ ...current, models: current.models.filter((seen) => seen !== id) }))
+                      setDraft((current) => ({
+                        ...current,
+                        models: current.models.filter((seen) => seen.id !== item.id)
+                      }))
                     }
                   >
                     ×
                   </button>
-                </span>
+                </div>
               ))}
             </div>
-          </Field>
-        ) : null}
-        {catalog.length > 0 ? (
-          <Field
-            label={t('settings.providerForm.catalogLabel')}
-            htmlFor="provider-catalog-model"
-            hint={t('settings.providerForm.catalogHint')}
-          >
-            <select
-              id="provider-catalog-model"
-              className="ark-field__select"
-              value={catalog.some((item) => item.id === draft.model) ? draft.model : ''}
-              disabled={busy}
-              onChange={(event) => {
-                const model = catalog.find((item) => item.id === event.target.value)
-                if (model) setDraft((current) => applyCatalogModel(current, model))
-              }}
-            >
-              <option value="">{t('settings.providerForm.catalogPlaceholder')}</option>
-              {catalog.map((model) => <option key={model.id} value={model.id}>{catalogLabels[model.id] ?? model.id}</option>)}
-            </select>
-            {catalogAddable.length > 0 ? (
-              <Button
-                size="sm"
-                disabled={busy}
-                onClick={() => setDraft((current) => mergeImportedModels(current, catalogAddable))}
-              >
-                {t('settings.providerForm.catalogAddAll', { count: catalogAddable.length })}
-              </Button>
-            ) : (
-              <span className="ark-settings__hint">{t('settings.providerForm.catalogAllPresent')}</span>
-            )}
           </Field>
         ) : null}
         <TextField
@@ -243,11 +240,8 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
         <button type="button" className="ark-linkbtn" onClick={() => setAdvanced((value) => !value)}>
           {advanced ? t('settings.providerForm.advancedHide') : t('settings.providerForm.advancedShow')}
         </button>
-        <Button size="sm" disabled={busy || catalogBusy} onClick={() => void discover()}>
-          {catalogBusy ? t('settings.providerForm.querying') : t('settings.providerForm.queryModels')}
-        </Button>
-        <Button size="sm" disabled={busy} onClick={() => setImporting(true)}>
-          {t('settings.providerForm.importModels')}
+        <Button size="sm" disabled={busy || catalogBusy} onClick={() => void openImport()}>
+          {catalogBusy ? t('settings.providerForm.querying') : t('settings.providerForm.importModels')}
         </Button>
       </div>
 
@@ -312,8 +306,8 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
           catalog={catalog}
           draft={draft}
           onCancel={() => setImporting(false)}
-          onConfirm={(ids) => {
-            setDraft((current) => mergeImportedModels(current, ids))
+          onConfirm={(rows) => {
+            setDraft((current) => mergeImportedModels(current, rows))
             setImporting(false)
           }}
         />

@@ -1,54 +1,68 @@
 import { describe, expect, it } from 'vitest'
-import type { ProviderModelSummary } from '../../../shared/contracts'
 import { buildEntry, emptyDraft } from './ProviderDraft'
-import { applyCatalogModel } from './ProviderCatalog'
+import { mergeImportedModels, updateInventoryItem } from './ProviderCatalog'
 
-describe('provider model discovery form helpers', () => {
-  it('applies explicit catalog capabilities to the entry the user saves', () => {
-    const draft = {
-      ...emptyDraft(),
-      id: 'gateway',
-      base_url: 'https://gateway.example/v1',
-      api_key: 'secret'
-    }
-    const model: ProviderModelSummary = {
-      id: 'vision-model',
-      context_window_tokens: 128_000,
-      supports_vision: true,
-      max_output_tokens: 16_384
-    }
-
-    const chosen = applyCatalogModel(draft, model)
-    const built = buildEntry(chosen, false)
-
-    expect(chosen.model).toBe('vision-model')
-    expect(chosen.context_window_tokens).toBe('128000')
-    expect(chosen.supports_vision).toBe(true)
-    expect(built).toMatchObject({
-      ok: true,
-      entry: {
-        model: 'vision-model',
-        context_window_tokens: 128_000,
-        supports_vision: true
-      }
-    })
-  })
-
-  it('keeps hand-typed capabilities when the catalog does not declare them', () => {
+describe('provider model inventory helpers', () => {
+  it('imports catalog metadata into the entry the user saves', () => {
     const draft = {
       ...emptyDraft(),
       id: 'gateway',
       base_url: 'https://gateway.example/v1',
       api_key: 'secret',
-      context_window_tokens: '200000',
-      supports_vision: false
+      model: 'vision-model'
     }
 
-    // A bare `{ id }` row is what most `/models` endpoints actually return.
-    const chosen = applyCatalogModel(draft, { id: 'plain-model' })
+    const merged = mergeImportedModels(draft, [
+      { id: 'vision-model', label: null, alreadyPresent: false, context_window_tokens: 128_000, supports_vision: true },
+      { id: 'plain-model', label: null, alreadyPresent: false }
+    ])
+    const built = buildEntry(merged, false)
 
-    expect(chosen.model).toBe('plain-model')
-    expect(chosen.context_window_tokens).toBe('200000')
-    expect(chosen.supports_vision).toBe(false)
+    expect(built).toMatchObject({
+      ok: true,
+      entry: {
+        model: 'vision-model',
+        context_window_tokens: 128_000,
+        supports_vision: true,
+        models: [{ id: 'plain-model', supports_vision: undefined }]
+      }
+    })
+  })
+
+  it('keeps per-model metadata valid: a non-positive window fails the save', () => {
+    const draft = {
+      ...emptyDraft(),
+      id: 'gateway',
+      base_url: 'https://gateway.example/v1',
+      api_key: 'secret',
+      model: 'default',
+      models: [{ id: 'bad', context_window_tokens: 0 }]
+    }
+
+    const built = buildEntry(draft, false)
+
+    expect(built).toMatchObject({ ok: false })
+  })
+
+  it('patches one inventory row in place without touching the others', () => {
+    const draft = {
+      ...emptyDraft(),
+      model: 'default',
+      models: [
+        { id: 'a', context_window_tokens: 128_000 },
+        { id: 'b' }
+      ]
+    }
+
+    const patched = updateInventoryItem(draft, 'b', { supports_vision: true, context_window_tokens: 32_000 })
+
+    expect(patched.models).toEqual([
+      { id: 'a', context_window_tokens: 128_000 },
+      { id: 'b', context_window_tokens: 32_000, supports_vision: true }
+    ])
+
+    // Clearing restores "unknown": the key is dropped, not written as null.
+    const cleared = updateInventoryItem(patched, 'a', { context_window_tokens: undefined })
+    expect(cleared.models[0]).toEqual({ id: 'a' })
   })
 })
