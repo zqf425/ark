@@ -78,11 +78,15 @@ impl ModelCatalogClient {
             .map_err(|_| catalog_transport_failure(&config.provider_id))?;
         let status = response.status();
         if !status.is_success() {
+            // Carry the upstream status so the settings UI can tell an auth
+            // failure (401/403) from a wrong endpoint (404) instead of showing
+            // one generic "model request failed" for every case.
             return Err(ArkError::model(format!(
                 "model catalog request for provider `{}` returned HTTP {}",
                 config.provider_id,
                 status.as_u16()
-            )));
+            ))
+            .with_upstream_status(status.as_u16()));
         }
         if response.content_length().is_some_and(|size| {
             usize::try_from(size).map_or(true, |size| size > MAX_CATALOG_BODY_BYTES)
@@ -123,25 +127,15 @@ fn catalog_transport_failure(provider_id: &str) -> ArkError {
     ))
 }
 
-/// Resolve the standard `GET /v1/models` endpoint from a provider base URL.
+/// Resolve the standard `{base}/models` endpoint from a provider base URL.
 ///
-/// A base ending in `/v1` (including gateway paths such as `/api/v1`) is not
-/// given a second version segment. Query parameters are preserved for providers
-/// that explicitly place routing data there, but this helper never exposes the
-/// URL in an error message.
+/// The version-segment rule lives in [`crate::config::url::model_catalog_url`],
+/// shared with the chat families: discovery must hit the same version prefix a
+/// turn would, otherwise a provider that answers `/v4/chat/completions` also
+/// answers 404 for `/v4/v1/models`. This wrapper only supplies the resolved base
+/// URL and never exposes the URL in an error message.
 fn model_catalog_url(config: &ProviderConfig) -> String {
-    let base = config.resolved_base_url();
-    let Ok(mut url) = reqwest::Url::parse(&base) else {
-        return format!("{}/v1/models", base.trim_end_matches('/'));
-    };
-    let path = url.path().trim_end_matches('/');
-    let catalog_path = if path.ends_with("/v1") {
-        format!("{path}/models")
-    } else {
-        format!("{path}/v1/models")
-    };
-    url.set_path(&catalog_path);
-    url.to_string()
+    crate::config::url::model_catalog_url(&config.resolved_base_url())
 }
 
 /// Parse common provider catalog shapes into the stable wire response.
@@ -314,5 +308,47 @@ mod tests {
         assert!(error.message.contains("catalog"));
         assert!(!error.message.contains("api_key"));
         assert!(!error.message.contains("secret"));
+    }
+
+    /// A non-2xx catalog answer must carry the upstream status, so the settings
+    /// UI can tell a bad key (401) from a wrong base URL (404) instead of
+    /// showing the same generic message for both.
+    #[tokio::test]
+    async fn a_failed_catalog_keeps_the_upstream_status() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4_096];
+            let _ = socket.read(&mut request).unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        });
+
+        let config = ProviderConfig::new("catalog", "unused")
+            .with_base_url(format!("http://{address}/v1"))
+            .with_api_key("secret");
+        let error = super::ModelCatalogClient::default()
+            .list(&config)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.upstream_status, Some(401));
+        assert!(error.message.contains("401"), "{}", error.message);
+        // The transport layer's own status stays the documented 502 for a
+        // proxied model failure; only `upstream_status` names the provider.
+        assert_eq!(
+            error.code,
+            ark_common::ArkErrorCode::ModelRequestFailed,
+            "{}",
+            error.message
+        );
+        server.join().unwrap();
     }
 }

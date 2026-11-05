@@ -60,6 +60,7 @@ export type {
   ProviderModelCatalogConnection,
   ProviderModelCatalogRequest,
   ProviderModelCatalogResponse,
+  ProviderModelInventoryItem,
   ProviderModelSummary,
   ProviderTestRequest,
   ProviderTestResponse,

@@ -374,20 +374,12 @@ async fn start_if_eligible(
         return false;
     }
 
-    let _workspace_guard = state.workspace_gate.lock().await;
-    if cancel.is_cancelled()
-        || !state.continuations.is_current(thread_id, generation)
-        || state.is_shutting_down()
-        || !policy_allows_auto_continue(state)
-        || state.turns.active_for(thread_id).is_some()
-    {
-        return false;
-    }
-
-    let turn_id = TurnId::new();
     // Same pre-start seam as the explicit-input path (requirements/
     // plugin-hook-bus.md): outside the workspace gate, no retry on denial.
-    // An auto-continuation denied by a hook simply stays unscheduled.
+    // A hook callback may re-enter the host through a gate-protected route;
+    // holding the global gate while awaiting it would self-deadlock. An
+    // auto-continuation denied by a hook simply stays unscheduled.
+    let turn_id = TurnId::new();
     if state
         .hooks
         .on_turn_pre_start(
@@ -402,6 +394,20 @@ async fn start_if_eligible(
     {
         return false;
     }
+
+    // Recheck eligibility under the gate: a user turn, archive, delete or
+    // shutdown may have landed while the hook was running. Registration then
+    // shares the critical section with those lifecycle handlers.
+    let _workspace_guard = state.workspace_gate.lock().await;
+    if cancel.is_cancelled()
+        || !state.continuations.is_current(thread_id, generation)
+        || state.is_shutting_down()
+        || !policy_allows_auto_continue(state)
+        || state.turns.active_for(thread_id).is_some()
+    {
+        return false;
+    }
+
     let Some(registration) = state.turns.try_register(thread_id, turn_id, cancel.clone()) else {
         return false;
     };

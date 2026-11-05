@@ -1,231 +1,12 @@
-@import './workbench-agent.css';
 @import './workbench-panel.css';
 
 /*
- * Workbench layout: full-height glass sidebar + centered canvas + context
- * drawer, ported from the smart-ark Code shell. The sidebar is a layered
- * gradient glass surface; the canvas rides the stage gradient; the body washes
- * (styles/global.css) show through everywhere else.
+ * Workbench scene layout (ARK Console, proposal A).
+ *
+ * The scene is a flex row: thread list, conversation, resident inspector. The
+ * shell owns the rail/top bar/status bar; this file only owns the columns and
+ * the keyboard-operable resizer. Colours come from design tokens only.
  */
-
-.ark-shell {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  background: transparent;
-}
-
-.ark-cols {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  position: relative;
-}
-
-.ark-col {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-}
-
-.ark-col--left {
-  width: var(--ark-left);
-  flex: none;
-  position: relative;
-  background: var(--ark-sidebar-gradient);
-  border-right: 1px solid var(--ark-sidebar-border);
-}
-
-/* Top haze: the radial whale-blue light smart-ark layers over its sidebar
-   gradient. Sits under the sidebar content. */
-.ark-col--left::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--ark-sidebar-haze);
-  pointer-events: none;
-}
-
-.ark-col--left > * {
-  position: relative;
-}
-
-.ark-col--center {
-  flex: 1;
-  min-width: 320px;
-  position: relative;
-  background: var(--ark-stage-gradient);
-}
-
-/* Collapsed-sidebar tab: a slim rail button to bring the thread list back. */
-.ark-sidebar-tab {
-  width: 26px;
-  flex: none;
-  border: 0;
-  border-right: 1px solid var(--ark-sidebar-border);
-  background: var(--ark-sidebar-gradient);
-  color: var(--ark-text-faint);
-  cursor: pointer;
-  font-size: 14px;
-}
-
-.ark-sidebar-tab:hover {
-  color: var(--ark-accent);
-  background: var(--ark-sidebar-row-hover);
-}
-
-/* ---------- sidebar footer: status + view switch ---------- */
-
-.ark-sidebar__foot {
-  flex: none;
-  border-top: 1px solid var(--ark-sidebar-divider);
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.ark-sidebar__foot-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.ark-sidebar__status {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--ark-text-faint);
-  font-size: 11.5px;
-}
-
-.ark-sidebar__status-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ark-sidebar__refresh {
-  margin-left: auto;
-  width: 22px;
-  height: 22px;
-  border: 0;
-  border-radius: var(--ark-radius-sm);
-  background: transparent;
-  color: var(--ark-text-faint);
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-}
-
-.ark-sidebar__refresh:hover {
-  background: var(--ark-sidebar-row-hover);
-  color: var(--ark-text);
-}
-
-/* Segmented Code/Settings switch, styled like smart-ark's workspace tabs:
-   inset track, raised active pill with a whale-blue ring. */
-.ark-viewswitch {
-  display: flex;
-  gap: 2px;
-  align-items: center;
-  padding: 3px;
-  border-radius: 9px;
-  background: var(--ark-bg-inset);
-  box-shadow: inset 0 0 0 1px var(--ark-sidebar-row-ring);
-}
-
-.ark-viewswitch__btn {
-  flex: 1;
-  border: 0;
-  background: none;
-  color: var(--ark-text-dim);
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 7px;
-  cursor: pointer;
-}
-
-.ark-viewswitch__btn:hover {
-  color: var(--ark-text);
-  background: var(--ark-sidebar-row-hover);
-}
-
-.ark-viewswitch__btn.is-active {
-  color: var(--ark-accent);
-  background: var(--ark-bg-raised);
-  font-weight: 550;
-  box-shadow: var(--ark-shadow-ctl), 0 0 0 1px var(--ark-sidebar-row-ring);
-}
-
-/* ---------- context drawer ---------- */
-
-/* The context projection floats over the canvas: the conversation never
-   reflows when it opens, and the scrim makes dismissal obvious. */
-.ark-drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: var(--ark-right);
-  max-width: 100%;
-  z-index: 6;
-  display: flex;
-  flex-direction: column;
-  background: var(--ark-bg-raised);
-  border-left: 1px solid var(--ark-border);
-  box-shadow: var(--ark-shadow-2);
-}
-
-.ark-drawer[hidden],
-.ark-drawer-scrim[hidden] {
-  display: none;
-}
-
-.ark-drawer-scrim {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  border: 0;
-  padding: 0;
-  background: var(--ark-overlay);
-  cursor: pointer;
-}
-
-/* Floating frosted pill with the collapse toggles. */
-.ark-workbench-tools {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--ark-border-muted);
-  border-radius: 999px;
-  background: var(--ark-card-ghost);
-  backdrop-filter: blur(10px) saturate(1.1);
-  box-shadow: var(--ark-shadow-ctl);
-  z-index: 4;
-}
-
-.ark-workbench-tools__btn {
-  width: 24px;
-  height: 22px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--ark-text-faint);
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-}
-
-.ark-workbench-tools__btn:hover {
-  background: var(--ark-bg-hover);
-  color: var(--ark-text);
-}
 
 .ark-resizer {
   width: 5px;
@@ -251,6 +32,23 @@
 
 .ark-resizer:focus-visible {
   outline: none;
+}
+
+/* Collapsed thread list: a slim rail button to bring it back. */
+.console-sidebar-tab {
+  width: 26px;
+  flex: none;
+  border: 0;
+  border-right: 1px solid var(--console-line);
+  background: var(--ark-bg-canvas);
+  color: var(--ark-text-faint);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.console-sidebar-tab:hover {
+  color: var(--ark-accent);
+  background: var(--ark-bg-hover);
 }
 
 @media (prefers-reduced-motion: reduce) {

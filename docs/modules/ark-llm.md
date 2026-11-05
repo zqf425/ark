@@ -18,6 +18,10 @@
   `max_output_tokens` / `max_tokens` / `top_provider.max_completion_tokens` 中的输出上限
   （`max_output_tokens`，缺失即 unknown）；通用 `/models` 只有 id 时，能力字段必须是
   unknown。GET 请求 10 秒超时、响应最大 1 MiB、模型最多 500 个，错误不得回显可能携带 query secret 的 URL。
+- 目录 URL 与聊天 URL 共用同一版本段规则（`config::url::model_catalog_url`）：已带 `v1`/`v2`/`v4`/`V1` 等
+  版本段（含 `/api/paas/v4` 这类网关前缀）的 base 直接追加 `models`，`/beta` 与聊天一样提升为 `/v1`。
+  禁止在目录侧单独判 `ends_with("/v1")`，否则聊天可用而目录 404。非 2xx 响应必须带
+  `upstream_status`，使 401/403 与 404 在设置页可区分。
 - provider 配置的 `custom_endpoint` 是整 URL 逐字模式：设置后请求不再追加任何 provider family 路径，
   URL 原样使用（仍受脱敏与错误处理约束）。
 - 自定义 provider header 可以补充请求，但不得覆盖 endpoint family 的认证、版本或 content-type 头；POST 的
