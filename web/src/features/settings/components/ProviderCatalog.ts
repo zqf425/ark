@@ -9,7 +9,7 @@ import type {
   ProviderModelInventoryItem,
   ProviderModelSummary
 } from '../../../shared/contracts'
-import { PROVIDER_MODELS_MAX } from '../../../shared/contracts/web-only'
+import { PROVIDER_DEFAULT_CONTEXT_WINDOW, PROVIDER_MODELS_MAX } from '../../../shared/contracts/web-only'
 import { translateNow } from '../../../shared/i18n/current'
 import type { ProviderDraft } from './ProviderDraft'
 
@@ -123,13 +123,16 @@ export function buildImportCandidates(
   for (const model of catalog) {
     if (seen.has(model.id)) continue
     seen.add(model.id)
+    // Probe the catalog's declared window; when the provider publishes none,
+    // every imported row still gets a concrete 256K default (smart-ark parity)
+    // instead of an empty field that silently falls back at runtime.
+    const probed = model.context_window_tokens !== undefined
+    const label = catalogLabel(model) + (probed ? '' : ` · ${translateNow('settings.providerImport.fallbackContext')}`)
     rows.push({
       id: model.id,
-      label: catalogLabel(model),
+      label,
       alreadyPresent: present.has(model.id),
-      ...(model.context_window_tokens !== undefined
-        ? { context_window_tokens: model.context_window_tokens }
-        : {}),
+      context_window_tokens: model.context_window_tokens ?? PROVIDER_DEFAULT_CONTEXT_WINDOW,
       ...(model.supports_vision !== undefined
         ? { supports_vision: model.supports_vision }
         : {})
@@ -138,7 +141,14 @@ export function buildImportCandidates(
   for (const id of parsePastedModelIds(pastedText)) {
     if (seen.has(id)) continue
     seen.add(id)
-    rows.push({ id, label: null, alreadyPresent: present.has(id) })
+    // Pasted ids have no catalog metadata at all: same 256K fallback, and the
+    // dialog shows the fallback note so the value is never silently assumed.
+    rows.push({
+      id,
+      label: translateNow('settings.providerImport.fallbackContext'),
+      alreadyPresent: present.has(id),
+      context_window_tokens: PROVIDER_DEFAULT_CONTEXT_WINDOW
+    })
   }
   return rows
 }
@@ -184,7 +194,7 @@ export function mergeImportedModels(
       id,
       ...(row.context_window_tokens !== undefined
         ? { context_window_tokens: row.context_window_tokens }
-        : {}),
+        : { context_window_tokens: PROVIDER_DEFAULT_CONTEXT_WINDOW }),
       ...(row.supports_vision !== undefined
         ? { supports_vision: row.supports_vision }
         : {})
@@ -195,9 +205,7 @@ export function mergeImportedModels(
   // inventory — so a catalog row for the default model mirrors its metadata up.
   const defaultRow = selected.find((row) => row.id.trim() === defaultModel)
   if (defaultRow) {
-    if (defaultRow.context_window_tokens !== undefined) {
-      context_window_tokens = defaultRow.context_window_tokens.toString()
-    }
+    context_window_tokens = String(defaultRow.context_window_tokens ?? PROVIDER_DEFAULT_CONTEXT_WINDOW)
     if (defaultRow.supports_vision !== undefined) {
       supports_vision = defaultRow.supports_vision
     }

@@ -204,11 +204,12 @@ impl ProviderStore {
     /// Whether the resolved provider's model explicitly declared vision support.
     ///
     /// Same selection rules as [`Self::resolve`], but reads the catalog-reported
-    /// `supports_vision` flag. When a thread overrides the model and the
-    /// inventory records metadata for that model, the per-model flag wins:
-    /// metadata belongs to the model id, not the provider entry. `None`
-    /// (unknown) must be treated as "not declared": image parts are only sent
-    /// on an explicit positive, never on a guess from the model name.
+    /// `supports_vision` flag. Metadata belongs to the model id, never to the
+    /// provider entry: an override that names the stored default model reads
+    /// the entry-level flag, an override with an inventory row reads that row,
+    /// and an override with no row is unknown. `None` (unknown) must be treated
+    /// as "not declared": image parts are only sent on an explicit positive,
+    /// never inherited from another model or guessed from the model name.
     pub fn resolve_vision(&self, id: Option<&str>, model: Option<&str>) -> Option<bool> {
         let document = self.lock();
         let target = match id.map(str::trim).filter(|value| !value.is_empty()) {
@@ -218,9 +219,16 @@ impl ProviderStore {
                 .and_then(|default| document.get(default)),
         }?;
         if let Some(model) = model.map(str::trim).filter(|value| !value.is_empty()) {
+            if model == target.model {
+                return target.supports_vision;
+            }
             if let Some(item) = target.models.iter().flatten().find(|item| item.id == model) {
                 return item.supports_vision;
             }
+            // An override without inventory metadata is unknown. Inheriting the
+            // entry-level flag here would apply the default model's vision
+            // capability to a different model id that never declared it.
+            return None;
         }
         target.supports_vision
     }
@@ -887,8 +895,15 @@ mod tests {
             store.resolve_vision(Some("p"), Some("vision-model")),
             Some(true)
         );
-        // Unknown override model: fall back to the entry-level flag.
-        assert_eq!(store.resolve_vision(Some("p"), Some("other")), Some(false));
+        // An explicit override equal to the stored default model still reads
+        // the entry-level flag (the inventory strips that id).
+        assert_eq!(
+            store.resolve_vision(Some("p"), Some("deepseek-chat")),
+            Some(false)
+        );
+        // Unknown override model: no inventory row, so vision is unknown —
+        // the default model's flag must not leak onto a different model id.
+        assert_eq!(store.resolve_vision(Some("p"), Some("other")), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

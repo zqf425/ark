@@ -8,6 +8,7 @@ import {
   updateInventoryItem
 } from './ProviderCatalog'
 import { emptyDraft } from './ProviderDraft'
+import { PROVIDER_DEFAULT_CONTEXT_WINDOW } from '../../../shared/contracts/web-only'
 
 const catalogRow = (id: string): ProviderModelSummary => ({ id })
 
@@ -35,16 +36,43 @@ describe('provider batch model import helpers', () => {
       '',
       draft
     )
+    expect(rows[0]).toEqual({
+      id: 'vision',
+      label: 'vision — 128000 tokens · 支持识图',
+      alreadyPresent: false,
+      context_window_tokens: 128_000,
+      supports_vision: true
+    })
+    // A catalog row with no published window is probed to the 256K fallback
+    // and says so in its label, so the value is visible before confirming.
+    expect(rows[1]).toMatchObject({
+      id: 'plain',
+      label: expect.stringContaining('256K'),
+      alreadyPresent: false,
+      context_window_tokens: PROVIDER_DEFAULT_CONTEXT_WINDOW
+    })
+  })
+
+  it('probes 256K for catalog rows and pasted ids without a published window', () => {
+    const draft = { ...emptyDraft(), model: 'default' }
+    const rows = buildImportCandidates([catalogRow('bare')], 'pasted\n', draft)
     expect(rows).toEqual([
       {
-        id: 'vision',
-        label: 'vision — 128000 tokens · 支持识图',
+        id: 'bare',
+        label: expect.stringContaining('256K'),
         alreadyPresent: false,
-        context_window_tokens: 128_000,
-        supports_vision: true
+        context_window_tokens: PROVIDER_DEFAULT_CONTEXT_WINDOW
       },
-      { id: 'plain', label: 'plain', alreadyPresent: false }
+      {
+        id: 'pasted',
+        label: expect.stringContaining('256K'),
+        alreadyPresent: false,
+        context_window_tokens: PROVIDER_DEFAULT_CONTEXT_WINDOW
+      }
     ])
+    // The default draft itself starts at 256K, not an empty field, and an
+    // edit of a provider with no stored window is seeded the same way.
+    expect(draft.context_window_tokens).toBe(String(PROVIDER_DEFAULT_CONTEXT_WINDOW))
   })
 
   it('defaults the selection to everything not already present', () => {
@@ -76,8 +104,12 @@ describe('provider batch model import helpers', () => {
       { id: 'new', label: null, alreadyPresent: false }
     ])
     expect(merged.model).toBe('default')
-    // Existing inventory rows survive; the merge only appends fresh ids.
-    expect(merged.models).toEqual([{ id: 'inv-1' }, { id: 'new' }])
+    // Existing inventory rows survive; the merge only appends fresh ids, and a
+    // fresh row without catalog metadata gets the 256K fallback.
+    expect(merged.models).toEqual([
+      { id: 'inv-1' },
+      { id: 'new', context_window_tokens: PROVIDER_DEFAULT_CONTEXT_WINDOW }
+    ])
   })
 
   it('mirrors the default model\'s catalog metadata onto the entry-level fields', () => {
@@ -100,7 +132,10 @@ describe('provider batch model import helpers', () => {
       { id: 'second', label: null, alreadyPresent: false }
     ])
     expect(merged.model).toBe('first')
-    expect(merged.models).toEqual([{ id: 'second' }])
+    expect(merged.context_window_tokens).toBe(String(PROVIDER_DEFAULT_CONTEXT_WINDOW))
+    expect(merged.models).toEqual([
+      { id: 'second', context_window_tokens: PROVIDER_DEFAULT_CONTEXT_WINDOW }
+    ])
   })
 
   it('keeps catalog metadata across the merge', () => {

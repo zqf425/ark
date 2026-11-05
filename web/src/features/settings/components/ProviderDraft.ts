@@ -14,7 +14,7 @@ import {
   type ProviderModelInventoryItem,
   type ProviderView
 } from '../../../shared/contracts'
-import { PROVIDER_MODELS_MAX } from '../../../shared/contracts/web-only'
+import { PROVIDER_DEFAULT_CONTEXT_WINDOW, PROVIDER_MODELS_MAX } from '../../../shared/contracts/web-only'
 
 export type ProviderDraft = {
   id: string
@@ -45,7 +45,7 @@ export function emptyDraft(): ProviderDraft {
     headers_text: '',
     max_tokens: '',
     temperature: '',
-    context_window_tokens: '',
+    context_window_tokens: String(PROVIDER_DEFAULT_CONTEXT_WINDOW),
     supports_vision: null,
     models: []
   }
@@ -67,7 +67,7 @@ export function draftFromView(view: ProviderView): ProviderDraft {
     headers_text: '',
     max_tokens: '',
     temperature: '',
-    context_window_tokens: view.context_window_tokens?.toString() ?? '',
+    context_window_tokens: String(view.context_window_tokens ?? PROVIDER_DEFAULT_CONTEXT_WINDOW),
     supports_vision: view.supports_vision ?? null,
     models: view.models ?? []
   }

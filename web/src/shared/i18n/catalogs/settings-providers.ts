@@ -51,7 +51,13 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
   'settings.providerForm.idHintCreating': ['唯一标识，保存后用于 default provider。', 'Unique identifier, used as the default provider id after saving.'],
   'settings.providerForm.labelLabel': ['label（可选）', 'label (optional)'],
   'settings.providerForm.labelPlaceholder': ['DeepSeek 官方', 'DeepSeek official'],
-  'settings.providerForm.modelLabel': ['model', 'model'],
+  'settings.providerForm.defaultModelLabel': ['默认模型（model）', 'Default model (model)'],
+  'settings.providerForm.modelsLabel': ['模型（首行为默认模型，id 可编辑；每行独立设置上下文与识图）', 'Models (first row is the default, editable id; each row sets its own context and vision)'],
+  'settings.providerForm.modelsHint': [
+    '所有模型用完全相同的行：id、上下文窗口、识图。首行是默认模型（标记「默认」，id 可编辑、不可移除），其上下文与识图存条目级字段；其余模型可在会话里切换，每行只管自己，互不覆盖。目录未声明上下文时按 256K 兜底，仍可手动修改。',
+    'Every model uses the same row: id, context window, vision. The first row is the default (badged Default, editable id, not removable) and its context/vision live at entry level; the others are selectable per session. Each row owns its own values with no cross-row override. A model without a published window falls back to 256K and stays editable.'
+  ],
+  'settings.providerForm.defaultModelBadge': ['默认', 'Default'],
   'settings.providerForm.modelPlaceholder': ['deepseek-chat', 'deepseek-chat'],
   'settings.providerForm.apiKeyPlaceholderKeep': ['留空 = 保留原 key', 'Leave blank to keep the stored key'],
   'settings.providerForm.apiKeyPlaceholderNew': ['sk-…', 'sk-…'],
@@ -63,11 +69,6 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
   'settings.providerForm.advancedHide': ['收起高级选项', 'Hide advanced options'],
   'settings.providerForm.querying': ['查询中…', 'Querying…'],
   'settings.providerForm.importModels': ['导入模型', 'Import models'],
-  'settings.providerForm.inventoryLabel': ['已导入模型', 'Imported models'],
-  'settings.providerForm.inventoryHint': [
-    '会话运行配置可从这份清单里选；每个模型可单独设置上下文窗口与识图能力，未填写表示未知。',
-    'The session runtime picker offers these; each model can carry its own context window and vision flag — blank means unknown.'
-  ],
   'settings.providerForm.inventoryRemove': ['移除 {model}', 'Remove {model}'],
   'settings.providerForm.inventoryContextPlaceholder': ['上下文窗口', 'Context window'],
   'settings.providerForm.inventoryContextLabel': ['{model} 的上下文窗口（tokens）', 'Context window for {model} (tokens)'],
@@ -83,12 +84,6 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
   'settings.providerForm.maxTokensLabel': ['max_tokens（可选）', 'max_tokens (optional)'],
   'settings.providerForm.maxTokensHint': ['留空则使用运行时默认值。', 'Leave blank to use the runtime default.'],
   'settings.providerForm.temperatureLabel': ['temperature（可选，0–2）', 'temperature (optional, 0–2)'],
-  'settings.providerForm.contextWindowLabel': ['context_window_tokens（可选）', 'context_window_tokens (optional)'],
-  'settings.providerForm.contextWindowHint': [
-    '模型目录有明确数据时会自动填写；运行时会用它限制上下文压缩阈值。',
-    'Filled in when the catalog has explicit data; the runtime uses it to bound the compaction threshold.'
-  ],
-  'settings.providerForm.visionLabel': ['支持识图', 'Supports vision'],
   'settings.providerForm.validationFailed': ['表单校验失败', 'Form validation failed'],
   'settings.providerForm.catalogFailed': ['模型目录查询失败', 'Model catalog query failed'],
 
@@ -126,5 +121,6 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
   'settings.providerImport.selectAllVisible': ['全选可见（{count}）', 'Select visible ({count})'],
   'settings.providerImport.clearVisible': ['取消可见项', 'Clear visible'],
   'settings.providerImport.confirm': ['导入 {count} 个', 'Import {count}'],
-  'settings.providerImport.overCap': ['超出上限 {max}', 'over the {max} limit']
+  'settings.providerImport.overCap': ['超出上限 {max}', 'over the {max} limit'],
+  'settings.providerImport.fallbackContext': ['目录未声明上下文，按 256K 兜底', 'no published window, 256K fallback']
 } as const

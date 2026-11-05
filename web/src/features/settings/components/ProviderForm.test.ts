@@ -24,7 +24,9 @@ describe('provider model inventory helpers', () => {
         model: 'vision-model',
         context_window_tokens: 128_000,
         supports_vision: true,
-        models: [{ id: 'plain-model', supports_vision: undefined }]
+        // A row with no catalog metadata is persisted with the 256K fallback,
+        // so the runtime never sees an unknown window after an import.
+        models: [{ id: 'plain-model', context_window_tokens: 256_000, supports_vision: undefined }]
       }
     })
   })

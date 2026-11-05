@@ -174,9 +174,13 @@ pub(crate) fn parse_model_catalog_response(body: &str) -> Result<ProviderModelCa
                         &["context_window"],
                         &["context_window_tokens"],
                         &["max_context_length"],
+                        &["max_model_len"],
                         &["limits", "context_length"],
+                        &["top_provider", "context_length"],
+                        &["metadata", "context_length"],
                     ],
-                ),
+                )
+                .or_else(|| provider_array_context_length(value)),
                 supports_vision: vision_at(value),
                 max_output_tokens: number_at(
                     value,
@@ -218,9 +222,18 @@ fn number_at(value: &Value, paths: &[&[&str]]) -> Option<u64> {
 }
 
 fn vision_at(value: &Value) -> Option<bool> {
-    bool_at(value, &[&["supports_vision"], &["capabilities", "vision"]]).or_else(|| {
+    bool_at(
+        value,
+        &[
+            &["supports_vision"],
+            &["capabilities", "vision"],
+            &["supports_image_in"],
+        ],
+    )
+    .or_else(|| {
         modalities_at(value, &["architecture", "input_modalities"])
             .or_else(|| modalities_at(value, &["input_modalities"]))
+            .or_else(|| modalities_at(value, &["modalities", "input"]))
             .map(|modalities| {
                 modalities
                     .iter()
@@ -237,6 +250,16 @@ fn bool_at(value: &Value, paths: &[&[&str]]) -> Option<bool> {
         }
         current.as_bool()
     })
+}
+
+/// HuggingFace Router style: each upstream entry in `providers[]` carries its
+/// own `context_length`; take the first positive one. Aggregators otherwise
+/// publish no top-level window, so without this the model would read as unknown.
+fn provider_array_context_length(value: &Value) -> Option<u64> {
+    let providers = value.get("providers")?.as_array()?;
+    providers
+        .iter()
+        .find_map(|provider| number_at(provider, &[&["context_length"], &["max_model_len"]]))
 }
 
 fn modalities_at<'a>(value: &'a Value, path: &[&str]) -> Option<Vec<&'a str>> {
@@ -282,6 +305,32 @@ mod tests {
         assert_eq!(catalog.models[1].supports_vision, Some(false));
         assert_eq!(catalog.models[2].context_window_tokens, None);
         assert_eq!(catalog.models[2].supports_vision, None);
+    }
+
+    #[test]
+    fn aggregator_context_and_vision_aliases_are_probed() {
+        let catalog = parse_model_catalog_response(
+            r#"{
+                "data": [
+                    {"id": "hf", "providers": [{"context_length": 32768}]},
+                    {"id": "vllm", "max_model_len": 65536, "modalities": {"input": ["text", "image"]}},
+                    {"id": "alias", "top_provider": {"context_length": 8192}, "supports_image_in": true},
+                    {"id": "metadata", "metadata": {"context_length": "4096"}}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let by_id = |id: &str| catalog.models.iter().find(|m| m.id == id).unwrap();
+        assert_eq!(by_id("hf").context_window_tokens, Some(32_768));
+        assert_eq!(by_id("vllm").context_window_tokens, Some(65_536));
+        assert_eq!(by_id("vllm").supports_vision, Some(true));
+        assert_eq!(by_id("alias").context_window_tokens, Some(8_192));
+        assert_eq!(by_id("alias").supports_vision, Some(true));
+        assert_eq!(by_id("metadata").context_window_tokens, Some(4_096));
+        // A bare /models row still reports unknown, not a guessed window.
+        let bare = parse_model_catalog_response(r#"{"data": [{"id": "bare"}]}"#).unwrap();
+        assert_eq!(bare.models[0].context_window_tokens, None);
     }
 
     #[test]
