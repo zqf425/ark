@@ -8,6 +8,7 @@ import type {
   ProviderModelCatalogRequest,
   ProviderModelSummary
 } from '../../../shared/contracts'
+import { PROVIDER_MODELS_MAX } from '../../../shared/contracts/web-only'
 import { translateNow } from '../../../shared/i18n/current'
 import type { ProviderDraft } from './ProviderDraft'
 
@@ -32,13 +33,22 @@ export function parseProviderHeaders(headersText: string): BuiltHeaders {
   }
 }
 
-/** Apply only remote metadata that the catalog explicitly returned. */
+/**
+ * Apply only remote metadata that the catalog explicitly returned.
+ *
+ * A missing field is "unknown", not "empty": most `/models` endpoints publish
+ * ids only, so overwriting a value the operator typed by hand would silently
+ * discard a real context window or vision flag.
+ */
 export function applyCatalogModel(draft: ProviderDraft, model: ProviderModelSummary): ProviderDraft {
   return {
     ...draft,
     model: model.id,
-    context_window_tokens: model.context_window_tokens?.toString() ?? '',
-    supports_vision: model.supports_vision ?? null
+    context_window_tokens:
+      model.context_window_tokens !== undefined
+        ? model.context_window_tokens.toString()
+        : draft.context_window_tokens,
+    supports_vision: model.supports_vision ?? draft.supports_vision
   }
 }
 
@@ -130,9 +140,22 @@ export function buildImportCandidates(
   return rows
 }
 
-/** Default selection: every row that is not already in the provider. */
+/**
+ * Default selection: every row that is not already in the provider, capped at
+ * the inventory ceiling.
+ *
+ * A catalog routinely returns hundreds of ids while `models` holds at most
+ * `PROVIDER_MODELS_MAX`. Pre-selecting everything would open the dialog with a
+ * permanently disabled confirm button, so the default is the first N selectable
+ * rows and the user can still deselect or pick a different subset.
+ */
 export function defaultImportSelection(rows: ImportCandidate[]): Set<string> {
-  return new Set(rows.filter((row) => !row.alreadyPresent).map((row) => row.id))
+  return new Set(
+    rows
+      .filter((row) => !row.alreadyPresent)
+      .slice(0, PROVIDER_MODELS_MAX)
+      .map((row) => row.id)
+  )
 }
 
 /**

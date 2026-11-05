@@ -28,6 +28,12 @@ export type ProvidersApi = {
   error: string | null
   /** Non-null while a mutation runs; the value names the row being changed. */
   busy: string | null
+  /**
+   * True only while a model-catalog query runs. Kept apart from `busy` because
+   * discovery is a read of the *remote* provider: it must not lock the settings
+   * form's inputs or make the save button claim it is saving.
+   */
+  catalogBusy: boolean
   refresh: () => Promise<void>
   upsert: (request: ProviderUpsertRequest) => Promise<Outcome<ProviderListResponse>>
   remove: (providerId: string) => Promise<Outcome<ProviderListResponse>>
@@ -43,6 +49,7 @@ export function useProviders(): ProvidersApi {
   const [status, setStatus] = useState<LoadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [catalogBusy, setCatalogBusy] = useState(false)
   const mounted = useMounted()
 
   const apply = useCallback((response: ProviderListResponse) => {
@@ -101,9 +108,9 @@ export function useProviders(): ProvidersApi {
     return outcome
   }, [])
   const models = useCallback(async (request: ProviderModelCatalogRequest) => {
-    setBusy(`models:${request.provider_id ?? 'draft'}`)
+    setCatalogBusy(true)
     const outcome = await attempt(() => listProviderModels(request))
-    if (mounted.current) setBusy(null)
+    if (mounted.current) setCatalogBusy(false)
     return outcome
   }, [])
 
@@ -111,5 +118,5 @@ export function useProviders(): ProvidersApi {
     void refresh()
   }, [refresh])
 
-  return { providers, defaultProviderId, activeProviderId, status, error, busy, refresh, upsert, remove, setDefault, test, models }
+  return { providers, defaultProviderId, activeProviderId, status, error, busy, catalogBusy, refresh, upsert, remove, setDefault, test, models }
 }

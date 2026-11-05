@@ -18,6 +18,7 @@ import {
   type ProviderModelSummary
 } from '../../../shared/contracts'
 import { CheckField, Field, SelectField, TextField } from './Field'
+import { PROVIDER_MODELS_MAX } from '../../../shared/contracts/web-only'
 import {
   applyCatalogModel,
   buildCatalogRequest,
@@ -42,13 +43,15 @@ export type ProviderFormProps = {
   editing: boolean
   initial: ProviderDraft
   busy: boolean
+  /** True only while the model-catalog query runs; never locks the form. */
+  catalogBusy: boolean
   onCancel: () => void
   onSubmit: (entry: ProviderEntry, makeDefault: boolean) => Promise<void>
   onTest: (entry: ProviderEntry) => Promise<void>
   onDiscover: (request: ProviderModelCatalogRequest) => Promise<ProviderModelCatalogResponse>
 }
 
-export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTest, onDiscover }: ProviderFormProps): JSX.Element {
+export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, onSubmit, onTest, onDiscover }: ProviderFormProps): JSX.Element {
   const { t } = useI18n()
   const [draft, setDraft] = useState<ProviderDraft>(initial)
   const [advanced, setAdvanced] = useState(false)
@@ -90,6 +93,13 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
   }
 
   const catalogLabels = Object.fromEntries(catalog.map((model) => [model.id, catalogLabel(model)])) as Record<string, string>
+  // Discovery alone must not silently persist an inventory: the ids below are
+  // offered as an explicit action, capped so the save cannot fail on the store's
+  // ceiling. `mergeImportedModels` already drops the default model and dupes.
+  const catalogAddable = catalog
+    .map((model) => model.id)
+    .filter((id) => id !== draft.model.trim() && !draft.models.includes(id))
+    .slice(0, PROVIDER_MODELS_MAX)
 
   return (
     <div className="ark-card ark-card--editing">
@@ -188,6 +198,17 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
               <option value="">{t('settings.providerForm.catalogPlaceholder')}</option>
               {catalog.map((model) => <option key={model.id} value={model.id}>{catalogLabels[model.id] ?? model.id}</option>)}
             </select>
+            {catalogAddable.length > 0 ? (
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => setDraft((current) => mergeImportedModels(current, catalogAddable))}
+              >
+                {t('settings.providerForm.catalogAddAll', { count: catalogAddable.length })}
+              </Button>
+            ) : (
+              <span className="ark-settings__hint">{t('settings.providerForm.catalogAllPresent')}</span>
+            )}
           </Field>
         ) : null}
         <TextField
@@ -222,8 +243,8 @@ export function ProviderForm({ editing, initial, busy, onCancel, onSubmit, onTes
         <button type="button" className="ark-linkbtn" onClick={() => setAdvanced((value) => !value)}>
           {advanced ? t('settings.providerForm.advancedHide') : t('settings.providerForm.advancedShow')}
         </button>
-        <Button size="sm" disabled={busy} onClick={() => void discover()}>
-          {busy ? t('settings.providerForm.querying') : t('settings.providerForm.queryModels')}
+        <Button size="sm" disabled={busy || catalogBusy} onClick={() => void discover()}>
+          {catalogBusy ? t('settings.providerForm.querying') : t('settings.providerForm.queryModels')}
         </Button>
         <Button size="sm" disabled={busy} onClick={() => setImporting(true)}>
           {t('settings.providerForm.importModels')}

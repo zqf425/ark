@@ -33,6 +33,21 @@ describe('provider batch model import helpers', () => {
     expect([...defaultImportSelection(rows)]).toEqual(['a', 'b'])
   })
 
+  // A catalog can list hundreds of ids while the store accepts at most
+  // PROVIDER_MODELS_MAX. Selecting all of them would open the dialog with a
+  // permanently disabled confirm button.
+  it('caps the default selection at the inventory ceiling', () => {
+    const draft = { ...emptyDraft(), model: 'default' }
+    const many = Array.from({ length: 100 }, (_, index) => catalogRow(`model-${index}`))
+    const rows = buildImportCandidates(many, '', draft)
+
+    const selection = defaultImportSelection(rows)
+
+    expect(selection.size).toBe(64)
+    expect([...selection][0]).toBe('model-0')
+    expect([...selection].at(-1)).toBe('model-63')
+  })
+
   it('merges the selection into the inventory without touching the default', () => {
     const draft = { ...emptyDraft(), model: 'default', models: ['inv-1'] }
     const merged = mergeImportedModels(draft, ['default', 'inv-1', 'new'])
