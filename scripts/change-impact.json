@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "areas": [
     {
       "id": "agent-runtime",
@@ -30,6 +30,108 @@
       "paths": ["apps/ark-desktop/"],
       "design": ["docs/modules/ark-desktop.md"],
       "verify": ["node --test apps/ark-desktop/scripts/desktop-layout.test.mjs", "npm --prefix apps/ark-desktop run build:web"]
+    },
+    {
+      "id": "common",
+      "paths": ["crates/ark-common/"],
+      "design": ["docs/modules/ark-common.md"],
+      "verify": ["cargo test -p ark-common"]
+    },
+    {
+      "id": "config",
+      "paths": ["crates/ark-config/"],
+      "design": ["docs/modules/ark-config.md"],
+      "verify": ["cargo test -p ark-config"]
+    },
+    {
+      "id": "store",
+      "paths": ["crates/ark-store/"],
+      "design": ["docs/modules/ark-store.md"],
+      "verify": ["cargo test -p ark-store"]
+    },
+    {
+      "id": "schedule",
+      "paths": ["crates/ark-schedule/"],
+      "design": ["docs/modules/ark-schedule.md"],
+      "verify": ["cargo test -p ark-schedule"]
+    },
+    {
+      "id": "im",
+      "paths": ["crates/ark-im/"],
+      "design": ["docs/modules/ark-im.md"],
+      "verify": ["cargo test -p ark-im"]
+    },
+    {
+      "id": "llm",
+      "paths": ["crates/ark-llm/"],
+      "design": ["docs/modules/ark-llm.md"],
+      "verify": ["cargo test -p ark-llm"]
+    },
+    {
+      "id": "tool",
+      "paths": ["crates/ark-tool/"],
+      "design": ["docs/modules/ark-tool.md"],
+      "verify": ["cargo test -p ark-tool"]
+    },
+    {
+      "id": "http",
+      "paths": ["crates/ark-http/"],
+      "design": ["docs/modules/ark-http.md"],
+      "verify": ["cargo test -p ark-http"]
+    },
+    {
+      "id": "ui",
+      "paths": ["crates/ark-ui/"],
+      "design": ["docs/modules/ark-ui.md"],
+      "verify": ["cargo test -p ark-ui"]
+    },
+    {
+      "id": "mcp",
+      "paths": ["crates/ark-mcp/"],
+      "design": ["docs/modules/ark-mcp.md"],
+      "verify": ["cargo test -p ark-mcp"]
+    },
+    {
+      "id": "plugin",
+      "paths": ["crates/ark-plugin/"],
+      "design": ["docs/modules/ark-plugin.md"],
+      "verify": ["cargo test -p ark-plugin"]
+    },
+    {
+      "id": "skills",
+      "paths": ["crates/ark-skills/"],
+      "design": ["docs/modules/ark-skills.md"],
+      "verify": ["cargo test -p ark-skills"]
+    },
+    {
+      "id": "provider",
+      "paths": ["crates/ark-provider/"],
+      "design": ["docs/modules/ark-provider.md"],
+      "verify": ["cargo test -p ark-provider"]
+    },
+    {
+      "id": "workspace",
+      "paths": ["crates/ark-workspace/"],
+      "design": ["docs/modules/ark-workspace.md"],
+      "verify": ["cargo test -p ark-workspace"]
+    },
+    {
+      "id": "delegation",
+      "paths": ["crates/ark-delegation/"],
+      "design": ["docs/modules/ark-delegation.md"],
+      "verify": ["cargo test -p ark-delegation"]
+    },
+    {
+      "id": "studio",
+      "paths": ["crates/ark-studio/"],
+      "design": ["docs/modules/ark-studio.md"],
+      "verify": ["cargo test -p ark-studio"]
+    },
+    {
+      "id": "obs",
+      "paths": ["crates/ark-obs/"],
+      "design": ["docs/modules/ark-obs.md"],
+      "verify": ["cargo test -p ark-obs"]
     }
   ]
 }

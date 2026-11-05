@@ -278,7 +278,10 @@ pub async fn remove(
     }
     // Thread ids are never reused. Drop the process-local tombstone after the
     // durable deletion; late child wakeups fail the store existence check.
+    // Also reclaim the turn-registry epoch marker: it is insert-only on
+    // registration and would otherwise leak one entry per deleted thread.
     state.continuations.allow(thread_id);
+    state.turns.forget_thread(thread_id);
     Ok(StatusCode::NO_CONTENT)
 }
 

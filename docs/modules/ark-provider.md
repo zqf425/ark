@@ -24,11 +24,21 @@ provider id 的回合经 `resolve(None)` 使用该默认；`resolve_vision(id)` 
 `resolve_thread_provider` 用覆盖值替换默认模型，因此清单是新模型进入会话选择器的登记表，不是
 每回合的解析来源。`ProviderView.models` 是该清单的脱敏镜像。
 
-模型目录只在用户点击查询时请求，既可引用已保存条目，也可使用未保存草稿；空草稿密钥/header 会复用
+模型目录只在用户点击导入时请求，既可引用已保存条目，也可使用未保存草稿；空草稿密钥/header 会复用
 同 id 的已存机密。目录解析出的 `context_window_tokens` 和 `supports_vision` 只有用户选择模型并保存后才
 持久化；`max_output_tokens` 仅出现在目录响应中供设置 UI 展示，不进持久化条目。缺失元数据必须保持
 unknown，禁止按模型名推断。已禁用条目仍可查询目录，便于在启用前完成配置。目录响应由 `ark-llm`
-限时、限体积、排序和去重，provider 层不缓存明文密钥或远端响应。
+限时、限体积、排序和去重，provider 层不缓存明文密钥或远端响应。目录 URL 的版本段由 `ark-llm` 与聊天
+请求共用同一规则，provider 层不得自行拼接 `/v1/models`。
+
+清单条目是 `ProviderModelInventoryItem`：除 id 外还可携带该模型各自的 `context_window_tokens` 与
+`supports_vision`（None 即 unknown，禁止按名称推断）。反序列化兼容旧的纯字符串数组，旧数据读为
+unknown 元数据。线程覆盖模型时经 `resolve_for_model` / `resolve_vision(id, model)` 套用清单里该模型的
+元数据：覆盖值等于默认 `model` 时读条目级字段，命中清单项时读该行，覆盖到无清单记录的模型时上下文窗口
+置空、识图记为 unknown——绝不把默认模型的窗口或识图标记套到别的模型 id 上。默认 `model` 的元数据存放在
+条目级字段（清单归一化会去掉与 `model` 相同的项），不依赖清单。设置页把默认模型与清单模型渲染成完全相同的
+行、每行只编辑自己的元数据，正是这一「每行归属」语义在 UI 上的对应；`headers` / `temperature` /
+`max_tokens` 是供应商级字段，对所有模型生效，不属于任何一行。
 
 `headers`、`temperature`、`max_tokens` 不是仅供展示的字段：有效条目必须将它们映射到每个实际模型请求。
 目录已知的上下文窗口会在下一父/子回合收窄全局压缩阈值；若用户设置了输出上限，应先预留该输出空间。

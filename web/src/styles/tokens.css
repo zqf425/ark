@@ -1,124 +1,151 @@
 /**
- * Light design tokens: the "Kun whale" palette ported from the smart-ark Code
- * UI (ds-* system). Airy blue-tinted neutrals over white glass surfaces, one
- * whale-blue accent, a three-level navy shadow scale and a gradient primary
- * action. Component CSS must consume these tokens — a literal hex outside the
- * token files breaks theme parity and is a review blocker.
+ * ARK Console design tokens — light "Paper" palette (default theme).
+ *
+ * Full visual redesign of the Code UI (approved proposal A): the former
+ * whale-blue glass language is replaced by a flat, high-contrast developer
+ * console. Every `--ark-*` name is preserved so existing component CSS keeps
+ * compiling while its rendered result changes; `--console-*` names serve the
+ * new app shell. Component CSS must consume these tokens — a literal hex
+ * outside tokens.css / theme.css breaks light-dark parity.
  */
 :root {
   color-scheme: light;
 
   /* surfaces */
-  --ark-bg: #f3f5fc;
-  --ark-bg-canvas: #fafbff;
-  --ark-bg-raised: #ffffff;
-  --ark-bg-inset: #eaf0f9;
-  --ark-bg-hover: rgba(59, 110, 187, 0.065);
+  --ark-bg: #f5f6f7;
+  --ark-bg-canvas: #ffffff;
+  --ark-bg-raised: #f8f9fa;
+  --ark-bg-inset: #f2f4f6;
+  --ark-bg-hover: #eef1f3;
 
-  /* borders: soft hairlines, navy-tinted */
-  --ark-border: rgba(20, 47, 95, 0.13);
-  --ark-border-muted: rgba(20, 47, 95, 0.085);
-  --ark-border-strong: rgba(20, 47, 95, 0.2);
+  /* borders: crisp hairlines, no glow */
+  --ark-border: #e1e5e9;
+  --ark-border-muted: #ebeef1;
+  --ark-border-strong: #ccd3da;
 
-  /* text */
-  --ark-text: #233659;
-  --ark-text-dim: #54678c;
-  --ark-text-faint: #8492b1;
-  --ark-text-placeholder: #93a1c0;
+  /* text: three readable steps, all above 4.5:1 on their surfaces */
+  --ark-text: #171d23;
+  --ark-text-dim: #4e5965;
+  --ark-text-faint: #626c78;
+  --ark-text-placeholder: #6b7682;
 
   /* intent */
-  --ark-accent: #3b82d8;
-  --ark-accent-dim: #7d9bdc;
-  --ark-accent-soft: rgba(59, 130, 216, 0.15);
-  --ark-selection: rgba(59, 130, 216, 0.2);
-  --ark-ok: #128a4a;
-  --ark-warn: #9a6a0b;
-  --ark-error: #d6493f;
-  --ark-error-strong: #a12d37;
-  --ark-ok-wash: rgba(17, 185, 129, 0.14);
-  --ark-warn-wash: rgba(240, 162, 63, 0.16);
-  --ark-error-wash: rgba(244, 116, 100, 0.14);
-  --ark-skill: #7a68e8;
-  --ark-skill-soft: rgba(122, 104, 232, 0.13);
+  --ark-accent: #08775f;
+  --ark-accent-dim: rgba(8, 119, 95, 0.55);
+  --ark-accent-soft: rgba(8, 119, 95, 0.09);
+  --ark-selection: rgba(8, 119, 95, 0.18);
+  --ark-ok: #0a7a50;
+  --ark-warn: #a66a08;
+  --ark-error: #c73f37;
+  --ark-error-strong: #a32e27;
+  --ark-ok-wash: rgba(10, 138, 112, 0.09);
+  --ark-warn-wash: rgba(214, 146, 32, 0.11);
+  --ark-error-wash: rgba(199, 63, 55, 0.09);
+  --ark-skill: #5b4bc4;
+  --ark-skill-soft: rgba(91, 75, 196, 0.1);
 
-  /* user bubble: whale-light blue wash with a matching hairline */
-  --ark-user-message: rgba(133, 193, 241, 0.2);
-  --ark-user-border: rgba(133, 193, 241, 0.35);
+  /* user request card: hairline, no bubble */
+  --ark-user-message: rgba(8, 119, 95, 0.05);
+  --ark-user-border: rgba(8, 119, 95, 0.28);
 
-  /* primary action: whale-blue gradient (send button, new-thread CTA) */
-  --ark-gradient-primary: linear-gradient(135deg, #4f90d6, #6ca2dd);
-  --ark-primary: #3b82d8;
-  --ark-primary-hover: #4f90d6;
+  /* primary action: solid, no gradient */
+  --ark-gradient-primary: #08775f;
+  --ark-primary: #08775f;
+  --ark-primary-hover: #0a8a70;
   --ark-primary-text: #ffffff;
-  --ark-primary-shadow: 0 6px 14px rgba(79, 144, 214, 0.35);
+  --ark-primary-shadow: 0 1px 2px rgba(20, 28, 36, 0.16);
 
-  /* glass cards and chips */
-  --ark-card-soft: rgba(255, 255, 255, 0.8);
-  --ark-card-strong: rgba(255, 255, 255, 0.96);
-  --ark-card-ghost: rgba(255, 255, 255, 0.58);
-  --ark-chip-bg: rgba(255, 255, 255, 0.9);
-  --ark-chip-border: rgba(20, 47, 95, 0.13);
-  --ark-chip-active: linear-gradient(180deg, rgba(229, 241, 253, 0.98), rgba(214, 232, 250, 0.94));
+  /* cards and chips */
+  --ark-card-soft: #ffffff;
+  --ark-card-strong: #ffffff;
+  --ark-card-ghost: rgba(255, 255, 255, 0.94);
+  --ark-chip-bg: #f1f3f5;
+  --ark-chip-border: #e1e5e9;
+  --ark-chip-active: #e6efec;
 
   /* code surfaces */
-  --ark-code-block-bg: #edf3fb;
-  --ark-code-block-border: rgba(20, 47, 95, 0.1);
-  --ark-inline-code-bg: rgba(240, 245, 251, 0.92);
-  --ark-terminal-bg: #f5f8fd;
-  --ark-terminal-text: #3d4c6e;
+  --ark-code-block-bg: #f6f8f9;
+  --ark-code-block-border: #e1e5e9;
+  --ark-inline-code-bg: #edf0f2;
+  --ark-terminal-bg: #f6f8f9;
+  --ark-terminal-text: #4e5965;
 
-  /* sidebar: layered gradient glass */
-  --ark-sidebar-gradient: linear-gradient(180deg, rgba(246, 249, 254, 0.98) 0%, rgba(237, 243, 252, 0.98) 100%);
-  --ark-sidebar-haze:
-    radial-gradient(circle at 62% -14%, rgba(133, 193, 241, 0.16), transparent 38%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0) 30%);
-  --ark-sidebar-border: rgba(108, 162, 221, 0.26);
-  --ark-sidebar-divider: rgba(108, 162, 221, 0.22);
-  --ark-sidebar-row-hover: rgba(108, 162, 221, 0.1);
-  --ark-sidebar-row-active: rgba(216, 232, 249, 0.85);
-  --ark-sidebar-row-ring: rgba(108, 162, 221, 0.2);
-  --ark-sidebar-field-bg: rgba(244, 248, 253, 0.8);
+  /* sidebar: flat panel, no haze */
+  --ark-sidebar-gradient: #ffffff;
+  --ark-sidebar-haze: none;
+  --ark-sidebar-border: #e1e5e9;
+  --ark-sidebar-divider: #ebeef1;
+  --ark-sidebar-row-hover: #eef1f3;
+  --ark-sidebar-row-active: rgba(8, 119, 95, 0.1);
+  --ark-sidebar-row-ring: rgba(8, 119, 95, 0.2);
+  --ark-sidebar-field-bg: #f2f4f6;
 
-  /* canvas stage and chrome washes */
-  --ark-stage-gradient: linear-gradient(180deg, #fafbff 0%, #ffffff 100%);
-  --ark-body-wash: linear-gradient(180deg, #f7f9fe, #f0f4fb);
-  --ark-body-glow:
-    radial-gradient(52rem 30rem at 82% -12%, rgba(133, 193, 241, 0.16), transparent 60%),
-    linear-gradient(160deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 42%);
+  /* stage — deliberately flat */
+  --ark-stage-gradient: #ffffff;
+  --ark-body-wash: #f5f6f7;
+  --ark-body-glow: none;
 
-  /* shadow scale: control / card / float, navy-based */
-  --ark-shadow-ctl: 0 2px 6px rgba(20, 47, 95, 0.05);
+  /* shadows: one small control shadow, one float shadow */
+  --ark-shadow-ctl: 0 1px 2px rgba(20, 28, 36, 0.06);
   --ark-shadow-1: var(--ark-shadow-ctl);
-  --ark-shadow-card: 0 4px 14px rgba(20, 47, 95, 0.06);
-  --ark-shadow-2: 0 18px 46px rgba(20, 47, 95, 0.1), 0 5px 16px rgba(20, 47, 95, 0.06);
-  --ark-composer-shadow: 0 12px 34px rgba(20, 47, 95, 0.07), 0 3px 10px rgba(20, 47, 95, 0.04);
+  --ark-shadow-card: 0 2px 8px rgba(20, 28, 36, 0.07);
+  --ark-shadow-2: 0 18px 60px rgba(20, 28, 36, 0.22);
+  --ark-composer-shadow: 0 6px 20px rgba(20, 28, 36, 0.1);
   --ark-composer-shadow-focus:
-    0 0 0 3px rgba(59, 130, 216, 0.1), 0 14px 40px rgba(20, 47, 95, 0.09),
-    0 4px 12px rgba(20, 47, 95, 0.05);
-  --ark-overlay: rgba(31, 45, 76, 0.32);
+    0 0 0 2px rgba(8, 119, 95, 0.14), 0 6px 20px rgba(20, 28, 36, 0.1);
+  --ark-overlay: rgba(24, 30, 36, 0.28);
 
   /* scrollbars */
-  --ark-scrollbar-thumb: rgba(84, 103, 140, 0.24);
-  --ark-scrollbar-thumb-hover: rgba(84, 103, 140, 0.34);
+  --ark-scrollbar-thumb: #c3cbd3;
+  --ark-scrollbar-thumb-hover: #a9b3bd;
 
-  /* radii: control 8 / card 10 / panel & bubble 14 / hero card 18 / composer 24 */
-  --ark-radius-sm: 8px;
-  --ark-radius: 10px;
-  --ark-radius-lg: 14px;
-  --ark-radius-xl: 18px;
-  --ark-radius-composer: 24px;
+  /* radii: control 5 / card 7 / panel 10 / dialog 12 */
+  --ark-radius-sm: 5px;
+  --ark-radius: 7px;
+  --ark-radius-lg: 10px;
+  --ark-radius-xl: 12px;
+  --ark-radius-composer: 10px;
 
   /* type */
-  --ark-font: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-  --ark-mono: 'SF Mono', 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  --ark-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI',
+    'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  --ark-mono: 'SF Mono', 'JetBrains Mono', 'Cascadia Code', SFMono-Regular, Consolas, monospace;
   --ark-size: 13px;
 
-  /* layout: chat column matches the smart-ark 4xl (56rem) reading measure */
-  --ark-topbar: 48px;
-  --ark-left: 260px;
-  --ark-right: 360px;
-  --ark-canvas: 56rem;
+  /* layout */
+  --ark-topbar: 46px;
+  --ark-left: 272px;
+  --ark-right: 392px;
+  --ark-canvas: 860px;
+  --ark-canvas-width: 860px;
+
+  /* ---- new app-shell tokens (features/console) ---- */
+  --console-rail: 52px;
+  --console-status: 26px;
+  --console-accent-ink: #ffffff;
+  --console-line: #e1e5e9;
+  --console-line-soft: #ebeef1;
+  --console-line-strong: #ccd3da;
+  --console-blue: #2b6cd4;
+  --console-add: rgba(10, 138, 112, 0.09);
+  --console-del: rgba(199, 63, 55, 0.08);
+  --console-add-ink: #0a7a62;
+  --console-del-ink: #b7433b;
+  --console-code: #f6f8f9;
+  --console-scrim: rgba(24, 30, 36, 0.28);
+  --console-warn-line: rgba(166, 106, 8, 0.4);
+  --console-warn-wash: rgba(214, 146, 32, 0.1);
+  --console-avatar-a: #3a4a5c;
+  --console-avatar-b: #6c7f93;
+
+  /* syntax tokens (diff / code surfaces) */
+  --tk-kw: #1b57c0;
+  --tk-ty: #8a5b00;
+  --tk-str: #0a7a50;
+  --tk-cm: #5f6a76;
+  --tk-mac: #b03a32;
+  --tk-fn: #0b6e86;
+  --tk-num: #a04a00;
 }
 
 :root[data-ark-font-size='small'] {

@@ -157,6 +157,20 @@ impl TurnRegistry {
             .copied()
     }
 
+    /// Reclaim the lifecycle epoch marker of a durably deleted thread.
+    ///
+    /// `latest_by_thread` only ever grows on registration; without this call a
+    /// long-lived process keeps one `(ThreadId, TurnId)` entry per thread it
+    /// ever created. Only the delete route calls it, after the durable delete
+    /// succeeded: clearing earlier would break the `is_latest_for` ABA guard.
+    /// Slots are a separate lifecycle and stay untouched.
+    pub fn forget_thread(&self, thread_id: ThreadId) {
+        self.latest_by_thread
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&thread_id);
+    }
+
     /// True when `turn_id` is the newest turn registered for this thread.
     /// Lifecycle handlers hold `workspace_gate`, so registration cannot advance
     /// this marker between their check and continuation suppression.
@@ -315,5 +329,37 @@ mod tests {
                 "the window keeps recent terminal turns readable"
             );
         }
+    }
+
+    #[test]
+    fn forget_thread_reclaims_only_the_deleted_threads_epoch_marker() {
+        let registry = TurnRegistry::new();
+        let doomed = ThreadId::new();
+        let kept_a = ThreadId::new();
+        let kept_b = ThreadId::new();
+        let doomed_turn = TurnId::new();
+        let kept_a_turn = TurnId::new();
+        let kept_b_turn = TurnId::new();
+        for (thread, turn) in [
+            (doomed, doomed_turn),
+            (kept_a, kept_a_turn),
+            (kept_b, kept_b_turn),
+        ] {
+            registry
+                .try_register(thread, turn, CancelToken::new())
+                .expect("each thread is idle");
+        }
+
+        registry.forget_thread(doomed);
+
+        assert_eq!(
+            registry.latest_for(doomed),
+            None,
+            "the deleted thread's epoch marker must be reclaimed"
+        );
+        assert_eq!(registry.latest_for(kept_a), Some(kept_a_turn));
+        assert_eq!(registry.latest_for(kept_b), Some(kept_b_turn));
+        // Epoch bookkeeping is separate from slot retention.
+        assert!(registry.get(doomed_turn).is_some());
     }
 }

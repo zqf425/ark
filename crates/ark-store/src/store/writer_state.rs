@@ -78,6 +78,10 @@ impl WriterState {
         diagnostics: Arc<dyn DiagnosticSink>,
     ) -> Result<Self> {
         let parsed = repair_log_blocking(&paths)?;
+        // Explicit gate at the writer boundary: a torn tail may be repaired,
+        // but any complete malformed line means the authoritative log is
+        // corrupt. Never build a divergent in-memory projection or append to it.
+        parsed.reject_malformed(&paths.events_jsonl())?;
         if parsed.truncate_at.is_some() {
             diagnostics.record(
                 StoreDiagnostic::new(
@@ -535,6 +539,38 @@ mod tests {
             usage: None,
             tool_invocations: None,
         }
+    }
+
+    #[test]
+    fn open_refuses_a_log_with_mid_file_garbage_without_modifying_it() {
+        let dir = TempDir::new("writer-open-corrupt");
+        let thread = ThreadId::new();
+        let paths = ThreadPaths::new(dir.path().join("thread"));
+        crate::store::fs_util::ensure_dir(paths.dir()).unwrap();
+        let mut text = String::new();
+        text.push_str(&encode_event(&event_at(thread, 1)).unwrap());
+        text.push_str("garbage\n");
+        text.push_str(&encode_event(&event_at(thread, 2)).unwrap());
+        std::fs::write(paths.events_jsonl(), &text).unwrap();
+
+        let err = match WriterState::open(
+            thread,
+            paths.clone(),
+            StoreLimits::for_tests(),
+            Arc::new(MemoryDiagnostics::new()),
+        ) {
+            Ok(_) => panic!("the writer must not start on a corrupt log"),
+            Err(err) => err,
+        };
+        assert_eq!(err.code, ark_common::ArkErrorCode::StoreFailure);
+        assert!(err.message.contains("1 malformed"), "{}", err.message);
+        assert!(
+            err.message.contains(&paths.events_jsonl().display().to_string()),
+            "the error must name the file: {}",
+            err.message
+        );
+        // No truncation and no append: the on-disk log is byte-identical.
+        assert_eq!(std::fs::read(paths.events_jsonl()).unwrap(), text.as_bytes());
     }
 
     #[test]

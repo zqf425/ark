@@ -16,8 +16,17 @@
   `ark_http::transport_client` 构建的受治理 client（同一代理/TLS 策略），本 crate 不自建传输。
 - model catalog 解析远端显式返回的 context/modalities 元数据，以及 `max_completion_tokens` /
   `max_output_tokens` / `max_tokens` / `top_provider.max_completion_tokens` 中的输出上限
-  （`max_output_tokens`，缺失即 unknown）；通用 `/models` 只有 id 时，能力字段必须是
-  unknown。GET 请求 10 秒超时、响应最大 1 MiB、模型最多 500 个，错误不得回显可能携带 query secret 的 URL。
+  （`max_output_tokens`，缺失即 unknown）。上下文窗口按 `context_length` / `context_window` /
+  `context_window_tokens` / `max_context_length` / `max_model_len` / `limits.context_length` /
+  `top_provider.context_length` / `metadata.context_length`，以及 HuggingFace Router 的
+  `providers[].context_length` 逐项嗅探；识图按 `supports_vision` / `capabilities.vision` /
+  `supports_image_in` 与 `input_modalities` / `modalities.input` 中的 `image` 判定。通用 `/models` 只有 id
+  时能力字段仍是 unknown（导入对话框另做 256K 兜底，不在本层猜测）。GET 请求 10 秒超时、响应最大 1 MiB、
+  模型最多 500 个，错误不得回显可能携带 query secret 的 URL。
+- 目录 URL 与聊天 URL 共用同一版本段规则（`config::url::model_catalog_url`）：已带 `v1`/`v2`/`v4`/`V1` 等
+  版本段（含 `/api/paas/v4` 这类网关前缀）的 base 直接追加 `models`，`/beta` 与聊天一样提升为 `/v1`。
+  禁止在目录侧单独判 `ends_with("/v1")`，否则聊天可用而目录 404。非 2xx 响应必须带
+  `upstream_status`，使 401/403 与 404 在设置页可区分。
 - provider 配置的 `custom_endpoint` 是整 URL 逐字模式：设置后请求不再追加任何 provider family 路径，
   URL 原样使用（仍受脱敏与错误处理约束）。
 - 自定义 provider header 可以补充请求，但不得覆盖 endpoint family 的认证、版本或 content-type 头；POST 的

@@ -174,26 +174,22 @@ impl ChildTurnExecutorImpl {
         model: Option<&str>,
     ) -> Result<Option<ark_llm::ProviderConfig>> {
         let provider_id = provider_id.filter(|id| !id.trim().is_empty());
-        let mut provider = match provider_id {
-            Some(id) => Some(self.providers.resolve(Some(id)).ok_or_else(|| {
-                ark_common::ArkError::validation(format!("child provider is unavailable: {id}"))
-            })?),
-            None => self.providers.resolve(None),
-        };
-        if let (Some(provider), Some(model)) = (
-            &mut provider,
-            model.filter(|model| !model.trim().is_empty()),
-        ) {
-            if model != provider.model {
-                // Catalog metadata belongs to the stored model id. A child
-                // override has no associated catalog response, so retaining
-                // the old window would incorrectly compact against another
-                // model's limit.
-                provider.model = model.to_string();
-                provider.context_window_tokens = None;
-            }
+        // `resolve_for_model` applies the inventory entry recorded for the
+        // override model (context window); an override without one clears the
+        // window, because the stored limit belongs to the stored model id.
+        let model = model
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        match self.providers.resolve_for_model(provider_id, model) {
+            Some(provider) => Ok(Some(provider)),
+            // Distinguish "no provider configured" (fall through to the parent
+            // fallback) from "the named provider is unusable" (an error).
+            None if provider_id.is_none() => Ok(None),
+            None => Err(ark_common::ArkError::validation(format!(
+                "child provider is unavailable: {}",
+                provider_id.unwrap_or_default()
+            ))),
         }
-        Ok(provider)
     }
 
     /// Build the transport client for a resolved provider, or retain the local

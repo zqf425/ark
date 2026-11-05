@@ -136,31 +136,58 @@ impl KindLimits for ImChannelKind {
     }
 }
 
+/// Length in UTF-16 code units, which is what Telegram's message limit counts.
+/// A non-BMP scalar (emoji, CJK extension B) occupies two units.
+fn utf16_len(text: &str) -> usize {
+    text.chars().map(char::len_utf16).sum()
+}
+
+/// Split at the largest char boundary whose UTF-16 length fits `max_units`.
+/// Always consumes at least one char so a wide scalar cannot stall the caller.
+fn split_at_utf16(text: &str, max_units: usize) -> (&str, &str) {
+    let mut used = 0;
+    let mut byte_end = 0;
+    for ch in text.chars() {
+        let width = ch.len_utf16();
+        if used + width > max_units && byte_end > 0 {
+            break;
+        }
+        used += width;
+        byte_end += ch.len_utf8();
+        if used >= max_units {
+            break;
+        }
+    }
+    text.split_at(byte_end)
+}
+
 /// Split a reply into platform-sized pieces on paragraph/line boundaries,
-/// falling back to a hard cut when one line exceeds the limit.
+/// falling back to a hard cut when one line exceeds the limit. All budgets are
+/// measured in UTF-16 code units so a message full of surrogate pairs still
+/// fits Telegram's documented hard limit (a plain `chars().count()` did not).
 pub fn chunk_text(kind: ImChannelKind, text: &str) -> Vec<String> {
     let limit = kind.max_message_chars();
-    if text.chars().count() <= limit {
+    if utf16_len(text) <= limit {
         return vec![text.to_string()];
     }
     let mut chunks = Vec::new();
     let mut current = String::new();
     for line in text.split_inclusive('\n') {
-        if line.chars().count() > limit {
-            // One overlong line: hard-cut it char by char.
+        if utf16_len(line) > limit {
+            // One overlong line: hard-cut it on UTF-16-safe char boundaries.
             if !current.is_empty() {
                 chunks.push(std::mem::take(&mut current));
             }
-            let mut rest: String = line.to_string();
-            while rest.chars().count() > limit {
-                let head: String = rest.chars().take(limit).collect();
-                rest = rest.chars().skip(limit).collect();
-                chunks.push(head);
+            let mut rest = line;
+            while utf16_len(rest) > limit {
+                let (head, tail) = split_at_utf16(rest, limit);
+                chunks.push(head.to_string());
+                rest = tail;
             }
-            current = rest;
+            current = rest.to_string();
             continue;
         }
-        if current.chars().count() + line.chars().count() > limit {
+        if utf16_len(&current) + utf16_len(line) > limit {
             chunks.push(std::mem::take(&mut current));
         }
         current.push_str(line);
@@ -487,6 +514,30 @@ mod tests {
         // Paragraph-boundary chunking keeps lines intact when they fit.
         let lines = format!("{}\n{}", "b".repeat(2000), "c".repeat(2000));
         assert_eq!(chunk_text(ImChannelKind::Telegram, &lines).len(), 1);
+    }
+
+    #[test]
+    fn chunking_counts_utf16_units_not_chars() {
+        // Telegram's 4096 limit counts UTF-16 code units. A naive
+        // `chars().count()` chunk of 4096 emoji is 8192 units and is rejected.
+        let emoji = "\u{1F600}".repeat(4096);
+        let chunks = chunk_text(ImChannelKind::Telegram, &emoji);
+        assert!(chunks.len() > 1, "a surrogate-pair-only message must be split");
+        let mut rebuilt = String::new();
+        for chunk in &chunks {
+            assert!(
+                chunk.chars().map(char::len_utf16).sum::<usize>() <= 4096,
+                "chunk exceeds the UTF-16 budget"
+            );
+            rebuilt.push_str(chunk);
+        }
+        assert_eq!(rebuilt, emoji, "chunking must not lose or reorder text");
+
+        // BMP CJK text behaves like the old char count.
+        let cjk = "中".repeat(3000);
+        for chunk in chunk_text(ImChannelKind::Telegram, &cjk) {
+            assert!(chunk.chars().map(char::len_utf16).sum::<usize>() <= 4096);
+        }
     }
 
     #[test]

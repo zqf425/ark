@@ -41,7 +41,9 @@
 - 设置页的 tuning、provider 与 MCP 都使用生成契约；API key、MCP env/header 值只写不回读，编辑时的空
   secret 字段表示保留，不表示删除。
 - 新增/编辑 provider 可显式查询模型目录，在用户选择后才把远端明确声明的 context window 与识图能力写入
-  待保存表单；目录未声明时显示 unknown，不按模型名称猜测，也不自动提交配置。
+  待保存表单；传输层对目录未声明的能力仍保持 unknown、不按模型名称猜测，也不自动提交配置。导入对话框在
+  目录解析之外做上下文嗅探：优先用目录明确声明的窗口（含 `max_model_len`、`top_provider.context_length`、
+  `providers[].context_length` 等别名），识别不出的模型按 256K 兜底并在候选行标注，落表后仍可逐行修改。
 - 组件状态按 feature 拆分，避免重建旧 `Workbench.tsx` 巨型组件；UI 变更应进行实际浏览器验证。
 - 会话流按回合分组渲染：一回合内的 reasoning、tool_call、tool_result 收进一张可折叠"执行过程"卡
   （对齐 smart-ark 的工作卡），运行中自动展开、结束后自动收起，用户开关即固定；用户消息与助手回复
@@ -54,25 +56,34 @@
 - 已知未接入的路由：`debug/llm-rounds`（调试）、`attachments/diagnostics`（诊断）、
   `child-runs/{id}/thread|events|cleanup`（子代理完整转录查看器需要独立的轮询/订阅设计，见子代理
   监督约束）、`sessions/{id}/resume-thread`（定时任务结果已直接携带 thread_id 跳转）。
-- Code 使用"任务历史 → 宽会话画布"的默认两栏结构，且无全局顶栏：侧栏底部的 footer 承载运行时
-  状态（在线点、重检按钮）与 Code/设置视图切换，设置视图保留顶栏。会话搜索和最近/归档切换只过滤
-  已加载的 `ThreadSummary`，不新增搜索 API；Plan、Changes、File、Terminal 是浮在画布之上的上下文
-  抽屉（带遮罩，默认 `hidden` 隐藏、不占据主画布），不是挤压布局的第三列。抽屉收起用 `hidden` 而非
-  条件渲染：组件保持挂载，面板草稿与服务端读模型不得因开关抽屉丢失。抽屉打开时移入焦点并支持
-  Esc 关闭。
-- 视觉样式只消费设计令牌：浅色"鲸蓝"色板在 `styles/tokens.css`，暗色"深海"覆盖在 `styles/theme.css`，
-  共享原语样式在 `styles/primitives.css`，由 `styles/global.css` 聚合引入；圆角与阴影分级都在令牌层
-  定义，组件 CSS 出现字面 hex/rgba 色值属于破坏主题对等性的检视阻断项。视觉语言对齐 smart-ark 的
-  Code 界面：渐变玻璃侧栏、画布居中 56rem 阅读列、右对齐鲸蓝用户气泡（右下 4px 方角）、浮动 24px
-  圆角输入框（工具条内嵌壳内）、三级藏青阴影、渐变主行动按钮（发送、新建会话），意图色面
-  （ok/warn/error/skill 的 wash）同样由令牌提供。设置页同语言：248px 玻璃导航栏（激活行 = 微底色 +
-  细描边环）、768px 居中内容列、18px 卡片带分隔线标题、14px 圆角控件配强调色聚焦环；供应商等
-  嵌套列表用微底色"凹井"，编辑/选中态统一为"强调描边 + 柔光"公式。
-- 设置页供应商表单支持批量导入模型（对齐 smart-ark 的导入对话框、按 arkd 能力面收敛）：候选来自
-  已查询的模型目录与粘贴输入（每行一个 id，服务无 /models 时使用）；已存在的 id 标记且默认不勾选，
-  确认后并入表单清单，默认 `model` 为空时由首个候选行回填。清单作为芯片列表展示、可逐项移除，
-  保存时整体提交：表单恒发完整列表（省略 = 保留，仅限 MCP 等部分编辑客户端；显式空列表 = 清空，
-  与 secret 类"空=保留"语义不同）。
+- Code 使用 ARK Console shell（方案 A）：46px 全局顶栏 + 52px 活动栏 + 26px 状态栏，主舞台在
+  `code` 场景下是"线程列表 / 会话画布 / 常驻检查器"三列；顶栏承载工作区、Git head、运行态、模型、
+  主题切换与 ⌘K 入口，状态栏承载连接、工作区、变更数、上下文占用、tokens 与版本。会话搜索和最近/
+  归档切换只过滤已加载的 `ThreadSummary`，不新增搜索 API；Plan、Changes、File、Terminal 是常驻
+  检查器的四个 Tab（收起用 `hidden` 保挂载，面板草稿与服务端读模型不得因折叠丢失），不再使用带
+  遮罩的浮动抽屉。`review`、`new`、`settings` 是同一 shell 下的全屏场景，由 `view-slice` 的 `view`
+  选择；`commandOpen` 控制 ⌘K 命令面板。
+- 视觉样式只消费设计令牌：浅色"纸白"为默认主题（`preferences.ts` 默认 `theme: 'light'`），色板在
+  `styles/tokens.css`，暗色"石墨"覆盖在 `styles/theme.css`，共享原语样式在 `styles/primitives.css`，
+  由 `styles/global.css` 聚合引入；圆角与阴影分级都在令牌层定义，组件 CSS 出现字面 hex/rgba 色值
+  属于破坏主题对等性的检视阻断项。ARK Console 语言是扁平、高对比的开发者控制台：无渐变玻璃、
+  无氛围光晕、无浮动大圆角输入框；1px 硬边框定义层级，控件 5px / 卡片 7px / 面板 10px / 对话框
+  12px 圆角，实心主行动按钮，用户消息是左对齐引用卡而非右对齐气泡。shell 专用的 `--console-*`
+  令牌与 diff 语法色 `--tk-*` 同样在 tokens/theme 两侧定义。设置页沿用同一 shell：分组导航 +
+  分区表单，卡片用 hairline 分隔，嵌套列表用微底色"凹井"。
+- 设置页供应商表单用单个「导入模型」入口合并目录查询与批量导入（对齐 smart-ark 的导入对话框、按
+  arkd 能力面收敛）：点击即拉取远端目录并弹出选择对话框，候选来自目录与粘贴输入（每行一个 id，服务无
+  /models 时使用）；已存在的 id 标记且默认不勾选，确认后并入表单清单。导入时自动嗅探上下文窗口，识别不出
+  用 256K 兜底（对齐 smart-ark 的 `DEFAULT_PROVIDER_CONTEXT_WINDOW_TOKENS`），默认 `model` 为空时由首个
+  候选行回填，命中默认模型的行把元数据镜像到条目级字段。
+- 默认模型与所有导入模型用**同一套 `ModelRow` 行**展示，默认模型不再单独占一个输入框：每行都是
+  id + 上下文窗口输入框 + 识图开关（+ 移除），首行的 id 可编辑、额外标记「默认」且不可移除。**每行只管自己的上下文窗口与识图能力，没有跨行覆盖、也不存在"谁为准"的
+  冲突**：首行（默认模型）的值存条目级 `context_window_tokens` / `supports_vision`，其余行的值存各自的
+  `models` 清单项（`ProviderModelInventoryItem`）；线程切换到某模型时只读该行元数据。因此「高级选项」只保留
+  真正作用于整个供应商的 `headers` / `max_tokens` / `temperature`，不再重复放模型级字段（旧版把条目级窗口/
+  识图错放进高级设置，只对默认模型生效却看起来像全局）。保存时整体提交：表单恒发完整列表（省略 = 保留，
+  仅限 MCP 等部分编辑客户端；显式空列表 = 清空，与 secret 类"空=保留"语义不同）。目录查询用独立的
+  `catalogBusy`，不锁定表单其余字段。
 - 会话运行时覆盖停靠在输入框区（`.ark-composer-stack`），不再占据会话标题区：供应商/模型、权限档位与
   推理强度是输入框工具条上的即时选择器（`ComposerRuntimeControls`），打开时重读 `GET /v1/threads/{id}`
   再经 `PATCH /v1/threads/{id}` 的 `runtime` 覆盖立即保存；后端按字段合并、无清除语义，因此不可清除的

@@ -122,3 +122,24 @@
   padding: 12px 18px 14px;
   border-top: 1px solid var(--ark-border-muted);
 }
+
+/* Per-model metadata rows in the provider form's inventory list. The id column
+   has the same flex basis for the default model's editable input and the
+   imported models' read-only label, so every row's controls line up. */
+.ark-importdialog__row .ark-provider-model__id {
+  flex: 1 1 200px;
+  min-width: 140px;
+  max-width: 320px;
+  font-family: var(--ark-mono);
+  font-size: 12.5px;
+}
+
+.ark-importdialog__row .ark-provider-model__context {
+  width: 140px;
+  margin-left: auto;
+  flex: none;
+}
+
+.ark-importdialog__row .ark-check {
+  flex: none;
+}
