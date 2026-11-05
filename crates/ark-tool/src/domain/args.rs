@@ -31,7 +31,8 @@ pub struct ReadArgs {
 #[derive(Debug, Clone, Deserialize)]
 pub struct WriteArgs {
     pub path: String,
-    #[serde(default)]
+    // `content` is required by the tool schema. A serde default here let
+    // `{"path":...}` silently truncate an existing file to zero bytes.
     pub content: String,
 }
 
