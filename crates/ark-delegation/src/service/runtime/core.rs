@@ -24,6 +24,20 @@ impl RuntimeCore {
         self.prepared.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    pub(super) fn has_handle(&self, child: ChildId) -> bool {
+        self.lock_handles().contains_key(&child)
+    }
+
+    /// Take every prepared run that no task has claimed yet.
+    ///
+    /// `run_child` removes its entry when it claims a run, so the map contains
+    /// exactly the parked children that have no worker to observe an abort.
+    pub(super) fn take_unclaimed_prepared(&self) -> Vec<PreparedChild> {
+        std::mem::take(&mut *self.lock_prepared())
+            .into_values()
+            .collect()
+    }
+
     fn lock_deleted(&self) -> std::sync::MutexGuard<'_, HashSet<ChildId>> {
         self.deleted.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -117,41 +131,55 @@ impl RuntimeCore {
         prompt: String,
         policy: SubagentPolicy,
     ) -> Result<PreparedChild> {
-        // One lock acquisition: taking `known` twice around a non-reentrant mutex
-        // would self-deadlock on an unknown id.
-        let existing = self.lock_known().get(&child_id).cloned();
-        let Some(existing) = existing else {
-            return Err(ArkError::not_found(format!(
-                "child run not found: {child_id}"
-            )));
+        // Claim the resume atomically. Every resume reads `known`, so doing the
+        // "not active" check and inserting the new `queued` record under one
+        // lock makes the loser see an active placeholder and refuse before it
+        // can append a second row with the same `resume_count` (DL-01).
+        let (existing, record) = {
+            let mut known = self.lock_known();
+            let existing = known.get(&child_id).cloned().ok_or_else(|| {
+                ArkError::not_found(format!("child run not found: {child_id}"))
+            })?;
+            if existing.parent_thread_id != request.parent_thread_id {
+                // Ownership is decided by the authoritative log, never by the caller.
+                return Err(ArkError::not_found(format!(
+                    "child run not found: {child_id}"
+                )));
+            }
+            if existing.is_active() {
+                return Err(ArkError::conflict(format!(
+                    "child run {child_id} is still {} and cannot be resumed",
+                    existing.status.as_str()
+                )));
+            }
+            if existing.status == ark_common::ChildRunStatus::Completed {
+                return Err(ArkError::conflict(format!(
+                    "child run {child_id} already completed; nothing to resume"
+                )));
+            }
+            let resume_count = existing.resume_count.unwrap_or(0) + 1;
+            let mut record = existing.clone();
+            record.status = ark_common::ChildRunStatus::Queued;
+            record.ended_at = None;
+            record.error = None;
+            record.summary = None;
+            record.resume_count = Some(resume_count);
+            record.prompt = Some(prompt.clone());
+            // Reserve before the awaited append: `known` now reports `queued`.
+            known.insert(child_id, record.clone());
+            (existing, record)
         };
-        if existing.parent_thread_id != request.parent_thread_id {
-            // Ownership is decided by the authoritative log, never by the caller.
-            return Err(ArkError::not_found(format!(
-                "child run not found: {child_id}"
-            )));
+
+        // The durable append is the point of no return. On failure, restore only
+        // our own placeholder so a concurrent destroy is not undone and the
+        // child remains resumable instead of being stuck at `queued`.
+        if let Err(err) = self.store.append_child_run(record.clone()).await {
+            let mut known = self.lock_known();
+            if known.get(&child_id) == Some(&record) {
+                known.insert(child_id, existing);
+            }
+            return Err(err);
         }
-        if existing.is_active() {
-            return Err(ArkError::conflict(format!(
-                "child run {child_id} is still {} and cannot be resumed",
-                existing.status.as_str()
-            )));
-        }
-        if existing.status == ark_common::ChildRunStatus::Completed {
-            return Err(ArkError::conflict(format!(
-                "child run {child_id} already completed; nothing to resume"
-            )));
-        }
-        let resume_count = existing.resume_count.unwrap_or(0) + 1;
-        let mut record = existing.clone();
-        record.status = ark_common::ChildRunStatus::Queued;
-        record.ended_at = None;
-        record.error = None;
-        record.summary = None;
-        record.resume_count = Some(resume_count);
-        record.prompt = Some(prompt.clone());
-        self.store.append_child_run(record.clone()).await?;
-        self.lock_known().insert(child_id, record.clone());
         self.publish_activity(&record).await;
 
         let ctx = ChildTurnContext {
@@ -320,7 +348,9 @@ impl RuntimeCore {
             self.lock_known().remove(&finished.child_id);
             return Ok(finished);
         }
+        let mut terminal_durable = true;
         if let Err(err) = self.store.append_child_run(finished.clone()).await {
+            terminal_durable = false;
             tracing::warn!(
                 child = %finished.child_id,
                 error = %err.message,
@@ -330,7 +360,13 @@ impl RuntimeCore {
         self.lock_known()
             .insert(finished.child_id, finished.clone());
         self.publish_activity(&finished).await;
-        self.publish_completion(&finished).await;
+        // The parent inbox must never consume a terminal state absent from
+        // `children/runs.jsonl`. Publishing here would consume the stable
+        // notification id forever, so hydrate's corrected convergence would be
+        // deduplicated away. Leave the durable active row for hydrate (DL-03).
+        if terminal_durable {
+            self.publish_completion(&finished).await;
+        }
         Ok(finished)
     }
 
@@ -365,6 +401,13 @@ impl RuntimeCore {
         if record.is_active() {
             return;
         }
+        // `children/runs.jsonl` is the authority: only announce a terminal
+        // state that is actually the newest durable row for this child. This
+        // keeps a memory-only terminal (append failure) or a stale terminal
+        // from an earlier resume out of the parent inbox (DL-03).
+        if !self.latest_authoritative_record_matches(record).await {
+            return;
+        }
         let notification_id = completion_notification_id(record);
         match self
             .completion_already_published(record, &notification_id)
@@ -394,6 +437,34 @@ impl RuntimeCore {
                 );
             }
         }
+    }
+
+    /// Whether the newest authoritative row for this child is the terminal
+    /// state we are about to announce. Deliberately ignores timestamps so a
+    /// JSON round-trip cannot make a legitimately durable row look stale.
+    async fn latest_authoritative_record_matches(&self, record: &ChildRunRecord) -> bool {
+        let records = match self.store.list_child_runs(record.parent_thread_id).await {
+            Ok(records) => records,
+            Err(err) => {
+                tracing::warn!(
+                    child = %record.child_id,
+                    error = %err.message,
+                    "could not inspect the authoritative child-run log"
+                );
+                return false;
+            }
+        };
+        records
+            .into_iter()
+            .rfind(|candidate| candidate.child_id == record.child_id)
+            .map(|latest| {
+                !latest.is_active()
+                    && latest.status == record.status
+                    && latest.resume_count == record.resume_count
+                    && latest.error == record.error
+                    && latest.summary == record.summary
+            })
+            .unwrap_or(false)
     }
 
     /// Whether this exact terminal notification is already durable on the
@@ -483,7 +554,14 @@ impl RuntimeCore {
             // Ownership is decided by the authoritative record, never the caller.
             return Ok(false);
         }
-        if record.is_active() || self.lock_handles().contains_key(&child) {
+        // A prepared-but-unclaimed run has a durable `queued` row and a control
+        // handle but no worker that could observe an abort. Claim its parked
+        // entry first: after this remove, `run_child` can no longer start it,
+        // and `abort_all` can no longer converge it concurrently (DL-02).
+        let parked = self.lock_prepared().remove(&child);
+        if parked.is_none()
+            && (record.is_active() || self.lock_handles().contains_key(&child))
+        {
             return Err(ArkError::conflict(format!(
                 "child run {child} is still {} and cannot be destroyed; abort it first",
                 record.status.as_str()
@@ -493,19 +571,39 @@ impl RuntimeCore {
         // known record until storage succeeds so an I/O failure does not make a
         // still-present child disappear from the API.
         self.lock_deleted().insert(child);
-        self.lock_prepared().remove(&child);
+        let handle = if parked.is_some() {
+            self.lock_handles().remove(&child)
+        } else {
+            None
+        };
         let removed = match self.store.delete_child_run(parent, child).await {
             Ok(removed) => removed,
             Err(err) => {
                 self.lock_deleted().remove(&child);
+                self.restore_parked(child, parked, handle);
                 return Err(err);
             }
         };
         if !removed {
             self.lock_deleted().remove(&child);
+            self.restore_parked(child, parked, handle);
             return Ok(false);
         }
         self.lock_known().remove(&child);
         Ok(true)
+    }
+
+    fn restore_parked(
+        &self,
+        child: ChildId,
+        parked: Option<PreparedChild>,
+        handle: Option<Arc<RunningChild>>,
+    ) {
+        if let Some(prepared) = parked {
+            self.lock_prepared().insert(child, prepared);
+        }
+        if let Some(handle) = handle {
+            self.lock_handles().insert(child, handle);
+        }
     }
 }
