@@ -60,9 +60,21 @@ export const SETTINGS_IM_MESSAGES = {
     'Empty rejects every new chat (the sender gets a hint with their chat id); configured lists silently drop outsiders.'
   ],
   'settings.im.form.requireMention': ['群聊必须 @机器人', 'Groups must @-mention the bot'],
-  'settings.im.form.workspace': ['工作区覆盖（留空用默认）', 'Workspace override (empty = default)'],
-  'settings.im.form.model': ['模型覆盖（留空用默认）', 'Model override (empty = default)'],
-  'settings.im.form.providerId': ['供应商覆盖（留空用默认）', 'Provider override (empty = default)'],
+  'settings.im.form.workspace': ['工作区（已填入默认值）', 'Workspace (default filled in)'],
+  'settings.im.form.workspaceHint': [
+    '默认取「工作区」设置；改成其它路径即为该渠道单独覆盖。',
+    'Defaults to the workspace setting; type another path to override it for this channel.'
+  ],
+  'settings.im.form.model': ['模型（已填入默认值）', 'Model (default filled in)'],
+  'settings.im.form.modelHint': [
+    '默认取当前生效供应商的模型；改成其它模型即为该渠道单独覆盖。',
+    'Defaults to the active provider model; type another model to override it for this channel.'
+  ],
+  'settings.im.form.providerId': ['供应商（已填入默认值）', 'Provider (default filled in)'],
+  'settings.im.form.providerIdHint': [
+    '默认取当前生效供应商；改成其它供应商即为该渠道单独覆盖。',
+    'Defaults to the active provider; type another provider to override it for this channel.'
+  ],
   'settings.im.form.autonomy': ['自治级别', 'Autonomy'],
   'settings.im.form.enabled': ['启用', 'Enabled'],
   'settings.im.form.secretsHint': [

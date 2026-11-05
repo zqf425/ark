@@ -37,10 +37,10 @@ use crate::{
     MemoryListResponse, PanelEntry, PendingApprovalView, PendingUserInputView, PlanView,
     PluginDiagnosticView, PluginEntry, PluginHostReport, ProviderEntry, ProviderListResponse,
     ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
-    ProviderModelSummary, ProviderTestRequest, ProviderTestResponse, ProviderView,
-    ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, ReviewRequest,
-    RewindRequest, RewindResponse, RunStatus, RuntimeConfigView, RuntimeEvent, RuntimeInfo,
-    ScheduleKind, ScheduledRunRecord, ScheduledTask, ScheduledTaskListResponse,
+    ProviderModelInventoryItem, ProviderModelSummary, ProviderTestRequest, ProviderTestResponse,
+    ProviderView, ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest,
+    ReviewRequest, RewindRequest, RewindResponse, RunStatus, RuntimeConfigView, RuntimeEvent,
+    RuntimeInfo, ScheduleKind, ScheduledRunRecord, ScheduledTask, ScheduledTaskListResponse,
     SessionResumeResponse, SkillDiagnostics, SkillLoadWarning, SkillSource, SkillSummary,
     SkillsSettings, SteerChildRequest, SubagentSettings, SwitchWorkspaceRequest, TaskSchedule,
     TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadExport, ThreadItem,
@@ -165,6 +165,7 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     ProviderListResponse::export_all_to(dir)?;
     ProviderModelCatalogConnection::export_all_to(dir)?;
     ProviderModelCatalogRequest::export_all_to(dir)?;
+    ProviderModelInventoryItem::export_all_to(dir)?;
     ProviderModelSummary::export_all_to(dir)?;
     ProviderModelCatalogResponse::export_all_to(dir)?;
     ProviderTestRequest::export_all_to(dir)?;
@@ -342,6 +343,7 @@ const ROOT_NAMES: &[&str] = &[
     "ProviderListResponse",
     "ProviderModelCatalogConnection",
     "ProviderModelCatalogRequest",
+    "ProviderModelInventoryItem",
     "ProviderModelSummary",
     "ProviderModelCatalogResponse",
     "ProviderTestRequest",

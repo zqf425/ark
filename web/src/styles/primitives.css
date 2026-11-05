@@ -1,7 +1,7 @@
 /**
  * Shared primitives owned by shared/ui (Button, Tabs, chip/dot helpers,
- * EmptyState, textarea, error boundary). Smart-ark look: pill-friendly radii,
- * soft navy shadows, gradient primary action.
+ * EmptyState, textarea, error boundary). ARK Console look: small radii,
+ * crisp hairlines, solid primary action; colors come from design tokens.
  */
 
 /* ---------- buttons ---------- */
@@ -51,18 +51,17 @@
   outline-offset: 1px;
 }
 
-/* Primary actions carry the whale gradient, like smart-ark's send/CTA. */
+/* Primary actions are solid accent, never gradients. */
 .ark-btn--primary {
-  background: var(--ark-gradient-primary);
+  background: var(--ark-primary);
   border-color: transparent;
   color: var(--ark-primary-text);
   box-shadow: var(--ark-primary-shadow);
 }
 
 .ark-btn--primary:hover:not(:disabled) {
-  background: var(--ark-gradient-primary);
+  background: var(--ark-primary-hover);
   border-color: transparent;
-  filter: brightness(1.05);
 }
 
 .ark-btn--ghost {

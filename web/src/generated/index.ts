@@ -88,6 +88,7 @@ export type { ProviderView } from "./ProviderView";
 export type { ProviderListResponse } from "./ProviderListResponse";
 export type { ProviderModelCatalogConnection } from "./ProviderModelCatalogConnection";
 export type { ProviderModelCatalogRequest } from "./ProviderModelCatalogRequest";
+export type { ProviderModelInventoryItem } from "./ProviderModelInventoryItem";
 export type { ProviderModelSummary } from "./ProviderModelSummary";
 export type { ProviderModelCatalogResponse } from "./ProviderModelCatalogResponse";
 export type { ProviderTestRequest } from "./ProviderTestRequest";

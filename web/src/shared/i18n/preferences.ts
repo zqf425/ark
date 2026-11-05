@@ -7,7 +7,7 @@ export const UI_PREFERENCES_STORAGE_KEY = 'ark.ui.preferences'
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   locale: 'zh-CN',
   fontSize: 'medium',
-  theme: 'system'
+  theme: 'light'
 }
 
 function isLocale(value: unknown): value is UiLocale {

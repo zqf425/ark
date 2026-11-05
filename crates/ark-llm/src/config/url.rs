@@ -81,6 +81,21 @@ pub fn anthropic_messages_url(base_url: &str) -> String {
     append_path(&versioned(base_url.trim()), "messages")
 }
 
+/// `{base}/models` for model discovery.
+///
+/// Discovery must resolve the same version segment a chat request would, or a
+/// provider that works for a turn answers 404 for its own model list. So this
+/// shares [`versioned`] instead of testing for a literal `/v1` suffix: `/v2`,
+/// `/v4`, `/V1` and gateway prefixes such as `/api/paas/v4` are all reused, and
+/// a `/beta` base is promoted to `/v1` exactly like [`openai_chat_url`].
+pub fn model_catalog_url(base_url: &str) -> String {
+    let mut base = versioned(base_url);
+    if last_segment(&base).eq_ignore_ascii_case("beta") {
+        base = append_path(&unversioned(base_url.trim()), "v1");
+    }
+    append_path(&base, "models")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,5 +172,57 @@ mod tests {
         assert!(!is_version_segment("v"));
         assert!(!is_version_segment("version"));
         assert!(!is_version_segment("v1beta"));
+    }
+
+    #[test]
+    fn catalog_url_shares_the_chat_versioning() {
+        assert_eq!(
+            model_catalog_url("https://api.deepseek.com"),
+            "https://api.deepseek.com/v1/models"
+        );
+        assert_eq!(
+            model_catalog_url("https://api.deepseek.com/v1"),
+            "https://api.deepseek.com/v1/models"
+        );
+    }
+
+    /// A non-`v1` version prefix is the case that used to 404: chat resolved
+    /// `/api/paas/v4/chat/completions` while discovery appended a second `v1`.
+    #[test]
+    fn catalog_url_reuses_any_version_prefix() {
+        assert_eq!(
+            model_catalog_url("https://open.bigmodel.cn/api/paas/v4"),
+            "https://open.bigmodel.cn/api/paas/v4/models"
+        );
+        assert_eq!(
+            model_catalog_url("https://gateway.example/api/v2/"),
+            "https://gateway.example/api/v2/models"
+        );
+        assert_eq!(
+            model_catalog_url("https://gateway.example/V1"),
+            "https://gateway.example/V1/models"
+        );
+    }
+
+    /// Discovery mirrors the chat families' `/beta` promotion instead of
+    /// inventing its own rule.
+    #[test]
+    fn catalog_url_promotes_a_beta_base_like_a_chat_request() {
+        assert_eq!(
+            model_catalog_url("https://api.deepseek.com/beta"),
+            "https://api.deepseek.com/v1/models"
+        );
+        assert_eq!(
+            openai_chat_url("https://api.deepseek.com/beta"),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn catalog_url_keeps_a_query_string_at_the_end() {
+        assert_eq!(
+            model_catalog_url("https://gateway.example/v1?tenant=ark"),
+            "https://gateway.example/v1/models?tenant=ark"
+        );
     }
 }
