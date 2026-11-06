@@ -6,7 +6,8 @@
 //! steps. `literal: false` still means literal here, and the output says so.
 
 use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput};
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use crate::domain::{args, glob, schema};
 use crate::exec::common::{as_output, workspace_path};
@@ -44,6 +45,16 @@ struct Query {
     context: usize,
 }
 
+impl Query {
+    /// `limit` counts *matching* lines, but every match may emit `2*context+1`
+    /// lines. Cap the total output rows accordingly so context is not mistaken
+    /// for a match (T-07) and a huge `context` cannot overflow (T-09).
+    fn line_cap(&self) -> usize {
+        self.limit
+            .saturating_mul(self.context.saturating_mul(2).saturating_add(1))
+    }
+}
+
 fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
     let parsed: args::GrepArgs = args::parse("grep", &raw)?;
     let needle = parsed.pattern.clone().unwrap_or_default();
@@ -62,29 +73,62 @@ fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
     if target.is_file() {
         scan_file(&target, &target, &query, &mut hits);
     } else {
-        walk(&target, &target, &query, 0, &mut hits);
+        let mut visited = HashSet::new();
+        walk(&target, &target, &query, 0, &mut hits, &mut visited);
     }
     if hits.is_empty() {
         return Ok(ToolOutput::ok(format!("no matches for `{}`", query.needle)));
     }
-    let body = cap_all(&hits.join("\n"), &DEFAULT_LIMITS, Some(query.limit));
+    let body = cap_all(&hits.join("\n"), &DEFAULT_LIMITS, Some(query.line_cap()));
     Ok(ToolOutput::ok(body))
 }
 
-fn walk(root: &Path, dir: &Path, query: &Query, depth: usize, out: &mut Vec<String>) {
-    if depth > 32 || out.len() >= query.limit {
+fn walk(
+    root: &Path,
+    dir: &Path,
+    query: &Query,
+    depth: usize,
+    out: &mut Vec<String>,
+    visited: &mut HashSet<PathBuf>,
+) {
+    if depth > 32 || out.len() >= query.line_cap() {
         return;
     }
+    // Canonicalize once per directory and never revisit it: a symlink cycle
+    // otherwise re-expands the same tree at every level (T-02).
+    let Ok(real_dir) = std::fs::canonicalize(dir) else {
+        return;
+    };
+    if !visited.insert(real_dir) {
+        return;
+    }
+    let Ok(real_root) = std::fs::canonicalize(root) else {
+        return;
+    };
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
-        if out.len() >= query.limit {
+        if out.len() >= query.line_cap() {
             return;
         }
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        // Never follow symlinks: a link out of the workspace would leak
+        // external file contents, and a self-link would spin the walk.
+        if kind.is_symlink() {
+            continue;
+        }
         let path = entry.path();
-        if path.is_dir() {
-            walk(root, &path, query, depth + 1, out);
+        let Ok(real_path) = std::fs::canonicalize(&path) else {
+            continue;
+        };
+        if !real_path.starts_with(&real_root) {
+            continue;
+        }
+        if kind.is_dir() {
+            walk(root, &path, query, depth + 1, out, visited);
         } else {
             scan_file(root, &path, query, out);
         }
@@ -92,7 +136,7 @@ fn walk(root: &Path, dir: &Path, query: &Query, depth: usize, out: &mut Vec<Stri
 }
 
 fn scan_file(root: &Path, file: &Path, query: &Query, out: &mut Vec<String>) {
-    if out.len() >= query.limit {
+    if out.len() >= query.line_cap() {
         return;
     }
     let relative = file
@@ -133,21 +177,45 @@ fn scan_file(root: &Path, file: &Path, query: &Query, out: &mut Vec<String>) {
             lines.iter().map(|l| l.to_string()).collect(),
         )
     };
-    let mut index = 0usize;
-    while index < lines.len() && out.len() < query.limit {
-        if haystack_lines[index].contains(&haystack_needle) {
-            let start = index.saturating_sub(query.context);
-            let end = (index + query.context + 1).min(lines.len());
-            for (line_index, line) in lines.iter().enumerate().take(end).skip(start) {
-                let marker = if line_index == index { ":" } else { "-" };
-                out.push(format!(
-                    "{relative}{marker}{}{marker}{line}",
-                    line_index + 1
-                ));
+    // Mark every line to emit exactly once: ':' for a real match, '-' for
+    // context. Adjacent context windows overlap, so a single marker vector
+    // deduplicates them while keeping the match marker authoritative. `limit`
+    // counts matches, not output rows (T-07); all arithmetic is saturating so
+    // a model-supplied `usize::MAX` cannot panic (T-09).
+    let mut emit: Vec<Option<char>> = vec![None; lines.len()];
+    let mut matched = 0usize;
+    for (index, line) in haystack_lines.iter().enumerate() {
+        if matched >= query.limit {
+            break;
+        }
+        if !line.contains(&haystack_needle) {
+            continue;
+        }
+        matched += 1;
+        let start = index.saturating_sub(query.context);
+        let end = index
+            .saturating_add(query.context)
+            .saturating_add(1)
+            .min(lines.len());
+        for slot in &mut emit[start..end] {
+            if slot.is_none() {
+                *slot = Some('-');
             }
-            index = end;
-        } else {
-            index += 1;
+        }
+        emit[index] = Some(':');
+    }
+    let line_cap = query.line_cap();
+    for (index, marker) in emit.into_iter().enumerate() {
+        if out.len() >= line_cap {
+            break;
+        }
+        if let Some(m) = marker {
+            out.push(format!(
+                "{relative}{m}{}{m}{line}",
+                index + 1,
+                m = m,
+                line = lines[index]
+            ));
         }
     }
 }
@@ -225,5 +293,79 @@ mod tests {
             .await
             .unwrap();
         assert!(!out.ok);
+    }
+
+    #[tokio::test]
+    async fn overlapping_context_windows_emit_each_line_once() {
+        let dir = temp_workspace("grep-context-overlap");
+        std::fs::write(dir.join("a.txt"), "hit-a\nhit-b\nhit-c\nhit-d\nhit-e\n").unwrap();
+        let out = GrepTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "hit", "context": 1 })),
+            )
+            .await
+            .unwrap();
+        for n in 1..=5 {
+            let occurrences = out.content.matches(&format!("a.txt-{n}-")).count()
+                + out.content.matches(&format!("a.txt:{n}:")).count();
+            assert_eq!(occurrences, 1, "line {n} must appear exactly once: {}", out.content);
+        }
+    }
+
+    #[tokio::test]
+    async fn limit_counts_matches_not_context_rows() {
+        let dir = temp_workspace("grep-limit-context");
+        std::fs::write(dir.join("a.txt"), "m1\nm2\nm3\nm4\nm5\n").unwrap();
+        let out = GrepTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "m", "limit": 2, "context": 2 })),
+            )
+            .await
+            .unwrap();
+        // Exactly two *matching* lines; later lines may still appear as
+        // context rows (`-`), which is correct, but never as matches (`:`).
+        assert!(out.content.contains("a.txt:1:m1"));
+        assert!(out.content.contains("a.txt:2:m2"));
+        assert!(
+            !out.content.contains("a.txt:3:m3"),
+            "a third real match must not be emitted: {}",
+            out.content
+        );
+        assert!(!out.content.contains("a.txt:5:m5"));
+    }
+
+    #[tokio::test]
+    async fn a_max_usize_context_does_not_panic() {
+        let dir = temp_workspace("grep-overflow");
+        std::fs::write(dir.join("a.txt"), "needle\n").unwrap();
+        let out = GrepTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "needle", "context": usize::MAX })),
+            )
+            .await
+            .unwrap();
+        assert!(out.ok);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn grep_does_not_follow_symlinks_out_of_the_workspace() {
+        use std::os::unix::fs::symlink;
+        let dir = temp_workspace("grep-symlink-escape");
+        let outside = temp_workspace("grep-symlink-outside");
+        std::fs::write(outside.join("secret.txt"), "needle-secret\n").unwrap();
+        symlink(&outside, dir.join("link")).unwrap();
+        let out = GrepTool
+            .execute(&ctx(&dir), ToolArgs(serde_json::json!({ "pattern": "needle" })))
+            .await
+            .unwrap();
+        assert!(
+            !out.content.contains("needle-secret"),
+            "a symlink must not leak external contents: {}",
+            out.content
+        );
     }
 }

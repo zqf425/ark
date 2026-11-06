@@ -5,7 +5,8 @@
 //! tree cannot blow up the model context.
 
 use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput};
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use crate::domain::{args, glob, schema};
 use crate::exec::common::{as_output, with_detail, workspace_path};
@@ -45,7 +46,13 @@ fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
     for entry in std::fs::read_dir(&dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().to_string();
-        let marker = if entry.path().is_dir() { "/" } else { "" };
+        // `Path::is_dir` follows symlinks; use the dir-entry type so a link
+        // never masquerades as a real directory.
+        let marker = if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            "/"
+        } else {
+            ""
+        };
         entries.push(format!("{name}{marker}"));
     }
     entries.sort();
@@ -91,7 +98,8 @@ fn run_find(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> 
     let limit = parsed.limit.unwrap_or(DEFAULT_FIND_LIMIT).max(1);
     let name_only = glob::is_name_pattern(&pattern);
     let mut found = Vec::new();
-    walk(&root, &root, &pattern, name_only, limit, 0, &mut found);
+    let mut visited = HashSet::new();
+    walk(&root, &root, &pattern, name_only, limit, 0, &mut found, &mut visited);
     found.sort();
     let body = cap_all(&found.join("\n"), &DEFAULT_LIMITS, Some(limit));
     Ok(ToolOutput::ok(body))
@@ -105,10 +113,22 @@ fn walk(
     limit: usize,
     depth: usize,
     out: &mut Vec<String>,
+    visited: &mut HashSet<PathBuf>,
 ) {
     if depth > MAX_DEPTH || out.len() >= limit {
         return;
     }
+    // Canonicalize once per directory and never revisit it: a symlink cycle
+    // (or a bind mount) otherwise re-expands the same tree at every level.
+    let Ok(real_dir) = std::fs::canonicalize(dir) else {
+        return;
+    };
+    if !visited.insert(real_dir) {
+        return;
+    }
+    let Ok(real_root) = std::fs::canonicalize(root) else {
+        return;
+    };
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -116,7 +136,23 @@ fn walk(
         if out.len() >= limit {
             return;
         }
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        // Never follow a symlink: a link out of the workspace would leak
+        // external names, and a self-referencing link would spin the walk.
+        if kind.is_symlink() {
+            continue;
+        }
         let path = entry.path();
+        // Every traversed entry must still resolve inside the workspace root,
+        // not just the initial argument (design ark-tool.md:15).
+        let Ok(real_path) = std::fs::canonicalize(&path) else {
+            continue;
+        };
+        if !real_path.starts_with(&real_root) {
+            continue;
+        }
         let relative = path
             .strip_prefix(root)
             .map(|rest| rest.to_string_lossy().replace('\\', "/"))
@@ -129,8 +165,8 @@ fn walk(
         if !relative.is_empty() && glob::matches(pattern, &candidate) {
             out.push(relative);
         }
-        if path.is_dir() {
-            walk(root, &path, pattern, name_only, limit, depth + 1, out);
+        if kind.is_dir() {
+            walk(root, &path, pattern, name_only, limit, depth + 1, out, visited);
         }
     }
 }
@@ -196,5 +232,42 @@ mod tests {
             .await
             .unwrap();
         assert!(!out.ok);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn find_does_not_follow_symlinks_out_of_the_workspace() {
+        use std::os::unix::fs::symlink;
+        let dir = temp_workspace("find-symlink-escape");
+        let outside = temp_workspace("find-symlink-outside");
+        std::fs::write(outside.join("secret.txt"), "secret").unwrap();
+        symlink(&outside, dir.join("link")).unwrap();
+        let out = FindTool
+            .execute(&ctx(&dir), ToolArgs(serde_json::json!({ "pattern": "*" })))
+            .await
+            .unwrap();
+        assert!(
+            !out.content.contains("secret.txt"),
+            "a symlink must not leak external names: {}",
+            out.content
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlink_cycles_do_not_duplicate_paths() {
+        use std::os::unix::fs::symlink;
+        let dir = temp_workspace("find-symlink-cycle");
+        std::fs::create_dir_all(dir.join("a")).unwrap();
+        std::fs::write(dir.join("a/keep.txt"), "x").unwrap();
+        symlink("..", dir.join("a/back")).unwrap();
+        let out = FindTool
+            .execute(&ctx(&dir), ToolArgs(serde_json::json!({ "pattern": "*" })))
+            .await
+            .unwrap();
+        let mut seen = std::collections::HashSet::new();
+        for line in out.content.lines() {
+            assert!(seen.insert(line), "duplicate path {line}");
+        }
     }
 }

@@ -29,33 +29,43 @@ pub fn render_catalog(skills: &[LoadedSkill], budget_bytes: usize) -> Option<Str
     if skills.is_empty() {
         return None;
     }
-    let fixed = format!("{HEADER}\n\n{SECTION}\n\n{FOOTER}");
-    let mut used = fixed.len();
     let mut lines: Vec<String> = Vec::new();
     let mut dropped = 0usize;
     for skill in skills {
-        let line = entry_line(skill);
-        let cost = line.len() + 1;
-        if used + cost > budget_bytes {
+        let mut candidate = lines.clone();
+        candidate.push(entry_line(skill));
+        if catalog_text(&candidate, dropped).len() > budget_bytes {
             dropped += 1;
-            continue;
+        } else {
+            lines = candidate;
         }
-        used += cost;
-        lines.push(line);
+    }
+    // The "omitted" hint is part of the prompt too. It is appended outside the
+    // line loop, so it must be budgeted here rather than after the fact (T-10):
+    // shrink the list until the *whole* rendered string fits.
+    let mut text = catalog_text(&lines, dropped);
+    while text.len() > budget_bytes && !lines.is_empty() {
+        lines.pop();
+        dropped += 1;
+        text = catalog_text(&lines, dropped);
     }
     if lines.is_empty() {
         return None;
     }
+    // Final UTF-8-safe guard in case a character boundary ever disagrees.
+    Some(fit_to_budget(&text, budget_bytes).to_string())
+}
+
+/// Assemble the full catalog string including the omitted hint.
+fn catalog_text(lines: &[String], dropped: usize) -> String {
+    let mut parts = lines.to_vec();
     if dropped > 0 {
         let noun = if dropped == 1 { "skill" } else { "skills" };
-        lines.push(format!(
+        parts.push(format!(
             "- and {dropped} more {noun} omitted (catalog budget reached)."
         ));
     }
-    Some(format!(
-        "{HEADER}\n\n{SECTION}\n{}\n\n{FOOTER}",
-        lines.join("\n")
-    ))
+    format!("{HEADER}\n\n{SECTION}\n{}\n\n{FOOTER}", parts.join("\n"))
 }
 
 fn entry_line(skill: &LoadedSkill) -> String {
@@ -120,7 +130,24 @@ mod tests {
             .collect();
         let text = render_catalog(&skills, 900).expect("catalog");
         assert!(text.contains("omitted (catalog budget reached)"));
-        assert!(text.len() < 1_600);
+        // The hint used to be appended after the budget loop, so the returned
+        // string could exceed the configured byte budget (T-10).
+        assert!(text.len() <= 900, "catalog is {} bytes", text.len());
+    }
+
+    #[test]
+    fn catalog_budget_never_splits_a_codepoint_in_cjk_names() {
+        let skills: Vec<LoadedSkill> = (0..20)
+            .map(|index| skill(&format!("中文技能-{index}"), Some("描述")))
+            .collect();
+        for budget in [300, 500, 900, 2_000] {
+            if let Some(text) = render_catalog(&skills, budget) {
+                assert!(text.len() <= budget, "budget {budget} exceeded");
+                // A String is always valid UTF-8; if a boundary had been cut,
+                // constructing it would have produced a replacement char.
+                assert!(!text.contains('\u{FFFD}'));
+            }
+        }
     }
 
     #[test]
