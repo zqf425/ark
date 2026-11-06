@@ -23,6 +23,7 @@ import { useCodeSessionStore } from '../../code-session/state/store'
 import { useViewStore } from '../../workbench/state/view-slice'
 import type { SettingsApi } from '../hooks/use-settings'
 import type { ProvidersApi } from '../hooks/use-providers'
+import { toModelProviderGroups } from '../../../shared/model-provider-menu'
 import { useIm } from '../hooks/use-im'
 import { describeOutcome, type Outcome } from '../api/outcome'
 import { CheckField } from './Field'
@@ -365,6 +366,8 @@ export function ImSection({
       {draft ? (
         <ChannelForm
           draft={draft}
+          groups={toModelProviderGroups(providers.providers)}
+          defaults={defaults}
           onDraft={setDraft}
           editing={editingId !== null}
           busy={api.busy !== null}

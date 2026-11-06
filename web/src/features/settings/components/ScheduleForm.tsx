@@ -10,6 +10,11 @@ import { Button } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import type { ScheduleKind } from '../../../shared/contracts'
 import { CheckField, Field, SelectField, TextField } from './Field'
+import {
+  ModelProviderMenu,
+  type ModelProviderGroup,
+  type ModelProviderSelection
+} from '../../../shared/model-provider-menu'
 import { Notice } from './SectionShell'
 import {
   MONTH_DAYS,
@@ -31,6 +36,10 @@ export type ScheduleFormProps = {
   onChange: (draft: ScheduleDraft) => void
   onSubmit: () => void
   onCancel: () => void
+  /** Provider -> model groups for the single two-level menu. */
+  groups: readonly ModelProviderGroup[]
+  /** Effective runtime default, previewed when no override is stored. */
+  fallback?: ModelProviderSelection
 }
 
 function toggleDay(days: number[], day: number): number[] {
@@ -45,7 +54,9 @@ export function ScheduleForm({
   unchanged,
   onChange,
   onSubmit,
-  onCancel
+  onCancel,
+  groups,
+  fallback
 }: ScheduleFormProps): JSX.Element {
   const { t } = useI18n()
   const set = (patch: Partial<ScheduleDraft>): void => onChange({ ...draft, ...patch })
@@ -175,23 +186,22 @@ export function ScheduleForm({
           disabled={busy}
           onChange={(value) => set({ autonomy: value })}
         />
-        <TextField
-          id="schedule-model"
-          label={t('settings.schedules.field.model')}
-          hint={t('settings.schedules.field.modelHint')}
-          value={draft.model}
-          disabled={busy}
-          onChange={(value) => set({ model: value })}
-        />
-        <TextField
-          id="schedule-provider"
-          label={t('settings.schedules.field.provider')}
-          hint={t('settings.schedules.field.providerHint')}
-          value={draft.providerId}
-          disabled={busy}
-          mono
-          onChange={(value) => set({ providerId: value })}
-        />
+        <Field label={t('settings.schedules.field.model')} htmlFor="schedule-model" hint={t('settings.schedules.field.modelHint')}>
+          <ModelProviderMenu
+            id="schedule-model"
+            groups={groups}
+            value={{ providerId: draft.providerId, model: draft.model }}
+            fallback={fallback}
+            disabled={busy}
+            ariaLabel={t('settings.schedules.field.model')}
+            placeholder={t('settings.general.defaultModel.unset')}
+            onSelect={(selection) => set({ providerId: selection.providerId, model: selection.model })}
+            clearSelection={{
+              label: t('modelProviderMenu.followDefault'),
+              onClear: () => set({ providerId: '', model: '' })
+            }}
+          />
+        </Field>
         <TextField
           id="schedule-workspace"
           label={t('settings.schedules.field.workspace')}

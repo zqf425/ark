@@ -11,7 +11,11 @@ import type { FeishuDomain, ImChannelKind } from '../../../shared/contracts'
 import type { MessageKey } from '../../../shared/i18n'
 import { CheckField, Field, SelectField, TextField } from './Field'
 import { Notice } from './SectionShell'
-import { IM_AUTONOMY_VALUES, IM_KINDS, type ImChannelDraft } from './im-form'
+import { IM_AUTONOMY_VALUES, IM_KINDS, type ImChannelDraft, type ImFormDefaults } from './im-form'
+import {
+  ModelProviderMenu,
+  type ModelProviderGroup
+} from '../../../shared/model-provider-menu'
 
 const KIND_LABEL_KEYS: Record<ImChannelKind, MessageKey> = {
   telegram: 'settings.im.kind.telegram',
@@ -146,7 +150,9 @@ export function ChannelForm({
   formError,
   onSubmit,
   onCancel,
-  onSaveMaster
+  onSaveMaster,
+  groups,
+  defaults
 }: {
   draft: ImChannelDraft
   onDraft: (next: ImChannelDraft) => void
@@ -156,6 +162,10 @@ export function ChannelForm({
   onSubmit: () => void
   onCancel: () => void
   onSaveMaster: (next: boolean) => void
+  /** Provider -> model groups for the single two-level menu. */
+  groups: readonly ModelProviderGroup[]
+  /** Runtime defaults, restored by the "follow default" entry. */
+  defaults: ImFormDefaults
 }): JSX.Element {
   const { t } = useI18n()
   return (
@@ -213,20 +223,23 @@ export function ChannelForm({
           value={draft.workspace}
           onChange={(value) => onDraft({ ...draft, workspace: value })}
         />
-        <TextField
-          id="im-form-model"
-          label={t('settings.im.form.model')}
-          hint={t('settings.im.form.modelHint')}
-          value={draft.model}
-          onChange={(value) => onDraft({ ...draft, model: value })}
-        />
-        <TextField
-          id="im-form-provider"
-          label={t('settings.im.form.providerId')}
-          hint={t('settings.im.form.providerIdHint')}
-          value={draft.providerId}
-          onChange={(value) => onDraft({ ...draft, providerId: value })}
-        />
+        <Field label={t('settings.im.form.model')} htmlFor="im-form-model" hint={t('settings.im.form.modelHint')}>
+          <ModelProviderMenu
+            id="im-form-model"
+            groups={groups}
+            value={{ providerId: draft.providerId, model: draft.model }}
+            disabled={busy}
+            ariaLabel={t('settings.im.form.model')}
+            onSelect={(selection) =>
+              onDraft({ ...draft, providerId: selection.providerId, model: selection.model })
+            }
+            clearSelection={{
+              label: t('modelProviderMenu.followDefault'),
+              onClear: () =>
+                onDraft({ ...draft, providerId: defaults.providerId, model: defaults.model })
+            }}
+          />
+        </Field>
         <SelectField<(typeof IM_AUTONOMY_VALUES)[number]>
           id="im-form-autonomy"
           label={t('settings.im.form.autonomy')}

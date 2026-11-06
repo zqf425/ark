@@ -119,16 +119,24 @@ export function ModelProviderMenu({
     [displayGroups, value, fallback]
   )
 
-  // Opening positions the right column on the provider of the current value.
+  // Re-anchor on the stored selection when it changes (e.g. a runtime fetch
+  // resolves after the menu opened). Primitive deps keep an unrelated parent
+  // re-render from resetting a provider the operator just hovered over.
+  useEffect(() => {
+    if (open && resolved.group) setActiveId(resolved.group.id)
+  }, [open, resolved.group?.id])
+
+  // On open, and while an async provider list arrives, ensure some group is
+  // active without ever overriding a provider already picked by the operator.
   useEffect(() => {
     if (!open) return
-    setActiveId(resolved.group?.id ?? displayGroups[0]?.id ?? null)
-  }, [open, resolved.group?.id, displayGroups])
+    setActiveId((current) => current ?? displayGroups[0]?.id ?? null)
+  }, [open, displayGroups])
 
-  // Uncontrolled menus own their dismissal. A controlled menu (composer)
-  // delegates outside-click/Escape to the parent that already owns them.
+  // Outside-click and Escape close the menu in both modes: `setOpen` routes a
+  // controlled menu's close through `onOpenChange` instead of local state.
   useEffect(() => {
-    if (!open || isControlled) return
+    if (!open) return
     const onDown = (event: MouseEvent): void => {
       if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
     }
@@ -141,7 +149,7 @@ export function ModelProviderMenu({
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
     }
-  }, [open, isControlled])
+  }, [open])
 
   const activeGroup = displayGroups.find((group) => group.id === activeId) ?? null
   const triggerLabel = resolved.group

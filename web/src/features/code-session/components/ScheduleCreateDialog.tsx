@@ -10,6 +10,8 @@ import { useEffect, useState } from 'react'
 import { useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import { useSchedules } from '../../settings/hooks/use-schedules'
+import { useProviders } from '../../settings/hooks/use-providers'
+import { toModelProviderGroups } from '../../../shared/model-provider-menu'
 import { describeOutcome } from '../../settings/api/outcome'
 import { ScheduleForm } from '../../settings/components/ScheduleForm'
 import {
@@ -22,6 +24,11 @@ export function ScheduleCreateDialog({ onClose }: { onClose: () => void }): JSX.
   const { t } = useI18n()
   const toast = useToast()
   const api = useSchedules()
+  const providers = useProviders()
+  const groups = toModelProviderGroups(providers.providers)
+  const active = providers.providers.find((row) => row.id === (providers.activeProviderId ?? '')) ??
+    providers.providers.find((row) => row.is_default) ?? null
+  const fallback = active ? { providerId: active.id, model: active.model } : undefined
   const [draft, setDraft] = useState<ScheduleDraft>(() => emptyScheduleDraft())
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -84,6 +91,8 @@ export function ScheduleCreateDialog({ onClose }: { onClose: () => void }): JSX.
             busy={api.busy !== null}
             error={formError}
             unchanged={false}
+            groups={groups}
+            fallback={fallback}
             onChange={setDraft}
             onSubmit={() => void submit()}
             onCancel={onClose}
