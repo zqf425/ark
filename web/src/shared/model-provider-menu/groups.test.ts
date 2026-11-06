@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProviderView } from '../contracts'
-import { resolveModelProviderSelection, toModelProviderGroups } from './groups'
+import { resolveModelProviderSelection, toDefaultModelGroups, toModelProviderGroups } from './groups'
 
 function provider(id: string, model: string, inventory: string[] = []): ProviderView {
   return {
@@ -36,6 +36,17 @@ describe('two-level provider/model menu grouping', () => {
   it('keeps disabled providers and empty inventories visible', () => {
     const disabled = { ...provider('off', ''), enabled: false }
     expect(toModelProviderGroups([disabled])).toEqual([{ id: 'off', label: 'off', models: [] }])
+  })
+
+  it('default-provider groups expose exactly the configured default model', () => {
+    const groups = toDefaultModelGroups([
+      provider('p1', 'glm', ['glm', 'qwen', 'kimi']),
+      provider('p2', 'gpt', [])
+    ])
+    expect(groups).toEqual([
+      { id: 'p1', label: 'p1', models: ['glm'] },
+      { id: 'p2', label: 'p2', models: ['gpt'] }
+    ])
   })
 
   it('resolves an explicit selection over the fallback', () => {

@@ -70,11 +70,6 @@ export const SETTINGS_IM_MESSAGES = {
     '在二级菜单中先选供应商再选模型；「跟随默认」恢复为该渠道默认值。',
     'Pick a provider then a model in the two-level menu; "Follow default" restores the channel default.'
   ],
-  'settings.im.form.providerId': ['供应商（已填入默认值）', 'Provider (default filled in)'],
-  'settings.im.form.providerIdHint': [
-    '默认取当前生效供应商；改成其它供应商即为该渠道单独覆盖。',
-    'Defaults to the active provider; type another provider to override it for this channel.'
-  ],
   'settings.im.form.autonomy': ['自治级别', 'Autonomy'],
   'settings.im.form.enabled': ['启用', 'Enabled'],
   'settings.im.form.secretsHint': [

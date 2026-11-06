@@ -49,8 +49,6 @@ export const SETTINGS_SCHEDULES_MESSAGES = {
   'settings.schedules.field.autonomyDefault': ['（使用默认）', '(use default)'],
   'settings.schedules.field.model': ['供应商 / 模型（可选）', 'Provider / model (optional)'],
   'settings.schedules.field.modelHint': ['在二级菜单中先选供应商再选模型；「跟随默认」表示不覆盖。', 'Pick a provider then a model in the two-level menu; "Follow default" clears the override.'],
-  'settings.schedules.field.provider': ['供应商 ID（可选）', 'Provider id (optional)'],
-  'settings.schedules.field.providerHint': ['留空表示使用运行时默认供应商。', 'Blank means the runtime default provider.'],
   'settings.schedules.field.workspace': ['工作区（可选）', 'Workspace (optional)'],
   'settings.schedules.field.workspaceHint': ['留空表示使用全局默认工作区。', 'Blank means the global default workspace.'],
 

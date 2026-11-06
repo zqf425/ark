@@ -14,7 +14,7 @@ import { useSettings, useWorkspaceProbe } from '../hooks/use-settings'
 import type { ProvidersApi } from '../hooks/use-providers'
 import { describeOutcome } from '../api/outcome'
 import { Field, SelectField } from './Field'
-import { ModelProviderMenu, toModelProviderGroups } from '../../../shared/model-provider-menu'
+import { ModelProviderMenu, toDefaultModelGroups } from '../../../shared/model-provider-menu'
 import { KeyValue, LoadError, Notice, SettingsSection, Skeleton } from './SectionShell'
 
 /** Log level ids stay verbatim; only their explanatory suffix is translated. */
@@ -82,7 +82,7 @@ function DefaultModelPicker({ providers }: { providers: ProvidersApi }): JSX.Ele
 
   const disabled = providers.providers.length === 0 || pending || providers.busy !== null
 
-  const groups = toModelProviderGroups(providers.providers)
+  const groups = toDefaultModelGroups(providers.providers)
   const currentProvider = providers.providers.find((row) => row.id === providers.defaultProviderId)
 
   const change = async (providerId: string): Promise<void> => {

@@ -44,6 +44,17 @@ export type ResolvedSelection = {
 }
 
 /**
+ * Groups for the "default provider" setting. The runtime stores only a provider
+ * id and always serves that provider's configured `model`, so each provider
+ * offers exactly one model row. Showing the whole inventory here would turn a
+ * click on a non-default model into a silent no-op: the setting cannot pin a
+ * model, only the provider.
+ */
+export function toDefaultModelGroups(providers: readonly ProviderView[]): ModelProviderGroup[] {
+  return toModelProviderGroups(providers).map((group) => ({ ...group, models: group.models.slice(0, 1) }))
+}
+
+/**
  * An explicit `(providerId, model)` always wins; a blank provider id previews
  * the effective runtime default (active provider) without pinning an override.
  */
