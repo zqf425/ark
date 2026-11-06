@@ -700,10 +700,7 @@ mod tests {
             .rename_thread(created.thread_id, "renamed")
             .await
             .unwrap();
-        store
-            .set_archived(created.thread_id, true)
-            .await
-            .unwrap();
+        store.set_archived(created.thread_id, true).await.unwrap();
 
         let listed = store.list_threads().await.unwrap();
         let meta = listed
@@ -731,14 +728,22 @@ mod tests {
             .find(|meta| meta.thread_id == id)
             .expect("the thread is listed after reopen");
         assert_eq!(restored.created_at, expected);
-        assert_eq!(restored.created_at, reopened.get_thread(id).await.unwrap().created_at);
+        assert_eq!(
+            restored.created_at,
+            reopened.get_thread(id).await.unwrap().created_at
+        );
     }
 
     #[test]
     fn legacy_index_json_without_created_at_falls_back_to_updated_at() {
         use crate::store::index::{IndexEntry, IndexSnapshot};
 
-        let row = IndexEntry::new(ThreadId::new(), "legacy", "threads/legacy", chrono::Utc::now());
+        let row = IndexEntry::new(
+            ThreadId::new(),
+            "legacy",
+            "threads/legacy",
+            chrono::Utc::now(),
+        );
         let mut snapshot = serde_json::to_value(IndexSnapshot::from_entries(vec![row])).unwrap();
         // Simulate an `index.json` written before `created_at` existed.
         snapshot["threads"][0]

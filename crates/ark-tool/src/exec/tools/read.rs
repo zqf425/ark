@@ -9,7 +9,7 @@ use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput};
 
 use crate::domain::{args, schema};
 use crate::exec::common::{as_output, read_text, with_detail, workspace_path};
-use crate::policy::{DEFAULT_LIMITS, cap_all};
+use crate::policy::{cap_all, DEFAULT_LIMITS};
 
 /// Default number of lines returned when the call sets no `limit`.
 pub const DEFAULT_LINE_LIMIT: usize = 400;

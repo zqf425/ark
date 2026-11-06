@@ -248,7 +248,11 @@ mod tests {
             .await
             .unwrap();
         std::env::remove_var("ARK_TEST_SECRET");
-        assert!(!out.content.contains("super-secret-value"), "{}", out.content);
+        assert!(
+            !out.content.contains("super-secret-value"),
+            "{}",
+            out.content
+        );
         assert!(out.content.contains("PATH="), "PATH must remain usable");
     }
 

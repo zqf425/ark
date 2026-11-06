@@ -522,7 +522,10 @@ mod tests {
         // `chars().count()` chunk of 4096 emoji is 8192 units and is rejected.
         let emoji = "\u{1F600}".repeat(4096);
         let chunks = chunk_text(ImChannelKind::Telegram, &emoji);
-        assert!(chunks.len() > 1, "a surrogate-pair-only message must be split");
+        assert!(
+            chunks.len() > 1,
+            "a surrogate-pair-only message must be split"
+        );
         let mut rebuilt = String::new();
         for chunk in &chunks {
             assert!(

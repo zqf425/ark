@@ -229,7 +229,10 @@ impl Reactor {
     /// instead of leaving a `turn_started` with no terminal (AG-01).
     pub async fn run(&mut self) -> Result<TurnOutcome> {
         if self.machine.state().is_terminal() {
-            return Ok(self.terminal_outcome.clone().unwrap_or(TurnOutcome::Completed));
+            return Ok(self
+                .terminal_outcome
+                .clone()
+                .unwrap_or(TurnOutcome::Completed));
         }
         match self.drive().await {
             Ok(outcome) => Ok(outcome),

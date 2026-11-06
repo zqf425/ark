@@ -99,7 +99,16 @@ fn run_find(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> 
     let name_only = glob::is_name_pattern(&pattern);
     let mut found = Vec::new();
     let mut visited = HashSet::new();
-    walk(&root, &root, &pattern, name_only, limit, 0, &mut found, &mut visited);
+    walk(
+        &root,
+        &root,
+        &pattern,
+        name_only,
+        limit,
+        0,
+        &mut found,
+        &mut visited,
+    );
     found.sort();
     let body = cap_all(&found.join("\n"), &DEFAULT_LIMITS, Some(limit));
     Ok(ToolOutput::ok(body))
@@ -166,7 +175,16 @@ fn walk(
             out.push(relative);
         }
         if kind.is_dir() {
-            walk(root, &path, pattern, name_only, limit, depth + 1, out, visited);
+            walk(
+                root,
+                &path,
+                pattern,
+                name_only,
+                limit,
+                depth + 1,
+                out,
+                visited,
+            );
         }
     }
 }

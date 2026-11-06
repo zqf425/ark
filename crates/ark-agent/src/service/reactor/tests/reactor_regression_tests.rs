@@ -403,7 +403,10 @@ async fn an_append_failure_still_writes_one_terminal_and_run_is_idempotent() {
     assert_eq!(terminals, 1, "exactly one terminal: {recorded:?}");
 
     let before = recorded.len();
-    let second = reactor.run().await.expect("a terminal reactor is idempotent");
+    let second = reactor
+        .run()
+        .await
+        .expect("a terminal reactor is idempotent");
     assert!(matches!(second, TurnOutcome::Failed { .. }));
     assert_eq!(
         failing.inner.recorded().len(),

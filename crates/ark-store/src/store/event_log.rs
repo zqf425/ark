@@ -324,7 +324,10 @@ mod tests {
         assert!(open.is_err(), "the writer must not start on a corrupt log");
 
         // The authoritative log stays byte-identical: no truncation, no append.
-        assert_eq!(std::fs::read(paths.events_jsonl()).unwrap(), text.as_bytes());
+        assert_eq!(
+            std::fs::read(paths.events_jsonl()).unwrap(),
+            text.as_bytes()
+        );
     }
 
     #[test]
