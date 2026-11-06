@@ -1,0 +1,204 @@
+/**
+ * Two-level provider -> model menu. Self-contained: only design tokens, so it
+ * works inside the settings forms and the composer toolbar without importing
+ * either feature's stylesheet. Kept in its own file so the composer's own
+ * in-progress CSS is never touched.
+ */
+
+.ark-mpm {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  width: 100%;
+}
+
+/* Inline toolbars (composer pill) size the container to its trigger. */
+.ark-mpm--inline {
+  width: auto;
+}
+
+.ark-mpm__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 11px;
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius-lg);
+  background: var(--ark-card-strong);
+  color: var(--ark-text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--ark-shadow-ctl);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.ark-mpm__trigger:hover:not(:disabled) {
+  border-color: var(--ark-accent-dim);
+}
+
+.ark-mpm__trigger:focus-visible {
+  outline: none;
+  border-color: var(--ark-accent-dim);
+  box-shadow: 0 0 0 3px var(--ark-accent-soft);
+}
+
+.ark-mpm__trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ark-mpm__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-mpm__caret {
+  flex: none;
+  color: var(--ark-text-faint);
+  font-size: 11px;
+}
+
+.ark-mpm__default-badge {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--ark-chip-border);
+  border-radius: var(--ark-radius-sm);
+  background: var(--ark-chip-bg);
+  color: var(--ark-text-dim);
+  font-size: 10.5px;
+}
+
+/* Floating card: left = providers, right = models of the active provider. */
+.ark-mpm__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 380px;
+  max-width: min(520px, 90vw);
+  max-height: 340px;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius-lg);
+  background: var(--ark-bg-raised);
+  box-shadow: var(--ark-shadow-2);
+  overflow: hidden;
+}
+
+/* The composer toolbar opens its menu above the pill, right-aligned. */
+.ark-mpm__menu--above-end {
+  top: auto;
+  bottom: calc(100% + 8px);
+  left: auto;
+  right: 0;
+}
+
+.ark-mpm__columns {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.ark-mpm__left,
+.ark-mpm__right {
+  flex: 1 1 50%;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.ark-mpm__left {
+  border-right: 1px solid var(--ark-border-muted);
+}
+
+.ark-mpm__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--ark-radius-sm);
+  background: none;
+  color: var(--ark-text-dim);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ark-mpm__item:hover:not(:disabled),
+.ark-mpm__item--active {
+  background: var(--ark-bg-hover);
+  color: var(--ark-text);
+}
+
+.ark-mpm__item--selected {
+  border-color: var(--ark-accent-dim);
+  background: var(--ark-accent-soft);
+  color: var(--ark-text);
+}
+
+.ark-mpm__item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-mpm__model .ark-mpm__item-label {
+  font-family: var(--ark-mono);
+}
+
+.ark-mpm__chevron,
+.ark-mpm__check {
+  flex: none;
+  color: var(--ark-text-faint);
+}
+
+.ark-mpm__item--clear {
+  color: var(--ark-text-faint);
+}
+
+.ark-mpm__empty {
+  margin: 0;
+  padding: 8px;
+  font-size: 12px;
+  color: var(--ark-text-faint);
+}
+
+.ark-mpm__header,
+.ark-mpm__footer {
+  padding: 8px 10px;
+  border-top: 1px solid var(--ark-border-muted);
+}
+
+.ark-mpm__header {
+  border-top: 0;
+  border-bottom: 1px solid var(--ark-border-muted);
+}
+
+.ark-mpm__item-desc {
+  font-size: 11px;
+  color: var(--ark-text-faint);
+}
+
+.ark-mpm__hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ark-warn);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ark-mpm__trigger {
+    transition: none;
+  }
+}

@@ -11,6 +11,7 @@ import { COMMON_MESSAGES } from './catalogs/common'
 import { ERROR_MESSAGES } from './catalogs/errors'
 import { SESSION_MESSAGES } from './catalogs/session'
 import { SESSION_CANVAS_MESSAGES } from './catalogs/session-canvas'
+import { MODEL_PROVIDER_MENU_MESSAGES } from './catalogs/model-provider-menu'
 import { SETTINGS_CORE_MESSAGES } from './catalogs/settings-core'
 import { SETTINGS_GENERAL_MESSAGES } from './catalogs/settings-general'
 import { SETTINGS_INTEGRATIONS_MESSAGES } from './catalogs/settings-integrations'
@@ -40,7 +41,8 @@ export const MESSAGES = {
   ...SETTINGS_IM_MESSAGES,
   ...THREAD_LIST_MESSAGES,
   ...WORKBENCH_MESSAGES,
-  ...CONSOLE_MESSAGES
+  ...CONSOLE_MESSAGES,
+  ...MODEL_PROVIDER_MENU_MESSAGES
 } as const
 
 export type MessageKey = keyof typeof MESSAGES
