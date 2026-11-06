@@ -127,6 +127,16 @@ pub struct Reactor {
     /// model call), never in the middle of a tool-call/result pair: injecting
     /// there would hand the provider a history it considers malformed.
     steer: Option<Arc<SteerQueue>>,
+    /// Corrections drained for the in-flight round but not yet committed to
+    /// history/journal. They join the request through `request()` and are only
+    /// committed once the model round actually consumes them (AG-02).
+    staged_steering: Vec<String>,
+    /// Guards against a second `turn_started` when `run()` is retried (AG-01).
+    turn_started_written: bool,
+    /// Recorded outcome, so a repeated `run()` is idempotent (AG-01).
+    terminal_outcome: Option<TurnOutcome>,
+    /// Monotonic gate id component so duplicate `call_id`s stay distinct.
+    gate_seq: u64,
 }
 
 impl Reactor {
@@ -168,6 +178,10 @@ impl Reactor {
             approved: Vec::new(),
             denied: Vec::new(),
             steer: None,
+            staged_steering: Vec::new(),
+            turn_started_written: false,
+            terminal_outcome: None,
+            gate_seq: 0,
         }
     }
 
@@ -177,19 +191,10 @@ impl Reactor {
         self
     }
 
-    /// Fold any queued corrections into the history as user messages.
-    ///
-    /// Returns how many were applied, so the caller can record a
-    /// `turn_steered` event for each.
+    /// Drain queued corrections. They are *staged*, not folded into history:
+    /// the journal may only claim a correction the model actually received.
     pub fn drain_steering(&mut self) -> Vec<String> {
-        let Some(queue) = &self.steer else {
-            return Vec::new();
-        };
-        let drained = queue.drain();
-        for text in &drained {
-            self.history.push(ModelMessage::user(text.clone()));
-        }
-        drained
+        self.steer.as_ref().map(|q| q.drain()).unwrap_or_default()
     }
 
     pub fn state(&self) -> TurnState {
@@ -219,8 +224,37 @@ impl Reactor {
         self.history.push(message);
     }
 
-    /// Run the turn. Returns the outcome actually recorded, never a guess.
+    /// Run the turn. Every exit path records exactly one terminal event: an
+    /// I/O failure inside the loop is converged into a `Failed` outcome here
+    /// instead of leaving a `turn_started` with no terminal (AG-01).
     pub async fn run(&mut self) -> Result<TurnOutcome> {
+        if self.machine.state().is_terminal() {
+            return Ok(self.terminal_outcome.clone().unwrap_or(TurnOutcome::Completed));
+        }
+        match self.drive().await {
+            Ok(outcome) => Ok(outcome),
+            Err(err) => {
+                if !self.turn_started_written || self.machine.state().is_terminal() {
+                    return Err(err);
+                }
+                let outcome = TurnOutcome::failed(err.message.clone());
+                if self.machine.state() != TurnState::Finalizing {
+                    let _ = self.machine.enter(&Action::Finish {
+                        outcome: outcome.clone(),
+                    });
+                }
+                match self.finish(outcome).await {
+                    Ok(outcome) => Ok(outcome),
+                    // A broken writer cannot record a terminal; keep the more
+                    // diagnostic original error rather than masking it.
+                    Err(_) => Err(err),
+                }
+            }
+        }
+    }
+
+    /// The loop body. Errors bubble to `run`, which owns terminalization.
+    async fn drive(&mut self) -> Result<TurnOutcome> {
         self.prepare().await?;
         let mut input = TurnInput::new(
             self.machine.limits(),
@@ -257,7 +291,10 @@ impl Reactor {
 
     /// Emit `turn_started` and repair the history before the first round.
     async fn prepare(&mut self) -> Result<()> {
-        self.writer.append(self.events.turn_started()).await?;
+        if !self.turn_started_written {
+            self.writer.append(self.events.turn_started()).await?;
+            self.turn_started_written = true;
+        }
         if let Some(text) = self.pending_user_message.take() {
             let item = ThreadItem::new(self.events.turn_id, ItemKind::UserMessage)
                 .with_text(text)
@@ -305,8 +342,14 @@ impl Reactor {
     }
 
     fn request(&self) -> ModelRequest {
+        let mut messages = self.history.clone();
+        // Staged corrections travel with the request but are committed to
+        // `history` only once the stream confirms the model consumed them.
+        for text in &self.staged_steering {
+            messages.push(ModelMessage::user(text.clone()));
+        }
         ModelRequest {
-            messages: self.history.clone(),
+            messages,
             tools: self.tools_schema.clone(),
             temperature: self.temperature,
             max_tokens: self.max_tokens,
@@ -325,31 +368,41 @@ impl Reactor {
     }
 
     /// Estimate the prefix and run one model round.
+    ///
+    /// Corrections are *staged* into the request. They are committed to history
+    /// and the journal only after the model round was actually sent; a cancel
+    /// inside `pump` restores them to the queue instead of silently dropping a
+    /// 202-accepted steer (AG-02).
     async fn round_input(&mut self) -> Result<TurnInput> {
-        // Steering is applied at a *round boundary*, never mid tool-call/result
-        // pair: injecting there would hand the provider a history it considers
-        // malformed. `drain_steering` used to have no caller at all, so a
-        // correction produced a `turn_steered` event and then never reached the
-        // model (P1-6).
-        self.apply_steering().await?;
+        self.stage_steering();
         let estimate = TokenEstimator::new().estimate_request(&self.request());
         self.machine.set_prompt_estimate(estimate);
         match self.pump().await? {
-            Round::Settled(response) => self.settle_model(response).await,
+            Round::Settled(response) => {
+                self.commit_steering().await?;
+                self.settle_model(response).await
+            }
+            Round::Failed(message) => {
+                self.commit_steering().await?;
+                Ok(self.input_of(InputKind::ModelFailed { message }))
+            }
             Round::Aborted => {
+                self.restore_steering();
                 let reason = self.cancellation_reason("turn interrupted");
                 Ok(self.interrupt_input(&reason))
             }
-            Round::Failed(message) => Ok(self.input_of(InputKind::ModelFailed { message })),
         }
     }
 
-    /// Push queued corrections into the model history, then journal each one.
-    ///
-    /// The event is written **after** the history update so the durable log never
-    /// claims a correction the model did not actually receive.
-    async fn apply_steering(&mut self) -> Result<()> {
-        for text in self.drain_steering() {
+    fn stage_steering(&mut self) {
+        self.staged_steering = self.drain_steering();
+    }
+
+    /// Commit staged corrections to history + durable journal. Only called
+    /// after the model request really carried them.
+    async fn commit_steering(&mut self) -> Result<()> {
+        for text in std::mem::take(&mut self.staged_steering) {
+            self.history.push(ModelMessage::user(text.clone()));
             self.writer.append(self.events.turn_steered(&text)).await?;
             let item = ThreadItem::new(self.events.turn_id, ItemKind::UserMessage)
                 .with_text(text)
@@ -357,6 +410,20 @@ impl Reactor {
             self.writer.append(self.events.item_created(item)).await?;
         }
         Ok(())
+    }
+
+    /// Put staged corrections back in order so a retry can deliver them.
+    fn restore_steering(&mut self) {
+        let texts = std::mem::take(&mut self.staged_steering);
+        if let Some(queue) = &self.steer {
+            queue.restore(texts);
+        }
+    }
+
+    /// Stage + commit for the rescue path (no model stream of its own).
+    async fn apply_steering(&mut self) -> Result<()> {
+        self.stage_steering();
+        self.commit_steering().await
     }
 
     fn has_pending_steering(&self) -> bool {
@@ -601,7 +668,9 @@ impl Reactor {
 
     /// Write the terminal event, then land on the terminal state.
     async fn finish(&mut self, outcome: TurnOutcome) -> Result<TurnOutcome> {
-        self.complete_stream_items().await?;
+        // Rendering items are best-effort: their append must never cost the
+        // turn its terminal event (the old ordering did exactly that, AG-01).
+        let _ = self.complete_stream_items().await;
         self.writer.finish(&outcome).await?;
         if self.machine.state() == TurnState::Finalizing {
             self.machine
@@ -611,7 +680,57 @@ impl Reactor {
         self.machine
             .settle(&outcome)
             .map_err(|err| ArkError::internal(err.to_string()))?;
+        self.terminal_outcome = Some(outcome.clone());
         Ok(outcome)
+    }
+
+    /// Close every call of the current round that has no tool result yet.
+    /// A gate cancelled mid-wait otherwise leaves the assistant's `tool_calls`
+    /// dangling with no paired `finished` row (AG-03).
+    pub(super) async fn converge_pending_calls_on_cancel(&mut self) -> Result<()> {
+        let mut paired: Vec<String> = self
+            .history
+            .iter()
+            .filter(|m| m.role == ModelRole::Tool)
+            .filter_map(|m| m.tool_call_id.clone())
+            .collect();
+        // Clone the round's calls: appending tool history needs `&mut self`,
+        // so the loop must not hold an immutable borrow of `self`.
+        let pending_calls = self.pending_calls.clone();
+        for call in &pending_calls {
+            if let Some(pos) = paired.iter().position(|id| id == &call.call_id) {
+                paired.remove(pos);
+                continue;
+            }
+            let detail = "cancelled before the call completed".to_string();
+            self.writer
+                .append(self.events.tool_call_started(
+                    &call.call_id,
+                    &call.tool,
+                    call.arguments.clone(),
+                ))
+                .await?;
+            self.writer
+                .append(self.events.tool_call_finished(
+                    &call.call_id,
+                    &call.tool,
+                    false,
+                    0,
+                    String::new(),
+                    Some(detail.clone()),
+                ))
+                .await?;
+            let execution = ToolExecution {
+                call_id: call.call_id.clone(),
+                tool: call.tool.clone(),
+                ok: false,
+                content: String::new(),
+                duration_ms: 0,
+                detail: Some(detail),
+            };
+            self.append_tool_history(call, &execution);
+        }
+        Ok(())
     }
 }
 

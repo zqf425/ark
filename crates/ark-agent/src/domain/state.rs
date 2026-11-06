@@ -66,6 +66,10 @@ impl TurnState {
         match (self, next) {
             (_, Compacting) => matches!(self, Preparing | DispatchingTools | AwaitingModel),
             (Preparing, AwaitingModel) => true,
+            // Any working state must be able to write a terminal event: an
+            // I/O error during `prepare()` otherwise leaves a turn with a
+            // `turn_started` and no terminal (AG-01).
+            (Preparing, Finalizing) => true,
             (AwaitingModel, DispatchingTools) => true,
             (AwaitingModel, AwaitingApproval) => true,
             (AwaitingModel, AwaitingUserInput) => true,
@@ -118,6 +122,13 @@ mod tests {
         // Design §7.1: the terminal event must exist before Completed.
         assert!(!TurnState::AwaitingModel.can_enter(TurnState::Completed));
         assert!(!TurnState::Preparing.can_enter(TurnState::Completed));
+    }
+
+    #[test]
+    fn a_failed_prepare_can_still_reach_finalizing() {
+        // A write failure during `prepare()` must still converge to a terminal
+        // event instead of leaving an orphaned `turn_started` (AG-01).
+        assert!(TurnState::Preparing.can_enter(TurnState::Finalizing));
     }
 
     #[test]
