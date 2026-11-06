@@ -29,9 +29,15 @@ impl Reactor {
         mut call: ToolCallRequest,
         summary: String,
     ) -> Result<TurnInput> {
-        // `call_id` is provider-local and may repeat across concurrent turns;
-        // HTTP resolution is process-wide, so scope the public gate id by turn.
-        let approval_id = format!("approval_{}_{}", self.events.turn_id, call.call_id);
+        // `call_id` is provider-local and may repeat even within one round;
+        // HTTP resolution is process-wide, so scope the public gate id by turn
+        // and a monotonic sequence (AG-05). The id still ends with the call id
+        // so gate-ordering assertions stay stable.
+        self.gate_seq = self.gate_seq.saturating_add(1);
+        let approval_id = format!(
+            "approval_{}_{}_{}",
+            self.events.turn_id, self.gate_seq, call.call_id
+        );
         let gates = Arc::clone(&self.gates);
         let request = ApprovalRequest::new(approval_id.clone(), call.clone(), summary.clone());
         // Prepare **before** the event becomes observable: prepare completes
@@ -47,9 +53,10 @@ impl Reactor {
             .await?;
         let reply = tokio::select! {
             _ = self.cancel.cancelled() => {
-                // No explicit drop: the registered future was moved into this
-                // select branch, and `select!` drops the losing branch's
-                // future, whose internal guard removes the registration.
+                // The assistant row already declares every call of this round.
+                // Close the ones still unanswered before unwinding, or the
+                // journal and history are left with orphan tool_calls (AG-03).
+                self.converge_pending_calls_on_cancel().await?;
                 let reason = self.cancellation_reason("turn interrupted while awaiting approval");
                 return Ok(self.interrupt_input(&reason))
             }
@@ -65,8 +72,16 @@ impl Reactor {
         // Chain bookkeeping: the step only sees a pure snapshot of it.
         let already_approved = self.approved.clone();
         let denied_so_far = self.denied.clone();
-        self.pending_approvals
-            .retain(|ask| ask.call.call_id != call.call_id);
+        // Remove exactly one entry: `retain` deleted every ask sharing the
+        // same provider-local `call_id`, silently dropping sibling calls
+        // (AG-05).
+        if let Some(pos) = self
+            .pending_approvals
+            .iter()
+            .position(|ask| ask.call.call_id == call.call_id)
+        {
+            self.pending_approvals.remove(pos);
+        }
         if reply.approved() {
             // A human approval is scoped to this exact, already-validated call.
             // The runner rejects `NeedsApproval` defensively, so it must receive
@@ -113,7 +128,11 @@ impl Reactor {
         call: ToolCallRequest,
         prompt: String,
     ) -> Result<TurnInput> {
-        let request_id = format!("ask_{}_{}", self.events.turn_id, call.call_id);
+        self.gate_seq = self.gate_seq.saturating_add(1);
+        let request_id = format!(
+            "ask_{}_{}_{}",
+            self.events.turn_id, self.gate_seq, call.call_id
+        );
         let gates = Arc::clone(&self.gates);
         let request = UserInputRequest {
             request_id: request_id.clone(),
@@ -129,8 +148,8 @@ impl Reactor {
             .await?;
         let answer = tokio::select! {
             _ = self.cancel.cancelled() => {
-                // Same as approvals: the losing select branch's future is
-                // dropped and its internal guard cleans up the registration.
+                // Same pairing invariant as approvals (AG-03).
+                self.converge_pending_calls_on_cancel().await?;
                 let reason = self.cancellation_reason("turn interrupted while awaiting user input");
                 return Ok(self.interrupt_input(&reason))
             }
@@ -156,8 +175,13 @@ impl Reactor {
         // Chain bookkeeping for the sibling gates of the same round: every ask
         // is answered in its own round, approvals follow once the asks are
         // done, and only then may anything dispatch (A2).
-        self.pending_user_inputs
-            .retain(|ask| ask.call.call_id != call.call_id);
+        if let Some(pos) = self
+            .pending_user_inputs
+            .iter()
+            .position(|ask| ask.call.call_id == call.call_id)
+        {
+            self.pending_user_inputs.remove(pos);
+        }
         let remaining_asks = self.pending_user_inputs.clone();
         let approvals = self.pending_approvals.clone();
         let pending_dispatch = if remaining_asks.is_empty() && approvals.is_empty() {

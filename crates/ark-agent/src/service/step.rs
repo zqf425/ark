@@ -124,7 +124,6 @@ fn settle_model(input: &TurnInput) -> Action {
 #[derive(Debug, Default, Clone)]
 struct DispatchYield {
     synthetic: Vec<SyntheticResult>,
-    extra: Vec<ToolCallRequest>,
 }
 
 fn dispatch(
@@ -145,8 +144,7 @@ fn dispatch(
             .with_storm_count(suppressed.count),
         );
     }
-    let mut runnable = storm.allowed;
-    runnable.extend(carry.extra);
+    let runnable = storm.allowed;
     let batches = ParallelPolicy::default()
         .with_parallel_cap(input.limits.max_parallel_tool_calls)
         .plan(&runnable);
@@ -172,8 +170,13 @@ fn gate_resolved(input: &TurnInput) -> Action {
     };
     let mut carry = DispatchYield {
         synthetic: synthetic_so_far.clone(),
-        extra: Vec::new(),
     };
+    // The human-approved call joins the *checked* call set instead of being
+    // appended to `runnable` afterwards. Otherwise every approval-gated call
+    // bypassed `max_identical_calls`, no matter how often it had already run
+    // (AG-04). `repeats` is aligned with `pending_dispatch + call` by the
+    // reactor, so the extra entry is simply ignored when the call is denied.
+    let mut calls = pending_dispatch.clone();
     if !approved {
         let message = if reason.trim().is_empty() {
             "denied by the approval gate".to_string()
@@ -184,7 +187,7 @@ fn gate_resolved(input: &TurnInput) -> Action {
             .synthetic
             .push(SyntheticResult::new(call, false, message));
     } else {
-        carry.extra.push(call.clone());
+        calls.push(call.clone());
     }
     if let Some(next) = next_ask {
         return Action::RequestApproval {
@@ -192,7 +195,7 @@ fn gate_resolved(input: &TurnInput) -> Action {
             summary: next.summary.clone(),
         };
     }
-    dispatch(pending_dispatch, repeats, input, carry)
+    dispatch(&calls, repeats, input, carry)
 }
 
 fn after_tools(input: &TurnInput) -> Action {

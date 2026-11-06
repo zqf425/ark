@@ -157,6 +157,27 @@ mod tests {
     }
 
     #[test]
+    fn restore_puts_drained_texts_back_in_order() {
+        let queue = SteerQueue::new();
+        assert!(queue.push("first"));
+        assert!(queue.push("second"));
+        let drained = queue.drain();
+        assert!(queue.is_empty());
+        queue.restore(drained);
+        assert_eq!(queue.drain(), vec!["first", "second"]);
+    }
+
+    #[test]
+    fn restore_keeps_newer_texts_after_the_restored_ones() {
+        let queue = SteerQueue::new();
+        assert!(queue.push("old"));
+        let drained = queue.drain();
+        assert!(queue.push("new"));
+        queue.restore(drained);
+        assert_eq!(queue.drain(), vec!["old", "new"]);
+    }
+
+    #[test]
     fn blank_text_is_rejected() {
         let queue = SteerQueue::new();
         assert!(!queue.push("   "));
@@ -241,6 +262,22 @@ impl SteerQueue {
             return Vec::new();
         };
         pending.drain(..).collect()
+    }
+
+    /// Put drained texts back at the front, preserving their order. Used when a
+    /// model round is cancelled after draining but before the request was sent:
+    /// a 202-accepted correction must not be silently lost (AG-02).
+    pub fn restore(&self, texts: Vec<String>) {
+        let Ok(mut pending) = self.pending.lock() else {
+            return;
+        };
+        for (index, text) in texts.into_iter().enumerate() {
+            let len = pending.len();
+            if len >= self.capacity {
+                break;
+            }
+            pending.insert(index.min(len), text);
+        }
     }
 
     pub fn len(&self) -> usize {
