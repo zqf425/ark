@@ -137,9 +137,10 @@ impl RuntimeCore {
         // can append a second row with the same `resume_count` (DL-01).
         let (existing, record) = {
             let mut known = self.lock_known();
-            let existing = known.get(&child_id).cloned().ok_or_else(|| {
-                ArkError::not_found(format!("child run not found: {child_id}"))
-            })?;
+            let existing = known
+                .get(&child_id)
+                .cloned()
+                .ok_or_else(|| ArkError::not_found(format!("child run not found: {child_id}")))?;
             if existing.parent_thread_id != request.parent_thread_id {
                 // Ownership is decided by the authoritative log, never by the caller.
                 return Err(ArkError::not_found(format!(
@@ -559,9 +560,7 @@ impl RuntimeCore {
         // entry first: after this remove, `run_child` can no longer start it,
         // and `abort_all` can no longer converge it concurrently (DL-02).
         let parked = self.lock_prepared().remove(&child);
-        if parked.is_none()
-            && (record.is_active() || self.lock_handles().contains_key(&child))
-        {
+        if parked.is_none() && (record.is_active() || self.lock_handles().contains_key(&child)) {
             return Err(ArkError::conflict(format!(
                 "child run {child} is still {} and cannot be destroyed; abort it first",
                 record.status.as_str()

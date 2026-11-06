@@ -309,7 +309,11 @@ mod tests {
         for n in 1..=5 {
             let occurrences = out.content.matches(&format!("a.txt-{n}-")).count()
                 + out.content.matches(&format!("a.txt:{n}:")).count();
-            assert_eq!(occurrences, 1, "line {n} must appear exactly once: {}", out.content);
+            assert_eq!(
+                occurrences, 1,
+                "line {n} must appear exactly once: {}",
+                out.content
+            );
         }
     }
 
@@ -359,7 +363,10 @@ mod tests {
         std::fs::write(outside.join("secret.txt"), "needle-secret\n").unwrap();
         symlink(&outside, dir.join("link")).unwrap();
         let out = GrepTool
-            .execute(&ctx(&dir), ToolArgs(serde_json::json!({ "pattern": "needle" })))
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "needle" })),
+            )
             .await
             .unwrap();
         assert!(

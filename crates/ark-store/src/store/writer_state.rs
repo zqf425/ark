@@ -565,12 +565,16 @@ mod tests {
         assert_eq!(err.code, ark_common::ArkErrorCode::StoreFailure);
         assert!(err.message.contains("1 malformed"), "{}", err.message);
         assert!(
-            err.message.contains(&paths.events_jsonl().display().to_string()),
+            err.message
+                .contains(&paths.events_jsonl().display().to_string()),
             "the error must name the file: {}",
             err.message
         );
         // No truncation and no append: the on-disk log is byte-identical.
-        assert_eq!(std::fs::read(paths.events_jsonl()).unwrap(), text.as_bytes());
+        assert_eq!(
+            std::fs::read(paths.events_jsonl()).unwrap(),
+            text.as_bytes()
+        );
     }
 
     #[test]

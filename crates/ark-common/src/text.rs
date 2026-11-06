@@ -29,7 +29,10 @@ pub fn redact_secret(value: &str) -> String {
     let chars: Vec<char> = trimmed.chars().collect();
     let shown = (chars.len() / 4).min(4);
     let visible: String = chars.iter().take(shown).collect();
-    format!("{visible}...{}", truncated_fingerprint(&chars, shown, value.len()))
+    format!(
+        "{visible}...{}",
+        truncated_fingerprint(&chars, shown, value.len())
+    )
 }
 
 fn truncated_fingerprint(chars: &[char], shown: usize, byte_len: usize) -> String {
@@ -69,10 +72,7 @@ mod tests {
     fn redaction_never_reveals_a_short_secret_in_full() {
         for secret in ["a", "abcd", "abcde", "12345678"] {
             let out = redact_secret(secret);
-            assert!(
-                !out.contains(secret),
-                "{secret:?} leaked in full: {out:?}"
-            );
+            assert!(!out.contains(secret), "{secret:?} leaked in full: {out:?}");
         }
         // Even the visible prefix and tail together cannot cover a short value.
         assert_eq!(redact_secret("a"), "...(1)");

@@ -605,4 +605,3 @@ mod tests {
         assert_eq!(content[1]["source"]["data"], "aGk=");
     }
 }
-

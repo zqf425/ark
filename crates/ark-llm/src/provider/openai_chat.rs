@@ -483,4 +483,3 @@ mod tests {
         assert_eq!(calls[0]["function"]["arguments"], r#"{"path":"a.txt"}"#);
     }
 }
-
