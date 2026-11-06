@@ -112,6 +112,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_missing_content_does_not_silently_truncate_the_file() {
+        let dir = temp_workspace("write-missing-content");
+        let target = dir.join("a.txt");
+        std::fs::write(&target, "keep").unwrap();
+        for raw in [
+            serde_json::json!({ "path": "a.txt" }),
+            serde_json::json!({ "path": "a.txt", "content": null }),
+        ] {
+            let out = WriteTool.execute(&ctx(&dir), ToolArgs(raw)).await.unwrap();
+            assert!(!out.ok, "content is required by the write schema");
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+        }
+    }
+
+    #[tokio::test]
     async fn write_refuses_an_escape() {
         let dir = temp_workspace("write-escape");
         let raw = ToolArgs(serde_json::json!({ "path": "../out.txt", "content": "x" }));

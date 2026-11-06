@@ -196,12 +196,20 @@ impl HttpBus {
                 )
                 .await?;
             let location = response.headers.get("location").cloned();
-            let hop = self.executor.hop_for(
-                &prepared.url,
-                response.status,
-                location.as_deref(),
-                followed,
-            )?;
+            // A per-request `follow_redirects: false` caps this budget at 0.
+            // `web_fetch` needs that: its SSRF guard only resolves the first
+            // hop, so following a 3xx to a private address would bypass it.
+            // Return the 3xx as-is instead; the tool renders it as ok:false.
+            let hop = if followed >= prepared.redirect_budget {
+                None
+            } else {
+                self.executor.hop_for(
+                    &prepared.url,
+                    response.status,
+                    location.as_deref(),
+                    followed,
+                )?
+            };
             let Some((target, drop_body)) = hop else {
                 return Ok(response);
             };

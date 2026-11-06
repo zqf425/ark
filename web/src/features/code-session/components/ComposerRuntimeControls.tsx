@@ -126,7 +126,9 @@ export function ComposerRuntimeControls({ threadId }: { threadId: string | null 
     providers.providers.find((provider) => provider.is_default) ??
     null
   const modelOptions = selectedProvider
-    ? [selectedProvider.model, ...selectedProvider.models].filter((id) => id && id !== (runtime.model ?? ''))
+    ? [selectedProvider.model, ...selectedProvider.models.map((item) => item.id)].filter(
+        (id) => id && id !== (runtime.model ?? '')
+      )
     : []
   const visionUnsupported = selectedProvider !== null && selectedProvider.supports_vision !== true
 

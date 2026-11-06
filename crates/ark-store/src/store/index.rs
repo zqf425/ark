@@ -27,6 +27,10 @@ pub struct IndexEntry {
     pub parent_thread_id: Option<ThreadId>,
     pub title: String,
     pub updated_at: DateTime<Utc>,
+    /// Real creation time from `thread.json`. Old `index.json` snapshots may
+    /// lack it; those fall back to `updated_at` in `entry_to_meta`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub archived: bool,
     #[serde(default)]
@@ -41,12 +45,18 @@ pub struct IndexEntry {
 }
 
 impl IndexEntry {
-    pub fn new(thread_id: ThreadId, title: impl Into<String>, path_rel: impl Into<String>) -> Self {
+    pub fn new(
+        thread_id: ThreadId,
+        title: impl Into<String>,
+        path_rel: impl Into<String>,
+        created_at: DateTime<Utc>,
+    ) -> Self {
         Self {
             thread_id,
             parent_thread_id: None,
             title: title.into(),
             updated_at: Utc::now(),
+            created_at: Some(created_at),
             archived: false,
             status: "idle".to_string(),
             tokens_total: 0,
@@ -273,7 +283,7 @@ mod tests {
     use crate::store::tests::TempDir;
 
     fn entry(indexed_seq: u64) -> IndexEntry {
-        let mut entry = IndexEntry::new(ThreadId::new(), "t", "threads/t");
+        let mut entry = IndexEntry::new(ThreadId::new(), "t", "threads/t", Utc::now());
         entry.indexed_seq = indexed_seq;
         entry
     }

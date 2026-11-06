@@ -28,6 +28,11 @@ pub struct OutboundRequest {
     /// sees the plaintext.
     #[serde(default)]
     pub credential: Option<String>,
+    /// Per-request override of the bus redirect policy. `Some(false)` is used
+    /// by `web_fetch`: the tool's SSRF guard only validates the first hop, so
+    /// silently following a 3xx to a private address would bypass it.
+    #[serde(default)]
+    pub follow_redirects: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

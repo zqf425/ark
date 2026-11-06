@@ -1,10 +1,10 @@
 /**
- * App composition (design §7.10.2).
+ * App composition for the approved ARK Console shell (proposal A).
  *
- * The Code workbench is chromeless: the sidebar footer carries status and the
- * view switch. The settings view keeps a top bar with the same switch. This
- * file only wires panels to hooks and picks a view: no fetch, no event
- * interpretation, no styling decisions beyond layout slots.
+ * The shell owns the top bar, activity rail and status bar; this file only
+ * picks the scene that renders in the stage and keeps the one thread-stream
+ * hook mounted across scene changes. No fetch, no event interpretation, no
+ * styling decisions beyond choosing a scene.
  */
 import { useEffect } from 'react'
 import { ErrorBoundary } from './shared/ui'
@@ -14,17 +14,21 @@ import { useThreadList } from './features/code-session/hooks/use-thread-list'
 import { useThreadStream } from './features/code-session/hooks/use-thread-stream'
 import { ThreadListPanel } from './features/code-session/components/ThreadListPanel'
 import { ThreadStream } from './features/code-session/components/ThreadStream'
-import { RuntimeStatusBar } from './features/code-session/components/RuntimeStatusBar'
 import { PanelSlot } from './features/workbench/panels/PanelSlot'
 import { WorkbenchLayout } from './features/workbench/layout/WorkbenchLayout'
 import { useViewStore } from './features/workbench/state/view-slice'
 import { SettingsPage } from './features/settings/components/SettingsPage'
+import { ConsoleShell } from './features/console/ConsoleShell'
+import { NewTaskPage } from './features/console/components/NewTaskPage'
+import { ReviewPage } from './features/console/components/ReviewPage'
+import { useConsoleMeta } from './features/console/hooks/use-console-meta'
 
 export function App(): JSX.Element {
   const { t } = useI18n()
   const view = useViewStore((state) => state.view)
   const activeThreadId = useCodeSessionStore((s) => s.activeThreadId)
   const { refresh, create } = useThreadList()
+  const meta = useConsoleMeta()
 
   // One bootstrap fetch. The stream hook below owns everything after that.
   useEffect(() => {
@@ -33,34 +37,39 @@ export function App(): JSX.Element {
 
   useThreadStream(activeThreadId)
 
-  if (view === 'settings') {
-    return (
-      <div className="ark-shell">
-        <RuntimeStatusBar />
+  return (
+    <ConsoleShell meta={meta}>
+      {view === 'settings' ? (
         <ErrorBoundary label={t('workbench.boundary.settings')}>
           <SettingsPage />
         </ErrorBoundary>
-      </div>
-    )
-  }
-
-  return (
-    <WorkbenchLayout
-      left={
-        <ErrorBoundary label={t('workbench.boundary.threadList')}>
-          <ThreadListPanel />
+      ) : view === 'review' ? (
+        <ErrorBoundary label={t('console.review.title')}>
+          <ReviewPage />
         </ErrorBoundary>
-      }
-      center={
-        <ErrorBoundary label={t('workbench.boundary.stream')}>
-          <ThreadStream threadId={activeThreadId} onCreateThread={create} />
+      ) : view === 'new' ? (
+        <ErrorBoundary label={t('console.new.title')}>
+          <NewTaskPage meta={meta} />
         </ErrorBoundary>
-      }
-      right={
-        <ErrorBoundary label={t('workbench.boundary.panel')}>
-          <PanelSlot />
-        </ErrorBoundary>
-      }
-    />
+      ) : (
+        <WorkbenchLayout
+          left={
+            <ErrorBoundary label={t('workbench.boundary.threadList')}>
+              <ThreadListPanel />
+            </ErrorBoundary>
+          }
+          center={
+            <ErrorBoundary label={t('workbench.boundary.stream')}>
+              <ThreadStream threadId={activeThreadId} onCreateThread={create} />
+            </ErrorBoundary>
+          }
+          right={
+            <ErrorBoundary label={t('workbench.boundary.panel')}>
+              <PanelSlot />
+            </ErrorBoundary>
+          }
+        />
+      )}
+    </ConsoleShell>
   )
 }

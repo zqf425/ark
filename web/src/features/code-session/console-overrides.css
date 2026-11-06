@@ -1,0 +1,70 @@
+/**
+ * ARK Console visual overrides for the existing Code session components.
+ *
+ * Loaded last from code-session.css so it refines (never rewrites) the legacy
+ * stylesheets. Kept deliberately narrow: it only touches container-level
+ * classes. The composer pickers (ark-composer__pill / __pick / __option) are
+ * owned by code-session-composer.css and are NOT overridden here, so in-flight
+ * work on those controls stays intact.
+ */
+
+/* User turn: right-aligned whale bubble -> left-aligned quote card. */
+.ark-msg--user {
+  align-self: stretch;
+  align-items: stretch;
+  max-width: 100%;
+  border: 1px solid var(--ark-border);
+  border-left: 2px solid var(--ark-accent);
+  border-radius: 0 var(--ark-radius) var(--ark-radius) 0;
+  background: var(--ark-bg-raised);
+  box-shadow: none;
+  padding: 10px 14px;
+}
+
+.ark-msg--user .ark-msg__body {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.65;
+}
+
+.ark-msg--user .ark-msg__head {
+  order: 0;
+  padding-right: 0;
+}
+
+/* Tool/process cards, gates and the composer shell: tighten radii. */
+.ark-tool,
+.ark-toolresult,
+.ark-gate,
+.ark-childruns,
+.ark-childcompletion,
+.ark-hero-stage__window {
+  border-radius: var(--ark-radius);
+}
+
+.ark-gate--approval {
+  border-color: var(--console-warn-line);
+  background: var(--console-warn-wash);
+}
+
+.ark-composer__box {
+  border-radius: var(--ark-radius-lg);
+  box-shadow: var(--ark-composer-shadow);
+}
+
+.ark-composer__sendbtn {
+  border-radius: var(--ark-radius-sm);
+}
+
+/* Stream header: flat panel with a ruled bottom edge. */
+.ark-threadfocus {
+  border-bottom: 1px solid var(--ark-border);
+  background: var(--ark-bg-canvas);
+}
+
+/* The old statusbar chrome is replaced by the shell status bar. */
+.ark-statusbar {
+  background: var(--ark-bg-canvas);
+  backdrop-filter: none;
+  border-bottom: 1px solid var(--ark-border);
+}

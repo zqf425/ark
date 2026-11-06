@@ -33,10 +33,10 @@ pub use base::{
     McpServerTestResponse, McpServerView, McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry,
     MemoryListResponse, PluginDiagnosticView, PluginEntry, PluginHostReport, ProviderEntry,
     ProviderListResponse, ProviderModelCatalogConnection, ProviderModelCatalogRequest,
-    ProviderModelCatalogResponse, ProviderModelSummary, ProviderTestRequest, ProviderTestResponse,
-    ProviderView, SkillActivation, SkillDiagnostics, SkillLoadWarning, SkillManifest, SkillSource,
-    SkillSummary, SkillTriggers, SkillTurnResolution, ThreadSkillsResponse, UpdateMemoryRequest,
-    WorkspaceStatus, WorkspaceValidateResponse,
+    ProviderModelCatalogResponse, ProviderModelInventoryItem, ProviderModelSummary,
+    ProviderTestRequest, ProviderTestResponse, ProviderView, SkillActivation, SkillDiagnostics,
+    SkillLoadWarning, SkillManifest, SkillSource, SkillSummary, SkillTriggers, SkillTurnResolution,
+    ThreadSkillsResponse, UpdateMemoryRequest, WorkspaceStatus, WorkspaceValidateResponse,
 };
 pub use capability::{
     CapabilitiesResponse, Capability, PageId, PageSpec, PanelEntry, PanelSlot, PanelSpec,

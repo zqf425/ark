@@ -228,10 +228,25 @@ impl DelegationRuntime {
     /// Abort every known child (used by graceful shutdown).
     ///
     /// Queued children are included: they own a handle before they own a slot.
-    pub fn abort_all(&self) {
+    /// A parked child has no worker to observe that handle, so it is converged
+    /// here to an `aborted` terminal record rather than waiting for a restart.
+    pub async fn abort_all(&self) {
         let handles: Vec<Arc<RunningChild>> = self.core.lock_handles().values().cloned().collect();
         for handle in handles {
             handle.abort();
+        }
+        let parked = self.core.take_unclaimed_prepared();
+        for prepared in parked {
+            let child = prepared.record.child_id;
+            let _ = self
+                .core
+                .finish(
+                    prepared.record,
+                    ChildTurnReport::aborted("aborted while awaiting execution"),
+                )
+                .await;
+            self.core.lock_handles().remove(&child);
+            self.core.settled.notify_waiters();
         }
     }
 
@@ -253,9 +268,22 @@ impl DelegationRuntime {
     /// already completed, still active — is decided here and surfaces as an
     /// error, so the client never gets an accepted-but-doomed resume.
     pub async fn prepare_child(&self, request: SubagentRequest) -> Result<ChildId> {
-        let prepared = self.core.prepare(request).await?;
+        let mut prepared = self.core.prepare(request).await?;
         let child_id = prepared.record.child_id;
-        self.core.lock_prepared().insert(child_id, prepared);
+        // Claim the parked slot first. Installing the handle only for the winner
+        // keeps a rejected duplicate from replacing the control tokens of a run
+        // that is already parked (DL-01/DL-02).
+        let mut parked = self.core.lock_prepared();
+        let entry = match parked.entry(child_id) {
+            std::collections::hash_map::Entry::Vacant(entry) => entry,
+            std::collections::hash_map::Entry::Occupied(_) => {
+                return Err(ArkError::conflict(format!(
+                    "child run {child_id} is already awaiting execution"
+                )));
+            }
+        };
+        self.core.install_handle(&mut prepared);
+        entry.insert(prepared);
         Ok(child_id)
     }
 
@@ -291,7 +319,8 @@ impl DelegationRuntime {
         Ok(child)
     }
 
-    /// Install the handle synchronously, then spawn an independent supervisor.
+    /// Reuse the prepared handle (or install one for direct execute paths), then
+    /// spawn an independent supervisor.
     ///
     /// The supervisor owns the worker JoinHandle, so a foreground caller being
     /// interrupted cannot also discard panic handling for the child.
@@ -299,7 +328,11 @@ impl DelegationRuntime {
         &self,
         mut prepared: PreparedChild,
     ) -> oneshot::Receiver<Result<SubagentOutcome>> {
-        self.core.install_handle(&mut prepared);
+        // Keep the control handle installed by `prepare_child` intact: an abort
+        // that landed while the run was parked must still reach its worker.
+        if !self.core.has_handle(prepared.record.child_id) {
+            self.core.install_handle(&mut prepared);
+        }
         let record = prepared.record.clone();
         let child = record.child_id;
         let core = Arc::clone(&self.core);

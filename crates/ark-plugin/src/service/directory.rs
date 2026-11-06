@@ -218,6 +218,7 @@ impl DirectoryPlugin {
                             timeout_ms: None,
                             idempotency_key: None,
                             credential: credential.clone(),
+                            follow_redirects: None,
                         },
                         http: Arc::clone(&self.http),
                     }),

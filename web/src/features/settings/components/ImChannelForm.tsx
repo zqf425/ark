@@ -209,18 +209,21 @@ export function ChannelForm({
         <TextField
           id="im-form-workspace"
           label={t('settings.im.form.workspace')}
+          hint={t('settings.im.form.workspaceHint')}
           value={draft.workspace}
           onChange={(value) => onDraft({ ...draft, workspace: value })}
         />
         <TextField
           id="im-form-model"
           label={t('settings.im.form.model')}
+          hint={t('settings.im.form.modelHint')}
           value={draft.model}
           onChange={(value) => onDraft({ ...draft, model: value })}
         />
         <TextField
           id="im-form-provider"
           label={t('settings.im.form.providerId')}
+          hint={t('settings.im.form.providerIdHint')}
           value={draft.providerId}
           onChange={(value) => onDraft({ ...draft, providerId: value })}
         />

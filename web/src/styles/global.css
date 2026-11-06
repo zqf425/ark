@@ -4,11 +4,13 @@
 @import './toast.css';
 
 /**
- * Global entry: imports the token layers (light palette in tokens.css, dark
- * overrides in theme.css), shared primitives and toast styles, then owns the
- * document base — canvas washes, scrollbars, selection. Component styles must
- * consume the tokens; a literal hex outside the token files is a review
- * blocker because it breaks light/dark parity.
+ * Global entry for the approved ARK Console redesign.
+ *
+ * Token layers load first (light Paper in tokens.css, dark Graphite overrides
+ * in theme.css); shared primitives and toast follow. The document base is
+ * deliberately flat: the old fixed-position ambient washes are gone, so the
+ * app shell owns every surface. Component CSS must consume tokens — a literal
+ * hex outside tokens.css / theme.css breaks light-dark parity.
  */
 
 * {
@@ -27,29 +29,9 @@ body {
   color: var(--ark-text);
   font-family: var(--ark-font);
   font-size: var(--ark-size);
-  line-height: 1.6;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  position: relative;
-}
-
-/* Ambient washes behind everything, ported from smart-ark: a vertical daylight
-   gradient plus a top-right whale-blue glow. Tokens keep both themes in sync. */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -2;
-  background: var(--ark-body-wash);
-  pointer-events: none;
-}
-
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background: var(--ark-body-glow);
-  pointer-events: none;
+  overflow: hidden;
 }
 
 button,
@@ -71,7 +53,12 @@ kbd {
   background: var(--ark-selection);
 }
 
-/* Slim rounded scrollbars, navy-tinted like the smart-ark shell. */
+/* Keyboard focus is visible everywhere, including custom controls. */
+:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: 2px;
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--ark-scrollbar-thumb) transparent;
@@ -97,7 +84,6 @@ kbd {
   background-color: var(--ark-scrollbar-thumb-hover);
 }
 
-/* Accessibility: honour the OS "reduce motion" setting for every transition. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -34,7 +34,9 @@ impl Default for SkillsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            roots: vec![home_dir().join(".ark").join("skills")],
+            // Own home root (`.arkd`), separate from smart-ark's `.ark`, so the
+            // two runtimes never discover or write each other's skills.
+            roots: vec![home_dir().join(".arkd").join("skills")],
             workspace_dirs: vec![".agents/skills".to_string(), "skills".to_string()],
             active_limit: DEFAULT_ACTIVE_LIMIT,
             instruction_budget_bytes: DEFAULT_INSTRUCTION_BUDGET_BYTES,
@@ -146,6 +148,8 @@ mod tests {
         assert_eq!(config.catalog_budget_bytes, 8_000);
         assert_eq!(config.workspace_dirs, vec![".agents/skills", "skills"]);
         assert_eq!(config.roots.len(), 1);
+        // 默认技能根必须落在本应用自己的 `.arkd` 主目录下，不得回退到 smart-ark 的 `.ark`。
+        assert_eq!(config.roots[0], home_dir().join(".arkd").join("skills"));
     }
 
     #[test]

@@ -38,7 +38,10 @@ impl PluginKind {
 
 /// Semantic version, minimal on purpose: only major/minor/patch plus optional
 /// pre-release text, because that is all dependency resolution needs.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+///
+/// `Ord` is implemented by hand: deriving it compared the pre-release string
+/// lexicographically, so `1.0.0-10` sorted *before* `1.0.0-9`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Version {
     pub major: u64,
     pub minor: u64,
@@ -79,6 +82,54 @@ impl Version {
             patch: numbers[2],
             pre,
         })
+    }
+}
+
+/// Compare two dot-separated pre-release identifiers following semver:
+/// numeric identifiers are compared as numbers and rank below alphanumeric
+/// ones; a version without a pre-release outranks one with it.
+fn compare_pre(a: Option<&str>, b: Option<&str>) -> std::cmp::Ordering {
+    use std::cmp::Ordering::{Equal, Greater, Less};
+    match (a, b) {
+        (None, None) => Equal,
+        (None, Some(_)) => Greater,
+        (Some(_), None) => Less,
+        (Some(a), Some(b)) => {
+            let mut ai = a.split('.');
+            let mut bi = b.split('.');
+            loop {
+                match (ai.next(), bi.next()) {
+                    (None, None) => return Equal,
+                    (None, Some(_)) => return Less,
+                    (Some(_), None) => return Greater,
+                    (Some(x), Some(y)) => {
+                        let ord = match (x.parse::<u64>(), y.parse::<u64>()) {
+                            (Ok(nx), Ok(ny)) => nx.cmp(&ny),
+                            (Ok(_), Err(_)) => Less,
+                            (Err(_), Ok(_)) => Greater,
+                            (Err(_), Err(_)) => x.cmp(y),
+                        };
+                        if ord != Equal {
+                            return ord;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Ord for Version {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (self.major, self.minor, self.patch)
+            .cmp(&(other.major, other.minor, other.patch))
+            .then_with(|| compare_pre(self.pre.as_deref(), other.pre.as_deref()))
+    }
+}
+
+impl PartialOrd for Version {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -294,6 +345,22 @@ mod tests {
         assert!(Version::new(2, 0, 0) > Version::new(1, 9, 9));
         assert!(Version::parse("1").is_err());
         assert!(Version::parse("x.y.z").is_err());
+    }
+
+    #[test]
+    fn prerelease_identifiers_follow_semver_not_lexicographic_order() {
+        let v = |s: &str| Version::parse(s).unwrap();
+        // The original derived Ord compared the strings, so "10" < "9".
+        assert!(v("1.0.0-9") < v("1.0.0-10"));
+        assert!(v("1.0.0-10") > v("1.0.0-9"));
+        // Numeric identifiers rank below alphanumeric ones.
+        assert!(v("1.0.0-1") < v("1.0.0-alpha"));
+        // A release outranks any of its pre-releases.
+        assert!(v("1.0.0-pre") < v("1.0.0"));
+        assert_eq!(v("1.0.0"), v("1.0.0"));
+        assert!(v("1.0.0") < v("1.0.1"));
+        // Longer identifier lists rank higher when all shared parts tie.
+        assert!(v("1.0.0-alpha") < v("1.0.0-alpha.1"));
     }
 
     #[test]

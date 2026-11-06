@@ -209,6 +209,10 @@ impl Executor {
             timeout_ms: Some(previous.timeout_ms),
             idempotency_key: None,
             credential: previous.credential_ref.clone().filter(|_| same_host),
+            // Redirect hops keep the caller's decision: the outer loop already
+            // stops at `prepared.redirect_budget`, so no hop is prepared for a
+            // request that opted out of following redirects.
+            follow_redirects: None,
         };
         prepare(
             &self.policy,

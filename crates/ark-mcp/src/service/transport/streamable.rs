@@ -85,6 +85,7 @@ impl StreamableHttpTransport {
             timeout_ms: self.config.timeout_ms,
             idempotency_key: None,
             credential: self.config.credential.clone(),
+            follow_redirects: None,
         };
         let response = self.http.request(&self.config.plugin_id, request).await?;
         if let Some(session) = response.headers.get("mcp-session-id") {

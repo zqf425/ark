@@ -191,6 +191,7 @@ fn rebuild_entry(
         item.thread_id,
         item.file.title.clone(),
         store.data_paths().thread_rel(&item.thread_id),
+        item.file.created_at,
     );
     entry.parent_thread_id = item.file.parent_thread_id;
     entry.updated_at = item.file.updated_at;
