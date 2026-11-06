@@ -14,6 +14,7 @@ import { useSettings, useWorkspaceProbe } from '../hooks/use-settings'
 import type { ProvidersApi } from '../hooks/use-providers'
 import { describeOutcome } from '../api/outcome'
 import { Field, SelectField } from './Field'
+import { ModelProviderMenu, toModelProviderGroups } from '../../../shared/model-provider-menu'
 import { KeyValue, LoadError, Notice, SettingsSection, Skeleton } from './SectionShell'
 
 /** Log level ids stay verbatim; only their explanatory suffix is translated. */
@@ -81,8 +82,13 @@ function DefaultModelPicker({ providers }: { providers: ProvidersApi }): JSX.Ele
 
   const disabled = providers.providers.length === 0 || pending || providers.busy !== null
 
+  const groups = toModelProviderGroups(providers.providers)
+  const currentProvider = providers.providers.find((row) => row.id === providers.defaultProviderId)
+
   const change = async (providerId: string): Promise<void> => {
-    if (!providerId) return
+    // Selecting another model of the same provider cannot change the stored
+    // default (the runtime keys it by provider id), so do not emit a no-op PATCH.
+    if (!providerId || providerId === providers.defaultProviderId) return
     setPending(true)
     const outcome = await providers.setDefault(providerId)
     setPending(false)
@@ -93,25 +99,19 @@ function DefaultModelPicker({ providers }: { providers: ProvidersApi }): JSX.Ele
   return (
     <>
       <Field label={t('settings.general.defaultModel.label')} htmlFor="settings-default-provider" hint={t('settings.general.defaultModel.hint')}>
-        <select
+        <ModelProviderMenu
           id="settings-default-provider"
-          className="ark-field__select"
-          value={providers.defaultProviderId ?? ''}
+          groups={groups}
+          value={{ providerId: providers.defaultProviderId ?? '', model: currentProvider?.model ?? '' }}
           disabled={disabled}
-          onChange={(event) => void change(event.target.value)}
-        >
-          <option value="">
-            {providers.providers.length === 0
+          ariaLabel={t('settings.general.defaultModel.label')}
+          placeholder={
+            providers.providers.length === 0
               ? t('settings.general.defaultModel.noProviders')
-              : t('settings.general.defaultModel.unset')}
-          </option>
-          {providers.providers.map((provider) => (
-            <option key={provider.id} value={provider.id}>
-              {provider.label ? `${provider.label} · ${provider.id}` : provider.id}
-              {provider.model ? ` · ${provider.model}` : ''}
-            </option>
-          ))}
-        </select>
+              : t('settings.general.defaultModel.unset')
+          }
+          onSelect={(selection) => void change(selection.providerId)}
+        />
       </Field>
 
       <KeyValue

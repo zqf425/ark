@@ -84,7 +84,7 @@ export function SettingsPage(): JSX.Element {
       case 'schedules':
         return (
           <ErrorBoundary label={t('settings.boundary.schedules')}>
-            <ScheduleSection settings={settings} />
+            <ScheduleSection settings={settings} providers={providers} />
           </ErrorBoundary>
         )
       case 'im':

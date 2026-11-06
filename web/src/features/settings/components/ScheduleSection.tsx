@@ -17,6 +17,8 @@ import type { ApplyResult, ScheduleKind, ScheduledTask } from '../../../shared/c
 import { useCodeSessionStore } from '../../code-session/state/store'
 import { useViewStore } from '../../workbench/state/view-slice'
 import type { SettingsApi } from '../hooks/use-settings'
+import type { ProvidersApi } from '../hooks/use-providers'
+import { toModelProviderGroups } from '../../../shared/model-provider-menu'
 import { useSchedules } from '../hooks/use-schedules'
 import { describeOutcome, type Outcome } from '../api/outcome'
 import { CheckField } from './Field'
@@ -136,11 +138,20 @@ function TaskRow({
   )
 }
 
-export function ScheduleSection({ settings }: { settings: SettingsApi }): JSX.Element {
+export function ScheduleSection({ settings, providers }: { settings: SettingsApi; providers?: ProvidersApi }): JSX.Element {
   const { t } = useI18n()
   const toast = useToast()
   const api = useSchedules()
   const { config, saving, save } = settings
+  const groups = toModelProviderGroups(providers?.providers ?? [])
+  const activeProvider = providers
+    ? providers.providers.find((row) => row.id === (providers.activeProviderId ?? '')) ??
+      providers.providers.find((row) => row.is_default) ??
+      null
+    : null
+  const fallback = activeProvider
+    ? { providerId: activeProvider.id, model: activeProvider.model }
+    : undefined
   // Same selection the thread list uses; the app view switch then shows it.
   const selectThread = useCodeSessionStore((state) => state.setActiveThread)
   const setView = useViewStore((state) => state.setView)
@@ -360,6 +371,8 @@ export function ScheduleSection({ settings }: { settings: SettingsApi }): JSX.El
           busy={api.busy !== null}
           error={formError}
           unchanged={unchanged}
+          groups={groups}
+          fallback={fallback}
           onChange={setDraft}
           onSubmit={() => void submit()}
           onCancel={() => {
