@@ -200,10 +200,32 @@ fn load_markdown_package(
     root: &Path,
     source: SkillSource,
 ) -> std::result::Result<(LoadedSkill, Option<String>), CandidateError> {
-    let entry_path = root.join(MARKDOWN_ENTRY);
-    let (entry_text, note) = read_entry(&entry_path);
-    let text = entry_text.clone().unwrap_or_default();
-    let front = frontmatter::parse(&text).unwrap_or_default();
+    // `SKILL.md` always carries the front matter, even when `entry:` points at
+    // a separate instruction file. Read it first so the declaration is not
+    // silently ignored (T-08): a legacy package that said
+    // `entry: INSTRUCTIONS.md` used to inject SKILL.md instead.
+    let manifest_path = root.join(MARKDOWN_ENTRY);
+    let (skill_md, mut note) = read_entry(&manifest_path);
+    let front = frontmatter::parse(skill_md.as_deref().unwrap_or_default()).unwrap_or_default();
+    let entry_path = match front
+        .entry
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        // Reuse the manifest-package guard: reject absolute paths and `..`.
+        Some(entry) => join_entry(root, entry).map_err(CandidateError::Validation)?,
+        None => manifest_path.clone(),
+    };
+    let (entry_text, entry_note) = if entry_path == manifest_path {
+        (skill_md.clone(), None)
+    } else {
+        read_entry(&entry_path)
+    };
+    if note.is_none() {
+        note = entry_note;
+    }
+    let text = skill_md.clone().unwrap_or_default();
     let folder = root
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
@@ -212,6 +234,7 @@ fn load_markdown_package(
         .description
         .clone()
         .or_else(|| frontmatter::first_paragraph(frontmatter::body(&text)));
+    let _ = skill_md; // the front-matter source is kept only for parsing above
     let skill = LoadedSkill {
         id: slug(front.id.as_deref().unwrap_or(&folder)),
         name: front.name.clone().unwrap_or_else(|| folder.clone()),

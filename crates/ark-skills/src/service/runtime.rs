@@ -415,6 +415,13 @@ fn inject(active: &[Match], budget_bytes: usize) -> Injection {
 /// `None` when the package was listed but its entry file could not be read.
 fn instruction_text(matched: &Match) -> Option<String> {
     let entry = matched.skill.entry_text.as_deref()?;
+    // Legacy packages keep YAML front matter inside their entry file; stripping
+    // it keeps metadata lines out of the injected prompt (T-08).
+    let entry = if matched.skill.legacy {
+        crate::domain::frontmatter::body(entry)
+    } else {
+        entry
+    };
     let mut parts: Vec<String> = Vec::new();
     parts.push(format!(
         "Active Skill: {} ({})",

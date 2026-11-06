@@ -51,6 +51,11 @@ impl LineWindow {
 /// UTF-8, the file is redone through the whole-file fallback chain
 /// (GB18030, Big5, ...) instead of emitting replacement characters; the
 /// partially collected window is discarded first, so lines never double up.
+/// A non-UTF-8 file has to be decoded through the whole-file fallback chain.
+/// Cap it so a huge legacy log cannot be loaded into memory in full (T-06):
+/// UTF-8 files are streamed and unaffected by this bound.
+const MAX_LEGACY_DECODE_BYTES: u64 = 8 * 1024 * 1024;
+
 fn collect_window(
     path: &std::path::Path,
     offset: usize,
@@ -59,6 +64,12 @@ fn collect_window(
     let mut window = LineWindow::new(offset, limit);
     if ark_common::try_stream_utf8_lines(path, &mut |line| window.push(line))? {
         return Ok(window);
+    }
+    let len = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+    if len > MAX_LEGACY_DECODE_BYTES {
+        return Err(ark_common::ArkError::validation(format!(
+            "legacy-encoded file is too large to read ({len} bytes); only UTF-8 files are streamed"
+        )));
     }
     let mut window = LineWindow::new(offset, limit);
     for line in read_text(path)?.lines() {
@@ -111,7 +122,7 @@ fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
         format!(
             "{}: lines {}-{} of {}",
             display(&path),
-            offset + 1,
+            offset.saturating_add(1),
             offset.saturating_add(limit).min(window.total),
             window.total
         ),
@@ -220,6 +231,28 @@ mod tests {
         assert!(out.ok);
         assert!(out.content.contains("中文"), "got {}", out.content);
         assert!(!out.content.contains('\u{FFFD}'));
+    }
+
+    #[tokio::test]
+    async fn a_huge_legacy_encoded_file_refuses_whole_file_decode() {
+        let dir = temp_workspace("read-legacy-large");
+        // Invalid UTF-8 (0xD6) and larger than the decode cap. It must fail
+        // explicitly instead of being loaded whole into memory.
+        let bytes = vec![0xD6_u8; (MAX_LEGACY_DECODE_BYTES as usize) + 1024];
+        std::fs::write(dir.join("big.bin"), &bytes).unwrap();
+        let raw = ToolArgs(serde_json::json!({ "path": "big.bin", "offset": 0, "limit": 5 }));
+        let out = ReadTool.execute(&ctx(&dir), raw).await.unwrap();
+        assert!(!out.ok);
+        assert!(out.content.contains("too large"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn a_max_usize_offset_does_not_panic() {
+        let dir = temp_workspace("read-overflow");
+        std::fs::write(dir.join("empty.txt"), b"").unwrap();
+        let raw = ToolArgs(serde_json::json!({ "path": "empty.txt", "offset": usize::MAX }));
+        let out = ReadTool.execute(&ctx(&dir), raw).await.unwrap();
+        assert!(out.ok, "a valid call must not panic: {}", out.content);
     }
 
     #[test]
