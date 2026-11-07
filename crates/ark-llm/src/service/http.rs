@@ -8,6 +8,12 @@
 //! Nothing here buffers the whole reply: each `data:` frame is parsed and
 //! forwarded before the next one is read, which is the memory-peak fix the old
 //! runtime needed.
+//!
+//! There is deliberately no wall-clock deadline on a whole turn: reasoning
+//! models legitimately stream for many minutes. What is bounded is each
+//! *phase* — waiting for response headers, and waiting for the next body
+//! frame — so a dead connection cannot hang the runtime while a live long
+//! stream survives. See [`DEFAULT_PHASE_TIMEOUT`].
 
 use std::time::Duration;
 
@@ -23,11 +29,23 @@ use crate::config::endpoint::ProviderConfig;
 use crate::provider::route::Family;
 use crate::provider::StreamParser;
 
+/// Maximum time to wait for one phase of a model request: response headers,
+/// or a single body frame. Not a total deadline for the whole turn.
+///
+/// reqwest's request-level `timeout()` is a *total* deadline that also covers
+/// reading the body, so using it here cut long SSE streams off at exactly 120s
+/// and reported the truncation as the misleading "error decoding response
+/// body". Bounding the silence between reads instead lets a live stream run as
+/// long as it needs while a stalled one still fails promptly.
+const DEFAULT_PHASE_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// HTTP-backed [`ModelClient`].
 pub struct HttpModelClient {
     config: ProviderConfig,
     client: reqwest::Client,
     retry: RetryPolicy,
+    /// Bound on each request phase (headers / one body frame), not on the
+    /// whole turn. See [`DEFAULT_PHASE_TIMEOUT`].
     timeout: Duration,
 }
 
@@ -52,16 +70,19 @@ impl HttpModelClient {
             config,
             client,
             retry: RetryPolicy::default(),
-            timeout: Duration::from_secs(120),
+            timeout: DEFAULT_PHASE_TIMEOUT,
         }
     }
 
     /// Build a client with a default `reqwest::Client`.
+    ///
+    /// No client-level timeout: `ClientBuilder::timeout` is a total deadline
+    /// covering the body read too, which would truncate long SSE streams. The
+    /// phase bounds live in `send_once`/`pump` instead, so they behave the same
+    /// for clients injected through [`HttpModelClient::new`] regardless of who
+    /// built the transport.
     pub fn with_config(config: ProviderConfig) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(120))
-            .build()
-            .unwrap_or_default();
+        let client = reqwest::Client::builder().build().unwrap_or_default();
         Self::new(config, client)
     }
 
@@ -70,6 +91,11 @@ impl HttpModelClient {
         self
     }
 
+    /// Narrow the per-phase bound (response headers / one body frame).
+    ///
+    /// `probe` uses a short value so the settings dialog cannot hang, and
+    /// tests use it to make timeout behaviour deterministic. This is **not**
+    /// a total deadline for a turn.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
@@ -198,15 +224,31 @@ impl HttpModelClient {
                 published: false,
                 retry_after: None,
             })?;
-        let mut builder = self
-            .client
-            .post(self.config.request_url())
-            .timeout(self.timeout)
-            .json(&body);
+        // No reqwest request-level `timeout()`: that is a total deadline that
+        // covers the body read and used to cut off long SSE streams. Bound only
+        // the wait for response headers here; `pump` bounds each body read.
+        let mut builder = self.client.post(self.config.request_url()).json(&body);
         for (name, value) in family.headers(&self.config) {
             builder = builder.header(name, value);
         }
-        let response = builder.send().await.map_err(|error| AttemptError {
+        let send_result = match tokio::time::timeout(self.timeout, builder.send()).await {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(AttemptError {
+                    kind: FailureKind::Transient,
+                    error: ArkError::model(format!(
+                        "model request timed out after {:?} waiting for response headers from {} {} ({})",
+                        self.timeout,
+                        self.config.provider_id,
+                        self.config.model,
+                        self.config.request_url()
+                    )),
+                    published: false,
+                    retry_after: None,
+                });
+            }
+        };
+        let response = send_result.map_err(|error| AttemptError {
             // A transport error is worth another attempt unless it is a URL
             // problem, which repeating cannot fix.
             kind: classify_transport(&error),
@@ -233,7 +275,13 @@ impl HttpModelClient {
             .map(|value| value.to_string());
         let retry_after = retry_after
             .and_then(|value| parse_retry_after(Some(&value), std::time::SystemTime::now()));
-        let text = response.text().await.unwrap_or_default();
+        // Removing the reqwest total deadline also removed its bound on this
+        // diagnostic read, so cap it explicitly: a hung error body must not
+        // wedge the retry loop.
+        let text = match tokio::time::timeout(self.timeout, response.text()).await {
+            Ok(Ok(text)) => text,
+            _ => String::new(),
+        };
         let summary = ark_common::text::truncate_utf8(&text, 512).to_string();
         Err(AttemptError {
             kind: FailureKind::from_status(status.as_u16()),
@@ -268,14 +316,26 @@ impl HttpModelClient {
         let mut text = String::new();
         let mut pending: Vec<u8> = Vec::new();
 
-        while let Some(chunk) = stream.next().await {
-            let bytes = chunk.map_err(|error| AttemptError {
-                error: ArkError::model(format!("model stream broke: {error}")),
-                kind: FailureKind::Transient,
-                published,
-                // Mid-stream there is no fresh Retry-After to read.
-                retry_after: None,
-            })?;
+        loop {
+            // Bound the *silence* between frames, not the length of the turn:
+            // a live long-running reasoning stream must never be cut off by a
+            // wall-clock deadline. Each received frame starts a fresh window.
+            let chunk = match tokio::time::timeout(self.timeout, stream.next()).await {
+                Ok(Some(chunk)) => chunk,
+                Ok(None) => break,
+                Err(_) => {
+                    return Err(AttemptError {
+                        error: ArkError::model(format!(
+                            "model stream timed out after {:?} without new data for {} {}",
+                            self.timeout, self.config.provider_id, self.config.model
+                        )),
+                        kind: FailureKind::Transient,
+                        published,
+                        retry_after: None,
+                    });
+                }
+            };
+            let bytes = chunk.map_err(|error| stream_failure(&error, published))?;
             // Bytes are decoded only down to the longest valid UTF-8 prefix:
             // a multi-byte codepoint split across TCP chunks must survive
             // into a later chunk, which per-chunk `from_utf8_lossy` would
@@ -381,11 +441,51 @@ fn split_at_last_complete_line(buffer: &str) -> (&str, &str) {
     }
 }
 
+/// Decide whether repeating a **send** could help.
+///
+/// Used only for `RequestBuilder::send()` errors. Here a `Decode` kind means a
+/// bad URL that repeating cannot fix, so it stays [`FailureKind::Permanent`].
 fn classify_transport(error: &reqwest::Error) -> FailureKind {
     if error.is_timeout() || error.is_connect() || error.is_request() {
         FailureKind::Transient
     } else {
         FailureKind::Permanent
+    }
+}
+
+/// Decide whether repeating a **body read** could help.
+///
+/// `Response::bytes_stream()` re-wraps every body error as `Kind::Decode`, so
+/// here `is_decode()` means a truncated/reset stream, not an undecodable
+/// payload (ark enables no content decoder). `is_timeout()` is the one signal
+/// that sees through both wrappers: it walks the source chain down to
+/// reqwest's `TimedOut`.
+fn classify_stream(error: &reqwest::Error) -> FailureKind {
+    if error.is_timeout() || error.is_connect() || error.is_body() || error.is_decode() {
+        FailureKind::Transient
+    } else {
+        FailureKind::Permanent
+    }
+}
+
+/// Turn a body-stream error into an attempt failure with an honest message.
+///
+/// reqwest labels every `bytes_stream()` error "error decoding response body",
+/// which made a plain timeout look like a payload bug. Classify by the
+/// underlying cause instead, and derive the retry kind rather than hardcoding
+/// it in the `map_err` closure.
+fn stream_failure(error: &reqwest::Error, published: bool) -> AttemptError {
+    let message = if error.is_timeout() {
+        "model stream timed out while waiting for data".to_string()
+    } else {
+        format!("model stream broke: {error}")
+    };
+    AttemptError {
+        error: ArkError::model(message),
+        kind: classify_stream(error),
+        published,
+        // Mid-stream there is no fresh Retry-After to read.
+        retry_after: None,
     }
 }
 
@@ -730,6 +830,170 @@ mod tests {
         let (complete, rest) = split_at_last_complete_line("data: a");
         assert!(complete.is_empty());
         assert_eq!(rest, "data: a");
+    }
+
+    /// Regression for the 120s cut-off: a live stream that keeps delivering
+    /// frames must survive well past the per-phase bound. The old reqwest
+    /// request-level `timeout()` was a *total* deadline covering the body, so
+    /// it truncated this stream at `timeout` even though data never stopped.
+    #[tokio::test]
+    async fn a_live_long_stream_is_not_cut_off_by_the_phase_bound() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        // 8 frames x 30ms = ~240ms total, each gap well inside the 120ms phase
+        // bound. Under the old total deadline the stream died at 120ms.
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4_096];
+            let _ = socket.read(&mut request).unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+            for i in 0..8 {
+                std::thread::sleep(Duration::from_millis(30));
+                let frame =
+                    format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"x{i}\"}}}}]}}\n\n");
+                socket
+                    .write_all(format!("{:x}\r\n{frame}\r\n", frame.len()).as_bytes())
+                    .unwrap();
+                let _ = socket.flush();
+            }
+            socket.write_all(b"0\r\n\r\n").unwrap();
+        });
+        let client = HttpModelClient::with_config(
+            ProviderConfig::new("test", "test-model")
+                .with_base_url(format!("http://{address}"))
+                .with_api_key("test-key"),
+        )
+        .with_retry(RetryPolicy::none())
+        .with_timeout(Duration::from_millis(120));
+        let (sink, _drain) = mpsc::channel(64);
+
+        let response = client
+            .stream(request(), sink)
+            .await
+            .expect("a stream with continuous frames must not be cut off");
+        server.join().unwrap();
+
+        assert_eq!(response.text, "x0x1x2x3x4x5x6x7");
+    }
+
+    /// A connection that goes quiet mid-stream must fail with an honest
+    /// "timed out" message, never the old misleading "decoding" wording.
+    #[tokio::test]
+    async fn a_stalled_stream_reports_a_timeout_not_a_decode_failure() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4_096];
+            let _ = socket.read(&mut request).unwrap();
+            // Headers + one frame, then stall: the socket stays open so this is
+            // a true idle stall, not a truncation. Unblocks when the client
+            // gives up and closes the connection (capped at 2s).
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+            let frame = "data: {\"choices\":[{\"delta\":{\"content\":\"par\"}}]}\n\n";
+            socket
+                .write_all(format!("{:x}\r\n{frame}\r\n", frame.len()).as_bytes())
+                .unwrap();
+            let _ = socket.flush();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut probe = [0_u8; 1];
+            let _ = socket.read(&mut probe);
+        });
+        let client = HttpModelClient::with_config(
+            ProviderConfig::new("test", "test-model")
+                .with_base_url(format!("http://{address}"))
+                .with_api_key("test-key"),
+        )
+        .with_retry(RetryPolicy::none())
+        .with_timeout(Duration::from_millis(60));
+        let (sink, _drain) = mpsc::channel(16);
+
+        let error = client
+            .stream(request(), sink)
+            .await
+            .expect_err("a stalled stream must fail");
+        server.join().unwrap();
+
+        let message = error.to_string();
+        assert!(message.contains("timed out"), "unexpected: {message}");
+        assert!(
+            !message.contains("decoding"),
+            "a timeout must not be labelled a decode failure: {message}"
+        );
+    }
+
+    /// reqwest's own read timeout produces `body(TimedOut)` that
+    /// `bytes_stream()` re-wraps as `Kind::Decode`. `is_timeout()` must still
+    /// see through that wrapper, or the diagnostic regresses to "decoding".
+    #[tokio::test]
+    async fn a_reqwest_read_timeout_is_still_reported_as_a_timeout() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4_096];
+            let _ = socket.read(&mut request).unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+            let _ = socket.flush();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut probe = [0_u8; 1];
+            let _ = socket.read(&mut probe);
+        });
+        let transport = reqwest::Client::builder()
+            .read_timeout(Duration::from_millis(60))
+            .build()
+            .unwrap();
+        let client = HttpModelClient::new(
+            ProviderConfig::new("test", "test-model")
+                .with_base_url(format!("http://{address}"))
+                .with_api_key("test-key"),
+            transport,
+        )
+        .with_retry(RetryPolicy::none())
+        // Keep our idle bound far above reqwest's so the reqwest error wins.
+        .with_timeout(Duration::from_secs(5));
+        let (sink, _drain) = mpsc::channel(16);
+
+        let error = client
+            .stream(request(), sink)
+            .await
+            .expect_err("a read timeout must fail");
+        server.join().unwrap();
+
+        let message = error.to_string();
+        assert!(
+            message.contains("timed out"),
+            "reqwest timeout must be labelled as such: {message}"
+        );
+        assert!(
+            !message.contains("decoding"),
+            "must not mislabel a timeout as a decode error: {message}"
+        );
     }
 
     #[test]
