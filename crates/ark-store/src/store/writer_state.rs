@@ -13,8 +13,12 @@ use crate::domain::session_state::SessionState;
 use crate::store::event_log::{
     append_text, encode_event, plan_compaction, read_markers_blocking, repair_log_blocking,
 };
-use crate::store::fs_util::{read_json_opt, remove_dir_all, write_atomic, write_json_atomic};
-use crate::store::items_log::{append_item_record_blocking, append_usage_blocking, UsageRecord};
+use crate::store::fs_util::{
+    read_json_opt, remove_dir_all, sync_parent_dir, write_atomic, write_json_atomic,
+};
+use crate::store::items_log::{
+    append_item_record_blocking, append_usage_blocking, write_items_records_blocking, UsageRecord,
+};
 use ark_common::{ArkError, Result, ThreadId};
 use ark_contract::{RewindResponse, RuntimeEvent};
 use chrono::Utc;
@@ -47,11 +51,26 @@ fn append_fsync(limits: &StoreLimits, event: &RuntimeEvent) -> bool {
     limits.fsync_on_append && !is_delta_event(event)
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct RewindRecord {
-    rewind_from_seq: u64,
-    target_turn_id: Option<ark_common::TurnId>,
-    last_seq: u64,
+#[derive(Clone, Copy)]
+enum DerivedAppend {
+    Item,
+    Usage,
+}
+
+/// Only a row this event actually appends needs a file fsync. Session writes
+/// are atomic replacements whose temporary file is already synced.
+fn derived_append_fsync(event: &RuntimeEvent, target: DerivedAppend) -> bool {
+    match target {
+        DerivedAppend::Item => crate::domain::items::affects_items(event) && !is_delta_event(event),
+        DerivedAppend::Usage => matches!(event, RuntimeEvent::Usage { .. }),
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct RewindRecord {
+    pub(crate) rewind_from_seq: u64,
+    pub(crate) target_turn_id: Option<ark_common::TurnId>,
+    pub(crate) last_seq: u64,
 }
 
 /// Mutable state owned exclusively by one writer actor.
@@ -66,17 +85,21 @@ pub struct WriterState {
     projector: ItemProjector,
     session: SessionState,
     rewinds: Vec<RewindRecord>,
+    compaction_pending: bool,
+    rewind_pending: bool,
     diagnostics: Arc<dyn DiagnosticSink>,
 }
 
 impl WriterState {
-    /// Load the log (repairing a torn tail) and rebuild the derived projections.
+    /// Load the log (repairing only a torn tail) and rebuild in-memory projections.
     pub fn open(
         thread_id: ThreadId,
         paths: ThreadPaths,
         limits: StoreLimits,
         diagnostics: Arc<dyn DiagnosticSink>,
     ) -> Result<Self> {
+        crate::store::compaction_tx::recover(&paths)?;
+        crate::store::rewind_tx::recover(&paths)?;
         let parsed = repair_log_blocking(&paths)?;
         // Explicit gate at the writer boundary: a torn tail may be repaired,
         // but any complete malformed line means the authoritative log is
@@ -91,11 +114,7 @@ impl WriterState {
                 .for_thread(thread_id),
             );
         }
-        let mut projector = ItemProjector::new();
-        for event in &parsed.events {
-            projector.apply(event);
-        }
-        let session = SessionState::replay(&parsed.events);
+        let (projector, session) = load_projections(&paths, &parsed.events)?;
         let rewinds = read_json_opt(&paths.rewinds_json()).unwrap_or_default();
         Ok(Self {
             thread_id,
@@ -108,6 +127,8 @@ impl WriterState {
             projector,
             session,
             rewinds,
+            compaction_pending: false,
+            rewind_pending: false,
             diagnostics,
         })
     }
@@ -134,8 +155,20 @@ impl WriterState {
     /// The in-memory watermark only advances after the append succeeded, so a
     /// failed write cannot hand out a `seq` that is not on disk.
     pub fn append(&mut self, event: RuntimeEvent) -> Result<RuntimeEvent> {
+        self.finish_pending_transactions()?;
         let seq = self.seq + 1;
         let stored = event.with_seq(seq);
+        let owns_dirty =
+            if crate::store::derived_repair::affects_derived(&stored) && !is_delta_event(&stored) {
+                crate::store::derived_dirty::mark_if_clean(
+                    &self.paths,
+                    seq,
+                    self.projector.current_turn(),
+                    &self.session,
+                )?
+            } else {
+                false
+            };
         let mut text = encode_event(&stored)?;
         if self.needs_newline {
             // The previous tail was a complete line without a trailing newline.
@@ -149,7 +182,10 @@ impl WriterState {
         self.needs_newline = false;
         self.seq = seq;
         self.events.push(stored.clone());
-        self.project_derived(&stored);
+        let derived_ok = self.project_derived(&stored);
+        if owns_dirty && derived_ok {
+            self.clear_dirty_after_append();
+        }
         self.fanout(&stored);
         Ok(stored)
     }
@@ -160,6 +196,7 @@ impl WriterState {
     /// channel only ever yields `seq > watermark` and the concatenation is
     /// already ordered and gap-free.
     pub fn snapshot_and_subscribe(&mut self, since_seq: u64) -> Result<Snapshot> {
+        self.finish_pending_transactions()?;
         let watermark = self.seq;
         let backlog = self.backlog(since_seq, watermark)?;
         let (sender, receiver) = mpsc::channel(self.limits.live_capacity);
@@ -237,76 +274,106 @@ impl WriterState {
     ///
     /// Returns the last folded `seq`, i.e. where the hole ends.
     pub fn compact(&mut self, keep_last: usize) -> Result<Option<u64>> {
+        self.finish_pending_transactions()?;
+        self.reject_destructive_if_dirty("compact")?;
         let keep_last = self.retention_safe_keep_last(keep_last);
         let planned = plan_compaction(&self.events, keep_last, "capacity")?;
         let Some((body, marker)) = planned else {
             return Ok(None);
         };
-        write_atomic(&self.paths.events_jsonl(), body.as_bytes())?;
-        append_text(
-            &self.paths.compacted_jsonl(),
-            &format!("{}\n", marker.to_line()),
-            self.limits.fsync_on_append,
-        )?;
         let cutoff = marker.to_seq;
+        self.persist_compaction_checkpoints()?;
+        self.compaction_pending = true;
+        let transaction = crate::store::compaction_tx::CompactionTransaction::begin(
+            &self.paths,
+            marker,
+            body.as_bytes(),
+        )?;
+        write_atomic(&self.paths.events_jsonl(), body.as_bytes())?;
         self.events.retain(|event| event.seq() > cutoff);
+        self.needs_newline = false;
+        sync_parent_dir(&self.paths.events_jsonl())?;
+        transaction.commit()?;
+        self.compaction_pending = false;
         Ok(Some(cutoff))
     }
 
     /// Physically discard every event at or after `rewind_from_seq` and append
-    /// one durable reset notification. Derived files are rebuilt from the kept
-    /// prefix before subscribers receive the notification.
+    /// one durable reset notification in a recoverable multi-file transaction.
     pub fn rewind(
         &mut self,
         rewind_from_seq: u64,
         target_turn_id: Option<ark_common::TurnId>,
     ) -> Result<RewindResponse> {
+        self.finish_pending_transactions()?;
+        self.validate_rewind()?;
+        let reset = RuntimeEvent::ThreadRewound {
+            seq: self.seq + 1,
+            thread_id: self.thread_id,
+            timestamp: Utc::now(),
+            rewind_from_seq,
+            target_turn_id,
+        };
+        let mut after = self
+            .events
+            .iter()
+            .filter(|event| event.seq() < rewind_from_seq)
+            .cloned()
+            .collect::<Vec<_>>();
+        after.push(reset.clone());
+        let body = encode_events(&after)?;
+        let mut rewinds = self.rewinds.clone();
+        rewinds.push(RewindRecord {
+            rewind_from_seq,
+            target_turn_id,
+            last_seq: reset.seq(),
+        });
+        let transaction = crate::store::rewind_tx::RewindTransaction::begin(
+            &self.paths,
+            body.as_bytes(),
+            &rewinds,
+        )?;
+        self.rewind_pending = true;
+        transaction.replace_events(body.as_bytes())?;
+        transaction.commit()?;
+        self.install_rewound_state(after, rewinds, &reset);
+        Ok(RewindResponse {
+            last_seq: reset.seq(),
+            rewind_from_seq,
+            already_rewound: false,
+        })
+    }
+
+    fn validate_rewind(&self) -> Result<()> {
+        if crate::store::fs_util::path_entry_exists(&self.paths.compacted_jsonl()) {
+            return Err(ArkError::conflict(format!(
+                "cannot rewind compacted thread {}",
+                self.thread_id
+            )));
+        }
+        self.reject_destructive_if_dirty("rewind")?;
         if self.has_running_turn() {
             return Err(ArkError::conflict(
                 "cannot rewind a thread with a running turn",
             ));
         }
-        let previous_watermark = self.seq;
-        self.events.retain(|event| event.seq() < rewind_from_seq);
-        let mut body = String::new();
-        for event in &self.events {
-            body.push_str(&encode_event(event)?);
-        }
-        write_atomic(&self.paths.events_jsonl(), body.as_bytes())?;
+        Ok(())
+    }
 
-        self.projector = ItemProjector::new();
-        for event in &self.events {
-            self.projector.apply(event);
-        }
-        // The rewrite must emit watermarked rows: a plain item rewrite would
-        // restore legacy-shape rows and push every later read back to a
-        // full-log replay.
-        crate::store::items_log::rewrite_items_from_events_blocking(&self.paths, &self.events)?;
+    fn install_rewound_state(
+        &mut self,
+        events: Vec<RuntimeEvent>,
+        rewinds: Vec<RewindRecord>,
+        reset: &RuntimeEvent,
+    ) {
+        self.seq = reset.seq();
+        self.events = events;
+        self.projector = project_items_in_memory(&self.events);
         self.session = SessionState::replay(&self.events);
-        write_json_atomic(&self.paths.session_json(), &self.session)?;
+        self.rewinds = rewinds;
         self.needs_newline = false;
-        // Sequence numbers are never reused: an SSE consumer that has already
-        // observed the discarded suffix receives this higher reset event.
-        self.seq = previous_watermark;
-        let stored = self.append(RuntimeEvent::ThreadRewound {
-            seq: 0,
-            thread_id: self.thread_id,
-            timestamp: Utc::now(),
-            rewind_from_seq,
-            target_turn_id,
-        })?;
-        let response = RewindResponse {
-            last_seq: stored.seq(),
-            rewind_from_seq,
-            already_rewound: false,
-        };
-        self.rewinds.push(RewindRecord {
-            rewind_from_seq,
-            target_turn_id,
-            last_seq: response.last_seq,
-        });
-        write_json_atomic(&self.paths.rewinds_json(), &self.rewinds)?;
-        Ok(response)
+        self.rewind_pending = false;
+        self.fanout(reset);
     }
 
     /// Find a rewind marker retained independently from the compactable event log.
@@ -426,50 +493,144 @@ impl WriterState {
         Ok(backlog)
     }
 
-    /// Push derived files. They are projections, so failures are diagnostics
-    /// rather than errors: the event log remains authoritative.
-    fn project_derived(&mut self, stored: &RuntimeEvent) {
-        if let Some(item) = self.projector.apply(stored) {
-            // Delta events must not append a row: each row carries the
-            // accumulated text, so a row per fragment made `items.jsonl`
-            // quadratic in the reply length. The row's watermark instead lets
-            // a read replay only the deltas that are still missing. The
-            // position fields are read *after* `apply`, which advanced them.
-            if !is_delta_event(stored) {
-                let record = crate::domain::items::ItemSnapshotRecord::from_projection(
-                    self.projector.first_seq_of(&item.item_id),
-                    self.projector.watermark_of(&item.item_id),
-                    &item,
-                );
-                if let Err(err) = append_item_record_blocking(&self.paths, &record, false) {
-                    self.report_derived("items.jsonl", &err);
-                }
-            }
+    /// Push derived files and report whether every required write succeeded.
+    fn project_derived(&mut self, stored: &RuntimeEvent) -> bool {
+        let item = self.project_item(stored);
+        let usage = self.project_usage(stored);
+        let session = self.project_session(stored);
+        item && usage && session
+    }
+
+    fn project_item(&mut self, stored: &RuntimeEvent) -> bool {
+        let Some(item) = self.projector.apply(stored) else {
+            return true;
+        };
+        if is_delta_event(stored) {
+            return true;
         }
-        if let RuntimeEvent::Usage {
+        let record = crate::domain::items::ItemSnapshotRecord::from_projection(
+            self.projector.first_seq_of(&item.item_id),
+            self.projector.watermark_of(&item.item_id),
+            &item,
+        );
+        self.record_derived_result(
+            "items.jsonl",
+            append_item_record_blocking(
+                &self.paths,
+                &record,
+                derived_append_fsync(stored, DerivedAppend::Item),
+            ),
+        )
+    }
+
+    fn project_usage(&self, stored: &RuntimeEvent) -> bool {
+        let RuntimeEvent::Usage {
             turn_id,
             usage,
             seq,
             ..
         } = stored
+        else {
+            return true;
+        };
+        let record = UsageRecord::from_event(*seq, *turn_id, usage.clone());
+        self.record_derived_result(
+            "usage.jsonl",
+            append_usage_blocking(
+                &self.paths,
+                &record,
+                derived_append_fsync(stored, DerivedAppend::Usage),
+            ),
+        )
+    }
+
+    fn project_session(&mut self, stored: &RuntimeEvent) -> bool {
+        if !self.session.apply(stored) {
+            return true;
+        }
+        self.record_derived_result(
+            "session.json",
+            write_json_atomic(&self.paths.session_json(), &self.session),
+        )
+    }
+
+    fn record_derived_result(&self, file: &str, result: Result<()>) -> bool {
+        if let Err(err) = result {
+            self.report_derived(file, &err);
+            return false;
+        }
+        true
+    }
+
+    fn clear_dirty_after_append(&self) {
+        if let Err(err) = crate::store::derived_dirty::clear(&self.paths) {
+            self.report_derived(".derived-dirty.json", &err);
+        }
+    }
+
+    fn persist_compaction_checkpoints(&self) -> Result<()> {
+        let records = self.projector.clone().snapshot_records();
+        write_items_records_blocking(&self.paths, &records)?;
+        write_json_atomic(&self.paths.session_json(), &self.session)?;
+        sync_parent_dir(&self.paths.session_json())
+    }
+
+    pub(crate) fn finish_pending_transactions(&mut self) -> Result<()> {
+        if self.compaction_pending {
+            sync_parent_dir(&self.paths.events_jsonl())?;
+            crate::store::compaction_tx::recover(&self.paths)?;
+            self.compaction_pending = false;
+        }
+        if self.rewind_pending
+            || crate::store::fs_util::path_entry_exists(&self.paths.rewind_pending_json())
         {
-            let record = UsageRecord::from_event(*seq, *turn_id, usage.clone());
-            if let Err(err) = append_usage_blocking(&self.paths, &record, false) {
-                self.report_derived("usage.jsonl", &err);
+            let previous_seq = self.seq;
+            let outcome = crate::store::rewind_tx::recover(&self.paths)?;
+            self.reload_from_disk()?;
+            self.rewind_pending = false;
+            let committed = outcome == crate::store::rewind_tx::RecoveryOutcome::Committed
+                || self.seq > previous_seq;
+            if committed {
+                if let Some(reset) = self
+                    .events
+                    .last()
+                    .cloned()
+                    .filter(|event| matches!(event, RuntimeEvent::ThreadRewound { .. }))
+                {
+                    self.fanout(&reset);
+                }
             }
         }
-        if self.session.apply(stored) {
-            if let Err(err) = write_json_atomic(&self.paths.session_json(), &self.session) {
-                self.report_derived("session.json", &err);
-            }
+        Ok(())
+    }
+
+    fn reload_from_disk(&mut self) -> Result<()> {
+        let parsed = repair_log_blocking(&self.paths)?;
+        let (projector, session) = load_projections(&self.paths, &parsed.events)?;
+        self.seq = parsed.max_seq;
+        self.events = parsed.events;
+        self.needs_newline = parsed.needs_newline;
+        self.projector = projector;
+        self.session = session;
+        self.rewinds = read_json_opt(&self.paths.rewinds_json()).unwrap_or_default();
+        Ok(())
+    }
+
+    fn reject_destructive_if_dirty(&self, operation: &str) -> Result<()> {
+        if crate::store::derived_dirty::exists(&self.paths) {
+            return Err(ArkError::conflict(format!(
+                "cannot {operation} thread {} while derived recovery is pending; restart the store first",
+                self.thread_id
+            )));
         }
+        Ok(())
     }
 
     fn report_derived(&self, file: &str, err: &ArkError) {
         self.diagnostics.record(
             StoreDiagnostic::new(
-                DiagnosticKind::ItemsRebuilt,
-                format!("derived write to {file} failed, it will be rebuilt: {err}"),
+                DiagnosticKind::DerivedWriteFailed,
+                format!("derived append to {file} failed: {err}"),
             )
             .for_thread(self.thread_id),
         );
@@ -507,311 +668,54 @@ impl WriterState {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::diagnostics::MemoryDiagnostics;
-    use crate::store::tests::{event_at, text_delta, TempDir};
-    use ark_common::{ChildId, ItemId, TurnId};
-    use chrono::Utc;
-
-    fn state(dir: &TempDir, thread: ThreadId) -> WriterState {
-        WriterState::open(
-            thread,
-            ThreadPaths::new(dir.path().join("thread")),
-            StoreLimits::for_tests(),
-            Arc::new(MemoryDiagnostics::new()),
-        )
-        .unwrap()
-    }
-
-    fn child_completed(thread: ThreadId, notification_id: &str) -> RuntimeEvent {
-        RuntimeEvent::ChildCompleted {
-            seq: 0,
-            thread_id: thread,
-            timestamp: Utc::now(),
-            notification_id: notification_id.to_string(),
-            child_id: ChildId::new(),
-            label: "inspect runtime".to_string(),
-            status: ark_common::ChildRunStatus::Completed,
-            summary: Some("healthy".to_string()),
-            error: None,
-            usage: None,
-            tool_invocations: None,
+fn load_projections(
+    paths: &ThreadPaths,
+    events: &[RuntimeEvent],
+) -> Result<(ItemProjector, SessionState)> {
+    if crate::store::compaction_tx::has_effective_history(paths) {
+        let recovery = crate::store::derived_dirty::recovery_plan(paths, events, false);
+        if crate::store::derived_dirty::exists(paths) && recovery.is_none() {
+            return Err(ArkError::store(
+                "cannot open compacted dirty thread without valid pre-append context",
+            ));
         }
-    }
-
-    #[test]
-    fn open_refuses_a_log_with_mid_file_garbage_without_modifying_it() {
-        let dir = TempDir::new("writer-open-corrupt");
-        let thread = ThreadId::new();
-        let paths = ThreadPaths::new(dir.path().join("thread"));
-        crate::store::fs_util::ensure_dir(paths.dir()).unwrap();
-        let mut text = String::new();
-        text.push_str(&encode_event(&event_at(thread, 1)).unwrap());
-        text.push_str("garbage\n");
-        text.push_str(&encode_event(&event_at(thread, 2)).unwrap());
-        std::fs::write(paths.events_jsonl(), &text).unwrap();
-
-        let err = match WriterState::open(
-            thread,
-            paths.clone(),
-            StoreLimits::for_tests(),
-            Arc::new(MemoryDiagnostics::new()),
-        ) {
-            Ok(_) => panic!("the writer must not start on a corrupt log"),
-            Err(err) => err,
-        };
-        assert_eq!(err.code, ark_common::ArkErrorCode::StoreFailure);
-        assert!(err.message.contains("1 malformed"), "{}", err.message);
-        assert!(
-            err.message
-                .contains(&paths.events_jsonl().display().to_string()),
-            "the error must name the file: {}",
-            err.message
-        );
-        // No truncation and no append: the on-disk log is byte-identical.
-        assert_eq!(
-            std::fs::read(paths.events_jsonl()).unwrap(),
-            text.as_bytes()
+        let suffix = recovery
+            .as_ref()
+            .and_then(|plan| {
+                events
+                    .iter()
+                    .position(|event| event.seq() == plan.planned_seq)
+            })
+            .map(|start| &events[start..])
+            .unwrap_or(events);
+        return crate::store::derived_repair::load_checkpoint_projections(
+            paths,
+            suffix,
+            recovery.as_ref(),
         );
     }
-
-    #[test]
-    fn compaction_keeps_an_unacknowledged_child_completion() {
-        let dir = TempDir::new("completion-compaction");
-        let thread = ThreadId::new();
-        let mut state = state(&dir, thread);
-        state.append(event_at(thread, 1)).unwrap();
-        state
-            .append(child_completed(thread, "child:pending"))
-            .unwrap();
-        for _ in 0..3 {
-            state.append(event_at(thread, 1)).unwrap();
-        }
-
-        let compacted_to = state.compact(2).unwrap();
-
-        assert_eq!(compacted_to, Some(1));
-        assert!(state.events().iter().any(|event| {
-            matches!(
-                event,
-                RuntimeEvent::ChildCompleted { notification_id, .. }
-                    if notification_id == "child:pending"
-            )
-        }));
-    }
-
-    #[test]
-    fn completion_query_excludes_unrelated_event_payloads() {
-        let dir = TempDir::new("completion-query");
-        let thread = ThreadId::new();
-        let mut state = state(&dir, thread);
-        state.append(event_at(thread, 1)).unwrap();
-        state.append(child_completed(thread, "child:one")).unwrap();
-
-        let events = state.child_completion_events();
-
-        assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], RuntimeEvent::ChildCompleted { .. }));
-    }
-
-    #[test]
-    fn interaction_query_excludes_transcript_payloads() {
-        let dir = TempDir::new("interaction-query");
-        let thread = ThreadId::new();
-        let turn = ark_common::TurnId::new();
-        let mut state = state(&dir, thread);
-        state.append(event_at(thread, 1)).unwrap();
-        state
-            .append(RuntimeEvent::TurnStarted {
-                seq: 0,
-                thread_id: thread,
-                turn_id: turn,
-                timestamp: Utc::now(),
-                auto_continuation: false,
-                attachment_ids: Vec::new(),
-                attachment_outcomes: Vec::new(),
-            })
-            .unwrap();
-        state
-            .append(RuntimeEvent::ApprovalRequested {
-                seq: 0,
-                thread_id: thread,
-                turn_id: turn,
-                timestamp: Utc::now(),
-                approval_id: "approval-1".into(),
-                tool: "bash".into(),
-                summary: "run command".into(),
-            })
-            .unwrap();
-
-        let events = state.interaction_events();
-
-        assert_eq!(events.len(), 2);
-        assert!(events
-            .iter()
-            .any(|event| matches!(event, RuntimeEvent::TurnStarted { .. })));
-        assert!(events
-            .iter()
-            .any(|event| matches!(event, RuntimeEvent::ApprovalRequested { .. })));
-        assert!(events
-            .iter()
-            .all(|event| !matches!(event, RuntimeEvent::Error { .. })));
-    }
-
-    #[test]
-    fn rewind_physically_discards_the_suffix_and_notifies_subscribers() {
-        let dir = TempDir::new("rewind-physical-truncation");
-        let thread = ThreadId::new();
-        let mut state = state(&dir, thread);
-        for _ in 0..4 {
-            state.append(event_at(thread, 1)).unwrap();
-        }
-        let mut subscription = state.snapshot_and_subscribe(0).unwrap();
-
-        let result = state.rewind(3, None).unwrap();
-
-        assert_eq!(result.last_seq, 5);
-        assert!(state
-            .events()
-            .iter()
-            .all(|event| event.seq() < 3 || event.seq() == 5));
-        assert!(matches!(
-            subscription.live.try_recv(),
-            Ok(RuntimeEvent::ThreadRewound { .. })
-        ));
-    }
-
-    #[test]
-    fn rewind_marker_survives_compaction_of_its_notification() {
-        let dir = TempDir::new("rewind-marker-compaction");
-        let thread = ThreadId::new();
-        let mut state = state(&dir, thread);
-        for _ in 0..4 {
-            state.append(event_at(thread, 1)).unwrap();
-        }
-
-        state.rewind(3, None).unwrap();
-        state.append(event_at(thread, 1)).unwrap();
-        state.append(event_at(thread, 1)).unwrap();
-        state.compact(1).unwrap();
-
-        assert!(state.rewind_record(Some(3), None).is_some());
-    }
-
-    #[test]
-    fn rewind_rejects_a_thread_with_a_running_persisted_turn() {
-        let dir = TempDir::new("rewind-running-turn");
-        let thread = ThreadId::new();
-        let turn = ark_common::TurnId::new();
-        let mut state = state(&dir, thread);
-        state
-            .append(RuntimeEvent::TurnStarted {
-                seq: 0,
-                thread_id: thread,
-                turn_id: turn,
-                timestamp: Utc::now(),
-                auto_continuation: false,
-                attachment_ids: Vec::new(),
-                attachment_outcomes: Vec::new(),
-            })
-            .unwrap();
-
-        assert_eq!(
-            state.rewind(1, Some(turn)).unwrap_err().code,
-            ark_common::ArkErrorCode::Conflict
-        );
-    }
-
-    #[test]
-    fn acknowledged_child_completion_no_longer_blocks_compaction() {
-        let dir = TempDir::new("acknowledged-completion-compaction");
-        let thread = ThreadId::new();
-        let mut state = state(&dir, thread);
-        state.append(event_at(thread, 1)).unwrap();
-        state
-            .append(child_completed(thread, "child:acknowledged"))
-            .unwrap();
-        state
-            .append(RuntimeEvent::ChildCompletionAcknowledged {
-                seq: 0,
-                thread_id: thread,
-                turn_id: ark_common::TurnId::new(),
-                timestamp: Utc::now(),
-                notification_id: "child:acknowledged".to_string(),
-            })
-            .unwrap();
-        for _ in 0..3 {
-            state.append(event_at(thread, 1)).unwrap();
-        }
-
-        let compacted_to = state.compact(2).unwrap();
-
-        assert_eq!(compacted_to, Some(4));
-        assert!(state
-            .events()
-            .iter()
-            .all(|event| !event.is_child_completion_lifecycle()));
-    }
-
-    #[test]
-    fn compaction_keeps_an_acknowledgement_for_a_retained_duplicate_completion() {
-        let dir = TempDir::new("duplicate-completion-compaction");
-        let thread = ThreadId::new();
-        let mut state = state(&dir, thread);
-        state.append(event_at(thread, 1)).unwrap();
-        state
-            .append(child_completed(thread, "child:duplicate"))
-            .unwrap();
-        state
-            .append(RuntimeEvent::ChildCompletionAcknowledged {
-                seq: 0,
-                thread_id: thread,
-                turn_id: ark_common::TurnId::new(),
-                timestamp: Utc::now(),
-                notification_id: "child:duplicate".to_string(),
-            })
-            .unwrap();
-        state
-            .append(child_completed(thread, "child:duplicate"))
-            .unwrap();
-        state.append(event_at(thread, 1)).unwrap();
-        state.append(event_at(thread, 1)).unwrap();
-
-        let compacted_to = state.compact(3).unwrap();
-
-        assert_eq!(compacted_to, Some(2));
-        assert!(state.events().iter().any(|event| {
-            matches!(
-                event,
-                RuntimeEvent::ChildCompletionAcknowledged { notification_id, .. }
-                    if notification_id == "child:duplicate"
-            )
-        }));
-    }
-
-    #[test]
-    fn append_fsync_skips_deltas_and_respects_the_limit() {
-        let mut limits = StoreLimits::for_tests();
-        let thread = ThreadId::new();
-        let turn = TurnId::new();
-        let delta = text_delta(thread, turn, ItemId::new(), 1, "chunk");
-        let key_point = event_at(thread, 2);
-
-        // With fsync enabled, streaming deltas skip the flush (a crash loses at
-        // most the torn tail and the projection replays from the log); every
-        // other event keeps the flush.
-        limits.fsync_on_append = true;
-        assert!(
-            !super::append_fsync(&limits, &delta),
-            "delta must skip fsync"
-        );
-        assert!(super::append_fsync(&limits, &key_point));
-
-        // The limit still wins: turning it off disables fsync entirely.
-        limits.fsync_on_append = false;
-        assert!(!super::append_fsync(&limits, &delta));
-        assert!(!super::append_fsync(&limits, &key_point));
-    }
+    Ok((
+        project_items_in_memory(events),
+        SessionState::replay(events),
+    ))
 }
+
+fn project_items_in_memory(events: &[RuntimeEvent]) -> ItemProjector {
+    let mut projector = ItemProjector::new();
+    for event in events {
+        projector.apply(event);
+    }
+    projector
+}
+
+fn encode_events(events: &[RuntimeEvent]) -> Result<String> {
+    let mut body = String::new();
+    for event in events {
+        body.push_str(&encode_event(event)?);
+    }
+    Ok(body)
+}
+
+#[cfg(test)]
+#[path = "writer_state_tests.rs"]
+mod tests;

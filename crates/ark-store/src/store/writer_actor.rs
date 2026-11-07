@@ -12,7 +12,7 @@
 
 use crate::store::writer_state::{Snapshot, WriterState};
 use ark_common::{ArkError, Result, ThreadId};
-use ark_contract::{RewindResponse, RuntimeEvent};
+use ark_contract::{RewindResponse, RuntimeEvent, ThreadItem};
 use tokio::sync::{mpsc, oneshot};
 
 /// Commands accepted by a writer actor (design 7.4.3, extended with the reads
@@ -31,23 +31,26 @@ pub enum WriterCmd {
         reply: oneshot::Sender<Result<Snapshot>>,
     },
     Watermark {
-        reply: oneshot::Sender<u64>,
+        reply: oneshot::Sender<Result<u64>>,
     },
     Replay {
         since_seq: u64,
-        reply: oneshot::Sender<Vec<RuntimeEvent>>,
+        reply: oneshot::Sender<Result<Vec<RuntimeEvent>>>,
     },
     ChildCompletionEvents {
-        reply: oneshot::Sender<Vec<RuntimeEvent>>,
+        reply: oneshot::Sender<Result<Vec<RuntimeEvent>>>,
     },
     InteractionEvents {
-        reply: oneshot::Sender<Vec<RuntimeEvent>>,
+        reply: oneshot::Sender<Result<Vec<RuntimeEvent>>>,
     },
     AttachmentEvents {
-        reply: oneshot::Sender<Vec<RuntimeEvent>>,
+        reply: oneshot::Sender<Result<Vec<RuntimeEvent>>>,
     },
     Events {
-        reply: oneshot::Sender<Vec<RuntimeEvent>>,
+        reply: oneshot::Sender<Result<Vec<RuntimeEvent>>>,
+    },
+    ReadItems {
+        reply: oneshot::Sender<Result<Vec<ThreadItem>>>,
     },
     Compact {
         keep_last: usize,
@@ -61,7 +64,7 @@ pub enum WriterCmd {
     RewindRecord {
         rewind_from_seq: Option<u64>,
         target_turn_id: Option<ark_common::TurnId>,
-        reply: oneshot::Sender<Option<RewindResponse>>,
+        reply: oneshot::Sender<Result<Option<RewindResponse>>>,
     },
     /// Stop accepting work and drop the actor.
     Shutdown,
@@ -111,13 +114,13 @@ impl WriterHandle {
     pub async fn watermark(&self) -> Result<u64> {
         let (reply, rx) = oneshot::channel();
         self.send(WriterCmd::Watermark { reply })?;
-        rx.await.map_err(|_| self.closed())
+        rx.await.map_err(|_| self.closed())?
     }
 
     pub async fn replay(&self, since_seq: u64) -> Result<Vec<RuntimeEvent>> {
         let (reply, rx) = oneshot::channel();
         self.send(WriterCmd::Replay { since_seq, reply })?;
-        rx.await.map_err(|_| self.closed())
+        rx.await.map_err(|_| self.closed())?
     }
 
     /// Reads the child-completion lifecycle records owned by this writer.
@@ -126,27 +129,34 @@ impl WriterHandle {
     pub async fn child_completion_events(&self) -> Result<Vec<RuntimeEvent>> {
         let (reply, rx) = oneshot::channel();
         self.send(WriterCmd::ChildCompletionEvents { reply })?;
-        rx.await.map_err(|_| self.closed())
+        rx.await.map_err(|_| self.closed())?
     }
 
     /// Reads only turn and interactive-gate lifecycle records from this writer.
     pub async fn interaction_events(&self) -> Result<Vec<RuntimeEvent>> {
         let (reply, rx) = oneshot::channel();
         self.send(WriterCmd::InteractionEvents { reply })?;
-        rx.await.map_err(|_| self.closed())
+        rx.await.map_err(|_| self.closed())?
     }
 
     /// Reads only attachment association records from this writer.
     pub async fn attachment_events(&self) -> Result<Vec<RuntimeEvent>> {
         let (reply, rx) = oneshot::channel();
         self.send(WriterCmd::AttachmentEvents { reply })?;
-        rx.await.map_err(|_| self.closed())
+        rx.await.map_err(|_| self.closed())?
     }
 
     pub async fn events(&self) -> Result<Vec<RuntimeEvent>> {
         let (reply, rx) = oneshot::channel();
         self.send(WriterCmd::Events { reply })?;
-        rx.await.map_err(|_| self.closed())
+        rx.await.map_err(|_| self.closed())?
+    }
+
+    /// Read the disk-backed item projection at the writer serialization point.
+    pub async fn read_items(&self) -> Result<Vec<ThreadItem>> {
+        let (reply, rx) = oneshot::channel();
+        self.send(WriterCmd::ReadItems { reply })?;
+        rx.await.map_err(|_| self.closed())?
     }
 
     pub async fn compact(&self, keep_last: usize) -> Result<Option<u64>> {
@@ -181,7 +191,7 @@ impl WriterHandle {
             target_turn_id,
             reply,
         })?;
-        rx.await.map_err(|_| self.closed())
+        rx.await.map_err(|_| self.closed())?
     }
 
     /// Ask the actor to stop, then wait for the queue to drain.
@@ -222,22 +232,32 @@ async fn run(mut state: WriterState, mut rx: mpsc::Receiver<WriterCmd>) {
                 let _ = reply.send(result);
             }
             WriterCmd::Watermark { reply } => {
-                let _ = reply.send(state.watermark());
+                let result = read_after_recovery(&mut state, |state| state.watermark());
+                let _ = reply.send(result);
             }
             WriterCmd::Replay { since_seq, reply } => {
-                let _ = reply.send(state.replay(since_seq));
+                let result = read_after_recovery(&mut state, |state| state.replay(since_seq));
+                let _ = reply.send(result);
             }
             WriterCmd::ChildCompletionEvents { reply } => {
-                let _ = reply.send(state.child_completion_events());
+                let result = read_after_recovery(&mut state, WriterState::child_completion_events);
+                let _ = reply.send(result);
             }
             WriterCmd::InteractionEvents { reply } => {
-                let _ = reply.send(state.interaction_events());
+                let result = read_after_recovery(&mut state, WriterState::interaction_events);
+                let _ = reply.send(result);
             }
             WriterCmd::AttachmentEvents { reply } => {
-                let _ = reply.send(state.attachment_events());
+                let result = read_after_recovery(&mut state, WriterState::attachment_events);
+                let _ = reply.send(result);
             }
             WriterCmd::Events { reply } => {
-                let _ = reply.send(state.events().to_vec());
+                let result = read_after_recovery(&mut state, |state| state.events().to_vec());
+                let _ = reply.send(result);
+            }
+            WriterCmd::ReadItems { reply } => {
+                let result = read_items_after_recovery(&mut state);
+                let _ = reply.send(result);
             }
             WriterCmd::Compact { keep_last, reply } => {
                 let result = state.compact(keep_last);
@@ -256,11 +276,27 @@ async fn run(mut state: WriterState, mut rx: mpsc::Receiver<WriterCmd>) {
                 target_turn_id,
                 reply,
             } => {
-                let _ = reply.send(state.rewind_record(rewind_from_seq, target_turn_id));
+                let result = read_after_recovery(&mut state, |state| {
+                    state.rewind_record(rewind_from_seq, target_turn_id)
+                });
+                let _ = reply.send(result);
             }
             WriterCmd::Shutdown => break,
         }
     }
+}
+
+fn read_after_recovery<T>(
+    state: &mut WriterState,
+    read: impl FnOnce(&WriterState) -> T,
+) -> Result<T> {
+    state.finish_pending_transactions()?;
+    Ok(read(state))
+}
+
+fn read_items_after_recovery(state: &mut WriterState) -> Result<Vec<ThreadItem>> {
+    state.finish_pending_transactions()?;
+    crate::store::items_log::read_items_blocking(state.paths())
 }
 
 #[cfg(test)]
@@ -406,5 +442,43 @@ mod tests {
         }
         assert_eq!(writer.replay(2).await.unwrap().len(), 1);
         assert_eq!(writer.events().await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn reads_finish_failed_rewind_and_emit_one_reset() {
+        let dir = TempDir::new("actor-rewind-read-recovery");
+        let thread = ThreadId::new();
+        let writer = handle(&dir, thread);
+        for _ in 0..4 {
+            writer.append(event_at(thread, 0)).await.unwrap();
+        }
+        let mut existing = writer.snapshot_and_subscribe(4).await.unwrap();
+        let paths = ThreadPaths::new(dir.path().join("thread"));
+        crate::store::rewind_tx::fail_once(
+            &paths,
+            crate::store::rewind_tx::TestStage::DerivedRebuild,
+        );
+
+        assert!(writer.rewind(3, None).await.is_err());
+        let snapshot = writer.snapshot_and_subscribe(0).await.unwrap();
+        assert_eq!(snapshot.watermark, 5);
+        assert_eq!(event_seqs(&snapshot.backlog), vec![1, 2, 5]);
+        assert_eq!(writer.watermark().await.unwrap(), 5);
+        assert_eq!(event_seqs(&writer.replay(0).await.unwrap()), vec![1, 2, 5]);
+        assert_eq!(event_seqs(&writer.events().await.unwrap()), vec![1, 2, 5]);
+        assert!(writer.rewind_record(Some(3), None).await.unwrap().is_some());
+        assert!(writer.child_completion_events().await.unwrap().is_empty());
+        assert!(writer.interaction_events().await.unwrap().is_empty());
+        assert!(writer.attachment_events().await.unwrap().is_empty());
+        assert!(matches!(
+            existing.live.try_recv(),
+            Ok(RuntimeEvent::ThreadRewound { seq: 5, .. })
+        ));
+        assert!(existing.live.try_recv().is_err(), "reset must be sent once");
+        assert!(!paths.rewind_pending_json().exists());
+    }
+
+    fn event_seqs(events: &[RuntimeEvent]) -> Vec<u64> {
+        events.iter().map(RuntimeEvent::seq).collect()
     }
 }

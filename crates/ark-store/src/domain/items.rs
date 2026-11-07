@@ -133,6 +133,39 @@ pub fn delta_item_id(event: &RuntimeEvent) -> Option<ItemId> {
     }
 }
 
+/// Stable target item for every event handled by the item projector.
+pub(crate) fn projected_item_id(event: &RuntimeEvent) -> Option<ItemId> {
+    match event {
+        RuntimeEvent::ItemCreated { item, .. }
+        | RuntimeEvent::ItemUpdated { item, .. }
+        | RuntimeEvent::ItemCompleted { item, .. } => Some(item.item_id),
+        RuntimeEvent::AssistantTextDelta { item_id, .. }
+        | RuntimeEvent::AssistantReasoningDelta { item_id, .. } => Some(*item_id),
+        RuntimeEvent::ToolCallStarted { call_id, .. }
+        | RuntimeEvent::ToolCallFinished { call_id, .. } => {
+            Some(keyed_item_id(&format!("tool_call:{call_id}")))
+        }
+        RuntimeEvent::ApprovalRequested { approval_id, .. }
+        | RuntimeEvent::ApprovalResolved { approval_id, .. } => {
+            Some(keyed_item_id(&format!("approval:{approval_id}")))
+        }
+        RuntimeEvent::UserInputRequested { request_id, .. }
+        | RuntimeEvent::UserInputResolved { request_id, .. } => {
+            Some(keyed_item_id(&format!("user_input:{request_id}")))
+        }
+        RuntimeEvent::Error { seq, .. } => Some(keyed_item_id(&format!("error:{seq}"))),
+        RuntimeEvent::CompactionCompleted { turn_id, .. } => {
+            Some(keyed_item_id(&format!("compaction:{turn_id}")))
+        }
+        _ => None,
+    }
+}
+
+/// Whether appending this event can change any persisted item snapshot.
+pub(crate) fn affects_items(event: &RuntimeEvent) -> bool {
+    projected_item_id(event).is_some()
+}
+
 /// Incremental folder: keeps item order and the latest snapshot per item.
 #[derive(Debug, Default, Clone)]
 pub struct ItemProjector {
@@ -166,9 +199,37 @@ impl ItemProjector {
         self.touched.insert(item_id, watermark_seq);
     }
 
+    /// Restore turn context that may only exist in a compacted session checkpoint.
+    pub(crate) fn seed_current_turn(&mut self, turn_id: Option<TurnId>) {
+        if turn_id.is_some() {
+            self.current_turn = turn_id;
+        }
+    }
+
+    pub(crate) fn current_turn(&self) -> Option<TurnId> {
+        self.current_turn
+    }
+
     /// Apply one event; returns the updated snapshot of the touched item.
     pub fn apply(&mut self, event: &RuntimeEvent) -> Option<ThreadItem> {
         self.note_turn(event);
+        self.apply_projected(event)
+    }
+
+    /// Apply an event only when its item checkpoint has not covered its seq.
+    /// Turn context is observed even for an already-covered event so a later
+    /// error event is projected with the same turn as a full replay.
+    pub(crate) fn apply_after_watermark(&mut self, event: &RuntimeEvent) -> Option<ThreadItem> {
+        self.note_turn(event);
+        if projected_item_id(event)
+            .is_some_and(|item_id| self.watermark_of(&item_id) >= event.seq())
+        {
+            return None;
+        }
+        self.apply_projected(event)
+    }
+
+    fn apply_projected(&mut self, event: &RuntimeEvent) -> Option<ThreadItem> {
         let seq = event.seq();
         let item = match event {
             RuntimeEvent::ItemCreated { item, .. } | RuntimeEvent::ItemUpdated { item, .. } => {

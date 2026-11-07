@@ -4,12 +4,16 @@
 //! reconciliation and projection rules stay unit-testable without a disk.
 
 pub mod child_store;
+pub(crate) mod compaction_tx;
 pub mod data_lock;
+pub(crate) mod derived_dirty;
+pub(crate) mod derived_repair;
 pub mod event_log;
 pub mod fs_util;
 pub mod index;
 pub mod items_log;
 pub mod notifier;
+pub(crate) mod rewind_tx;
 pub mod writer_actor;
 pub mod writer_state;
 

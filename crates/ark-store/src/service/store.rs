@@ -29,6 +29,201 @@ use std::time::Duration;
 /// open when `--data-dir` points into a shared directory.
 const SWEEP_MIN_FILE_AGE: Duration = Duration::from_secs(5 * 60);
 
+fn build_child_locator(paths: &DataPaths) -> Result<ChildLocator> {
+    let mut locator = ChildLocator::default();
+    for dir in crate::store::fs_util::list_dirs(&paths.threads_dir()) {
+        let parent_paths = ThreadPaths::new(dir);
+        let Some(parent) = thread_file::read(&parent_paths) else {
+            continue;
+        };
+        crate::store::child_store::absorb_parent_blocking(
+            &mut locator,
+            parent.thread_id,
+            &parent_paths,
+        )?;
+    }
+    Ok(locator)
+}
+
+fn clear_derived_dirty(
+    paths: &ThreadPaths,
+    thread_id: ThreadId,
+    diagnostics: &Arc<dyn DiagnosticSink>,
+) {
+    if let Err(error) = crate::store::derived_dirty::clear(paths) {
+        diagnostics.record(
+            StoreDiagnostic::new(
+                DiagnosticKind::DerivedWriteFailed,
+                format!("failed to clear derived dirty marker after repair: {error}"),
+            )
+            .for_thread(thread_id),
+        );
+    }
+}
+
+fn repair_top_level_threads(
+    paths: &DataPaths,
+    index: &ThreadIndex,
+    diagnostics: &Arc<dyn DiagnosticSink>,
+) {
+    for dir in crate::store::fs_util::list_dirs(&paths.threads_dir()) {
+        let thread_paths = ThreadPaths::new(dir);
+        let Some(file) = thread_file::read(&thread_paths) else {
+            continue;
+        };
+        repair_top_level_thread(&thread_paths, &file, index, diagnostics);
+        repair_child_threads(&thread_paths, file.thread_id, diagnostics);
+    }
+}
+
+fn repair_top_level_thread(
+    paths: &ThreadPaths,
+    file: &ThreadFile,
+    index: &ThreadIndex,
+    diagnostics: &Arc<dyn DiagnosticSink>,
+) {
+    let Some(parsed) = read_repair_log(paths, file.thread_id, diagnostics) else {
+        return;
+    };
+    if crate::store::derived_dirty::exists(paths) {
+        let indexed_seq = index.get(&file.thread_id).map(|row| row.indexed_seq);
+        if indexed_seq.is_some_and(|seq| seq <= parsed.max_seq) {
+            repair_dirty_thread(paths, file.thread_id, &parsed, diagnostics);
+        }
+        return;
+    }
+    if index.get(&file.thread_id).map(|row| row.indexed_seq) == Some(parsed.max_seq)
+        && crate::store::items_log::events_are_authoritative(paths, &parsed.events)
+    {
+        crate::store::derived_repair::repair_derived_from_events(
+            paths,
+            file.thread_id,
+            &parsed.events,
+            diagnostics,
+        );
+    }
+}
+
+fn repair_child_threads(
+    parent_paths: &ThreadPaths,
+    parent_id: ThreadId,
+    diagnostics: &Arc<dyn DiagnosticSink>,
+) {
+    for dir in crate::store::fs_util::list_dirs(&parent_paths.children_dir()) {
+        let child_paths = ThreadPaths::new(dir);
+        let Some(file) = thread_file::read(&child_paths) else {
+            continue;
+        };
+        let valid_name = child_paths
+            .dir()
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy() == file.thread_id.to_string());
+        if file.parent_thread_id != Some(parent_id) || !valid_name {
+            continue;
+        }
+        let parsed = read_repair_log(&child_paths, file.thread_id, diagnostics);
+        if crate::store::derived_dirty::exists(&child_paths) {
+            if let Some(parsed) = parsed.as_ref() {
+                repair_dirty_thread(&child_paths, file.thread_id, parsed, diagnostics);
+            }
+        }
+        repair_child_threads(&child_paths, file.thread_id, diagnostics);
+    }
+}
+
+fn read_repair_log(
+    paths: &ThreadPaths,
+    thread_id: ThreadId,
+    diagnostics: &Arc<dyn DiagnosticSink>,
+) -> Option<crate::store::event_log::LogParse> {
+    if let Err(error) = crate::store::compaction_tx::recover(paths) {
+        diagnostics.record(
+            StoreDiagnostic::new(
+                DiagnosticKind::DerivedWriteFailed,
+                format!("skipped interrupted compaction recovery: {error}"),
+            )
+            .for_thread(thread_id),
+        );
+        return None;
+    }
+    if let Err(error) = crate::store::rewind_tx::recover(paths) {
+        diagnostics.record(
+            StoreDiagnostic::new(
+                DiagnosticKind::DerivedWriteFailed,
+                format!("skipped interrupted rewind recovery: {error}"),
+            )
+            .for_thread(thread_id),
+        );
+        return None;
+    }
+    match crate::store::event_log::read_log_blocking(paths) {
+        Ok(parsed) => Some(parsed),
+        Err(error) => {
+            diagnostics.record(
+                StoreDiagnostic::new(
+                    DiagnosticKind::DerivedWriteFailed,
+                    format!("skipped derived repair for thread: {error}"),
+                )
+                .for_thread(thread_id),
+            );
+            None
+        }
+    }
+}
+
+fn repair_dirty_thread(
+    paths: &ThreadPaths,
+    thread_id: ThreadId,
+    parsed: &crate::store::event_log::LogParse,
+    diagnostics: &Arc<dyn DiagnosticSink>,
+) {
+    let Some(planned_seq) = crate::store::derived_dirty::planned_seq(paths) else {
+        return;
+    };
+    if dirty_event_proven_absent(paths, parsed, planned_seq) {
+        clear_derived_dirty(paths, thread_id, diagnostics);
+        return;
+    }
+    let complete_history = !crate::store::compaction_tx::has_effective_history(paths);
+    let Some(plan) =
+        crate::store::derived_dirty::recovery_plan(paths, &parsed.events, complete_history)
+    else {
+        return;
+    };
+    let Some(start) = parsed
+        .events
+        .iter()
+        .position(|event| event.seq() == plan.planned_seq)
+    else {
+        return;
+    };
+    if crate::store::derived_repair::repair_derived_from_checkpoint(
+        paths,
+        thread_id,
+        &parsed.events[start..],
+        &plan.pre_session,
+        plan.pre_current_turn,
+        diagnostics,
+    ) {
+        clear_derived_dirty(paths, thread_id, diagnostics);
+    }
+}
+
+fn dirty_event_proven_absent(
+    paths: &ThreadPaths,
+    parsed: &crate::store::event_log::LogParse,
+    planned_seq: u64,
+) -> bool {
+    !crate::store::fs_util::path_entry_exists(&paths.compacted_jsonl())
+        && parsed.truncate_at.is_none()
+        && parsed.max_seq.checked_add(1) == Some(planned_seq)
+        && parsed
+            .events
+            .iter()
+            .enumerate()
+            .all(|(offset, event)| event.seq() == offset as u64 + 1)
+}
+
 /// Directory-backed session store (design 7.4).
 pub struct FileSessionStore {
     pub(crate) config: StoreConfig,
@@ -79,6 +274,8 @@ impl FileSessionStore {
         }
         ensure_dir(&paths.threads_dir())?;
         let index = load_snapshot(&paths.index_file());
+        repair_top_level_threads(&paths, &index, &diagnostics);
+        let children = build_child_locator(&paths)?;
         let registry = WriterRegistry::new(config.limits().clone(), diagnostics.clone());
         Ok(Self {
             config,
@@ -86,7 +283,7 @@ impl FileSessionStore {
             registry,
             diagnostics,
             index: Mutex::new(index),
-            children: Mutex::new(ChildLocator::default()),
+            children: Mutex::new(children),
             child_logs: Mutex::new(HashMap::new()),
             _lock: lock,
         })
@@ -280,28 +477,6 @@ impl FileSessionStore {
         Ok(())
     }
 
-    /// Register a child run so `child_id -> parent` lookups resolve.
-    pub(crate) fn remember_child(
-        &self,
-        parent: ThreadId,
-        records: &[ark_ports::ChildRunRecord],
-    ) -> Result<()> {
-        let mut locator = self
-            .children
-            .lock()
-            .map_err(|_| ArkError::internal("child locator lock poisoned"))?;
-        for record in records {
-            locator.insert(
-                record.child_id,
-                crate::domain::child_index::ChildLocation::new(
-                    parent,
-                    self.paths.child_rel(&parent, &record.child_id),
-                ),
-            );
-        }
-        Ok(())
-    }
-
     /// Whether `thread` is itself a child run, which forbids delegating again.
     ///
     /// Depth is derived from two independent facts so a hand-edited
@@ -344,25 +519,19 @@ impl FileSessionStore {
     }
 
     /// Register a freshly created child so depth checks see it immediately.
-    pub(crate) fn note_child_location(&self, parent: ThreadId, child: ark_common::ChildId) {
-        match self.children.lock() {
-            Ok(mut locator) => {
-                locator.insert(
-                    child,
-                    crate::domain::child_index::ChildLocation::new(
-                        parent,
-                        self.paths.child_rel(&parent, &child),
-                    ),
-                );
-            }
-            // Dropping the note silently would strand the child at the wrong
-            // path for every later reader; make the corruption visible.
-            Err(_) => tracing::error!(
-                parent = %parent,
-                child = %child,
-                "child locator lock poisoned; child location note lost"
-            ),
-        }
+    pub(crate) fn note_child_location(
+        &self,
+        parent: ThreadId,
+        child: ark_common::ChildId,
+    ) -> Result<()> {
+        let location = crate::domain::child_index::ChildLocation::new(
+            parent,
+            self.paths.child_rel(&parent, &child),
+        );
+        self.children
+            .lock()
+            .map_err(|_| ArkError::internal("child locator lock poisoned"))?
+            .claim(child, location)
     }
     /// Parent id for a child run, resolved from the authoritative run log.
     pub fn parent_of_child(&self, child: ark_common::ChildId) -> Option<ThreadId> {
@@ -480,6 +649,48 @@ pub(crate) mod tests {
         .unwrap();
         assert!(diagnostics.is_empty());
         assert!(!diagnostics.has(DiagnosticKind::TempFilesSwept));
+    }
+
+    #[tokio::test]
+    async fn open_fails_when_two_parent_logs_claim_the_same_child() {
+        let dir = crate::store::tests::TempDir::new("store-child-owner-conflict");
+        let (first, second, first_paths, second_paths) = {
+            let store = test_store(&dir);
+            let first = store.create_thread("first").await.unwrap().thread_id;
+            let second = store.create_thread("second").await.unwrap().thread_id;
+            (
+                first,
+                second,
+                store.thread_paths(first),
+                store.thread_paths(second),
+            )
+        };
+        let child = ark_common::ChildId::new();
+        for (parent, paths) in [(first, first_paths), (second, second_paths)] {
+            let record = ark_ports::ChildRunRecord::queued(
+                child,
+                parent,
+                ark_common::TurnId::new(),
+                "scan",
+                chrono::Utc::now(),
+            );
+            crate::store::child_store::append_child_run_blocking(&paths, &record, false).unwrap();
+        }
+
+        let error = match FileSessionStore::with_diagnostics(
+            StoreConfig::new(dir.path()).with_limits(StoreLimits::for_tests()),
+            Arc::new(MemoryDiagnostics::new()),
+        ) {
+            Ok(_) => panic!("duplicate global child ownership must block startup"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, ark_common::ArkErrorCode::Conflict);
+        let detail = error
+            .detail
+            .expect("ownership conflict has structured detail");
+        assert!(detail.contains(&child.to_string()));
+        assert!(detail.contains(&first.to_string()));
+        assert!(detail.contains(&second.to_string()));
     }
 
     #[tokio::test]

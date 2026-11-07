@@ -15,8 +15,48 @@
 逐片段写行会使文件随回复长度呈二次方放大；读路径从行快照起投影，仅重放各条目水位之后的 delta。
 遗留形状（无水位字段或水位为 0 的行）的文本已含全部 delta，整体忽略该文件并回退全量事件回放，
 避免文本重复计入；重建路径（fork/rewind/reconcile）重写文件时一律产出水位化行，使旧文件被就地升级。
-事件日志追加时，流式 delta 事件跳过 fsync（崩溃最多丢失撕裂尾部，投影由权威日志重建），
-`fsync_on_append` 限制仍然生效。
+事件日志追加时，流式 delta 事件不直接写派生文件，并跳过 event fsync（崩溃最多丢失撕裂尾部，
+投影由权威日志补齐），`fsync_on_append` 限制仍然生效。除 delta 外，凡事件会写 items、usage、
+session 任一派生，writer 都先用 `write_json_atomic` 创建线程级 `.derived-dirty.json`；版本化 marker
+记录 `planned_seq`、append 前 item projector 的 `current_turn` 与完整 session checkpoint。原子 rename
+后还会 fsync 父目录，未确认 marker 目录项持久前不得追加权威事件。事件落盘后，本次实际追加到
+`items.jsonl`/`usage.jsonl` 的行必须完成文件 fsync；未追加的文件不做无条件 fsync，session 原子写的
+临时文件则已在 rename 前同步。三类中适用的派生写及同步全部成功才删除本次创建的 marker，并再次
+fsync 父目录；不适用的类别直接视为成功。任一写、同步、删除或目录同步失败均记录
+`DerivedWriteFailed`。若 marker 在本次追加前已存在，后续追加不能清除它，只能由启动恢复删除。
+
+派生文件自动修复只发生在 `FileSessionStore::with_diagnostics` 启动阶段。旧数据没有 dirty marker
+时，保留原有顶层安全门：compaction sidecar 路径完全不存在、`events.jsonl` 非空且序号严格连续为
+`1..=max_seq`、索引中存在该线程且 `indexed_seq == max_seq`，才校验并按需原子重写
+`items.jsonl`、`usage.jsonl`、`session.json`。
+
+marker 路径存在即保守视为 dirty，但只有严格 JSON 可解析、版本受支持、`planned_seq > 0` 且该序号
+确实位于连续到日志尾的 suffix 中，才授权增量恢复；损坏或未知版本 marker 原样保留，绝不覆盖派生。
+旧版仅含 `planned_seq` 的 marker 只在未压缩的完整 `1..planned_seq-1` 前缀能证明 append 前 session 与
+turn context 时兼容；压缩历史无法证明便保留。另一可安全清理情形是 compaction sidecar 路径完全
+不存在、日志无撕裂尾部且严格连续为 `1..=max_seq`，同时 `max_seq == planned_seq - 1`：这证明 marker
+已持久化但计划事件从未提交，因此无需改写派生即可清除。任何 sidecar、序号间隙、尾部歧义或其他
+水位关系都继续保守保留 marker。恢复以现有派生文件为 checkpoint，只处理 `planned_seq..tail`：items
+从 marker 的 append 前 `current_turn` 起步，按每个 item 的 `watermark_seq` 幂等补齐；usage 按事件 seq
+去重补齐；session 从 marker 的 append 前 checkpoint 重放 suffix。不得使用 dirty 期间可能已推进的
+`session.json` 作为起点，也不得用 suffix 全量投影覆盖 checkpoint 前缀；三类适用恢复都成功后才清
+marker。顶层 dirty 线程还要求全局索引行
+存在且不领先于日志；启动扫描也递归覆盖父子元数据和目录名一致的合法 child thread，并在判断 dirty
+状态前收敛其 pending compaction/rewind 事务。child 没有全局索引时不猜测；无 pending/dirty marker 或
+marker/suffix 不合法便不写。单线程日志中部坏行只记录跳过诊断，不阻断其余线程启动；
+`WriterState::open` 和读取路径都不会触发缓存写。
+
+读路径单独判断 events 是否可信：通常仅 sidecar 不存在且非空事件严格从 1 连续时，items/usage
+可直接从权威 events 投影；唯一例外是尚未截断、hash 仍匹配旧 events 的 pending compaction intention，
+它不声明 hole，读路径仍把完整 events 当权威历史。其他空、损坏、已提交或 hash 不匹配的 sidecar
+一律沿用 checkpoint/cache 加保留后缀的读取语义。无 dirty marker 时，items 从 `session.json`
+checkpoint 的 `last_turn_id` 初始化 `current_turn`；有合法版本化 marker 时，同进程读取、启动 repair 与
+`WriterState::open` 都从 marker 的 `planned_seq` 截取 suffix，并使用其 `pre_current_turn`/`pre_session`，
+绝不采用 dirty 期间可能已推进的 `session.json`。损坏或无法验证的 marker 使 compacted items/usage 读取
+保守失败。items 按每个 item 的 watermark 重放 suffix 中适用的 non-delta 与 delta；usage 把缓存记录
+和 marker 起始的 suffix Usage 按 seq 去重合并。因此重启前即可看到最新 usage，且 Error 后续即使发生
+`TurnStarted(B)` 并推进 session，无 turn id 的 `Error` 仍归属 marker 记录的 append 前回合 A，也不会
+拿 suffix 覆盖 checkpoint 前缀。
 
 ## 一致性与并发
 
@@ -25,8 +65,26 @@
   断开后用 `since_seq` 重连，绝不反压 writer。
 - 同父目录的 child append、删除、索引重建共用父级锁。锁表 mutex 只用于登记锁的短暂取用，在获取
   父级锁**之前**释放；真正嵌套持有的顺序为父级锁 → locator。
-- 启动时修复日志末尾半行并从权威日志重建派生数据；非末尾损坏不得静默掩盖。
-- `rewind` 采用**物理删除**：writer actor 在同一序列化点拒绝仍有未终结回合的日志、重写 `events.jsonl`，删除目标序号及之后的事件，随后从保留前缀重建 `items.jsonl` 与 `session.json`。它不使用逻辑截断；为让已连接 SSE 客户端丢弃旧投影，会追加一个序号绝不复用的 `thread_rewound` 通知事件。`rewinds.json` 保留已接受目标的幂等标记，因此后续压缩移除通知事件也不改变重复回退的成功语义。
+- writer 打开时只修复日志末尾半行；派生文件仅按上述启动安全门校验和重写，非末尾日志损坏只记录跳过诊断，不得静默掩盖。
+- compaction 截断前先把当前内存 items/session 固化为 checkpoint，再向 sidecar 原子写入包含旧、新
+  `events.jsonl` SHA-256 和目标 marker 的 `compaction_pending` intention；两次 rename 均 fsync
+  父目录。只有 intention 持久化成功后才原子替换 events，之后把 pending 行提交为正式 marker。
+  sidecar 写失败时 events 保持字节不变。崩溃恢复按当前 events hash 判定：匹配旧 hash 就撤销
+  intention（完整 events 绝不算 hole），匹配新 hash 就提交 marker；两者都不匹配则保守报错而不猜测。
+  提交失败后的同一 writer 在 append/再次 compact 前必须先完成目录同步和事务恢复。
+- `rewind` 采用**物理删除**，但先原子持久化 `.rewind-pending.json` intention，其中包含事务 id、替换前后
+  `events.jsonl` SHA-256 与事务完成后的 `rewinds.json`。随后一次性把 events 替换为“保留前缀 + 序号
+  绝不复用的 `thread_rewound` reset”，再从该权威结果幂等重建 `items.jsonl`、`usage.jsonl`、
+  `session.json`、`rewinds.json`，最后删除并同步 pending。恢复时 events 匹配 before hash 就撤销意图，
+  匹配 after hash 就完成全部派生，均不匹配则保守报错；因此崩溃在替换前后都不会猜测。任一步失败
+  返回时 writer 保留旧内存；后续 append/compact/rewind 以及 watermark、replay、snapshot subscribe、
+  rewind record 和其他基于 actor 内存投影的查询，均先完成 pending transaction 并从磁盘重载。
+  `SessionStore::read_items` 的磁盘投影读取也作为 writer 命令执行：先在同一单写者串行点恢复 pending，
+  再读取 items，禁止 facade 绕过 actor 并发恢复。生产线程 usage 从 `replay_events` 聚合，因而经过相同
+  barrier。只有确认 after 已提交才向既有订阅者恰好补发一次 reset，下一 append 接续 reset 高水位而不复用序号。
+  `rewinds.json` 的独立幂等记录
+  使后续压缩移除通知事件也不改变重复回退语义。仍拒绝未终结回合、任意 compaction sidecar，以及
+  `.derived-dirty.json` 存在时的 rewind；dirty marker 也继续阻止 compaction。
 - `fork`（`fork_thread(thread, upto_seq)`）同样物理复制：按序号复制目标前缀的 `events.jsonl` 等权威
   文件到新线程目录，新线程从复制前缀的末尾继续分配序号，并从该前缀重建全部投影。fork 是新线程
   而非分支指针，不与原线程共享任何文件。
@@ -82,6 +140,8 @@ data/threads/<thread>/
 ├── events.jsonl                # 权威事件
 ├── items.jsonl / usage.jsonl   # 事件派生数据
 ├── session.json                # 最后状态投影
+├── .derived-dirty.json         # append 与三类派生写之间的崩溃恢复标记
+├── .rewind-pending.json        # rewind 多文件事务意图（完成后删除）
 └── children/
     ├── runs.jsonl              # child 权威记录
     ├── index.json              # child 派生缓存
@@ -94,8 +154,14 @@ autonomy/reasoning_effort，即 `ThreadRuntimeSettings` 的逐字段平铺；全
 [arkd](arkd.md)。
 
 启动 reconciliation 以权威日志最大序号和索引水位决定跳过、增量投影或全量重建。索引写失败不能回滚
-已经 fsync 的事件；它必须留下可恢复的 dirty/reconcile 状态。全局 `child_id` locator 从所有父目录的
-`runs.jsonl` 重建，授权以记录中的 `parent_thread_id` 判断，绝不从目录路径猜测。
+已经 fsync 的事件；它必须留下可恢复的 dirty/reconcile 状态。全局 `child_id` locator 在
+`FileSessionStore::with_diagnostics` 返回前从所有父目录的权威 `children/runs.jsonl` 重建，确保重启后
+无需先调用 reconciliation 也能把 child 的读取和追加路由到内联目录。`child_id` 在整个 data dir 内只允许
+归属一个 parent；若启动扫描发现不同父日志声明同一 id，会返回结构化 conflict 并 fail-fast，绝不按目录
+扫描顺序覆盖。运行时 append 遵循“父日志锁 → locator 锁”的固定顺序，在写权威 `runs.jsonl` 前检查归属，
+并持有 locator guard 直到 append 成功及 locator 更新完成，因此并发跨父声明至多一个成功；同一父下的
+状态转换仍可持续追加。后续 reconciliation 再校验并刷新该视图。授权以记录中的
+`parent_thread_id` 判断，绝不从 child 目录路径猜测。
 
 `runs.jsonl` 一行是一次**状态转换**，不是一个 child：`queued`、`running`、终态各占一行，`resume` 也
 只追加新行并把 `resume_count` 加一，不产生第二个 child。因此任何投影（`index.json`、线程 detail 的

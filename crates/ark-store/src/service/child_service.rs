@@ -107,7 +107,7 @@ impl<'a> ChildStore<'a> {
         );
         file.parent_thread_id = Some(self.parent);
         write_json_atomic(&paths.thread_json(), &file)?;
-        self.store.note_child_location(self.parent, child);
+        self.store.note_child_location(self.parent, child)?;
         Ok(paths)
     }
 

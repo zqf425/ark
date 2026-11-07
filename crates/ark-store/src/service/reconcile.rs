@@ -238,43 +238,22 @@ fn scan_threads(store: &FileSessionStore) -> Result<Vec<DiskThread>> {
 
 /// Rebuild the child locator and every `children/index.json` from the run logs.
 fn sweep_children(store: &FileSessionStore, disk: &[DiskThread]) -> Result<usize> {
-    let mut repaired = 0usize;
     for item in disk {
         // Lock order is always parent log -> locator. Do not hold the global
         // locator while waiting for a parent lock: append/delete take the same
         // locks in this order.
-        let disagreements = store.with_child_log_lock(item.thread_id, || {
-            let disagreements = {
-                let mut locator = store
-                    .children
-                    .lock()
-                    .map_err(|_| ark_common::ArkError::internal("child locator lock poisoned"))?;
-                let before = locator.absorb(item.thread_id, &[], |_| String::new()).len();
-                let _ = before;
-                absorb_parent_blocking(&mut locator, item.thread_id, &item.paths)
-            };
-            let entries = sync_child_index_blocking(
-                &item.paths,
-                item.thread_id,
-                store.diagnostics().as_ref(),
-            )?;
-            let _ = entries;
-            Ok(disagreements)
+        store.with_child_log_lock(item.thread_id, || {
+            let mut locator = store
+                .children
+                .lock()
+                .map_err(|_| ark_common::ArkError::internal("child locator lock poisoned"))?;
+            absorb_parent_blocking(&mut locator, item.thread_id, &item.paths)?;
+            drop(locator);
+            sync_child_index_blocking(&item.paths, item.thread_id, store.diagnostics().as_ref())?;
+            Ok(())
         })?;
-        if !disagreements.is_empty() {
-            repaired += disagreements.len();
-            for child in disagreements {
-                store.diagnostics().record(
-                    StoreDiagnostic::new(
-                        crate::domain::diagnostics::DiagnosticKind::IndexRepaired,
-                        format!("locator re-pointed at children/runs.jsonl for {child}"),
-                    )
-                    .for_thread(item.thread_id),
-                );
-            }
-        }
     }
-    Ok(repaired)
+    Ok(0)
 }
 
 #[cfg(test)]

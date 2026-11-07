@@ -4,7 +4,7 @@
 //! blindly: a missing or empty file is rebuilt from `events.jsonl`, and a
 //! damaged line is skipped rather than failing the load.
 
-use crate::domain::items::{delta_item_id, fold_item_snapshots, project_items};
+use crate::domain::items::{fold_item_snapshots, project_items, ItemProjector};
 use crate::domain::layout::ThreadPaths;
 use crate::store::event_log::{append_text, encode_line, read_log_blocking};
 use ark_common::{Result, TurnId, Usage};
@@ -98,18 +98,35 @@ pub fn rewrite_items_from_events_blocking(
 /// Each line is first tried as a watermarked record and then as a bare
 /// pre-watermark item, so an old file still decodes instead of failing.
 pub fn read_item_rows_blocking(paths: &ThreadPaths) -> Vec<ItemRow> {
+    read_item_rows_checked_blocking(paths).0
+}
+
+/// Read item rows and report whether every non-blank line decoded.
+pub(crate) fn read_item_rows_checked_blocking(paths: &ThreadPaths) -> (Vec<ItemRow>, bool) {
     let raw = match ark_common::read_text_opt(&paths.items_jsonl()) {
         Some(raw) => raw,
-        None => return Vec::new(),
+        None => return (Vec::new(), true),
     };
-    raw.lines()
-        .filter_map(|line| {
-            serde_json::from_str::<crate::domain::items::ItemSnapshotRecord>(line)
-                .map(ItemRow::Watermarked)
-                .or_else(|_| serde_json::from_str::<ThreadItem>(line).map(ItemRow::Bare))
-                .ok()
+    let mut valid = true;
+    let rows = raw
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| match decode_item_row(line) {
+            Some(row) => Some(row),
+            None => {
+                valid = false;
+                None
+            }
         })
-        .collect()
+        .collect();
+    (rows, valid)
+}
+
+fn decode_item_row(line: &str) -> Option<ItemRow> {
+    serde_json::from_str::<crate::domain::items::ItemSnapshotRecord>(line)
+        .map(ItemRow::Watermarked)
+        .or_else(|_| serde_json::from_str::<ThreadItem>(line).map(ItemRow::Bare))
+        .ok()
 }
 
 /// Rebuild `items.jsonl` from the event log and return the rebuilt stream.
@@ -135,36 +152,70 @@ pub fn rebuild_items_blocking(paths: &ThreadPaths) -> Result<Vec<ThreadItem>> {
 /// is already inside the rows.
 pub fn read_items_blocking(paths: &ThreadPaths) -> Result<Vec<ThreadItem>> {
     let rows = read_item_rows_blocking(paths);
-    if rows.is_empty() || rows.iter().any(ItemRow::is_legacy) {
-        let events = read_log_blocking(paths)?.events;
-        if events.is_empty() {
-            // Damaged-log recovery: `items.jsonl` is the only surviving source.
-            return Ok(fold_item_snapshots(rows.into_iter().map(|row| match row {
-                ItemRow::Watermarked(record) => record.item,
-                ItemRow::Bare(item) => item,
-            })));
-        }
+    let events = read_log_blocking(paths)?.events;
+    if events_are_authoritative(paths, &events) {
         return Ok(project_items(&events));
     }
-    let events = read_log_blocking(paths)?.events;
-    let mut projector = crate::domain::items::ItemProjector::new();
+    let read = crate::store::derived_repair::checkpoint_read(paths, &events)?;
+    Ok(cached_items_from_events(
+        rows,
+        read.suffix,
+        read.current_turn,
+    ))
+}
+
+/// Whether reads may treat events as the complete authoritative history.
+///
+/// The sidecar must be entirely absent, the log non-empty, and sequence numbers
+/// must be exactly `1..=max`. Empty or damaged sidecars and any sequence gap keep
+/// the checkpoint/cache read semantics because an earlier prefix may be absent.
+pub(crate) fn events_are_authoritative(paths: &ThreadPaths, events: &[RuntimeEvent]) -> bool {
+    !crate::store::compaction_tx::has_effective_history(paths)
+        && !events.is_empty()
+        && events
+            .iter()
+            .enumerate()
+            .all(|(offset, event)| event.seq() == offset as u64 + 1)
+}
+
+/// Apply the pre-SCS-05 checkpoint read algorithm to cached rows and a suffix.
+fn cached_items_from_events(
+    rows: Vec<ItemRow>,
+    events: &[RuntimeEvent],
+    current_turn: Option<TurnId>,
+) -> Vec<ThreadItem> {
+    if rows.iter().any(ItemRow::is_legacy) {
+        if events.is_empty() {
+            return fold_item_snapshots(rows.into_iter().map(item_from_row));
+        }
+        return project_items(events);
+    }
+    project_cached_rows(rows, events, current_turn)
+}
+
+fn item_from_row(row: ItemRow) -> ThreadItem {
+    match row {
+        ItemRow::Watermarked(record) => record.item,
+        ItemRow::Bare(item) => item,
+    }
+}
+
+fn project_cached_rows(
+    rows: Vec<ItemRow>,
+    events: &[RuntimeEvent],
+    current_turn: Option<TurnId>,
+) -> Vec<ThreadItem> {
+    let mut projector = ItemProjector::new();
+    projector.seed_current_turn(current_turn);
     for row in rows {
-        match row {
-            ItemRow::Watermarked(record) => {
-                projector.seed_snapshot(record.first_seq, record.watermark_seq, record.item)
-            }
-            // The legacy branch above already returned for bare rows.
-            ItemRow::Bare(_) => {}
+        if let ItemRow::Watermarked(record) = row {
+            projector.seed_snapshot(record.first_seq, record.watermark_seq, record.item);
         }
     }
-    for event in &events {
-        if let Some(item_id) = delta_item_id(event) {
-            if event.seq() > projector.watermark_of(&item_id) {
-                projector.apply(event);
-            }
-        }
+    for event in events {
+        projector.apply_after_watermark(event);
     }
-    Ok(projector.finish_in_event_order())
+    projector.finish_in_event_order()
 }
 
 /// Append one usage increment to `usage.jsonl`.
@@ -174,13 +225,28 @@ pub fn append_usage_blocking(paths: &ThreadPaths, record: &UsageRecord, fsync: b
 
 /// Read every parsable usage increment.
 pub fn read_usage_blocking(paths: &ThreadPaths) -> Vec<UsageRecord> {
+    read_usage_checked_blocking(paths).0
+}
+
+/// Read usage rows and report whether every non-blank line decoded.
+pub(crate) fn read_usage_checked_blocking(paths: &ThreadPaths) -> (Vec<UsageRecord>, bool) {
     let raw = match ark_common::read_text_opt(&paths.usage_jsonl()) {
         Some(raw) => raw,
-        None => return Vec::new(),
+        None => return (Vec::new(), true),
     };
-    raw.lines()
-        .filter_map(|line| serde_json::from_str::<UsageRecord>(line).ok())
-        .collect()
+    let mut valid = true;
+    let records = raw
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| match serde_json::from_str::<UsageRecord>(line) {
+            Ok(record) => Some(record),
+            Err(_) => {
+                valid = false;
+                None
+            }
+        })
+        .collect();
+    (records, valid)
 }
 
 /// Fold all usage increments into one total.
@@ -195,16 +261,55 @@ pub fn usage_totals(records: &[UsageRecord]) -> Usage {
 /// Usage totals for a thread; rebuilds from events when the log is absent.
 pub fn thread_usage_blocking(paths: &ThreadPaths) -> Result<Usage> {
     let records = read_usage_blocking(paths);
-    if !records.is_empty() {
-        return Ok(usage_totals(&records));
+    let events = read_log_blocking(paths)?.events;
+    if events_are_authoritative(paths, &events) {
+        return Ok(usage_totals(&usage_records_from_events(&events)));
     }
-    let mut total = Usage::default();
-    for event in read_log_blocking(paths)?.events {
-        if let RuntimeEvent::Usage { usage, .. } = event {
-            total.merge(&usage);
-        }
+    let read = crate::store::derived_repair::checkpoint_read(paths, &events)?;
+    Ok(usage_totals(&merge_usage_records(records, read.suffix)))
+}
+
+fn merge_usage_records(records: Vec<UsageRecord>, events: &[RuntimeEvent]) -> Vec<UsageRecord> {
+    let mut merged = std::collections::BTreeMap::new();
+    for record in records {
+        merged.entry(record.seq).or_insert(record);
     }
-    Ok(total)
+    for record in usage_records_from_events(events) {
+        merged.insert(record.seq, record);
+    }
+    merged.into_values().collect()
+}
+
+pub(crate) fn rewrite_usage_from_events_blocking(
+    paths: &ThreadPaths,
+    events: &[RuntimeEvent],
+) -> Result<()> {
+    let mut body = String::new();
+    for record in usage_records_from_events(events) {
+        body.push_str(&encode_line(&record)?);
+    }
+    crate::store::fs_util::write_atomic(&paths.usage_jsonl(), body.as_bytes())
+}
+
+fn usage_records_from_events(events: &[RuntimeEvent]) -> Vec<UsageRecord> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            RuntimeEvent::Usage {
+                seq,
+                turn_id,
+                timestamp,
+                usage,
+                ..
+            } => Some(UsageRecord {
+                seq: *seq,
+                turn_id: Some(*turn_id),
+                usage: usage.clone(),
+                at: *timestamp,
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -269,6 +374,11 @@ mod tests {
         body.push_str(&encode_line(&item).unwrap());
         body.push_str("{\"item_id\": broken\n");
         std::fs::write(paths.items_jsonl(), body).unwrap();
+        std::fs::write(
+            paths.compacted_jsonl(),
+            crate::domain::compaction::CompactionMarker::new(1, 1, 0, "test").to_line(),
+        )
+        .unwrap();
 
         let rows = read_item_rows_blocking(&paths);
         assert_eq!(rows.len(), 1);
@@ -401,6 +511,11 @@ mod tests {
         let second = UsageRecord::from_event(2, turn, Usage::new(20, 5));
         append_usage_blocking(&paths, &first, false).unwrap();
         append_usage_blocking(&paths, &second, false).unwrap();
+        std::fs::write(
+            paths.compacted_jsonl(),
+            crate::domain::compaction::CompactionMarker::new(1, 1, 0, "test").to_line(),
+        )
+        .unwrap();
 
         let totals = thread_usage_blocking(&paths).unwrap();
         assert_eq!(totals.prompt_tokens, 30);
