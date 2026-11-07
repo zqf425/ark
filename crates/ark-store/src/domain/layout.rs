@@ -13,8 +13,10 @@ pub mod names {
     pub const EVENTS_JSONL: &str = "events.jsonl";
     pub const COMPACTED_JSONL: &str = "events.jsonl.compacted";
     pub const REWINDS_JSON: &str = "rewinds.json";
+    pub const REWIND_PENDING_JSON: &str = ".rewind-pending.json";
     pub const ITEMS_JSONL: &str = "items.jsonl";
     pub const USAGE_JSONL: &str = "usage.jsonl";
+    pub const DERIVED_DIRTY_JSON: &str = ".derived-dirty.json";
     pub const ATTACHMENTS: &str = "attachments";
     pub const RUNS: &str = "runs";
     pub const CHILDREN: &str = "children";
@@ -122,12 +124,20 @@ impl ThreadPaths {
         self.dir.join(names::REWINDS_JSON)
     }
 
+    pub fn rewind_pending_json(&self) -> PathBuf {
+        self.dir.join(names::REWIND_PENDING_JSON)
+    }
+
     pub fn items_jsonl(&self) -> PathBuf {
         self.dir.join(names::ITEMS_JSONL)
     }
 
     pub fn usage_jsonl(&self) -> PathBuf {
         self.dir.join(names::USAGE_JSONL)
+    }
+
+    pub fn derived_dirty_json(&self) -> PathBuf {
+        self.dir.join(names::DERIVED_DIRTY_JSON)
     }
 
     pub fn attachments_dir(&self) -> PathBuf {
@@ -194,8 +204,12 @@ mod tests {
         assert!(paths.events_jsonl().ends_with("events.jsonl"));
         assert!(paths.compacted_jsonl().ends_with("events.jsonl.compacted"));
         assert!(paths.rewinds_json().ends_with("rewinds.json"));
+        assert!(paths
+            .rewind_pending_json()
+            .ends_with(".rewind-pending.json"));
         assert!(paths.items_jsonl().ends_with("items.jsonl"));
         assert!(paths.usage_jsonl().ends_with("usage.jsonl"));
+        assert!(paths.derived_dirty_json().ends_with(".derived-dirty.json"));
         assert!(paths.attachments_dir().ends_with("attachments"));
         assert!(paths.children_index().ends_with("children/index.json"));
         assert!(paths.children_runs().ends_with("children/runs.jsonl"));

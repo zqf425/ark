@@ -167,13 +167,7 @@ pub fn append_text(path: &Path, text: &str, fsync: bool) -> Result<()> {
 /// Decoding goes through the shared policy so a BOM-prefixed marker file cannot
 /// turn every marker into an unparsable line.
 pub fn read_markers_blocking(paths: &ThreadPaths) -> Vec<CompactionMarker> {
-    ark_common::read_text_opt(&paths.compacted_jsonl())
-        .map(|text| {
-            text.lines()
-                .filter_map(crate::domain::compaction::parse_marker)
-                .collect()
-        })
-        .unwrap_or_default()
+    crate::store::compaction_tx::effective_markers(paths)
 }
 
 /// Compute the compacted log body and the marker describing what was folded.

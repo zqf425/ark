@@ -133,23 +133,34 @@ impl FileSessionStore {
     /// until the next restart (P1-3).
     pub(crate) fn append_child_run_blocking(&self, record: &ChildRunRecord) -> Result<()> {
         self.with_child_log_lock(record.parent_thread_id, || {
-            let parent_paths = self.thread_paths(record.parent_thread_id);
+            let parent = record.parent_thread_id;
+            let parent_paths = self.thread_paths(parent);
+            let location = crate::domain::child_index::ChildLocation::new(
+                parent,
+                self.paths.child_rel(&parent, &record.child_id),
+            );
+            let mut locator = self
+                .children
+                .lock()
+                .map_err(|_| ArkError::internal("child locator lock poisoned"))?;
+            locator.ensure_available(record.child_id, &location)?;
             crate::store::child_store::append_child_run_blocking(
                 &parent_paths,
                 record,
                 self.config.limits().fsync_on_append,
             )?;
+            locator.insert(record.child_id, location);
             // Cache only: a failure here is reported, never propagated, because
             // the next read or reconcile rebuilds it from the log.
             if let Err(err) = rebuild_child_index_blocking(&parent_paths) {
                 tracing::warn!(
-                    parent = %record.parent_thread_id,
+                    parent = %parent,
                     child = %record.child_id,
                     error = %err.message,
                     "child-run record stored but its derived index could not be rebuilt"
                 );
             }
-            self.remember_child(record.parent_thread_id, std::slice::from_ref(record))
+            Ok(())
         })
     }
 }
@@ -250,11 +261,10 @@ impl SessionStore for FileSessionStore {
 
     async fn read_items(&self, thread: ThreadId) -> Result<Vec<ThreadItem>> {
         let paths = self.resolve_paths(thread);
-        // `read_items_blocking` already prefers `items.jsonl` and only falls
-        // back to a projection when it is empty, so there is one read path.
-        tokio::task::spawn_blocking(move || crate::store::items_log::read_items_blocking(&paths))
-            .await
-            .map_err(|err| ArkError::internal(format!("item read task failed: {err}")))?
+        let writer = self.registry.writer_for(thread, &paths)?;
+        // The actor first completes any pending rewind, then reads the disk
+        // projection while serialized with every write for this thread.
+        writer.read_items().await
     }
 
     async fn subscribe(&self, thread: ThreadId, since_seq: u64) -> Result<SubscribeTicket> {
@@ -414,6 +424,84 @@ mod tests {
 
         let records = store.list_child_runs(meta.thread_id).await.unwrap();
         assert_eq!(records.len(), 8, "every concurrent append must survive");
+    }
+
+    #[tokio::test]
+    async fn child_id_cannot_be_appended_under_two_parents() {
+        let dir = TempDir::new("thread-ops-child-global-owner");
+        let store = test_store(&dir);
+        let first = store.create_thread("first").await.unwrap().thread_id;
+        let second = store.create_thread("second").await.unwrap().thread_id;
+        let child = ChildId::new();
+
+        store
+            .append_child_run(child_record(
+                first,
+                child,
+                ark_common::ChildRunStatus::Queued,
+            ))
+            .await
+            .unwrap();
+        store
+            .append_child_run(child_record(
+                first,
+                child,
+                ark_common::ChildRunStatus::Running,
+            ))
+            .await
+            .unwrap();
+
+        let error = store
+            .append_child_run(child_record(
+                second,
+                child,
+                ark_common::ChildRunStatus::Queued,
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ark_common::ArkErrorCode::Conflict);
+        assert_eq!(store.list_child_runs(first).await.unwrap().len(), 2);
+        assert!(store.list_child_runs(second).await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_cross_parent_child_appends_have_one_winner() {
+        let dir = TempDir::new("thread-ops-child-global-owner-race");
+        let store = Arc::new(test_store(&dir));
+        let first = store.create_thread("first").await.unwrap().thread_id;
+        let second = store.create_thread("second").await.unwrap().thread_id;
+        let child = ChildId::new();
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+
+        let mut tasks = Vec::new();
+        for parent in [first, second] {
+            let store = Arc::clone(&store);
+            let barrier = Arc::clone(&barrier);
+            tasks.push(tokio::spawn(async move {
+                barrier.wait().await;
+                store
+                    .append_child_run(child_record(
+                        parent,
+                        child,
+                        ark_common::ChildRunStatus::Queued,
+                    ))
+                    .await
+            }));
+        }
+        let mut results = Vec::new();
+        for task in tasks {
+            results.push(task.await.unwrap());
+        }
+
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        let loser = results
+            .iter()
+            .find_map(|result| result.as_ref().err())
+            .expect("one parent must lose ownership");
+        assert_eq!(loser.code, ark_common::ArkErrorCode::Conflict);
+        let stored = store.list_child_runs(first).await.unwrap().len()
+            + store.list_child_runs(second).await.unwrap().len();
+        assert_eq!(stored, 1, "the losing parent must not append a log row");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

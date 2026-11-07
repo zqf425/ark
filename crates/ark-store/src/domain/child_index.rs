@@ -4,7 +4,7 @@
 //! is a cache that `index_from_runs` regenerates. Everything here is pure, so
 //! "index equals a fold of the log" is provable without touching a disk.
 
-use ark_common::{ChildId, ThreadId, TurnId};
+use ark_common::{ArkError, ChildId, Result, ThreadId, TurnId};
 use ark_ports::ChildRunRecord;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -135,6 +135,35 @@ impl ChildLocator {
         self.inner.insert(child, location);
     }
 
+    /// Reject a child id already claimed at a different location.
+    pub fn ensure_available(&self, child: ChildId, expected: &ChildLocation) -> Result<()> {
+        let Some(existing) = self.inner.get(&child) else {
+            return Ok(());
+        };
+        if existing == expected {
+            return Ok(());
+        }
+        Err(ArkError::conflict(format!(
+            "child {child} is already owned by parent {}, not {}",
+            existing.parent_thread_id, expected.parent_thread_id
+        ))
+        .with_detail(
+            serde_json::json!({
+                "child_id": child,
+                "existing_parent_thread_id": existing.parent_thread_id,
+                "requested_parent_thread_id": expected.parent_thread_id,
+            })
+            .to_string(),
+        ))
+    }
+
+    /// Claim a child id without allowing scan or call order to change ownership.
+    pub fn claim(&mut self, child: ChildId, location: ChildLocation) -> Result<()> {
+        self.ensure_available(child, &location)?;
+        self.inner.insert(child, location);
+        Ok(())
+    }
+
     pub fn get(&self, child: &ChildId) -> Option<&ChildLocation> {
         self.inner.get(child)
     }
@@ -163,29 +192,19 @@ impl ChildLocator {
 
     /// Register every authoritative record found under `parent`.
     ///
-    /// Returns the ids whose previous location disagreed with the log, so the
-    /// caller can emit an `index_repaired` diagnostic.
+    /// A child id is globally unique: a second parent is corruption, not an
+    /// index disagreement that scan order may repair by overwriting.
     pub fn absorb(
         &mut self,
         parent: ThreadId,
         records: &[ChildRunRecord],
         rel_of: impl Fn(&ChildId) -> String,
-    ) -> Vec<ChildId> {
-        let mut repaired = Vec::new();
+    ) -> Result<()> {
         for record in records {
             let location = ChildLocation::new(parent, rel_of(&record.child_id));
-            match self.inner.get(&record.child_id) {
-                Some(existing) if existing == &location => {}
-                Some(_) => {
-                    repaired.push(record.child_id);
-                    self.inner.insert(record.child_id, location);
-                }
-                None => {
-                    self.inner.insert(record.child_id, location);
-                }
-            }
+            self.claim(record.child_id, location)?;
         }
-        repaired
+        Ok(())
     }
 }
 
@@ -271,22 +290,25 @@ mod tests {
     }
 
     #[test]
-    fn locator_reports_disagreements() {
+    fn locator_rejects_a_second_parent_without_changing_ownership() {
         let parent = ThreadId::new();
         let child = ChildId::new();
         let mut locator = ChildLocator::default();
         let records = vec![record(child, parent, ark_common::ChildRunStatus::Running)];
 
-        let first = locator.absorb(parent, &records, |id| {
-            format!("threads/{parent}/children/{id}")
-        });
-        assert!(first.is_empty(), "first insert is not a repair");
+        locator
+            .absorb(parent, &records, |id| {
+                format!("threads/{parent}/children/{id}")
+            })
+            .unwrap();
 
         let other_parent = ThreadId::new();
-        let second = locator.absorb(other_parent, &records, |id| {
-            format!("threads/{other_parent}/children/{id}")
-        });
-        assert_eq!(second, vec![child]);
-        assert_eq!(locator.get(&child).unwrap().parent_thread_id, other_parent);
+        let error = locator
+            .absorb(other_parent, &records, |id| {
+                format!("threads/{other_parent}/children/{id}")
+            })
+            .unwrap_err();
+        assert_eq!(error.code, ark_common::ArkErrorCode::Conflict);
+        assert_eq!(locator.get(&child).unwrap().parent_thread_id, parent);
     }
 }

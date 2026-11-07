@@ -6,8 +6,16 @@
 pub mod attachments;
 pub mod child_service;
 pub mod delegation;
+#[cfg(test)]
+mod derived_recovery_tests;
 pub mod im;
 pub mod memory;
+#[cfg(test)]
+mod recovery_blocker_tests;
+#[cfg(test)]
+mod rewind_facade_recovery_tests;
+#[cfg(test)]
+mod writer_derived_recovery_tests;
 
 pub use memory::MemoryFileStore;
 pub mod reconcile;

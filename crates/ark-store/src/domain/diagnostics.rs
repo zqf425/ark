@@ -19,6 +19,8 @@ pub enum DiagnosticKind {
     IndexInserted,
     IndexRemoved,
     ItemsRebuilt,
+    DerivedRebuilt,
+    DerivedWriteFailed,
     OrphanChildrenCleaned,
     SlowSubscriberDropped,
     LockFileCreated,
@@ -35,6 +37,8 @@ impl DiagnosticKind {
             DiagnosticKind::IndexInserted => "index_inserted",
             DiagnosticKind::IndexRemoved => "index_removed",
             DiagnosticKind::ItemsRebuilt => "items_rebuilt",
+            DiagnosticKind::DerivedRebuilt => "derived_rebuilt",
+            DiagnosticKind::DerivedWriteFailed => "derived_write_failed",
             DiagnosticKind::OrphanChildrenCleaned => "orphan_children_cleaned",
             DiagnosticKind::SlowSubscriberDropped => "slow_subscriber_dropped",
             DiagnosticKind::LockFileCreated => "lock_file_created",
@@ -147,6 +151,11 @@ mod tests {
         assert_eq!(DiagnosticKind::IndexRepaired.as_str(), "index_repaired");
         assert_eq!(DiagnosticKind::TailRepaired.as_str(), "tail_repaired");
         assert_eq!(DiagnosticKind::TempFilesSwept.as_str(), "temp_files_swept");
+        assert_eq!(DiagnosticKind::DerivedRebuilt.as_str(), "derived_rebuilt");
+        assert_eq!(
+            DiagnosticKind::DerivedWriteFailed.as_str(),
+            "derived_write_failed"
+        );
     }
 
     #[test]

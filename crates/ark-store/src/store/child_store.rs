@@ -197,15 +197,15 @@ pub fn sync_child_index_blocking(
     Ok(expected.children)
 }
 
-/// Scan one parent directory and absorb its children into `locator`.
+/// Scan one parent's authoritative records into the global child locator.
 ///
-/// Returns the ids whose location disagreed with the previously known one, which
-/// the caller reports as `index_repaired` (design 7.4.1).
+/// A duplicate declaration by another parent is returned as a conflict rather
+/// than resolved according to directory scan order.
 pub fn absorb_parent_blocking(
     locator: &mut ChildLocator,
     parent: ThreadId,
     parent_paths: &ThreadPaths,
-) -> Vec<ChildId> {
+) -> Result<()> {
     let records = read_child_runs_blocking(parent_paths);
     locator.absorb(parent, &records, |child| {
         format!(
@@ -485,7 +485,7 @@ mod tests {
         .unwrap();
 
         let mut locator = ChildLocator::default();
-        assert!(absorb_parent_blocking(&mut locator, parent, &paths).is_empty());
+        absorb_parent_blocking(&mut locator, parent, &paths).unwrap();
         let location = locator.get(&child).expect("child is registered");
         assert_eq!(location.parent_thread_id, parent);
         assert!(location

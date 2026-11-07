@@ -46,6 +46,34 @@ pub fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     write_atomic(path, &bytes)
 }
 
+/// Persist directory entry changes made by rename or remove.
+///
+/// File fsync alone does not make the containing directory entry durable. This
+/// helper is intentionally called only by the dirty-marker protocol, whose
+/// ordering relative to the authoritative event append is correctness-critical.
+pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    sync_dir(parent).map_err(|err| io_error("sync parent directory", parent, err))
+}
+
+#[cfg(unix)]
+fn sync_dir(path: &Path) -> std::io::Result<()> {
+    std::fs::File::open(path)?.sync_all()
+}
+
+#[cfg(windows)]
+fn sync_dir(path: &Path) -> std::io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)?
+        .sync_all()
+}
+
 /// Write `value` as pretty JSON only when the on-disk bytes differ.
 ///
 /// Derived files (children/index.json, index.json) are rewritten on every pass;
@@ -88,6 +116,17 @@ pub fn append_line_blocking(path: &Path, line: &str, fsync: bool) -> Result<()> 
             .map_err(|err| io_error("fsync", path, err))?;
     }
     Ok(())
+}
+
+/// Whether any filesystem entry occupies `path`.
+///
+/// Unlike `Path::exists`, this also sees dangling symlinks. Metadata errors
+/// other than not-found are treated conservatively as presence.
+pub(crate) fn path_entry_exists(path: &Path) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => true,
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+    }
 }
 
 /// Whether `path` exists as a file.
