@@ -149,4 +149,6 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.composer.skillsRefresh': ['重新扫描', 'Rescan'],
   'canvas.composer.detailsShow': ['展开会话信息', 'Show session details'],
   'canvas.composer.detailsHide': ['收起会话信息', 'Hide session details'],
+  'canvas.composer.workspaceAria': ['切换本次会话的工作区', 'Change the workspace for this thread'],
+  'canvas.composer.menuAria': ['插入附件或技能', 'Insert an attachment or a skill'],
 } as const

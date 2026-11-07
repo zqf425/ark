@@ -24,7 +24,7 @@ import { useTurn } from '../hooks/use-turn'
 import { associateAttachment, uploadAttachment } from '../api/attachments-api'
 import { listSkills, listThreadSkills, refreshThreadSkills } from '../api/skills-api'
 import { canEditComposer, canSendToThread } from './composer-availability'
-import { ComposerRuntimeControls } from './ComposerRuntimeControls'
+import { AutonomyPicker, WorkspacePicker, ContextRing, ModelPicker } from './ComposerRuntimeControls'
 import { SessionRuntimeControls } from './SessionRuntimeControls'
 import type { SkillSummary } from '../../../shared/contracts'
 
@@ -87,6 +87,25 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const [skillWarnings, setSkillWarnings] = useState(0)
   /** Per-thread details (workspace, compaction) stay folded until asked for. */
   const [detailsOpen, setDetailsOpen] = useState(false)
+  /** The round + button opens a small insert menu (attachment / skills). */
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (event: MouseEvent): void => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false)
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
 
   const inputDisabled = !canEditComposer(threadId, draft)
   const sendDisabled = !canSendToThread(threadId, draft, streamStatus)
@@ -377,39 +396,68 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
               aria-hidden="true"
               onChange={(event) => void pickFiles(event.target.files)}
             />
-            <button
-              type="button"
-              className="ark-composer__round"
-              disabled={inputDisabled || uploading || live}
-              title={live ? t('canvas.composer.attachLiveHint') : t('canvas.composer.attach')}
-              aria-label={uploading ? t('canvas.composer.attachUploading') : t('canvas.composer.attach')}
-              onClick={() => fileRef.current?.click()}
-            >
-              {uploading ? (
-                <span className="ark-composer__round-text">…</span>
-              ) : (
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-                  <path
-                    d="M12 5v14M5 12h14"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              )}
-            </button>
-            <button
-              type="button"
-              className="ark-composer__chipbtn"
-              disabled={inputDisabled}
-              onClick={() => void toggleSkills()}
-            >
-              {t('canvas.composer.skills')}
-            </button>
-            <ComposerRuntimeControls threadId={threadId} />
+            {/* Round + trigger with a small insert menu, like the smart-ark
+                composer menu: attachment and skills live behind one button. */}
+            <div className="ark-composer__pick" ref={menuRef}>
+              <button
+                type="button"
+                className="ark-composer__round"
+                disabled={inputDisabled || live}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                aria-label={t('canvas.composer.menuAria')}
+                title={t('canvas.composer.menuAria')}
+                onClick={() => setMenuOpen((value) => !value)}
+              >
+                {uploading ? (
+                  <span className="ark-composer__round-text">…</span>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                    <path
+                      d="M12 5v14M5 12h14"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                )}
+              </button>
+              {menuOpen ? (
+                <div className="ark-composer__popover" role="menu" aria-label={t('canvas.composer.menuAria')}>
+                  <button
+                    type="button"
+                    className="ark-composer__option"
+                    role="menuitem"
+                    disabled={uploading}
+                    title={live ? t('canvas.composer.attachLiveHint') : undefined}
+                    onClick={() => {
+                      setMenuOpen(false)
+                      fileRef.current?.click()
+                    }}
+                  >
+                    {uploading ? t('canvas.composer.attachUploading') : t('canvas.composer.attach')}
+                  </button>
+                  <button
+                    type="button"
+                    className="ark-composer__option"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      void toggleSkills()
+                    }}
+                  >
+                    {t('canvas.composer.skills')}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            <AutonomyPicker threadId={threadId} />
           </div>
           <div className="ark-composer__send">
+            <WorkspacePicker threadId={threadId} />
+            <ContextRing threadId={threadId} />
+            <ModelPicker threadId={threadId} />
             {live ? (
               <Button variant="default" size="sm" disabled={inputDisabled} onClick={queueDraft}>
                 {t('canvas.composer.queue')}
