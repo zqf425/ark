@@ -486,6 +486,36 @@ fn provider_context_window_caps_the_next_turn_and_reserves_requested_output() {
     assert_eq!(limits.context_limit_tokens, 27_904);
 }
 
+#[test]
+fn zero_turn_budgets_map_to_unlimited_limits() {
+    let config = RuntimeConfig {
+        tuning: ark_config::TuningConfig {
+            max_rounds: 0,
+            max_tokens: 0,
+            ..ark_config::TuningConfig::default()
+        },
+        ..RuntimeConfig::default()
+    };
+    let limits = super::turn_common::limits_for_turn(&config, None);
+    assert_eq!(limits.max_rounds, u32::MAX);
+    assert_eq!(limits.max_tokens, u64::MAX);
+}
+
+#[test]
+fn positive_turn_budgets_are_passed_through_unchanged() {
+    let config = RuntimeConfig {
+        tuning: ark_config::TuningConfig {
+            max_rounds: 500,
+            max_tokens: 5_000_000,
+            ..ark_config::TuningConfig::default()
+        },
+        ..RuntimeConfig::default()
+    };
+    let limits = super::turn_common::limits_for_turn(&config, None);
+    assert_eq!(limits.max_rounds, 500);
+    assert_eq!(limits.max_tokens, 5_000_000);
+}
+
 #[tokio::test]
 async fn startup_aborts_a_parent_turn_left_open_by_a_previous_process() {
     let data_dir = TestDataDir::new();

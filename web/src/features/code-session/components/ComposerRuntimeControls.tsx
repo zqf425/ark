@@ -17,6 +17,7 @@ import { translateNow } from '../../../shared/i18n/current'
 import { describeError } from '../../../shared/api/error-describe'
 import type { ThreadRuntimeSettings } from '../../../shared/contracts'
 import { compactThread, getThread, updateThread } from '../api/threads-api'
+import { pickWorkspaceFolder } from '../api/workspace-api'
 import { getRuntimeConfig } from '../../settings/api/settings-api'
 import { useProviders } from '../../settings/hooks/use-providers'
 import { useCodeSessionStore } from '../state/store'
@@ -212,6 +213,7 @@ export function WorkspacePicker({ threadId }: { threadId: string | null }): JSX.
   const [draft, setDraft] = useState('')
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [picking, setPicking] = useState(false)
   const [loadedFor, setLoadedFor] = useState<RuntimeOwner>(null)
   const paintedThreadId = useRef(threadId)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -270,6 +272,22 @@ export function WorkspacePicker({ threadId }: { threadId: string | null }): JSX.
     }
   }
 
+  // Opens the host's native folder dialog (POST /v1/workspace/pick); the
+  // picked path lands in the input so the explicit save stays the only
+  // write path. `path` is undefined when the user cancelled the dialog.
+  const browse = async (): Promise<void> => {
+    if (picking) return
+    setPicking(true)
+    try {
+      const picked = await pickWorkspaceFolder()
+      if (picked.path) setDraft(picked.path)
+    } catch (error) {
+      toast.push('error', t('session.runtime.workspace'), error instanceof Error ? error.message : String(error))
+    } finally {
+      setPicking(false)
+    }
+  }
+
   const label = basename(runtime.workspace ?? '')
 
   return (
@@ -304,14 +322,23 @@ export function WorkspacePicker({ threadId }: { threadId: string | null }): JSX.
               }}
             />
           </label>
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={saving || threadId === null || !canSaveRuntime(loadedFor, threadId)}
-            onClick={() => void save()}
-          >
-            {saving ? t('common.saving') : t('session.runtime.save')}
-          </Button>
+          <div className="ark-composer__popover-actions">
+            <Button
+              size="sm"
+              disabled={picking}
+              onClick={() => void browse()}
+            >
+              {picking ? t('common.working') : t('session.runtime.browse')}
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={saving || threadId === null || !canSaveRuntime(loadedFor, threadId)}
+              onClick={() => void save()}
+            >
+              {saving ? t('common.saving') : t('session.runtime.save')}
+            </Button>
+          </div>
         </div>
       ) : null}
     </div>
