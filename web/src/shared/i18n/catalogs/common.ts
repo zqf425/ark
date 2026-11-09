@@ -15,6 +15,7 @@ export const COMMON_MESSAGES = {
   'common.submitting': ['提交中…', 'Submitting…'],
   'common.refresh': ['刷新', 'Refresh'],
   'common.refreshing': ['刷新中…', 'Refreshing…'],
+  'common.working': ['处理中…', 'Working…'],
   'common.edit': ['编辑', 'Edit'],
   'common.add': ['新增', 'Add'],
   'common.close': ['关闭', 'Close'],

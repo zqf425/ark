@@ -188,6 +188,15 @@
   padding: 4px 6px;
 }
 
+.ark-composer__popover-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.ark-composer__popover-actions .ark-btn {
+  flex: 1;
+}
+
 .ark-composer__option {
   display: flex;
   flex-direction: column;
