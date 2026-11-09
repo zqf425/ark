@@ -346,31 +346,47 @@ impl HttpModelClient {
             let (complete, rest) = split_at_last_complete_line(&drained);
             text.push_str(rest);
             for frame in sse.push(complete) {
+                if accumulator.is_finished() {
+                    // A terminal frame already arrived; bytes after it (e.g. a
+                    // provider holding the connection open past `[DONE]`) are
+                    // not part of the response and must not be published.
+                    break;
+                }
+                let events = family.parse(&frame);
+                published |= forward(&mut accumulator, events, sink).await?;
+            }
+            if accumulator.is_finished() {
+                // `[DONE]` / `message_stop` / `response.completed` ends the
+                // turn. Waiting for EOF here would let a provider that keeps
+                // the connection alive trip the phase timeout, turning an
+                // already-completed stream into a transient error and a retry.
+                break;
+            }
+        }
+        if !accumulator.is_finished() {
+            if !pending.is_empty() {
+                // EOF with a truncated trailing codepoint: keep the old lossy
+                // tail behaviour instead of silently dropping those bytes.
+                text.push_str(&String::from_utf8_lossy(&pending));
+            }
+            let drained = std::mem::take(&mut text);
+            // Hand the remaining lines to the parser so `finish` below can still
+            // flush a final frame whose blank line never arrived.
+            for frame in sse.push(&drained) {
+                let events = family.parse(&frame);
+                published |= forward(&mut accumulator, events, sink).await?;
+            }
+            for frame in sse.finish() {
                 let events = family.parse(&frame);
                 published |= forward(&mut accumulator, events, sink).await?;
             }
         }
-        if !pending.is_empty() {
-            // EOF with a truncated trailing codepoint: keep the old lossy
-            // tail behaviour instead of silently dropping those bytes.
-            text.push_str(&String::from_utf8_lossy(&pending));
-        }
-        let drained = std::mem::take(&mut text);
-        // Hand the remaining lines to the parser so `finish` below can still
-        // flush a final frame whose blank line never arrived.
-        for frame in sse.push(&drained) {
-            let events = family.parse(&frame);
-            published |= forward(&mut accumulator, events, sink).await?;
-        }
-        for frame in sse.finish() {
-            let events = family.parse(&frame);
-            published |= forward(&mut accumulator, events, sink).await?;
-        }
         let events = family.finish();
         published |= forward(&mut accumulator, events, sink).await?;
-        // `finish` commits any tool call still being assembled; `response` then
-        // reports exactly what was published plus what was accumulated.
-        let _ = accumulator.finish();
+        // `finish` commits any tool call still being assembled. Forward those
+        // chunks too: a provider that closes without a terminal frame would
+        // otherwise report tool_calls in the response that the sink never saw.
+        published |= flush_tail(&mut accumulator, sink).await?;
         let _ = published;
         Ok(accumulator.response())
     }
@@ -409,6 +425,35 @@ fn decode_utf8_prefix(pending: &mut Vec<u8>, text: &mut String) {
     }
 }
 
+/// The consumer disappeared while a chunk was being published.
+fn sink_closed() -> AttemptError {
+    AttemptError {
+        error: ArkError::new(ArkErrorCode::RuntimeUnavailable, "model sink closed"),
+        kind: FailureKind::Permanent,
+        published: true,
+        retry_after: None,
+    }
+}
+
+/// Publish tool calls that only become complete when the stream is finalized.
+///
+/// `StreamAccumulator::finish` returns the chunks assembled at EOF; forwarding
+/// them keeps the sink and the returned `ModelResponse.tool_calls` in sync. A
+/// terminal frame already flushed these calls, so this is a no-op there.
+async fn flush_tail(
+    accumulator: &mut StreamAccumulator,
+    sink: &mpsc::Sender<ModelChunk>,
+) -> std::result::Result<bool, AttemptError> {
+    let mut published = false;
+    for chunk in accumulator.finish() {
+        published = true;
+        if sink.send(chunk).await.is_err() {
+            return Err(sink_closed());
+        }
+    }
+    Ok(published)
+}
+
 /// Forward accumulated chunks, reporting whether anything was published.
 async fn forward(
     accumulator: &mut StreamAccumulator,
@@ -421,12 +466,7 @@ async fn forward(
             published = true;
             if sink.send(chunk).await.is_err() {
                 // The consumer stopped listening (interrupt): stop reading.
-                return Err(AttemptError {
-                    error: ArkError::new(ArkErrorCode::RuntimeUnavailable, "model sink closed"),
-                    kind: FailureKind::Permanent,
-                    published: true,
-                    retry_after: None,
-                });
+                return Err(sink_closed());
             }
         }
     }

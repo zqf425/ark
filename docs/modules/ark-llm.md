@@ -11,6 +11,11 @@
 - endpoint format 在入口只路由一次到 provider family；禁止在巨型函数中堆叠格式分支。
 - SSE 帧解析、增量拼接、重试、usage 与消息/工具参数修复各有唯一实现。
 - 流必须逐块消费，不能为长响应无界缓冲。
+- 阶段超时只约束「等响应头」与「等下一帧」的静默，不约束整个回合。provider 发出终止帧
+  （`[DONE]` / `message_stop` / `response.completed`）即视为回合结束：pump 立即收尾，不再等
+  EOF，否则保持连接的服务端会把已完成的流误判为超时并触发重复请求。终止帧之后到达的字节不得
+  发布。收尾时 `StreamAccumulator::finish()` 补发的 tool-call chunk 必须同样转发到 sink，使
+  `ModelResponse.tool_calls` 与事件流一致；未发终止帧就 EOF 的流也走这条补发路径。
 - `cache_hit_rate` 只能读取原生 hit/miss 后计算，不能由 prompt token 猜测。
 - 传输 client 由调用方注入（`HttpModelClient::new` / `ModelCatalogClient::new`）；组合根注入经
   `ark_http::transport_client` 构建的受治理 client（同一代理/TLS 策略），本 crate 不自建传输。
@@ -72,4 +77,5 @@ Messages 无 effort 旋钮，三档映射为固定 thinking 预算（2k/8k/16k�
 ## 验证
 
 每个协议族以录制 SSE fixture 覆盖正常分块、畸形帧、断流、重试和 usage 缺失；模拟客户端用于
-agent 无网络测试。
+agent 无网络测试。`tests/stream_finalization.rs` 以本地 TCP 服务覆盖两条传输收尾边界：发完
+终止帧但保持连接，以及无终止帧直接 EOF 时工具调用的补发。
