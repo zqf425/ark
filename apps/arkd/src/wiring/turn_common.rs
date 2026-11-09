@@ -89,9 +89,21 @@ pub(crate) fn limits_for_turn(
     provider: Option<&ark_llm::ProviderConfig>,
 ) -> TurnLimits {
     let tuning = &snapshot.tuning;
+    // `0` is the settings UI's "unlimited" value for the two turn budgets.
+    // Translate it once here into the largest finite limit: the agent's
+    // budget policy keeps its plain `counter >= limit` semantics, and a real
+    // turn counter can never reach `u32::MAX` / `u64::MAX`.
     TurnLimits {
-        max_rounds: tuning.max_rounds.max(1),
-        max_tokens: tuning.max_tokens.max(1),
+        max_rounds: if tuning.max_rounds == 0 {
+            u32::MAX
+        } else {
+            tuning.max_rounds
+        },
+        max_tokens: if tuning.max_tokens == 0 {
+            u64::MAX
+        } else {
+            tuning.max_tokens
+        },
         max_tool_calls: tuning.max_tool_calls.max(1),
         max_identical_calls: tuning.max_identical_calls.max(1),
         context_limit_tokens: model::context_limit_tokens(tuning.context_limit_tokens, provider),

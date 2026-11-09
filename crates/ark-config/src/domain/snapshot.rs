@@ -20,9 +20,9 @@ pub const LOG_LEVELS: [&str; 6] = ["trace", "debug", "info", "warn", "error", "o
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TuningConfig {
-    /// Maximum model round-trips in one turn.
+    /// Maximum model round-trips in one turn. `0` means unlimited.
     pub max_rounds: u32,
-    /// Maximum cumulative tokens in one turn.
+    /// Maximum cumulative tokens in one turn. `0` means unlimited.
     pub max_tokens: u64,
     /// Maximum tool calls in one turn.
     pub max_tool_calls: u32,
@@ -64,9 +64,15 @@ impl Default for TuningConfig {
 
 impl TuningConfig {
     /// Clamp every field into a range that keeps the runtime usable.
+    ///
+    /// `max_rounds` and `max_tokens` take `0` as the settings UI's
+    /// "unlimited" value, so their lower bound is `0`. The config→runtime
+    /// boundary (`arkd::wiring::limits_for_turn`) translates `0` into the
+    /// largest finite budget; validation must therefore leave `0` untouched
+    /// instead of clamping it back to a positive floor.
     pub fn sanitized(mut self) -> Self {
-        self.max_rounds = self.max_rounds.clamp(1, 200);
-        self.max_tokens = self.max_tokens.clamp(1_000, 50_000_000);
+        self.max_rounds = self.max_rounds.clamp(0, 1_000);
+        self.max_tokens = self.max_tokens.clamp(0, 100_000_000);
         self.max_tool_calls = self.max_tool_calls.clamp(1, 5_000);
         self.max_identical_calls = self.max_identical_calls.clamp(1, 100);
         self.context_limit_tokens = self.context_limit_tokens.clamp(1_000, 10_000_000);
@@ -388,8 +394,29 @@ mod tests {
     #[test]
     fn out_of_range_tuning_is_rejected() {
         let mut config = RuntimeConfig::default();
-        config.tuning.max_rounds = 0;
+        config.tuning.max_rounds = 1_001;
         assert!(config.validate().is_err());
+        config.tuning.max_rounds = 24;
+        config.tuning.max_tokens = 100_000_001;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn zero_turn_limits_mean_unlimited_and_upper_bounds_are_inclusive() {
+        let mut config = RuntimeConfig::default();
+        // `0` is a valid "unlimited" value and must survive sanitizing.
+        config.tuning.max_rounds = 0;
+        config.tuning.max_tokens = 0;
+        assert!(config.validate().is_ok(), "0 is a valid unlimited value");
+        let zeroed = config.tuning.clone().sanitized();
+        assert_eq!(zeroed.max_rounds, 0);
+        assert_eq!(zeroed.max_tokens, 0);
+
+        // The new inclusive upper bounds must pass validation unchanged.
+        config.tuning.max_rounds = 1_000;
+        config.tuning.max_tokens = 100_000_000;
+        assert!(config.validate().is_ok());
+        assert_eq!(config.tuning.clone().sanitized(), config.tuning);
     }
 
     #[test]

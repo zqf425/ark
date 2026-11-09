@@ -34,8 +34,8 @@ const GROUPS: readonly TuningGroup[] = [
   {
     titleKey: 'settings.tuning.group.turn',
     fields: [
-      { key: 'max_rounds', labelKey: 'settings.tuning.field.maxRounds.label', hintKey: 'settings.tuning.field.maxRounds.hint', min: 1, max: 200 },
-      { key: 'max_tokens', labelKey: 'settings.tuning.field.maxTokens.label', hintKey: 'settings.tuning.field.maxTokens.hint', min: 1_000, max: 50_000_000 }
+      { key: 'max_rounds', labelKey: 'settings.tuning.field.maxRounds.label', hintKey: 'settings.tuning.field.maxRounds.hint', min: 0, max: 1_000 },
+      { key: 'max_tokens', labelKey: 'settings.tuning.field.maxTokens.label', hintKey: 'settings.tuning.field.maxTokens.hint', min: 0, max: 100_000_000 }
     ]
   },
   {
