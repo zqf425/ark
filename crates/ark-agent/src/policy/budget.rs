@@ -170,4 +170,22 @@ mod tests {
     fn small_prompt_never_asks_for_compaction() {
         assert!(!budget().needs_compaction(10));
     }
+
+    /// The config boundary translates a `0` ("unlimited") budget into the
+    /// largest finite limit. Prove that this never trips the counter check, so
+    /// "unlimited" really is unlimited for the agent policy.
+    #[test]
+    fn largest_finite_budgets_never_exhaust() {
+        let unlimited = TurnBudget::new(TurnLimits {
+            max_rounds: u32::MAX,
+            max_tokens: u64::MAX,
+            ..TurnLimits::tiny()
+        });
+        let progress = Progress {
+            rounds: 100_000,
+            tokens_used: 1_000_000_000,
+            ..Progress::default()
+        };
+        assert_eq!(unlimited.check(&progress), BudgetVerdict::Allow);
+    }
 }

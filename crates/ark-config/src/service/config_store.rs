@@ -255,7 +255,7 @@ mod tests {
     fn out_of_range_tuning_is_rejected_without_a_swap() {
         let store = store();
         let tuning = ark_contract::TuningSettings {
-            max_rounds: 0,
+            max_rounds: 1_001,
             ..ark_contract::TuningSettings::default()
         };
         let result = store.apply(ConfigPatch {
@@ -267,6 +267,23 @@ mod tests {
             store.snapshot().tuning.max_rounds,
             TuningConfig::default().max_rounds
         );
+    }
+
+    #[test]
+    fn zero_turn_limits_are_accepted_as_unlimited() {
+        let store = store();
+        let tuning = ark_contract::TuningSettings {
+            max_rounds: 0,
+            max_tokens: 0,
+            ..ark_contract::TuningSettings::default()
+        };
+        let result = store.apply(ConfigPatch {
+            tuning: Some(tuning),
+            ..ConfigPatch::default()
+        });
+        assert!(matches!(result, ApplyResult::Applied { .. }));
+        assert_eq!(store.snapshot().tuning.max_rounds, 0);
+        assert_eq!(store.snapshot().tuning.max_tokens, 0);
     }
 
     #[test]

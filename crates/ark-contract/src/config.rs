@@ -121,8 +121,12 @@ pub struct ImSettings {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct TuningSettings {
+    /// Maximum model round-trips in one turn. `0` means unlimited; valid
+    /// values are `0..=1000`.
     #[ts(as = "f64")]
     pub max_rounds: u32,
+    /// Maximum cumulative tokens in one turn. `0` means unlimited; valid
+    /// values are `0..=100_000_000`.
     #[ts(as = "f64")]
     pub max_tokens: u64,
     #[ts(as = "f64")]
