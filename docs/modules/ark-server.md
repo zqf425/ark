@@ -20,6 +20,11 @@
   `since_seq` 跳过事件。backlog 非空时不发送该帧，因为首个回放事件已经产生字节，且该帧会与回放末条
   重复同一个 `seq`。因此正文是否产生首字节不再由 keep-alive 间隔决定。
 - 连接有界；慢客户端断开后从最后 `seq` 重连，绝不阻塞线程 writer。
+- `GET /v1/threads/{id}/turns/{turn_id}` 必须校验 `TurnSummary.thread_id` 与路径 `{id}` 一致，
+  不一致按 404 处理（与 steer、child-run 单路由的归属校验一致）；turn id 不是跨线程可读的全局句柄。
+- `workspace_gate` 是全进程串行启动门，锁内只做注册表变更与必要的轻量存在性检查，不得 await
+  磁盘 I/O 或全量事件回放。附件授权（`authorize_turn_attachments`，回放整段事件日志）在取锁前
+  完成；`get_thread` 单文件存在性检查与删除路由共用同一 gate，保留在锁内以避免删除竞态。
 - `/v1/shutdown`、Ctrl-C 和任务 panic 走同一收敛流程：先阻止新的 completion wakeup，再取消待调度
   continuation 与活动回合，等待有限时间、落终态并清理 registry。
 - 后台 child 的持久 `child_completed` 成功写入后会唤醒 per-thread continuation supervisor。

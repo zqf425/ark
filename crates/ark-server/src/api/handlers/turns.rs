@@ -32,11 +32,14 @@ pub async fn get(
     State(state): State<AppState>,
     Path((id, turn)): Path<(String, String)>,
 ) -> Result<Json<TurnSummary>, ApiError> {
-    let _thread_id = parse_thread(&id)?;
+    let thread_id = parse_thread(&id)?;
     let turn_id = parse_turn(&turn)?;
+    // The path scopes the turn to this thread: a valid turn id belonging to a
+    // different thread must read as not-found, matching steer/child-run checks.
     state
         .turns
         .get(turn_id)
+        .filter(|summary| summary.thread_id == thread_id)
         .map(Json)
         .ok_or_else(|| ApiError::new(ark_common::ArkErrorCode::NotFound, "turn is not known"))
 }
@@ -245,6 +248,38 @@ mod tests {
         assert_eq!(error.code.http_status(), 404);
         // Refusal happens before registration: the thread stays idle.
         assert!(app_state.turns.active_for(thread.thread_id).is_none());
+    }
+
+    /// The path scopes a turn to its thread: a turn id belonging to another
+    /// thread must read as not-found, matching steer/child-run ownership checks.
+    #[tokio::test]
+    async fn a_turn_from_another_thread_is_not_readable_through_this_thread() {
+        let dir = test_dir();
+        let temp = dir.path().to_path_buf();
+        let state = state(&temp, Arc::new(CountingRunner(AtomicUsize::new(0))));
+        let owner = state.store.create_thread("owner").await.expect("thread");
+        let other = state.store.create_thread("other").await.expect("thread");
+        let turn_id = TurnId::new();
+        state
+            .turns
+            .try_register(owner.thread_id, turn_id, CancelToken::new())
+            .expect("turn registered on its own thread");
+
+        let same = get(
+            State(state.clone()),
+            Path((owner.thread_id.to_string(), turn_id.to_string())),
+        )
+        .await
+        .expect("the owning thread can read its turn");
+        assert_eq!(thread_of(&same.0), owner.thread_id);
+
+        let error = get(
+            State(state),
+            Path((other.thread_id.to_string(), turn_id.to_string())),
+        )
+        .await
+        .expect_err("a foreign thread must not read another thread's turn");
+        assert_eq!(error.0.code, ark_common::ArkErrorCode::NotFound);
     }
 
     #[test]

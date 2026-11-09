@@ -80,15 +80,20 @@ pub async fn start_turn_as(
             turn_source_label(&source),
         )
         .await?;
-    // Serialize explicit input with auto-continuation eligibility. User intent
-    // wins by cancelling a pending debounce before registering this turn.
-    let _workspace_guard = state.workspace_gate.lock().await;
-    state.store.get_thread(thread_id).await?;
-    // Authorize before registering: a rejected attachment must not leave a
-    // registered turn behind, and the check compares against this thread's own
-    // association events only.
+    // Authorize attachments before taking the global workspace gate: this
+    // replays the thread's whole event log, and a slow disk must not stall turn
+    // starts for every other thread (AGENTS.md §7.5). A rejected attachment
+    // still leaves no registered turn behind, and the check compares against
+    // this thread's own association events only.
     let attachment_ids =
         crate::service::authorize_turn_attachments(state, thread_id, requested_attachments).await?;
+    // Serialize explicit input with auto-continuation eligibility. User intent
+    // wins by cancelling a pending debounce before registering this turn.
+    // The gate covers only the registry mutation plus one lightweight thread
+    // existence check; that check is shared with the delete route so a
+    // concurrent delete cannot register a turn for a thread already gone.
+    let _workspace_guard = state.workspace_gate.lock().await;
+    state.store.get_thread(thread_id).await?;
     let Some(registration) = state.turns.try_register(thread_id, turn_id, cancel.clone()) else {
         let running = state
             .turns
