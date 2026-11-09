@@ -27,6 +27,7 @@ export type ItemsDraft = {
   userInputs: Record<string, PendingUserInput> | null
   childCompletions: Record<string, ChildCompletionNotice> | null
   childRunRevision: number
+  workbenchRevision: number
   rewindRevision: number
   rewoundFromSeq: number | null
   usage: UsageAggregate | null
@@ -46,6 +47,7 @@ export function draftOf(base: ItemsSnapshot): ItemsDraft {
     userInputs: null,
     childCompletions: null,
     childRunRevision: base.childRunRevision,
+    workbenchRevision: base.workbenchRevision,
     rewindRevision: base.rewindRevision,
     rewoundFromSeq: base.rewoundFromSeq,
     usage: base.usage,
@@ -101,6 +103,7 @@ export function commitDraft(draft: ItemsDraft): ItemsSnapshot {
     userInputs: draft.userInputs ?? base.userInputs,
     childCompletions: draft.childCompletions ?? base.childCompletions,
     childRunRevision: draft.childRunRevision,
+    workbenchRevision: draft.workbenchRevision,
     rewindRevision: draft.rewindRevision,
     rewoundFromSeq: draft.rewoundFromSeq,
     usage: draft.usage,

@@ -14,7 +14,7 @@ function describe(error: unknown): string {
 export function TerminalPanel(): JSX.Element {
   const { t } = useI18n()
   const threadId = useCodeSessionStore((state) => state.activeThreadId)
-  const lastSeq = useCodeSessionStore((state) => state.lastSeq)
+  const workbenchRevision = useCodeSessionStore((state) => state.workbenchRevision)
   const [data, setData] = useState<TerminalEntriesResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   /**
@@ -64,7 +64,7 @@ export function TerminalPanel(): JSX.Element {
     const controller = new AbortController()
     load(threadId, controller.signal)
     return () => controller.abort()
-  }, [threadId, lastSeq])
+  }, [threadId, workbenchRevision])
 
   if (!threadId) {
     return <EmptyState title={t('workbench.noThreadTitle')} hint={t('workbench.noThreadTerminalHint')} />

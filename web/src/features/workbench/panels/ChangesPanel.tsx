@@ -19,7 +19,10 @@ function describe(error: unknown): string {
 export function ChangesPanel(): JSX.Element {
   const { t } = useI18n()
   const threadId = useCodeSessionStore((state) => state.activeThreadId)
-  const lastSeq = useCodeSessionStore((state) => state.lastSeq)
+  // Only events that can change a server-side workbench projection advance
+  // this revision; `lastSeq` advances on every streamed token and would flood
+  // the panel with HTTP reloads.
+  const workbenchRevision = useCodeSessionStore((state) => state.workbenchRevision)
   const selectFile = useCodeSessionStore((state) => state.selectFile)
   const [data, setData] = useState<WorkspaceChangesResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -75,7 +78,7 @@ export function ChangesPanel(): JSX.Element {
     const controller = new AbortController()
     load(threadId, controller.signal)
     return () => controller.abort()
-  }, [threadId, lastSeq])
+  }, [threadId, workbenchRevision])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -88,7 +91,7 @@ export function ChangesPanel(): JSX.Element {
       if (!controller.signal.aborted) setWorkspaceError(describe(reason))
     })
     return () => controller.abort()
-  }, [threadId, lastSeq])
+  }, [threadId, workbenchRevision])
 
   const refreshWorkspace = (): void => {
     void Promise.all([getWorkspaceView(), getWorkspaceDiff()]).then(([view, diff]) => {

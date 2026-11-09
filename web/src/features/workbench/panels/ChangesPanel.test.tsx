@@ -137,7 +137,7 @@ describe('ChangesPanel thread ownership', () => {
     // A reload starts while the first request is still in flight.
     const second = deferred<WorkspaceChangesResponse>()
     changesMock.mockReturnValueOnce(second.promise)
-    useCodeSessionStore.setState({ lastSeq: useCodeSessionStore.getState().lastSeq + 1 })
+    useCodeSessionStore.setState({ workbenchRevision: useCodeSessionStore.getState().workbenchRevision + 1 })
     await settle()
     second.resolve(changes('newer-row.ts'))
     await settle()
@@ -162,7 +162,7 @@ describe('ChangesPanel thread ownership', () => {
 
     const failed = deferred<WorkspaceChangesResponse>()
     changesMock.mockReturnValueOnce(failed.promise)
-    useCodeSessionStore.setState({ lastSeq: useCodeSessionStore.getState().lastSeq + 1 })
+    useCodeSessionStore.setState({ workbenchRevision: useCodeSessionStore.getState().workbenchRevision + 1 })
     await settle()
     failed.reject(new Error('changes unavailable'))
     await settle()

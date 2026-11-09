@@ -39,19 +39,28 @@ export const createItemsSlice: StateCreator<ItemsSlice, [], [], ItemsSlice> = (s
 
   requestStreamReload: () => set((state) => ({ reloadToken: state.reloadToken + 1 })),
 
-  seedItems: (items, lastSeq, childCompletions, runtime) => set({
+  seedItems: (items, lastSeq, childCompletions, runtime) => set((state) => ({
     ...seedFromItems(items, lastSeq, childCompletions, runtime),
+    // A fresh server snapshot invalidates every workbench projection, even
+    // when the thread id did not change (reload after rewind, another client).
+    workbenchRevision: state.workbenchRevision + 1,
     detailStatus: 'ready',
     detailError: null
-  }),
+  })),
 
   ingestEvent: (event) => set(applyEvent(get(), event)),
 
-  resetItems: () => set({ ...emptyItemsState(), detailStatus: 'idle', detailError: null, streamError: null }),
+  resetItems: () => set((state) => ({ ...emptyItemsState(), workbenchRevision: state.workbenchRevision + 1, detailStatus: 'idle', detailError: null, streamError: null })),
 
   setDetailStatus: (status, error = null) => set({ detailStatus: status, detailError: error }),
 
-  setStreamStatus: (status, error = null) => set({ streamStatus: status, streamError: error }),
+  setStreamStatus: (status, error) => set((state) => ({
+    streamStatus: status,
+    // `onStatus('reconnecting')` follows `onError` in the SSE loop. A bare
+    // status update must not erase the transport diagnostic; only an explicit
+    // argument or a recovered `open` changes it.
+    streamError: error !== undefined ? error : status === 'open' ? null : state.streamError
+  })),
 
   noteApprovalResolved: (approvalId, approved) => set(markApprovalLocally(get(), approvalId, approved)),
 

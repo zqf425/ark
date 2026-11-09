@@ -15,7 +15,7 @@ export function FilePanel(): JSX.Element {
   const { t } = useI18n()
   const threadId = useCodeSessionStore((state) => state.activeThreadId)
   const path = useCodeSessionStore((state) => state.selectedFilePath)
-  const lastSeq = useCodeSessionStore((state) => state.lastSeq)
+  const workbenchRevision = useCodeSessionStore((state) => state.workbenchRevision)
   const [file, setFile] = useState<FilePreview | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -36,7 +36,7 @@ export function FilePanel(): JSX.Element {
       }
     })
     return () => controller.abort()
-  }, [threadId, path, lastSeq])
+  }, [threadId, path, workbenchRevision])
 
   if (!threadId || !path) {
     return <EmptyState title={t('workbench.noFileTitle')} hint={t('workbench.noFileHint')} />

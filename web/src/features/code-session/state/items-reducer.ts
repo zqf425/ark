@@ -40,6 +40,7 @@ export function emptyItemsState(): ItemsSnapshot {
     userInputs: {},
     childCompletions: {},
     childRunRevision: 0,
+    workbenchRevision: 0,
     rewindRevision: 0,
     rewoundFromSeq: null,
     usage: null,
@@ -55,6 +56,16 @@ const DELTA_ITEM_KIND: Partial<Record<RuntimeEvent['kind'], ItemKind>> = {
 
 const MAX_ERROR_LINES = 50
 const MAX_CHILD_COMPLETIONS = 50
+
+/** Runtime events that change one of the server-side workbench projections. */
+const WORKBENCH_EVENT_KINDS: ReadonlySet<RuntimeEvent['kind']> = new Set([
+  'goal_updated',
+  'goal_cleared',
+  'todos_updated',
+  'todos_cleared',
+  'tool_call_started',
+  'tool_call_finished'
+])
 
 /** Draft-first read: a copied channel is authoritative, otherwise use the base. */
 function currentItem(draft: ItemsDraft, itemId: ItemId): ThreadItem | undefined {
@@ -180,6 +191,10 @@ export function seedFromItems(
 export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnapshot {
   const draft = draftOf(state)
   if (event.seq > draft.lastSeq) draft.lastSeq = event.seq
+  // Workbench panels subscribe to this revision instead of `lastSeq`: the
+  // latter advances on every streamed token, which made each token trigger
+  // ~6 full HTTP reloads. Only these events change a server projection.
+  if (WORKBENCH_EVENT_KINDS.has(event.kind)) draft.workbenchRevision += 1
 
   switch (event.kind) {
     case 'item_created':
@@ -224,8 +239,11 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       rebuilt.lastSeq = draft.lastSeq
       rebuilt.rewindRevision = draft.rewindRevision + 1
       rebuilt.rewoundFromSeq = event.rewind_from_seq
-      // Child runs may have been discarded with the suffix; let the panel refetch.
+      // Child runs and every workbench projection may have been discarded with
+      // the suffix; let those panels refetch. Revisions stay monotonic so a
+      // rebuilt projection never looks older than the one it replaced.
       rebuilt.childRunRevision = draft.childRunRevision + 1
+      rebuilt.workbenchRevision = draft.workbenchRevision + 1
       return rebuilt
     }
 

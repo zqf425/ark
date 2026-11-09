@@ -22,6 +22,8 @@ export type ThreadStreamOptions = {
 
 const MAX_BACKOFF_MS = 10_000
 const IDLE_WATCHDOG_MS = 75_000
+/** A connection that delivered frames and stayed up this long resets the backoff. */
+const STABLE_CONNECTION_MS = 5_000
 
 function backoffMs(attempt: number): number {
   const base = Math.min(MAX_BACKOFF_MS, 500 * 2 ** Math.min(attempt, 5))
@@ -69,10 +71,12 @@ function parseEventFrame(frame: { id: string | null; event: string | null; data:
 export async function subscribeThreadEvents(options: ThreadStreamOptions): Promise<void> {
   let lastSeq = options.sinceSeq
   let attempt = 0
-  let opened = false
+  // Only used to label the next attempt as `reconnecting` rather than
+  // `connecting`. It must not gate per-connection `open` reporting.
+  let hasEverOpened = false
 
   while (!options.signal.aborted) {
-    options.onStatus(opened ? 'reconnecting' : 'connecting')
+    options.onStatus(hasEverOpened ? 'reconnecting' : 'connecting')
 
     let idleTimer: ReturnType<typeof setTimeout> | null = null
     const controller = new AbortController()
@@ -83,6 +87,10 @@ export async function subscribeThreadEvents(options: ThreadStreamOptions): Promi
       if (idleTimer) clearTimeout(idleTimer)
       idleTimer = setTimeout(() => controller.abort(), IDLE_WATCHDOG_MS)
     }
+
+    const connectedAt = Date.now()
+    let framesSeen = 0
+    let openedThisConnection = false
 
     try {
       armWatchdog()
@@ -97,11 +105,16 @@ export async function subscribeThreadEvents(options: ThreadStreamOptions): Promi
 
       for await (const frame of frames) {
         armWatchdog()
-        if (!opened) {
-          opened = true
+        framesSeen += 1
+        // Every successful connection reports `open`, including after a
+        // reconnect: the composer gates sending on `streamStatus === 'open'`,
+        // so a stale `reconnecting` would leave the thread unable to send
+        // until the page is reloaded.
+        if (!openedThisConnection) {
+          openedThisConnection = true
+          hasEverOpened = true
           options.onStatus('open')
         }
-        attempt = 0
 
         const parsed = parseEventFrame(frame)
         if (!parsed) continue
@@ -125,9 +138,14 @@ export async function subscribeThreadEvents(options: ThreadStreamOptions): Promi
     }
 
     if (options.signal.aborted) break
+    // A fast-flapping connection must keep backing off. Only a connection that
+    // delivered frames and stayed up for a while resets the schedule: resetting
+    // on every frame made the exponential backoff unreachable and produced a
+    // reconnect storm while the runtime was down.
+    const stable = framesSeen > 0 && Date.now() - connectedAt >= STABLE_CONNECTION_MS
+    attempt = stable ? 0 : attempt + 1
     options.onStatus('reconnecting')
     await sleep(backoffMs(attempt), options.signal)
-    attempt += 1
   }
 
   options.onStatus('closed')

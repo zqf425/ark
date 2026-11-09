@@ -27,7 +27,7 @@ const NO_OWNER: PlanOwnership = { owner: null, serverGoal: '', generation: 0 }
 export function PlanPanel(): JSX.Element {
   const { t } = useI18n()
   const threadId = useCodeSessionStore((state) => state.activeThreadId)
-  const lastSeq = useCodeSessionStore((state) => state.lastSeq)
+  const workbenchRevision = useCodeSessionStore((state) => state.workbenchRevision)
   const toast = useToast()
   const [plan, setPlan] = useState<PlanView | null>(null)
   const [goal, setGoal] = useState('')
@@ -61,7 +61,7 @@ export function PlanPanel(): JSX.Element {
   useEffect(() => {
     if (!threadId) return
     // Claim the thread and supersede the previous request before it starts, so a
-    // slower response from an older `lastSeq` cannot repaint stale data — and so
+    // slower response from an older revision cannot repaint stale data — and so
     // the very first load is not dropped for lack of an owner.
     ownership.current = beginPlanFetch(ownership.current, threadId)
     const generation = ownership.current.generation
@@ -90,7 +90,7 @@ export function PlanPanel(): JSX.Element {
         setError(describe(reason))
       })
     return () => controller.abort()
-  }, [threadId, lastSeq])
+  }, [threadId, workbenchRevision])
 
   if (!threadId) {
     return <EmptyState title={t('workbench.noThreadTitle')} hint={t('workbench.noThreadPlanHint')} />

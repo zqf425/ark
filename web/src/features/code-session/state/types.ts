@@ -75,6 +75,12 @@ export type ItemsSnapshot = {
   /** Advances only for child lifecycle events, not every streamed token. */
   childRunRevision: number
   /**
+   * Advances only for events that change a server-side workbench projection
+   * (plan, changes, file, terminal). Panels subscribe to this instead of
+   * `lastSeq`, which advances on every streamed token.
+   */
+  workbenchRevision: number
+  /**
    * Advances for every `thread_rewound` notification. The writer truncated the
    * durable log and never reuses sequence numbers, so the local projection is
    * stale by construction and must be rebuilt from the detail watermark.

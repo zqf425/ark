@@ -11,6 +11,15 @@
   `src/shared/contracts/web-only.ts`。
 - 运行时请求集中在 feature API/client 层；组件不直接裸 `fetch('/v1/...')`。
 - SSE 消费保存最后 `seq`，断线后使用 `since_seq` 恢复；页面必须能处理压缩产生的显式空洞。
+  每条成功建立的连接（含重连）都要重新上报 `open`，因为 composer 以 `streamStatus === 'open'`
+  为发送闸门，重连后停留在 `reconnecting` 会让线程在刷新页面前无法再发消息。指数退避只在连接
+  稳定存活一段时间后重置，不能每收到一帧就清零，否则运行时重启时会形成重连风暴。
+  `onError` 写入的传输诊断不能被随后裸 `onStatus('reconnecting')` 抹掉：仅显式传参或恢复到
+  `open` 才清除 `streamError`。
+- Plan、Changes、File、Terminal 面板订阅 `workbenchRevision` 而非 `lastSeq`。`lastSeq` 每个事件
+  （含每个 text delta token）都递增，作为 effect 依赖会让每个 token 触发约 6 次 HTTP 全量重取；
+  只有 `goal/todos` 与 `tool_call_started/finished` 这些会改变服务端投影的事件才递增 revision，
+  detail 播种、重置与 `thread_rewound` 另做单调推进。
 - SSE 空闲看门狗以“是否收到字节”为存活依据，不以“是否解析出事件帧”为依据：`stream()` 在每次
   `reader.read()` 拿到非空字节时上报活动，订阅层据此重置 75s 看门狗。只到达 `: keep-alive` 注释帧的
   空闲线程因此保持同一条连接；只有真正无字节静默超过阈值才 abort 并从最后 `seq` 重连。注释帧不进入

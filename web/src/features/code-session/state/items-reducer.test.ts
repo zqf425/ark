@@ -387,3 +387,44 @@ describe('items reducer usage and compaction', () => {
     })
   })
 })
+
+/**
+ * Workbench panels subscribe to `workbenchRevision` instead of `lastSeq`.
+ * Only events the server workbench projections actually consume may advance it,
+ * or every streamed token would trigger a full HTTP reload of all four panels.
+ */
+describe('items reducer workbench revision', () => {
+  const THREAD = '00000000-0000-0000-0000-000000000001'
+  const TURN = '00000000-0000-0000-0000-000000000003'
+  const ITEM = '00000000-0000-0000-0000-000000000004'
+  const base = { seq: 1, thread_id: THREAD, timestamp: '2026-10-28T00:00:00Z' }
+
+  it('does not advance for streamed text tokens, usage or child lifecycle', () => {
+    let state = emptyItemsState()
+    state = applyEvent(state, { kind: 'assistant_text_delta', ...base, turn_id: TURN, item_id: ITEM, delta: 'x' })
+    state = applyEvent(state, { kind: 'usage', ...base, seq: 2, turn_id: TURN, usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })
+    state = applyEvent(state, { kind: 'child_activity', ...base, seq: 3, child_id: '00000000-0000-0000-0000-000000000002', label: 'c', status: 'running' })
+
+    expect(state.lastSeq).toBe(3)
+    expect(state.workbenchRevision).toBe(0)
+  })
+
+  it('advances for every event the server workbench projections consume', () => {
+    let state = emptyItemsState()
+    state = applyEvent(state, { kind: 'goal_updated', ...base, goal: 'ship' })
+    state = applyEvent(state, { kind: 'todos_updated', ...base, seq: 2, todos: [] })
+    state = applyEvent(state, { kind: 'tool_call_started', ...base, seq: 3, turn_id: TURN, call_id: 'c1', tool: 'write', arguments: {} })
+    state = applyEvent(state, { kind: 'tool_call_finished', ...base, seq: 4, turn_id: TURN, call_id: 'c1', tool: 'write', ok: true, duration_ms: 1, output: '' })
+
+    expect(state.workbenchRevision).toBe(4)
+  })
+
+  it('bumps monotonically on rewind so a rebuilt snapshot is never stale', () => {
+    let state = emptyItemsState()
+    state = applyEvent(state, { kind: 'goal_updated', ...base, goal: 'ship' })
+    state = applyEvent(state, { kind: 'thread_rewound', ...base, seq: 9, rewind_from_seq: 3, target_turn_id: TURN })
+
+    expect(state.workbenchRevision).toBe(2)
+    expect(state.lastSeq).toBe(9)
+  })
+})
