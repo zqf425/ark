@@ -21,6 +21,7 @@ import { ChildCompletionCard } from './ErrorRow'
 import { UserInputCard } from './UserInputCard'
 import { Composer } from './Composer'
 import { StreamFooter } from './StreamFooter'
+import { SessionStatsBar } from './SessionStatsBar'
 import { ChildRunsPanel } from './ChildRunsPanel'
 import { rewindAvailabilityByTurn } from './rewind-flow'
 import { startReview } from '../api/turns-api'
@@ -227,6 +228,7 @@ export function ThreadStream({
           {reviewBusy ? t('canvas.header.reviewBusy') : t('canvas.header.review')}
         </Button>
       </header>
+      <SessionStatsBar threadId={threadId} />
       <div className="ark-stream__scroll" ref={scrollRef}>
         {/* Inner wrapper exists so a single ResizeObserver can see content
             growth; the flex gaps are inherited so the layout is unchanged. */}
@@ -298,8 +300,8 @@ export function ThreadStream({
 
       <StreamFooter />
       {/*
-        Runtime overrides live inside the composer: model/permission/reasoning
-        in its toolbar and workspace/compaction behind the 「会话信息」 chevron,
+        Runtime overrides live inside the composer: model/permission/reasoning,
+        the workspace project menu and context/compaction are all toolbar pills,
         so nothing is permanently docked above the input. Keyed by thread so
         switching sessions remounts the textarea: the composer keeps its
         message locally, and an unkeyed one would carry the previous thread's

@@ -62,7 +62,7 @@
 - 输入框「技能」面板消费线程级技能视图（`GET /v1/threads/{id}/skills`，合并 base/extra 并展示加载
   警告数，「重新扫描」调用 refresh 路由）；未选择线程时回落全局 `GET /v1/skills`。显式 `/id` 提及
   仍是唯一激活方式，不新增技能运行时字段。
-- 已知未接入的路由：`debug/llm-rounds`（调试）、`attachments/diagnostics`（诊断）、
+- 已知未接入的路由：`attachments/diagnostics`（诊断）、
   `child-runs/{id}/thread|events|cleanup`（子代理完整转录查看器需要独立的轮询/订阅设计，见子代理
   监督约束）、`sessions/{id}/resume-thread`（定时任务结果已直接携带 thread_id 跳转）。
 - Code 使用 ARK Console shell（方案 A）：46px 全局顶栏 + 52px 活动栏 + 26px 状态栏，主舞台在
@@ -97,13 +97,20 @@
   推理强度是输入框工具条上的即时选择器（`ComposerRuntimeControls`），打开时重读 `GET /v1/threads/{id}`
   再经 `PATCH /v1/threads/{id}` 的 `runtime` 覆盖立即保存；后端按字段合并、无清除语义，因此不可清除的
   字段不提供"未设置"选项，`reasoning_effort` 空串即"跟随默认"（协议映射见 [ark-llm](ark-llm.md)）。
-  工作空间覆盖与上下文压缩保留在输入框上方的详细面板（`SessionRuntimeControls`），其保存只携带
-  workspace 字段，避免覆盖工具条刚写入的值。工作空间输入旁的「浏览…」按钮调用
-  `POST /v1/workspace/pick` 弹出宿主原生文件夹选择框（对话框在 arkd 进程一侧，浏览器取消请求不关闭
-  已弹出的对话框）；`path` 省略（用户取消）时保持输入框不变，填充后仍由用户显式保存。覆盖只影响该会话的下一回合，运行中的回合不变，未设置字段
-  回退到全局默认值。模型输入带 datalist，建议项来自所选供应商的默认模型与导入清单。设置页使用生成契约
-  提供同一全局权限，展示“永远询问”“仅工作区修改”“完全访问”三档。
-- 会话标题、真实回合数和运行态可以作为紧凑上下文显示；运行时版本、SSE 状态、数据目录等诊断信息不能占据
+  工作空间、上下文结构和手动压缩也收进同一排工具条，不再有展开式详细面板：工作空间 pill 直接列出
+  `GET /v1/workspace` 的 active / recent 项目，点选即 `POST /v1/workspace/switch` 并把同一路径经
+  `PATCH /v1/threads/{id}` 写成本会话覆盖；「新增项目空间」调用 `POST /v1/workspace/pick` 与
+  `POST /v1/workspace/validate` 后走同一切换流程，不需要手填路径。活跃回合时禁用切换，服务端 409 是最终裁决。
+  上下文环弹层展示工具、系统提示、技能、消息、思考、检查点、其他的**结构占比**（渲染行数与字符数），
+  总量仍取最近一次权威 `usage` 事件的 `prompt_tokens` 与 tuning 窗口；token 估算的唯一宿主仍是
+  `ark-agent::TokenEstimator`，前端不重算 token。弹层内「压缩上下文」直接调用
+  `POST /v1/threads/{id}/compact`。共享 `ModelProviderMenu` 提供「供应商 → 模型」二级菜单与搜索，
+  推理强度留在菜单 footer；所有选择打开时重读线程覆盖、写入仍走 `PATCH`。设置页使用生成契约提供同一全局权限，
+  展示“永远询问”“仅工作区修改”“完全访问”三档。
+- 会话标题下方有紧凑统计条（`SessionStatsBar`）：轮次与模型调用数来自 `GET /v1/threads/{id}/usage`，
+  墙钟耗时来自 `GET /v1/debug/llm-rounds`（服务端按权威 `usage` 事件折出的 `duration_ms`），并展示
+  prompt/completion/total tokens、真实 `cache_hit_rate` 与 `cost_usd`；诊断分页 `truncated` 为真时把调用数
+  标为下限，请求失败保留上次已验证数值而不伪造零。运行时版本、SSE 状态、数据目录等诊断信息不能占据
   主任务层级，必须退为状态详情或提示信息。
 - 设置页的分类导航是 `web` 内本地状态，只决定既有 section 的可见性；每个 section 仍独立持有既有 hook，
   不把 provider、MCP 或 runtime 配置逻辑回流到 Code 会话状态或 `ark-agent`。

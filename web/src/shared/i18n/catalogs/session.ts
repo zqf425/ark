@@ -5,19 +5,13 @@
  * existing rewind and session-control tests keep guarding the same contract.
  */
 export const SESSION_MESSAGES = {
-  'session.runtime.title': ['本会话运行配置', 'Session runtime'],
   'session.runtime.workspace': ['工作空间', 'Workspace'],
-  'session.runtime.browse': ['浏览…', 'Browse…'],
-  'session.runtime.provider': ['供应商', 'Provider'],
-  'session.runtime.model': ['模型覆盖', 'Model override'],
-  'session.runtime.autonomy': ['权限', 'Permissions'],
-  'session.runtime.save': ['保存（下一回合生效）', 'Save for next turn'],
   'session.runtime.strict': ['永远询问：命令与写入需批准', 'Ask every time: approve commands and writes'],
   'session.runtime.workspaceWrite': ['仅工作区修改：命令需批准', 'Workspace edits only: approve commands'],
   'session.runtime.unattended': ['完全访问：可越出工作区，不再询问', 'Full access: outside workspace, no approvals'],
 
-  'session.context.compact': ['创建上下文检查点', 'Create context checkpoint'],
-  'session.context.compacted': ['上下文检查点已创建', 'Context checkpoint created'],
+  'session.context.compact': ['压缩上下文', 'Compact context'],
+  'session.context.compacted': ['上下文已压缩', 'Context compacted'],
 
   'session.rewind.entry': ['回退到这里', 'Rewind here'],
   'session.rewind.confirmTitle': ['回退到此回合之前？', 'Rewind to before this turn?'],

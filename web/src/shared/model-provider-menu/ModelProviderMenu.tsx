@@ -106,9 +106,11 @@ export function ModelProviderMenu({
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : internalOpen
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   const setOpen = (next: boolean): void => {
+    if (!next) setQuery('')
     if (!isControlled) setInternalOpen(next)
     onOpenChange?.(next)
   }
@@ -151,7 +153,23 @@ export function ModelProviderMenu({
     }
   }, [open])
 
-  const activeGroup = displayGroups.find((group) => group.id === activeId) ?? null
+  // Search narrows the model column; a provider whose name matches keeps all
+  // of its models, so typing a provider id still shows the full second level.
+  const needle = query.trim().toLowerCase()
+  const visibleGroups = displayGroups
+    .map((group) => {
+      const providerMatch = !needle
+        || group.label.toLowerCase().includes(needle)
+        || group.id.toLowerCase().includes(needle)
+      return {
+        ...group,
+        models: providerMatch
+          ? group.models
+          : group.models.filter((model) => model.toLowerCase().includes(needle))
+      }
+    })
+    .filter((group) => group.models.length > 0)
+  const activeGroup = visibleGroups.find((group) => group.id === activeId) ?? visibleGroups[0] ?? null
   const triggerLabel = resolved.group
     ? [resolved.group.label, resolved.model].filter(Boolean).join(' / ')
     : ''
@@ -191,6 +209,21 @@ export function ModelProviderMenu({
           role="menu"
           aria-label={ariaLabel}
         >
+          <label className="ark-mpm__search">
+            <input
+              type="search"
+              value={query}
+              placeholder={t('modelProviderMenu.search')}
+              aria-label={t('modelProviderMenu.search')}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' && query) {
+                  event.stopPropagation()
+                  setQuery('')
+                }
+              }}
+            />
+          </label>
           {header ? <div className="ark-mpm__header">{header}</div> : null}
           <div className="ark-mpm__columns">
             <div className="ark-mpm__left" role="group" aria-label={t('modelProviderMenu.providerColumn')}>
@@ -208,18 +241,20 @@ export function ModelProviderMenu({
                   <span className="ark-mpm__item-label">{clearSelection.label}</span>
                 </button>
               ) : null}
-              {displayGroups.length === 0 ? (
-                <p className="ark-mpm__empty">{t('modelProviderMenu.noProviders')}</p>
+              {visibleGroups.length === 0 ? (
+                <p className="ark-mpm__empty">
+                  {needle ? t('modelProviderMenu.noMatches') : t('modelProviderMenu.noProviders')}
+                </p>
               ) : (
-                displayGroups.map((group) => (
+                visibleGroups.map((group) => (
                   <button
                     key={group.id}
                     type="button"
                     role="menuitem"
                     aria-haspopup="menu"
-                    aria-expanded={activeId === group.id}
+                    aria-expanded={activeGroup?.id === group.id}
                     className={`ark-mpm__item ark-mpm__provider${
-                      activeId === group.id ? ' ark-mpm__item--active' : ''
+                      activeGroup?.id === group.id ? ' ark-mpm__item--active' : ''
                     }${resolved.group?.id === group.id ? ' ark-mpm__item--selected' : ''}`}
                     title={`${group.label} · ${group.id}`}
                     onMouseDown={(event) => event.preventDefault()}

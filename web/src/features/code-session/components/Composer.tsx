@@ -4,9 +4,9 @@
  * Layout follows the smart-ark Code composer: a 24px frosted shell whose first
  * row is the auto-growing textarea, a hairline-separated toolbar underneath
  * (round attach button, quiet runtime pickers on the left; queue/interrupt and
- * the circular gradient send button on the right), and a chevron that unfolds
- * the per-thread details (workspace, compaction) above the textarea instead of
- * a permanently docked panel.
+ * the circular gradient send button on the right). Workspace projects, context
+ * structure, manual compaction and the two-level model menu are all toolbar
+ * pills; there is no unfolded details panel.
  *
  * Enter sends, Shift+Enter inserts a newline. During a live turn the send
  * button becomes a steering action (追加) and a second action queues the draft
@@ -25,7 +25,6 @@ import { associateAttachment, uploadAttachment } from '../api/attachments-api'
 import { listSkills, listThreadSkills, refreshThreadSkills } from '../api/skills-api'
 import { canEditComposer, canSendToThread } from './composer-availability'
 import { AutonomyPicker, WorkspacePicker, ContextRing, ModelPicker } from './ComposerRuntimeControls'
-import { SessionRuntimeControls } from './SessionRuntimeControls'
 import type { SkillSummary } from '../../../shared/contracts'
 
 const MAX_ROWS = 8
@@ -85,8 +84,6 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const [skills, setSkills] = useState<SkillSummary[] | null>(null)
   const [skillsOpen, setSkillsOpen] = useState(false)
   const [skillWarnings, setSkillWarnings] = useState(0)
-  /** Per-thread details (workspace, compaction) stay folded until asked for. */
-  const [detailsOpen, setDetailsOpen] = useState(false)
   /** The round + button opens a small insert menu (attachment / skills). */
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -277,39 +274,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
         </div>
       ) : null}
 
-      {/* Unfolded session details float above the shell, exactly like the
-          smart-ark 「会话信息」 card: the composer never grows for them. */}
-      {detailsOpen && threadId ? (
-        <div className="ark-composer__details">
-          <SessionRuntimeControls threadId={threadId} />
-        </div>
-      ) : null}
-
       <div className="ark-composer__box">
-        {threadId ? (
-          <button
-            type="button"
-            className={`ark-composer__chevron${detailsOpen ? ' is-open' : ''}`}
-            aria-expanded={detailsOpen}
-            aria-label={
-              detailsOpen ? t('canvas.composer.detailsHide') : t('canvas.composer.detailsShow')
-            }
-            title={detailsOpen ? t('canvas.composer.detailsHide') : t('canvas.composer.detailsShow')}
-            onClick={() => setDetailsOpen((open) => !open)}
-          >
-            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
-              <path
-                d="m6 9.5 6 6 6-6"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.9"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-        ) : null}
-
         {attachments.length > 0 ? (
           <div className="ark-composer__attachments" role="list" aria-label={t('canvas.composer.attachmentsAria')}>
             {attachments.map((picked) => (

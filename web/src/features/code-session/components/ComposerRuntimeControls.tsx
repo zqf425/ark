@@ -9,20 +9,25 @@
  * clearing would be a silent no-op. Empty `reasoning_effort` is the
  * documented "follow default" value.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import type { MessageKey } from '../../../shared/i18n'
 import { translateNow } from '../../../shared/i18n/current'
 import { describeError } from '../../../shared/api/error-describe'
-import type { ThreadRuntimeSettings } from '../../../shared/contracts'
+import type { SkillSummary, ThreadRuntimeSettings, WorkspaceView } from '../../../shared/contracts'
 import { compactThread, getThread, updateThread } from '../api/threads-api'
 import { pickWorkspaceFolder } from '../api/workspace-api'
+import { getWorkspaceView, switchWorkspace, validateWorkspace } from '../../settings/api/workspace-api'
+import { listThreadSkills } from '../api/skills-api'
 import { getRuntimeConfig } from '../../settings/api/settings-api'
 import { useProviders } from '../../settings/hooks/use-providers'
 import { useCodeSessionStore } from '../state/store'
 import { canSaveRuntime, isRuntimeFormStale, type RuntimeOwner } from './session-runtime-guard'
 import { useContextLimit } from '../hooks/use-context-limit'
+import { orderedItems } from '../state/selectors'
+import { CONTEXT_CATEGORY_ORDER, contextStructure, type ContextCategoryKey, type ContextStructure } from './context-structure'
+import { workspaceBasename, workspaceOptions } from './workspace-options'
 import { formatTokens } from '../../../shared/format'
 import { ModelProviderMenu, toModelProviderGroups } from '../../../shared/model-provider-menu'
 
@@ -56,12 +61,6 @@ const AUTONOMY_DESC: Record<AutonomyValue, MessageKey> = {
 }
 
 const AUTONOMY_ORDER: AutonomyValue[] = ['strict', 'workspace_write', 'unattended']
-
-/** Last path segment, so the pill shows 「ark」 instead of the full path. */
-function basename(path: string): string {
-  const parts = path.trim().split(/[\\/]/).filter(Boolean)
-  return parts[parts.length - 1] ?? ''
-}
 
 function CaretGlyph(): JSX.Element {
   return (
@@ -203,29 +202,32 @@ export function AutonomyPicker({ threadId }: { threadId: string | null }): JSX.E
   )
 }
 
-/* ---------- right: workspace pill ---------- */
+/* ---------- right: workspace project picker ---------- */
 
+/**
+ * One pill opens a list of the host's active + recent projects. Picking a row
+ * switches the global workspace and pins the same path as this thread's
+ * override; "add" opens the native folder chooser, validates the path through
+ * the runtime, then performs the same switch. No path is typed by hand.
+ */
 export function WorkspacePicker({ threadId }: { threadId: string | null }): JSX.Element {
   const { t } = useI18n()
   const toast = useToast()
   const setCommandError = useCodeSessionStore((s) => s.setCommandError)
+  const activeTurnId = useCodeSessionStore((s) => s.activeTurnId)
   const [runtime, setRuntime] = useState<ThreadRuntimeSettings>({})
-  const [draft, setDraft] = useState('')
+  const [view, setView] = useState<WorkspaceView | null>(null)
   const [open, setOpen] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [picking, setPicking] = useState(false)
+  const [query, setQuery] = useState('')
+  const [busy, setBusy] = useState(false)
   const [loadedFor, setLoadedFor] = useState<RuntimeOwner>(null)
   const paintedThreadId = useRef(threadId)
   const rootRef = useRef<HTMLDivElement | null>(null)
 
-  // Switching threads must blank the form in the same commit, or the pill
-  // would offer to save A's workspace onto B.
   if (isRuntimeFormStale(paintedThreadId.current ?? '', threadId ?? '')) {
     paintedThreadId.current = threadId
     setRuntime({})
-    setDraft('')
     setLoadedFor(null)
-    setSaving(false)
   }
 
   useEffect(() => {
@@ -236,59 +238,85 @@ export function WorkspacePicker({ threadId }: { threadId: string | null }): JSX.
       .then((value) => {
         if (!active) return
         setRuntime(value)
-        setDraft(value.workspace ?? '')
         setLoadedFor(threadId)
       })
-      .catch(() => {
-        if (!active) return
-        // A failed load leaves `loadedFor` null, so the save cannot write
-        // another thread's stored overrides.
-        setLoadedFor(null)
-      })
-    return () => {
-      active = false
-    }
+      .catch(() => { if (active) setLoadedFor(null) })
+    return () => { active = false }
   }, [threadId])
+
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    void getWorkspaceView().then((value) => {
+      if (active) setView(value)
+    }).catch((error: unknown) => {
+      if (active) toast.push('error', t('canvas.workspace.switchFailed'), describeError(error, translateNow))
+    })
+    return () => { active = false }
+  }, [open, toast, t])
 
   useDismiss(open, rootRef, () => setOpen(false))
 
-  const save = async (): Promise<void> => {
-    if (!threadId) return
-    // Drop the write instead of applying displayed values to another thread.
-    if (!canSaveRuntime(loadedFor, threadId)) return
-    setSaving(true)
+  const { current, options } = useMemo(
+    () => workspaceOptions({ override: runtime.workspace, active: view?.active, recent: view?.recent ?? [] }),
+    [runtime.workspace, view]
+  )
+  const needle = query.trim().toLowerCase()
+  const filtered = needle
+    ? options.filter((option) => option.label.toLowerCase().includes(needle) || option.path.toLowerCase().includes(needle))
+    : options
+
+  const canSwitch = threadId !== null && canSaveRuntime(loadedFor, threadId) && activeTurnId === null
+
+  const commitWorkspace = async (
+    path: string,
+    messageKey: 'canvas.workspace.selected' | 'canvas.workspace.added'
+  ): Promise<void> => {
+    if (!threadId || !canSwitch) return
+    await switchWorkspace({ path })
+    await updateThread(threadId, { runtime: { workspace: path } })
+    const [nextView, nextRuntime] = await Promise.all([getWorkspaceView(), fetchRuntime(threadId)])
+    setView(nextView)
+    setRuntime(nextRuntime)
+    setLoadedFor(threadId)
+    toast.push('success', t(messageKey))
+    setOpen(false)
+    setQuery('')
+  }
+
+  const selectWorkspace = async (path: string): Promise<void> => {
+    if (busy || !canSwitch) return
+    setBusy(true)
     try {
-      // Only the workspace override travels; omitted fields keep their values.
-      await updateThread(threadId, { runtime: { workspace: draft || undefined } })
-      const next = await fetchRuntime(threadId)
-      setRuntime(next)
-      setDraft(next.workspace ?? '')
-      toast.push('success', t('session.runtime.title'))
+      await commitWorkspace(path, 'canvas.workspace.selected')
     } catch (error) {
-      setCommandError(describeError(error, translateNow))
-      toast.push('error', t('session.runtime.title'), error instanceof Error ? error.message : String(error))
+      const detail = describeError(error, translateNow)
+      setCommandError(detail)
+      toast.push('error', t('canvas.workspace.switchFailed'), detail)
     } finally {
-      setSaving(false)
+      setBusy(false)
     }
   }
 
-  // Opens the host's native folder dialog (POST /v1/workspace/pick); the
-  // picked path lands in the input so the explicit save stays the only
-  // write path. `path` is undefined when the user cancelled the dialog.
-  const browse = async (): Promise<void> => {
-    if (picking) return
-    setPicking(true)
+  const addProject = async (): Promise<void> => {
+    if (busy || !canSwitch) return
+    setBusy(true)
     try {
       const picked = await pickWorkspaceFolder()
-      if (picked.path) setDraft(picked.path)
+      if (!picked.path) return
+      const validated = await validateWorkspace(picked.path)
+      await commitWorkspace(validated.path, 'canvas.workspace.added')
     } catch (error) {
-      toast.push('error', t('session.runtime.workspace'), error instanceof Error ? error.message : String(error))
+      const detail = describeError(error, translateNow)
+      setCommandError(detail)
+      toast.push('error', t('canvas.workspace.addFailed'), detail)
     } finally {
-      setPicking(false)
+      setBusy(false)
     }
   }
 
-  const label = basename(runtime.workspace ?? '')
+  const busyHint = activeTurnId !== null ? t('canvas.workspace.busy') : ''
+  const label = workspaceBasename(current) || t('common.notSet')
 
   return (
     <div className="ark-composer__pick ark-composer__pick--end" ref={rootRef}>
@@ -299,78 +327,126 @@ export function WorkspacePicker({ threadId }: { threadId: string | null }): JSX.
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={t('canvas.composer.workspaceAria')}
-        title={runtime.workspace || t('common.notSet')}
+        title={current || t('common.notSet')}
         onClick={() => setOpen((value) => !value)}
       >
         <FolderGlyph />
-        <span className="ark-composer__pill-label">{label || t('common.notSet')}</span>
+        <span className="ark-composer__pill-label">{label}</span>
         <CaretGlyph />
       </button>
       {open ? (
-        <div className="ark-composer__popover" role="group" aria-label={t('canvas.composer.workspaceAria')}>
+        <div className="ark-composer__popover ark-workspace-menu" role="group" aria-label={t('canvas.composer.workspaceAria')}>
           <label className="ark-composer__field">
-            <span>{t('session.runtime.workspace')}</span>
+            <span>{t('canvas.workspace.projects')}</span>
             <input
-              value={draft}
-              placeholder={t('workbench.changes.workspacePlaceholder')}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
-                  void save()
-                }
-              }}
+              type="search"
+              value={query}
+              placeholder={t('canvas.workspace.search')}
+              onChange={(event) => setQuery(event.target.value)}
             />
           </label>
-          <div className="ark-composer__popover-actions">
-            <Button
-              size="sm"
-              disabled={picking}
-              onClick={() => void browse()}
-            >
-              {picking ? t('common.working') : t('session.runtime.browse')}
-            </Button>
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={saving || threadId === null || !canSaveRuntime(loadedFor, threadId)}
-              onClick={() => void save()}
-            >
-              {saving ? t('common.saving') : t('session.runtime.save')}
-            </Button>
+          <div className="ark-workspace-menu__list">
+            {filtered.map((option) => {
+              const isCurrent = option.path === current
+              return (
+                <button
+                  key={option.path}
+                  type="button"
+                  className={`ark-workspace-menu__option${isCurrent ? ' is-current' : ''}`}
+                  disabled={busy || !canSwitch}
+                  title={busyHint || option.path}
+                  onClick={() => void selectWorkspace(option.path)}
+                >
+                  <span className="ark-workspace-menu__label">{option.label}</span>
+                  {option.parent ? <span className="ark-workspace-menu__context">{option.parent}</span> : null}
+                  {isCurrent ? <span className="ark-workspace-menu__check" aria-label={t('canvas.workspace.current')}>✓</span> : null}
+                </button>
+              )
+            })}
+            {filtered.length === 0 ? (
+              <p className="ark-composer__hint">{options.length === 0 ? t('canvas.workspace.empty') : t('canvas.workspace.noMatch')}</p>
+            ) : null}
           </div>
+          <Button size="sm" disabled={busy || !canSwitch} title={busyHint} onClick={() => void addProject()}>
+            {busy ? t('common.working') : t('canvas.workspace.addProject')}
+          </Button>
         </div>
       ) : null}
     </div>
   )
 }
 
-/* ---------- right: context capacity ring ---------- */
+/* ---------- right: context structure + manual compaction ---------- */
 
 const RING_SIZE = 26
 const RING_RADIUS = 10.5
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
 const RING_STROKE = 2.5
-/** Past this fraction of the limit the ring turns the warning tone. */
+/** Past this fraction of the configured window the ring turns the warning tone. */
 const RING_WARN_RATIO = 0.8
 
+/** Stable empty view for the closed-popover memo. */
+const CLOSED_ITEM_VIEW: { itemOrder: string[]; itemsById: Record<string, never> } = {
+  itemOrder: [],
+  itemsById: {}
+}
+
+const CATEGORY_LABEL: Record<ContextCategoryKey, MessageKey> = {
+  tools: 'canvas.context.tools',
+  system: 'canvas.context.system',
+  skills: 'canvas.context.skills',
+  messages: 'canvas.context.messages',
+  reasoning: 'canvas.context.reasoning',
+  checkpoint: 'canvas.context.checkpoint',
+  other: 'canvas.context.other'
+}
+
+/**
+ * The ring is the compact entry point; its popover shows the *shape* of the
+ * durable conversation (render rows + loaded skills) beside the authoritative
+ * prompt-token total. Token arithmetic stays in `ark-agent::TokenEstimator` —
+ * this panel deliberately does not estimate tokens from text.
+ */
 export function ContextRing({ threadId }: { threadId: string | null }): JSX.Element | null {
   const { t } = useI18n()
   const toast = useToast()
   const usage = useCodeSessionStore((s) => s.usage)
+  const itemOrder = useCodeSessionStore((s) => s.itemOrder)
+  const itemsById = useCodeSessionStore((s) => s.itemsById)
   const contextLimit = useContextLimit()
   const [open, setOpen] = useState(false)
+  const [skills, setSkills] = useState<SkillSummary[]>([])
   const [compacting, setCompacting] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   useDismiss(open, rootRef, () => setOpen(false))
 
-  if (!usage || !contextLimit || contextLimit <= 0 || usage.lastPromptTokens == null) return null
+  useEffect(() => {
+    if (!open || !threadId) return
+    let active = true
+    void listThreadSkills(threadId)
+      .then((view) => { if (active) setSkills([...view.base_skills, ...view.extra_skills]) })
+      .catch(() => { if (active) setSkills([]) })
+    return () => { active = false }
+  }, [open, threadId])
 
-  const ratio = Math.min(1, Math.max(0, usage.lastPromptTokens / contextLimit))
-  const percent = Math.round(ratio * 100)
-  const warn = ratio >= RING_WARN_RATIO
+  // While the popover is closed, feed a stable empty view into the memo: token
+  // deltas must not rescan the whole conversation for a hidden panel.
+  const snapshot = open ? { itemOrder, itemsById } : CLOSED_ITEM_VIEW
+  const structure: ContextStructure = useMemo(
+    () => contextStructure(orderedItems(snapshot), skills),
+    [snapshot, skills]
+  )
 
+  if (!threadId) return null
+
+  const limit = contextLimit && contextLimit > 0 ? contextLimit : null
+  const used = usage?.lastPromptTokens ?? null
+  const ratio = limit && used != null ? Math.min(1, Math.max(0, used / limit)) : null
+  const percent = ratio == null ? null : Math.round(ratio * 100)
+  const warn = ratio != null && ratio >= RING_WARN_RATIO
+  const free = limit && used != null ? Math.max(0, limit - used) : null
+  const freeRatio = limit && free != null ? free / limit : null
   const compact = async (): Promise<void> => {
     if (!threadId || compacting) return
     setCompacting(true)
@@ -378,20 +454,26 @@ export function ContextRing({ threadId }: { threadId: string | null }): JSX.Elem
       await compactThread(threadId)
       toast.push('success', t('session.context.compacted'))
     } catch (error) {
-      toast.push('error', t('session.context.compact'), error instanceof Error ? error.message : String(error))
+      toast.push('error', t('session.context.compact'), describeError(error, translateNow))
     } finally {
       setCompacting(false)
     }
   }
+
+  const statusKey = ratio != null && ratio >= 1
+    ? 'canvas.context.overLimit'
+    : ratio != null && ratio >= RING_WARN_RATIO
+      ? 'canvas.context.nearLimit'
+      : 'canvas.context.hasRoom'
 
   return (
     <div className="ark-composer__pick ark-composer__pick--end" ref={rootRef}>
       <button
         type="button"
         className={`ark-composer__ring${warn ? ' is-warn' : ''}`}
-        aria-label={t('canvas.usage.contextTitle')}
+        aria-label={t('canvas.context.title')}
         aria-expanded={open}
-        title={t('canvas.usage.contextTitle')}
+        title={t('canvas.context.title')}
         onClick={() => setOpen((value) => !value)}
       >
         <svg viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`} width={RING_SIZE} height={RING_SIZE} aria-hidden="true" focusable="false">
@@ -405,22 +487,63 @@ export function ContextRing({ threadId }: { threadId: string | null }): JSX.Elem
             strokeWidth={RING_STROKE}
             strokeLinecap="round"
             strokeDasharray={RING_CIRCUMFERENCE}
-            strokeDashoffset={RING_CIRCUMFERENCE * (1 - ratio)}
+            strokeDashoffset={RING_CIRCUMFERENCE * (1 - (ratio ?? 0))}
             transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}
           />
         </svg>
-        <span className="ark-composer__ring-num">{percent}</span>
+        <span className="ark-composer__ring-num">{percent == null ? '·' : percent}</span>
       </button>
       {open ? (
-        <div className="ark-composer__popover" role="group" aria-label={t('canvas.usage.contextTitle')}>
-          <p className="ark-composer__hint">
-            {t('canvas.usage.context', {
-              used: formatTokens(usage.lastPromptTokens ?? 0),
-              limit: formatTokens(contextLimit),
-              percent
+        <div className="ark-composer__popover ark-context-popover" role="group" aria-label={t('canvas.context.title')}>
+          <div className="ark-context-popover__head">
+            <strong>{t('canvas.context.title')}</strong>
+            <span>
+              {limit && used != null
+                ? t('canvas.usage.context', { used: formatTokens(used), limit: formatTokens(limit), percent: percent ?? 0 })
+                : t('canvas.context.noLimit')}
+            </span>
+          </div>
+          <div className="ark-context-popover__bar" role="img" aria-label={t('canvas.context.title')}>
+            {structure.segments.filter((segment) => segment.ratio > 0).map((segment) => (
+              <span
+                key={segment.key}
+                className={`ark-context-popover__seg ark-context-popover__seg--${segment.key}`}
+                style={{ width: `${segment.ratio * 100}%` }}
+              />
+            ))}
+          </div>
+          <p className={`ark-context-popover__status${warn ? ' is-warn' : ''}`}>{t(statusKey)}</p>
+          {limit ? <p className="ark-context-popover__note">{t('canvas.context.threshold', { tokens: formatTokens(limit) })}</p> : null}
+          <div className="ark-context-popover__rows">
+            {CONTEXT_CATEGORY_ORDER.map((key) => {
+              const segment = structure.segments.find((entry) => entry.key === key)
+              if (!segment) return null
+              return (
+                <div className="ark-context-popover__row" key={key}>
+                  <span className={`ark-context-popover__swatch ark-context-popover__seg--${key}`} />
+                  <span className="ark-context-popover__label">{t(CATEGORY_LABEL[key])}</span>
+                  <span className="ark-context-popover__value">
+                    {t('canvas.context.segment', {
+                      items: segment.items,
+                      chars: formatTokens(segment.chars),
+                      percent: Math.round(segment.ratio * 100)
+                    })}
+                  </span>
+                </div>
+              )
             })}
-          </p>
-          <Button size="sm" disabled={compacting || !threadId} onClick={() => void compact()}>
+            {free != null && freeRatio != null ? (
+              <div className="ark-context-popover__row is-free">
+                <span className="ark-context-popover__swatch" />
+                <span className="ark-context-popover__label">{t('canvas.context.free')}</span>
+                <span className="ark-context-popover__value">
+                  {t('canvas.context.freeSegment', { chars: formatTokens(free), percent: Math.round(freeRatio * 100) })}
+                </span>
+              </div>
+            ) : null}
+          </div>
+          <p className="ark-context-popover__note">{t('canvas.context.estimateHint')}</p>
+          <Button size="sm" variant="primary" block disabled={compacting || !threadId} onClick={() => void compact()}>
             {compacting ? t('common.refreshing') : t('session.context.compact')}
           </Button>
         </div>

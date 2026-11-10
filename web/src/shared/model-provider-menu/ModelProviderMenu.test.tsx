@@ -62,6 +62,16 @@ function rightColumn(host: HTMLElement): HTMLElement {
   return node as HTMLElement
 }
 
+/** React tracks input values; a native setter is required to fire onChange. */
+async function typeSearch(harness: ReactHarness, value: string): Promise<void> {
+  const input = harness.host.querySelector('.ark-mpm__search input') as HTMLInputElement
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+  await act(async () => {
+    setter?.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+
 describe('ModelProviderMenu (two-level provider -> model)', () => {
   let harness: ReactHarness | null = null
 
@@ -143,6 +153,19 @@ describe('ModelProviderMenu (two-level provider -> model)', () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     })
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('filters the model column by search and reports no matches', async () => {
+    harness = await mountWithProviders(renderMenu())
+    await openMenu(harness)
+    const input = harness.host.querySelector('.ark-mpm__search input') as HTMLInputElement
+    expect(input).not.toBeNull()
+    await typeSearch(harness, 'gpt-4o')
+    const right = rightColumn(harness.host)
+    expect(right.textContent).toContain('gpt-4o')
+    expect(right.textContent).not.toContain('gpt-5')
+    await typeSearch(harness, 'missing-model')
+    expect(harness.host.querySelector('.ark-mpm__left')?.textContent).toContain('\u6ca1\u6709\u5339\u914d')
   })
 
   it('an unrelated parent re-render keeps the provider the operator switched to', async () => {

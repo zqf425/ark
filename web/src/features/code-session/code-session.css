@@ -7,6 +7,7 @@
  *   - code-session-tools.css    tool cards, tool results, error / notice rows
  *   - code-session-gates.css    gates and the floating composer shell
  *   - code-session-composer.css composer quick runtime pickers
+ *   - session-input-parity.css    session stats, context structure, project menu
  *   - code-session-threads.css  thread rail rows/search and rewind controls
  *   - code-session-schedule.css 「定时任务」 create dialog
  *   - code-session-hero.css     empty-state hero illustration
@@ -18,6 +19,7 @@
 @import './code-session-tools.css';
 @import './code-session-gates.css';
 @import './code-session-composer.css';
+@import './session-input-parity.css';
 @import './code-session-threads.css';
 @import './code-session-schedule.css';
 @import './code-session-hero.css';

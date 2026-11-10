@@ -93,6 +93,8 @@ export type {
   ThreadItem,
   ThreadSummary,
   ThreadUsageResponse,
+  LlmRound,
+  LlmRoundsResponse,
   TerminalEntriesResponse,
   TerminalEntry,
   PluginEnableRequest,

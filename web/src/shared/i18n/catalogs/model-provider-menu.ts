@@ -7,5 +7,7 @@ export const MODEL_PROVIDER_MENU_MESSAGES = {
   'modelProviderMenu.followDefault': ['跟随默认（留空）', 'Follow default (blank)'],
   'modelProviderMenu.defaultBadge': ['默认', 'Default'],
   'modelProviderMenu.providerColumn': ['供应商', 'Providers'],
-  'modelProviderMenu.modelColumn': ['模型', 'Models']
+  'modelProviderMenu.modelColumn': ['模型', 'Models'],
+  'modelProviderMenu.search': ['搜索供应商或模型', 'Search providers or models'],
+  'modelProviderMenu.noMatches': ['没有匹配的供应商或模型', 'No matching providers or models'],
 } as const

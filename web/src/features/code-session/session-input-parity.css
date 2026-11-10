@@ -1,0 +1,208 @@
+/**
+ * Styles for the smart-ark-like session input surfaces: top statistics strip,
+ * context structure popover and the "pick an existing project" menu.
+ *
+ * All colors come from the shared light/dark token pair; no literal color is
+ * allowed in feature CSS. Loaded after the composer stylesheet.
+ */
+
+/* ---------- top statistics strip ---------- */
+
+.ark-stats-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 30px;
+  padding: 5px max(24px, calc((100% - var(--ark-canvas-width)) / 2));
+  overflow-x: auto;
+  border-bottom: 1px solid var(--ark-border-muted);
+  background: var(--ark-bg-canvas);
+  color: var(--ark-text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+  scrollbar-width: thin;
+}
+
+.ark-stats-bar__item {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.ark-stats-bar--pending {
+  color: var(--ark-text-faint);
+}
+
+/* ---------- workspace project menu ---------- */
+
+.ark-workspace-menu {
+  min-width: 320px;
+  max-width: 360px;
+}
+
+.ark-workspace-menu__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.ark-workspace-menu__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--ark-radius-sm);
+  background: none;
+  color: var(--ark-text);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ark-workspace-menu__option:hover:not(:disabled) {
+  background: var(--ark-bg-hover);
+}
+
+.ark-workspace-menu__option:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ark-workspace-menu__option.is-current {
+  border-color: var(--ark-accent-dim);
+  background: var(--ark-accent-soft);
+}
+
+.ark-workspace-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+}
+
+.ark-workspace-menu__context,
+.ark-workspace-menu__check {
+  flex: none;
+  color: var(--ark-text-faint);
+  font-size: 11px;
+}
+
+/* ---------- context structure ---------- */
+
+.ark-context-popover {
+  width: 320px;
+  max-width: min(320px, 90vw);
+}
+
+.ark-context-popover__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ark-text-dim);
+  font-size: 12px;
+}
+
+.ark-context-popover__head strong {
+  color: var(--ark-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ark-context-popover__head span {
+  font-variant-numeric: tabular-nums;
+}
+
+.ark-context-popover__bar {
+  display: flex;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ark-bg-inset);
+}
+
+.ark-context-popover__seg {
+  flex: none;
+  min-width: 2px;
+}
+
+.ark-context-popover__seg--tools { background: var(--console-blue); }
+.ark-context-popover__seg--system { background: var(--ark-skill); }
+.ark-context-popover__seg--skills { background: var(--ark-ok); }
+.ark-context-popover__seg--messages { background: var(--ark-warn); }
+.ark-context-popover__seg--reasoning { background: var(--ark-text-faint); }
+.ark-context-popover__seg--checkpoint { background: var(--ark-accent); }
+.ark-context-popover__seg--other { background: var(--ark-border-strong); }
+
+.ark-context-popover__status {
+  margin: 0;
+  color: var(--ark-ok);
+  font-size: 11px;
+}
+
+.ark-context-popover__status.is-warn {
+  color: var(--ark-warn);
+}
+
+.ark-context-popover__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ark-context-popover__row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0;
+  color: var(--ark-text-dim);
+  font-size: 11.5px;
+}
+
+.ark-context-popover__row.is-free {
+  border-top: 1px solid var(--ark-border-muted);
+  color: var(--ark-text-faint);
+}
+
+.ark-context-popover__swatch {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--ark-border-strong);
+  border-radius: 2px;
+}
+
+.ark-context-popover__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-context-popover__value {
+  color: var(--ark-text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ark-context-popover__note {
+  margin: 0;
+  color: var(--ark-text-faint);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+@media (max-width: 800px) {
+  .ark-stats-bar {
+    gap: 10px;
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}

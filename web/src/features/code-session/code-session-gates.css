@@ -122,44 +122,6 @@
   box-shadow: var(--ark-composer-shadow-focus);
 }
 
-/* Chevron that unfolds the per-thread details, pinned to the shell's top-right
-   corner like smart-ark's 「会话信息」 toggle. */
-.ark-composer__chevron {
-  position: absolute;
-  top: 8px;
-  right: 12px;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--ark-text-faint);
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
-}
-
-.ark-composer__chevron:hover {
-  background: var(--ark-bg-hover);
-  color: var(--ark-text);
-}
-
-.ark-composer__chevron.is-open svg {
-  transform: rotate(180deg);
-}
-
-/* The unfolded details card floats above the shell and never resizes it. */
-.ark-composer__details {
-  border: 1px solid var(--ark-border-muted);
-  border-radius: var(--ark-radius-lg);
-  background: var(--ark-card-strong);
-  box-shadow: var(--ark-composer-shadow);
-  padding: 10px 12px;
-}
-
 /* Textarea metrics follow smart-ark: 15px / 1.45 line box, 40px minimum. */
 .ark-composer__input {
   width: 100%;
@@ -303,7 +265,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ark-composer__box,
-  .ark-composer__chevron,
   .ark-composer__round,
   .ark-composer__chipbtn,
   .ark-composer__sendbtn {
@@ -397,12 +358,6 @@
   align-items: center;
   gap: 10px;
   flex-basis: 100%;
-}
-
-.ark-session-runtime__hint {
-  flex-basis: 100%;
-  font-size: 11px;
-  color: var(--ark-warn);
 }
 
 /* ---------- child runs ---------- */

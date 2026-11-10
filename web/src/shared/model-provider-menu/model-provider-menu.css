@@ -202,3 +202,26 @@
     transition: none;
   }
 }
+
+/* Search sits above the two columns and never closes them while typing. */
+.ark-mpm__search {
+  display: block;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--ark-border-muted);
+}
+
+.ark-mpm__search input {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius-sm);
+  background: var(--ark-bg-inset);
+  color: var(--ark-text);
+  font-size: 12px;
+}
+
+.ark-mpm__search input:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: 1px;
+}

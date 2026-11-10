@@ -53,8 +53,8 @@ headless/远程构建不装配，避免在无人可见的机器上弹窗。macOS
 - `ark-workspace` 以 `status --porcelain=v1 -z` 和受限 diff 生成 staged/unstaged/untracked；untracked
   内容不读取，patch 总量限制 256 KiB、文件数限制 200。
 - `POST /v1/workspace/pick` 已接入：`FolderDialogService` 端口 + arkd `NativeFolderDialog` 适配器
-  （macOS 走 `osascript choose folder`，取消与启动失败都折叠为 `path` 省略并记 warn）；web 会话运行配置
-  面板提供「浏览…」按钮填充输入框。
+  （macOS 走 `osascript choose folder`，取消与启动失败都折叠为 `path` 省略并记 warn）；web 输入框的工作空间
+  pill 直接列出 active/recent 项目供选择，「新增项目空间」经原生选择框与 validate 后切到新项目，不再要求手填路径。
 - recent descriptors 以 canonical 路径 best-effort 原子写入 `<data-dir>/workspace-recent.json`，arkd 启动时
   恢复；文件缺失或损坏时降级为空集合，已失效、非目录、重复及当前 active 条目会被忽略。写入失败只记录
   告警，不阻断 workspace switch。recent 仅是可重建的展示数据，不参与 workspace lease 或工具授权判断。
@@ -66,4 +66,4 @@ headless/远程构建不装配，避免在无人可见的机器上弹窗。macOS
 `arkd` 持有 gate/lease 并装配；`ark-server` 转发；`web` 渲染 active/recents/diff；desktop 无业务变更。
 已覆盖路径/symlink、staged/unstaged/rename/untracked/binary/truncation、switch 与 parent/child 竞争、recent
 写入后重启恢复、损坏降级、失效条目过滤、409、generation 递增及 Rust → TypeScript 契约生成漂移检查。
-本次收尾没有改变前端或桌面行为，因此未新增浏览器/桌面验证。
+本次前端补充了工作空间直选/新增、统计条与上下文结构入口；验证以 web typecheck、单测、硬规则与构建为准，桌面宿主未改动。
