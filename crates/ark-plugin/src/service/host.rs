@@ -21,14 +21,18 @@ use crate::service::context::HostHandles;
 use crate::service::directory::{scan, DirectoryPlugin, ScannedPlugin};
 use crate::service::hook_audit::{HookAuditRecord, InMemoryHookAudit};
 use crate::service::plugin::Plugin;
+use crate::service::provision::{OsCommandRunner, ProvisionFlow, ProvisionSpec};
 use crate::service::registry::{
     LoadReport, MemoryPluginDiagnostics, PluginDiagnostic, PluginDiagnosticSink, PluginRegistry,
 };
-use ark_common::Result;
-use ark_contract::{PluginDiagnosticView, PluginEntry, PluginHostReport};
+use ark_common::{ArkError, Result};
+use ark_contract::{
+    PluginDiagnosticView, PluginEnableRequest, PluginEntry, PluginHostReport, PluginProvisionView,
+};
 use ark_http::{HttpBus, InMemoryDiagnosticSink};
 use ark_mcp::McpBus;
-use ark_ports::HttpCapability;
+use ark_ports::{HttpCapability, McpServerService};
+use async_trait::async_trait;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -44,6 +48,9 @@ pub struct PluginHost {
     hook_audit: Arc<InMemoryHookAudit>,
     http: Arc<HttpBus>,
     mcp: Option<Arc<McpBus>>,
+    /// Declarative enable flows (requirements/plugin-provisioning.md). `None`
+    /// when no loaded plugin declares a `provision` section.
+    provision: Option<ProvisionFlow>,
     report: LoadReport,
     root: PathBuf,
 }
@@ -140,6 +147,28 @@ pub fn load_host(
         http.unregister_plugin(plugin_id);
     }
 
+    // Collect declarative enable flows (requirements/plugin-provisioning.md).
+    // Only plugins that actually started are enableable: a skipped or failed
+    // plugin contributes no spec, so its manifest section stays inert.
+    let provision_specs: Vec<ProvisionSpec> = ready
+        .iter()
+        .filter_map(|item| {
+            item.declarations.provision.as_ref().map(|section| ProvisionSpec {
+                plugin_id: item.manifest.id.clone(),
+                plugin_dir: item.directory.clone(),
+                section: section.clone(),
+            })
+        })
+        .collect();
+    let provision = if provision_specs.is_empty() {
+        None
+    } else {
+        Some(ProvisionFlow::load(
+            provision_specs,
+            Arc::new(OsCommandRunner),
+        ))
+    };
+
     Ok(PluginHost {
         registry: Mutex::new(registry),
         diagnostics: diagnostics_sink,
@@ -147,6 +176,7 @@ pub fn load_host(
         hook_audit: Arc::new(InMemoryHookAudit::new(HOOK_AUDIT_CAPACITY)),
         http,
         mcp: None,
+        provision,
         report,
         root: root.to_path_buf(),
     })
@@ -168,6 +198,15 @@ impl PluginHost {
     pub fn with_mcp_bus(mut self, mcp: Arc<McpBus>) -> Self {
         self.mcp = Some(mcp);
         self
+    }
+
+    /// Attach the external MCP server registry the provision flow registers
+    /// into (requirements/plugin-provisioning.md). Composition-root wiring
+    /// only; never reachable from a plugin.
+    pub fn attach_mcp_servers(&self, service: Arc<dyn McpServerService>) {
+        if let Some(flow) = self.provision.as_ref() {
+            flow.attach_mcp_servers(service);
+        }
     }
 
     /// Where plugins were read from.
@@ -278,6 +317,7 @@ impl PluginHost {
             // The declared request, not the grant: a user reads here what the
             // plugin asked for (requirements/plugin-hook-bus.md, 权限与安全).
             hook_points: manifest.hook_points(),
+            provision: self.provision.as_ref().and_then(|flow| flow.status(&manifest.id)),
         })
     }
 
@@ -299,9 +339,32 @@ impl PluginHost {
     }
 }
 
+#[async_trait]
 impl ark_ports::PluginHostService for PluginHost {
     fn report(&self) -> PluginHostReport {
         self.host_report()
+    }
+
+    fn provision_status(&self, plugin_id: &str) -> Result<PluginProvisionView> {
+        self.provision
+            .as_ref()
+            .and_then(|flow| flow.status(plugin_id))
+            .ok_or_else(|| {
+                ArkError::validation(format!("plugin {plugin_id} declares no provision section"))
+            })
+    }
+
+    async fn enable(
+        &self,
+        plugin_id: &str,
+        request: PluginEnableRequest,
+    ) -> Result<PluginProvisionView> {
+        let Some(flow) = self.provision.as_ref() else {
+            return Err(ArkError::validation(format!(
+                "plugin {plugin_id} declares no provision section"
+            )));
+        };
+        flow.enable(plugin_id, request).await
     }
 }
 

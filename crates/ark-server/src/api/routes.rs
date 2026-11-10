@@ -237,6 +237,14 @@ fn protected_routes() -> Router<AppState> {
             "/v1/runtime/plugins",
             get(crate::api::handlers::base::plugins_report),
         )
+        .route(
+            "/v1/runtime/plugins/{id}/provision",
+            get(crate::api::handlers::base::plugin_provision),
+        )
+        .route(
+            "/v1/runtime/plugins/{id}/enable",
+            post(crate::api::handlers::base::plugin_enable),
+        )
         // ---- thread planning, gates, workbench projections and child runs ----
         .route(
             "/v1/threads/{id}/fork",

@@ -31,7 +31,8 @@ pub use attachment::{
 pub use base::{
     CreateMemoryRequest, HookAuditView, McpServerEntry, McpServerListResponse,
     McpServerTestResponse, McpServerView, McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry,
-    MemoryListResponse, PluginDiagnosticView, PluginEntry, PluginHostReport, ProviderEntry,
+    MemoryListResponse, PluginDiagnosticView, PluginEnableRequest, PluginEntry,
+    PluginHostReport, PluginProvisionView, ProviderEntry,
     ProviderListResponse, ProviderModelCatalogConnection, ProviderModelCatalogRequest,
     ProviderModelCatalogResponse, ProviderModelInventoryItem, ProviderModelSummary,
     ProviderTestRequest, ProviderTestResponse, ProviderView, SkillActivation, SkillDiagnostics,

@@ -723,6 +723,44 @@ pub struct PluginEntry {
     /// readers, which is why it defaults to empty.
     #[serde(default)]
     pub hook_points: Vec<String>,
+    /// Present only when the plugin declares a `provision` section; carries
+    /// the enable-flow state the settings UI renders
+    /// (requirements/plugin-provisioning.md). Additive: absent for every
+    /// plugin that does not opt in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provision: Option<PluginProvisionView>,
+}
+
+/// Provision lifecycle of one directory plugin that declares a `provision`
+/// section (requirements/plugin-provisioning.md).
+///
+/// `state` is one of `disabled | needs_install | enabled | failed`. The host
+/// drives every transition; the plugin itself contributes declarations only.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct PluginProvisionView {
+    pub plugin_id: String,
+    pub state: String,
+    /// Last detect/install/register outcome, for the settings UI.
+    #[serde(default)]
+    pub detail: String,
+    /// Display form of the governed install command, e.g.
+    /// `npm install -g agent-desktop`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub install_command: String,
+    /// External MCP server id this plugin registers once enabled.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mcp_server_id: String,
+}
+
+/// Body of `POST /v1/runtime/plugins/{id}/enable`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct PluginEnableRequest {
+    /// User consent to run the declared install command when detection says
+    /// the tool is missing. Absent means "detect and register only".
+    #[serde(default)]
+    pub install: bool,
 }
 
 /// One startup diagnostic or audit record.

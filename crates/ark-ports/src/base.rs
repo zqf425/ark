@@ -11,10 +11,11 @@
 use ark_common::Result;
 use ark_contract::{
     CreateMemoryRequest, McpServerEntry, McpServerListResponse, McpServerTestResponse,
-    MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, PluginHostReport, ProviderEntry,
-    ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
-    ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SkillTurnResolution,
-    ThreadSkillsResponse, UpdateMemoryRequest, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
+    MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, PluginEnableRequest,
+    PluginHostReport, PluginProvisionView, ProviderEntry, ProviderListResponse,
+    ProviderModelCatalogRequest, ProviderModelCatalogResponse, ProviderTestRequest,
+    ProviderTestResponse, SkillDiagnostics, SkillTurnResolution, ThreadSkillsResponse,
+    UpdateMemoryRequest, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
 };
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -133,14 +134,30 @@ pub trait MemoryService: Send + Sync {
 /// The local plugin host (design §7.7).
 ///
 /// `ark-server` must answer `GET /v1/runtime/plugins` without linking the crate
-/// that loads plugins, so the read side lives behind this trait. There is no
-/// enable/disable or reload entry point: the host loads once at startup, and an
-/// unload is a `ark-plugin` service operation, not a platform route.
+/// that loads plugins, so the read side lives behind this trait. The host loads
+/// once at startup; the only runtime mutation it serves is the governed
+/// provision enable flow (requirements/plugin-provisioning.md): detect the
+/// declared tool, optionally install it behind explicit user consent, and
+/// register the declared external MCP server.
+#[async_trait]
 pub trait PluginHostService: Send + Sync {
     /// Every plugin the host currently serves, plus startup and egress
     /// diagnostics. Contributions are read from the buses that own them, so a
     /// page or tool appears only while it is actually resolvable.
     fn report(&self) -> PluginHostReport;
+
+    /// Provision state of one plugin. Validation error when the plugin exists
+    /// but declares no `provision` section.
+    fn provision_status(&self, plugin_id: &str) -> Result<PluginProvisionView>;
+
+    /// Run the enable flow: detect, optionally install (only with the user
+    /// consent flag), then register the declared MCP server. Every step is
+    /// host-governed; the plugin contributes declarations only.
+    async fn enable(
+        &self,
+        plugin_id: &str,
+        request: PluginEnableRequest,
+    ) -> Result<PluginProvisionView>;
 }
 
 /// Native folder chooser for local UI flows (workspace switch, thread runtime

@@ -11,7 +11,8 @@ use serde::Deserialize;
 
 use ark_contract::{
     FolderPickResponse, McpServerEntry, McpServerListResponse, McpServerTestResponse,
-    PluginHostReport, ProviderEntry, ProviderListResponse, ProviderModelCatalogRequest,
+    PluginEnableRequest, PluginHostReport, PluginProvisionView, ProviderEntry,
+    ProviderListResponse, ProviderModelCatalogRequest,
     ProviderModelCatalogResponse, ProviderTestRequest, ProviderTestResponse, SkillDiagnostics,
     SwitchWorkspaceRequest, ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus,
     WorkspaceValidateResponse, WorkspaceView,
@@ -350,6 +351,38 @@ pub async fn plugins_report(
         .as_ref()
         .ok_or_else(|| missing("plugin"))?;
     Ok(Json(service.report()))
+}
+
+/// `GET /v1/runtime/plugins/{id}/provision` — enable-flow state of one plugin.
+pub async fn plugin_provision(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<PluginProvisionView>, ApiError> {
+    let service = state
+        .base
+        .plugins
+        .as_ref()
+        .ok_or_else(|| missing("plugin"))?;
+    Ok(Json(service.provision_status(&id)?))
+}
+
+/// `POST /v1/runtime/plugins/{id}/enable` — run the governed enable flow.
+///
+/// With `install: false` this only detects the declared tool and registers it
+/// when present; a missing tool answers `needs_install` and the plugin stays
+/// unusable. With `install: true` (the user's explicit consent) the declared
+/// install command runs first; failure leaves the plugin `failed`/unusable.
+pub async fn plugin_enable(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<PluginEnableRequest>,
+) -> Result<Json<PluginProvisionView>, ApiError> {
+    let service = state
+        .base
+        .plugins
+        .as_ref()
+        .ok_or_else(|| missing("plugin"))?;
+    Ok(Json(service.enable(&id, request).await?))
 }
 
 #[cfg(test)]

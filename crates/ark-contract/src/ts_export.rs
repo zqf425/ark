@@ -35,7 +35,8 @@ use crate::{
     LlmRound, LlmRoundError, LlmRoundsResponse, McpServerEntry, McpServerListResponse,
     McpServerTestResponse, McpServerView, McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry,
     MemoryListResponse, PanelEntry, PendingApprovalView, PendingUserInputView, PlanView,
-    PluginDiagnosticView, PluginEntry, PluginHostReport, ProviderEntry, ProviderListResponse,
+    PluginDiagnosticView, PluginEnableRequest, PluginEntry, PluginHostReport,
+    PluginProvisionView, ProviderEntry, ProviderListResponse,
     ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderModelInventoryItem, ProviderModelSummary, ProviderTestRequest, ProviderTestResponse,
     ProviderView, ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest,
@@ -187,6 +188,8 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     HookAuditView::export_all_to(dir)?;
     PluginEntry::export_all_to(dir)?;
     PluginDiagnosticView::export_all_to(dir)?;
+    PluginProvisionView::export_all_to(dir)?;
+    PluginEnableRequest::export_all_to(dir)?;
     PluginHostReport::export_all_to(dir)?;
 
     // ---- scheduled tasks ----
@@ -358,6 +361,8 @@ const ROOT_NAMES: &[&str] = &[
     "McpServerTestResponse",
     "PluginEntry",
     "PluginDiagnosticView",
+    "PluginProvisionView",
+    "PluginEnableRequest",
     "PluginHostReport",
     "SkillSummary",
     "SkillSource",

@@ -34,6 +34,23 @@
 启动诊断、拒绝的 `http_denials`），由 `GET /v1/runtime/plugins` 只读暴露，经 `ark_ports::
 PluginHostService` 注入 `BaseServices`。组合根不重新解释这些字段。
 
+## Provision 启用流（已落地）
+
+目录插件可声明 `provision` 段（`detect`/`install`/`mcp_server`），把「外部工具 + 外部 MCP server」
+接入本运行时；需求设计见 [`docs/requirements/plugin-provisioning.md`](../requirements/plugin-provisioning.md)。
+启用流程由宿主执行，插件只贡献声明、不贡献代码：
+
+- `POST /v1/runtime/plugins/{id}/enable` 触发 `service/provision.rs` 的状态机：detect → 同意后
+  install → `McpServerService::upsert` 注册 stdio server（工具以 `<server_id>.<tool>` 并入
+  `mcp` 工具组）；未安装且未同意停在 `needs_install`，安装或注册失败停在 `failed` —— 均为
+  不起用状态。状态持久化在 `<plugins_root>/<plugin_id>/provision-state.json`，启动时重跑
+  detect，二进制消失则降级为 `needs_install`。
+- 治理：命令必须是裸二进制名（无路径、无 shell、静态参数）；`install.command` 受安装器白名单
+  （`npm|pnpm|yarn|brew|cargo`）限制且必须来自用户显式同意；子进程清空环境、输出封顶、超时
+  杀进程。校验在装载期 fail closed，未启动的插件不生成 provision spec。
+- 组合根仅机械装配：`wiring` 把 `McpServerAdapter` 同时交给 `PluginHost::attach_mcp_servers`；
+  `PluginHostService` 新增 `provision_status`/`enable` 两个入口。
+
 ## 生命周期
 
 目录装载的失败隔离策略是“剔除 + 诊断 + 继续启动”：`plan_local_load` 把缺依赖、版本不兼容或成环的

@@ -333,6 +333,18 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         hooks: Arc::clone(&hooks),
     });
 
+    let mcp_adapter = Arc::new(McpServerAdapter::new(
+        Arc::clone(&mcp),
+        Arc::clone(&tools),
+        {
+            let plugin_mcp = Arc::clone(&plugin_mcp);
+            Arc::new(move || crate::plugin_host::plugin_tools(&plugin_mcp))
+        },
+    ));
+    // The provision enable flow registers its declared external MCP server
+    // through the same adapter the GUI edits (requirements/plugin-provisioning.md).
+    plugins.host().attach_mcp_servers(Arc::clone(&mcp_adapter) as Arc<dyn ark_ports::McpServerService>);
+
     let base = BaseServices::new()
         .with_providers(Arc::new(ProviderAdapter::new(Arc::clone(&providers))))
         .with_skills(Arc::new(SkillAdapter::new(Arc::clone(&skills))))
@@ -340,14 +352,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
             Arc::clone(&workspace),
             Arc::clone(&roots),
         )))
-        .with_mcp(Arc::new(McpServerAdapter::new(
-            Arc::clone(&mcp),
-            Arc::clone(&tools),
-            {
-                let plugin_mcp = Arc::clone(&plugin_mcp);
-                Arc::new(move || crate::plugin_host::plugin_tools(&plugin_mcp))
-            },
-        )))
+        .with_mcp(Arc::clone(&mcp_adapter) as Arc<dyn ark_ports::McpServerService>)
         .with_memory(Arc::new(MemoryAdapter::new(Arc::clone(&memory))))
         .with_ui(Arc::clone(&ui_bus) as Arc<dyn ark_ports::UiCapability>)
         .with_plugins(Arc::clone(plugins.host()) as Arc<dyn ark_ports::PluginHostService>)

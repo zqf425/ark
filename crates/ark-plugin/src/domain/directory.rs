@@ -50,6 +50,12 @@ pub struct DirectoryManifest {
     /// closed): a declarative plugin has no code to receive a hook callback.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hooks: Option<HookSection>,
+    /// Declarative enable flow (requirements/plugin-provisioning.md): how to
+    /// detect the tool, how to install it behind explicit user consent, and
+    /// which external MCP server to register once enabled. Host-governed; the
+    /// plugin contributes declarations only, never code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provision: Option<ProvisionSection>,
 }
 
 impl DirectoryManifest {
@@ -67,6 +73,9 @@ impl DirectoryManifest {
             hooks: self.hooks.clone(),
         };
         manifest.validate()?;
+        if let Some(provision) = &self.provision {
+            provision.validate()?;
+        }
         Ok(manifest)
     }
 }
@@ -205,6 +214,84 @@ fn default_method() -> String {
 /// Minimal object schema for a tool that declares none.
 fn empty_schema() -> serde_json::Value {
     serde_json::json!({ "type": "object", "properties": {} })
+}
+
+/// One host-governed command declaration: a bare binary name plus static
+/// args. No shell, no paths, no placeholders — the host spawns exactly this.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandDecl {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+/// The external MCP server the host registers once the plugin is enabled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpServerProvision {
+    /// Registry id of the server; its tools surface as `<id>.<tool>`.
+    pub id: String,
+    /// Launch command for the stdio transport.
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Tools the server may contribute; empty means all.
+    #[serde(default)]
+    pub allow_tools: Vec<String>,
+}
+
+/// `provision` section: the declarative enable flow
+/// (requirements/plugin-provisioning.md). Detection, installation and MCP
+/// registration run host-side under the governance rules in
+/// `service/provision.rs`; a plugin never executes code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProvisionSection {
+    /// Presence check, e.g. `agent-desktop status`.
+    pub detect: CommandDecl,
+    /// Install command; restricted to the host installer allowlist.
+    pub install: CommandDecl,
+    /// Server registered through `McpServerService` once enabled.
+    pub mcp_server: McpServerProvision,
+}
+
+impl ProvisionSection {
+    /// Fail-closed structural validation, called before any plugin starts.
+    pub fn validate(&self) -> ark_common::Result<()> {
+        validate_command(&self.detect.command, false)?;
+        validate_command(&self.install.command, true)?;
+        validate_command(&self.mcp_server.command, false)?;
+        if self.mcp_server.id.trim().is_empty()
+            || self.mcp_server.id.chars().any(char::is_whitespace)
+        {
+            return Err(ark_common::ArkError::validation(
+                "provision.mcp_server.id must be a non-empty id without whitespace",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Installers the host will ever spawn from a manifest. Detection and MCP
+/// launch accept any bare binary name; installation is where a dropped
+/// manifest could run arbitrary setup code, so it stays allowlisted.
+const INSTALL_ALLOWLIST: &[&str] = &["npm", "pnpm", "yarn", "brew", "cargo"];
+
+fn validate_command(command: &str, install: bool) -> ark_common::Result<()> {
+    let bare = !command.is_empty()
+        && command.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && command
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if !bare {
+        return Err(ark_common::ArkError::validation(format!(
+            "provision command {command:?} must be a bare binary name (no path, no shell)"
+        )));
+    }
+    if install && !INSTALL_ALLOWLIST.contains(&command) {
+        return Err(ark_common::ArkError::validation(format!(
+            "provision install command {command:?} is not in the installer allowlist"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

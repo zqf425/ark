@@ -103,6 +103,8 @@ export type { McpServerListResponse } from "./McpServerListResponse";
 export type { McpServerTestResponse } from "./McpServerTestResponse";
 export type { PluginEntry } from "./PluginEntry";
 export type { PluginDiagnosticView } from "./PluginDiagnosticView";
+export type { PluginProvisionView } from "./PluginProvisionView";
+export type { PluginEnableRequest } from "./PluginEnableRequest";
 export type { PluginHostReport } from "./PluginHostReport";
 export type { SkillSummary } from "./SkillSummary";
 export type { SkillSource } from "./SkillSource";

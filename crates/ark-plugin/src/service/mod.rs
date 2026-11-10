@@ -6,6 +6,7 @@ pub mod hook_audit;
 pub mod host;
 pub mod isolation;
 pub mod plugin;
+pub mod provision;
 pub mod registry;
 
 pub use context::{HostHandles, PluginContext};
@@ -17,6 +18,7 @@ pub use isolation::{
     ScopedTrace,
 };
 pub use plugin::{Plugin, Registration};
+pub use provision::{CommandRunner, OsCommandRunner, ProvisionFlow, ProvisionSpec};
 pub use registry::{
     LoadReport, MemoryPluginDiagnostics, PluginDiagnostic, PluginDiagnosticSink, PluginRegistry,
 };
