@@ -48,7 +48,9 @@
   `code-highlight`（文件预览高亮）：模型输出是不可信输入，任何进入 `dangerouslySetInnerHTML` 的
   HTML 必须先经 DOMPurify；这是展示层能力，不与 Rust 侧业务逻辑双实现。
 - 设置页的 tuning、provider 与 MCP 都使用生成契约；API key、MCP env/header 值只写不回读，编辑时的空
-  secret 字段表示保留，不表示删除。
+  secret 字段表示保留，不表示删除。表单里用户自己输入的 secret 草稿用共享 `TextField` 的
+  `revealable` 变体：默认掩码，可显式切换为明文/掩码并带 `aria-pressed`；这只暴露当前草稿值，
+  运行时已存的 key 仍不回显，供应商列表依旧只显示 `has_api_key` 与 hint。
 - 新增/编辑 provider 可显式查询模型目录，在用户选择后才把远端明确声明的 context window 与识图能力写入
   待保存表单；传输层对目录未声明的能力仍保持 unknown、不按模型名称猜测，也不自动提交配置。导入对话框在
   目录解析之外做上下文嗅探：优先用目录明确声明的窗口（含 `max_model_len`、`top_provider.context_length`、
@@ -85,6 +87,8 @@
   /models 时使用）；已存在的 id 标记且默认不勾选，确认后并入表单清单。导入时自动嗅探上下文窗口，识别不出
   用 256K 兜底（对齐 smart-ark 的 `DEFAULT_PROVIDER_CONTEXT_WINDOW_TOKENS`），默认 `model` 为空时由首个
   候选行回填，命中默认模型的行把元数据镜像到条目级字段。
+- 模型清单字段占满设置网格的一整行：一行需要 id、默认标记、上下文窗口与识图开关，挤在半宽列时识图会
+  溢出到相邻的 api_key 提示上；整行宽度加窄窗口换行保证所有控件留在自己的卡片内。
 - 默认模型与所有导入模型用**同一套 `ModelRow` 行**展示，默认模型不再单独占一个输入框：每行都是
   id + 上下文窗口输入框 + 识图开关（+ 移除），首行的 id 可编辑、额外标记「默认」且不可移除。**每行只管自己的上下文窗口与识图能力，没有跨行覆盖、也不存在"谁为准"的
   冲突**：首行（默认模型）的值存条目级 `context_window_tokens` / `supports_vision`，其余行的值存各自的

@@ -232,6 +232,7 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
           label={t('settings.providerForm.modelsLabel')}
           htmlFor="provider-model"
           hint={t('settings.providerForm.modelsHint')}
+          className="ark-provider-form__models"
         >
           <div id="provider-models" className="ark-importdialog__rows">
             <ModelRow
@@ -277,7 +278,7 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
         <TextField
           id="provider-api-key"
           label="api_key"
-          type="password"
+          revealable
           value={draft.api_key}
           disabled={busy}
           placeholder={

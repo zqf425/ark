@@ -2,19 +2,22 @@
  * Labelled form controls. One label style, one input style, one inline variant,
  * so every settings section looks the same without its own CSS.
  */
-import type { ChangeEvent, ReactNode } from 'react'
+import { useState, type ChangeEvent, type ReactNode } from 'react'
+import { useI18n } from '../../../shared/i18n'
 
 export type FieldProps = {
   label: string
   hint?: ReactNode
   htmlFor?: string
   inline?: boolean
+  /** Extra layout class for grid placement; the base styles stay shared. */
+  className?: string
   children: ReactNode
 }
 
-export function Field({ label, hint, htmlFor, inline = false, children }: FieldProps): JSX.Element {
+export function Field({ label, hint, htmlFor, inline = false, className, children }: FieldProps): JSX.Element {
   return (
-    <div className={`ark-field${inline ? ' ark-field--inline' : ''}`}>
+    <div className={`ark-field${inline ? ' ark-field--inline' : ''}${className ? ` ${className}` : ''}`}>
       <label className="ark-field__label" htmlFor={htmlFor}>
         {label}
       </label>
@@ -34,6 +37,8 @@ export type TextFieldProps = {
   disabled?: boolean
   mono?: boolean
   type?: 'text' | 'password' | 'number'
+  /** Masks the value by default and offers a show/hide toggle for the draft. */
+  revealable?: boolean
 }
 
 /** Single-line text input bound to a string value. */
@@ -46,23 +51,42 @@ export function TextField({
   hint,
   disabled = false,
   mono = false,
-  type = 'text'
+  type = 'text',
+  revealable = false
 }: TextFieldProps): JSX.Element {
+  const { t } = useI18n()
+  const [revealed, setRevealed] = useState(false)
   const handle = (event: ChangeEvent<HTMLInputElement>): void => onChange(event.target.value)
+  const input = (
+    <input
+      id={id}
+      className="ark-field__input"
+      type={revealable ? (revealed ? 'text' : 'password') : type}
+      value={value}
+      placeholder={placeholder}
+      disabled={disabled}
+      spellCheck={false}
+      autoComplete="off"
+      style={mono ? { fontFamily: 'var(--ark-mono)', fontSize: 11.5 } : undefined}
+      onChange={handle}
+    />
+  )
   return (
     <Field label={label} hint={hint} htmlFor={id}>
-      <input
-        id={id}
-        className="ark-field__input"
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        disabled={disabled}
-        spellCheck={false}
-        autoComplete="off"
-        style={mono ? { fontFamily: 'var(--ark-mono)', fontSize: 11.5 } : undefined}
-        onChange={handle}
-      />
+      {revealable ? (
+        <div className="ark-field__secret">
+          {input}
+          <button
+            type="button"
+            className="ark-linkbtn ark-field__secret-toggle"
+            aria-pressed={revealed}
+            disabled={disabled}
+            onClick={() => setRevealed((current) => !current)}
+          >
+            {revealed ? t('common.hideSecret') : t('common.showSecret')}
+          </button>
+        </div>
+      ) : input}
     </Field>
   )
 }

@@ -143,3 +143,14 @@
 .ark-importdialog__row .ark-check {
   flex: none;
 }
+
+/* A provider-form model row needs id + default badge + context + vision. In a
+   half-width grid cell the vision checkbox spills over the adjacent field, so
+   the inventory owns a full grid row; narrow windows wrap instead of overflow. */
+.ark-provider-form__models {
+  grid-column: 1 / -1;
+}
+
+.ark-provider-form__models .ark-importdialog__row {
+  flex-wrap: wrap;
+}

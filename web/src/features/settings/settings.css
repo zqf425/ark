@@ -136,6 +136,31 @@
   cursor: not-allowed;
 }
 
+/* Secret draft inputs: the reveal toggle sits beside the input without
+   shrinking it. Only the value the operator typed is ever revealed here. */
+.ark-field__secret {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ark-field__secret > .ark-field__input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ark-field__secret-toggle {
+  flex: none;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.ark-field__secret-toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .ark-field__area {
   width: 100%;
   resize: vertical;

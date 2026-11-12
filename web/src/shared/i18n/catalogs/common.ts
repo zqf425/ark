@@ -27,6 +27,8 @@ export const COMMON_MESSAGES = {
   'common.notSet': ['（未设置）', '(not set)'],
   'common.none': ['无', 'none'],
   'common.test': ['测试连接', 'Test connection'],
+  'common.showSecret': ['显示明文', 'Show'],
+  'common.hideSecret': ['隐藏', 'Hide'],
   /** Joins a short error code hint with the server's own message. */
   'common.hintSeparator': ['：', ': '],
   'common.listSeparator': ['、', ', '],
