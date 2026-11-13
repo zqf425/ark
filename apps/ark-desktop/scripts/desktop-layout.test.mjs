@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { resolveCargoTargetDir } from './prepare-sidecar.mjs'
+import { DEV_PORTS, isDevStackProcess } from './dev.mjs'
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryRoot = resolve(desktopRoot, '..', '..')
@@ -20,12 +21,44 @@ test('root dev command launches the native desktop shell', () => {
   assert.equal(rootPackage.scripts.dev, 'npm --prefix apps/ark-desktop run dev')
 })
 
-test('desktop package uses Tauri for development', () => {
+test('desktop package routes dev through the lifetime-bound supervisor', () => {
   const packagePath = resolve(desktopRoot, 'package.json')
   assert.equal(existsSync(packagePath), true, 'desktop package must exist')
 
   const desktopPackage = readJson(packagePath)
-  assert.equal(desktopPackage.scripts.dev, 'tauri dev')
+  assert.equal(desktopPackage.scripts.dev, 'node scripts/dev.mjs')
+
+  // The supervisor must still run tauri dev, not replace it.
+  const supervisor = readFileSync(resolve(desktopRoot, 'scripts', 'dev.mjs'), 'utf8')
+  assert.match(supervisor, /spawn\(tauriBin, \['dev'\]/)
+})
+
+test('dev supervisor sweeps exactly the ports the dev stack owns', () => {
+  const config = readJson(resolve(desktopRoot, 'src-tauri', 'tauri.conf.json'))
+  const devPort = new URL(config.build.devUrl).port
+  assert.deepEqual([...DEV_PORTS].sort(), ['18791', devPort].sort())
+})
+
+test('dev supervisor only kills processes that belong to the ark dev stack', () => {
+  const ours = [
+    'node /repo/web/node_modules/.bin/vite',
+    'target/debug/arkd serve --port 18791',
+    'cargo run --package arkd -- serve',
+    'node scripts/dev-web.mjs',
+    'target/debug/ark'
+  ]
+  for (const command of ours) {
+    assert.equal(isDevStackProcess(command), true, `must match: ${command}`)
+  }
+
+  const foreign = [
+    'redis-server *:5273',
+    'python3 -m http.server 18791',
+    '/usr/sbin/nginx -g daemon off;'
+  ]
+  for (const command of foreign) {
+    assert.equal(isDevStackProcess(command), false, `must not match: ${command}`)
+  }
 })
 
 test('Tauri configuration owns the window and delegates web development to Vite', () => {

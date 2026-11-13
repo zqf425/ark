@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "node scripts/dev.mjs",
     "dev:web": "node scripts/dev-web.mjs",
     "build": "tauri build --config src-tauri/tauri.release.conf.json",
     "build:web": "node scripts/build-web.mjs",

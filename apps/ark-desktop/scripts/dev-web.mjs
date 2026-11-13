@@ -17,3 +17,13 @@ child.once('error', (error) => {
   console.error(`无法启动 Web 开发服务器：${error.message}`)
   process.exit(1)
 })
+
+// Teardown hardening for standalone runs (`npm run dev:web`): forward the
+// interrupt to vite so the port is released immediately instead of leaking a
+// listener when an outer supervisor does not group-kill this subtree.
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(signal, () => {
+    child.kill(signal)
+    process.exit(0)
+  })
+}
