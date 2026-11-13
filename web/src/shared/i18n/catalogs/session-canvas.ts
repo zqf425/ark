@@ -203,13 +203,13 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.workspace.empty': ['暂无项目，可新增一个项目空间', 'No projects yet; add a project workspace'],
   'canvas.workspace.noMatch': ['没有匹配的项目', 'No matching projects'],
   'canvas.workspace.current': ['当前', 'Current'],
-  'canvas.workspace.selected': ['已切换工作空间', 'Workspace switched'],
-  'canvas.workspace.added': ['已新增项目空间', 'Project workspace added'],
-  'canvas.workspace.switchFailed': ['切换工作空间失败', 'Failed to switch workspace'],
+  'canvas.workspace.selected': ['已设为本会话工作空间，下个回合生效', 'Set as this session\'s workspace; applies next turn'],
+  'canvas.workspace.added': ['已新增并设为本会话工作空间', 'Project added and set for this session'],
+  'canvas.workspace.switchFailed': ['设置会话工作空间失败', 'Failed to set the session workspace'],
   'canvas.workspace.addFailed': ['新增项目空间失败', 'Failed to add a project workspace'],
   'canvas.stats.roundsTruncated': ['{count}+ 次调用', '{count}+ calls'],
   'canvas.stats.truncatedTitle': ['诊断记录超过单页上限，轮次与耗时为下限', 'Diagnostics exceeded one page; calls and duration are lower bounds'],
 
   'canvas.context.noLimit': ['上下文窗口暂不可用，仍可手动压缩。', 'Context window is unavailable; manual compaction is still available.'],
-  'canvas.workspace.busy': ['回合运行中不能切换工作空间', 'Cannot switch workspace while a turn is running'],
+  'canvas.workspace.busy': ['本会话正在回复，回复结束后即可修改工作空间', 'This session is replying; the workspace can be changed once it finishes'],
 } as const
