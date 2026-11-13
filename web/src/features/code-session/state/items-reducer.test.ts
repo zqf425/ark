@@ -477,16 +477,16 @@ describe('items reducer workbench revision', () => {
 })
 
 /**
- * A terminal failure renders inline at the interruption point: the server-side
- * projector folds `turn_failed` into a durable `error` item of that turn, which
- * reaches the reducer as a regular item event. The reducer itself only flips
- * the turn state — no separate footer channel.
+ * A terminal failure renders inline at the interruption point. The server-side
+ * projector folds `turn_failed` into a durable `error` item stored in
+ * `items.jsonl`, but the live SSE channel only carries the bare event, so the
+ * reducer materializes the same row with the server's deterministic id.
  */
 describe('items reducer turn_failed', () => {
   const THREAD_ID = '00000000-0000-0000-0000-000000000001'
   const TURN_ID = '00000000-0000-0000-0000-000000000003'
 
-  it('只翻转回合状态，不再额外追加底部错误行', () => {
+  it('live 折叠出与 Rust 投影同 id 的中断处错误行', () => {
     let state = emptyItemsState()
     state = applyEvent(state, {
       kind: 'turn_started',
@@ -510,8 +510,56 @@ describe('items reducer turn_failed', () => {
 
     expect(state.turnState[TURN_ID]).toBe('failed')
     expect(state.activeTurnId).toBeNull()
-    expect(state.itemsById).toEqual({})
-    expect(state.itemOrder).toEqual([])
+    expect(state.itemOrder).toHaveLength(1)
+    const row = state.itemsById[state.itemOrder[0]!]
+    expect(row?.kind).toBe('error')
+    expect(row?.status).toBe('failed')
+    expect(row?.turn_id).toBe(TURN_ID)
+    expect(row?.text).toBe('turn budget: max model rounds reached')
+  })
+
+  it('live 折叠 id 与 Rust keyed_item_id("turn_failed:{turn}") 完全一致', () => {
+    // Expected value precomputed with the Rust algorithm (fnv1a hi/lo seeded
+    // with the offset-basis pairs, custom-variant bits forced) for
+    // `turn_failed:00000000-0000-0000-0000-000000000003`.
+    const state = applyEvent(emptyItemsState(), {
+      kind: 'turn_failed',
+      seq: 1,
+      thread_id: THREAD_ID,
+      turn_id: TURN_ID,
+      timestamp: '2026-10-28T00:00:01Z',
+      message: 'x',
+      model_request_failed: false
+    })
+    expect(state.itemOrder[0]).toBe('47bfd081-5592-8d05-a602-cad4686b2174')
+  })
+
+  it('刷新 seed 携带同一 item 时合并为一行，不重复', () => {
+    let state = applyEvent(emptyItemsState(), {
+      kind: 'turn_failed',
+      seq: 1,
+      thread_id: THREAD_ID,
+      turn_id: TURN_ID,
+      timestamp: '2026-10-28T00:00:01Z',
+      message: 'x',
+      model_request_failed: false
+    })
+    state = applyEvent(state, {
+      kind: 'item_created',
+      seq: 2,
+      thread_id: THREAD_ID,
+      turn_id: TURN_ID,
+      timestamp: '2026-10-28T00:00:01Z',
+      item: {
+        item_id: state.itemOrder[0]!,
+        turn_id: TURN_ID,
+        kind: 'error',
+        status: 'failed',
+        created_at: '2026-10-28T00:00:01Z',
+        text: 'x'
+      }
+    })
+    expect(state.itemOrder).toHaveLength(1)
   })
 
   it('服务端投影的 error item 照常落到行投影，展示在中断处', () => {

@@ -55,6 +55,41 @@ const DELTA_ITEM_KIND: Partial<Record<RuntimeEvent['kind'], ItemKind>> = {
 const MAX_CHILD_COMPLETIONS = 50
 
 /**
+ * Deterministic `ItemId` for one turn's terminal failure, mirroring the Rust
+ * `keyed_item_id("turn_failed:{turn_id}")` (ark-store domain/items.rs): FNV-1a
+ * over the namespace string, hi/lo halves seeded with the offset basis pairs,
+ * packed into a UUID with the custom-variant bits forced. The server stores the
+ * error item under this id in `items.jsonl`, so the live-folded row and the
+ * replayed row are the same item and a seed merge never duplicates it.
+ */
+const FNV_BASIS_HI = 0xcbf29ce484222325n
+const FNV_BASIS_LO = 0x84222325cbf29ce4n
+const FNV_PRIME = 0x100000001b3n
+
+function fnv1a(bytes: Uint8Array, seed: bigint): bigint {
+  let hash = seed
+  for (const byte of bytes) {
+    hash ^= BigInt(byte)
+    hash = (hash * FNV_PRIME) & 0xffffffffffffffffn
+  }
+  return hash
+}
+
+function turnFailedItemId(turnId: TurnId): ItemId {
+  const namespace = new TextEncoder().encode(`turn_failed:${turnId}`)
+  const hi = fnv1a(namespace, FNV_BASIS_HI)
+  const lo = fnv1a(namespace, FNV_BASIS_LO)
+  const view = new DataView(new ArrayBuffer(16))
+  view.setBigUint64(0, hi)
+  view.setBigUint64(8, lo)
+  const bytes = new Uint8Array(view.buffer)
+  bytes[6] = (bytes[6]! & 0x0f) | 0x80
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}` as ItemId
+}
+
+/**
  * Streaming windows shorter than this are too noisy for a tok/s readout: a
  * near-instant round would otherwise print absurd spikes. Rounds below the
  * threshold simply show no speed.
@@ -246,13 +281,27 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       resetDeltaWindow(draft)
       return commitDraft(draft)
 
-    case 'turn_failed':
-      // The failure reason renders inline at the interruption point: the
+    case 'turn_failed': {
+      // The failure reason renders inline at the interruption point. The
       // server-side projector folds `turn_failed` into a durable `error`
-      // item of that turn, which arrives here as a regular item event.
+      // item, but that projection only lives in `items.jsonl` — the live
+      // SSE channel carries the bare `turn_failed` event. Materialize the
+      // same row here with the server's deterministic id
+      // (`turn_failed:{turn_id}`, mirrored from the Rust projector) so the
+      // live row and the replayed row are one item: a later seed merge
+      // keeps one row instead of duplicating it.
       setTurn(draft, event.turn_id, 'failed')
       resetDeltaWindow(draft)
+      upsertItem(draft, {
+        item_id: turnFailedItemId(event.turn_id),
+        turn_id: event.turn_id,
+        kind: 'error',
+        status: 'failed',
+        created_at: event.timestamp,
+        text: event.message
+      })
       return commitDraft(draft)
+    }
 
     case 'thread_rewound': {
       // The writer physically truncated `events.jsonl` and appended this
