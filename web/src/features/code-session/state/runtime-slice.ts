@@ -11,11 +11,15 @@ export type RuntimeSlice = {
   sending: boolean
   interrupting: boolean
   commandError: string | null
+  /** Unsent composer drafts keyed by thread id (survive thread switches). */
+  drafts: Record<string, string>
   setHealth: (payload: { online: boolean; version?: string | null; error?: string | null }) => void
   setRuntimeInfo: (payload: { version: string | null; dataDir: string | null; threadCount: number | null }) => void
   setSending: (sending: boolean) => void
   setInterrupting: (interrupting: boolean) => void
   setCommandError: (message: string | null) => void
+  setDraft: (threadId: string, text: string) => void
+  clearDraft: (threadId: string) => void
 }
 
 export const createRuntimeSlice: StateCreator<RuntimeSlice, [], [], RuntimeSlice> = (set) => ({
@@ -29,6 +33,7 @@ export const createRuntimeSlice: StateCreator<RuntimeSlice, [], [], RuntimeSlice
   sending: false,
   interrupting: false,
   commandError: null,
+  drafts: {},
 
   setHealth: ({ online, version = null, error = null }) =>
     set({
@@ -43,5 +48,17 @@ export const createRuntimeSlice: StateCreator<RuntimeSlice, [], [], RuntimeSlice
 
   setSending: (sending) => set({ sending }),
   setInterrupting: (interrupting) => set({ interrupting }),
-  setCommandError: (message) => set({ commandError: message })
+  setCommandError: (message) => set({ commandError: message }),
+
+  // One entry per thread; empty text stores "" so a cleared draft does not
+  // resurrect the old content, and the map is pruned when a thread's draft is
+  // sent so long sessions do not accumulate stale entries.
+  setDraft: (threadId, text) => set((state) => ({ drafts: { ...state.drafts, [threadId]: text } })),
+  clearDraft: (threadId) =>
+    set((state) => {
+      if (!(threadId in state.drafts)) return state
+      const next = { ...state.drafts }
+      delete next[threadId]
+      return { drafts: next }
+    })
 })
