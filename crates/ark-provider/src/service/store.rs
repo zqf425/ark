@@ -106,9 +106,11 @@ impl ProviderStore {
     ///
     /// `compaction_threshold_tokens` reports the threshold the runtime derives
     /// for the effective provider: 80% of that provider's context window minus
-    /// its reserved output. `None` when no provider resolves or the window is
-    /// undeclared — the renderer then hides the context meter instead of
-    /// guessing a denominator.
+    /// its reserved output. A provider that declares no window derives from
+    /// the 256K default window (`ark_llm::DEFAULT_CONTEXT_WINDOW_TOKENS`), the
+    /// same fallback the settings inventory applies. `None` only when no
+    /// provider resolves at all — the renderer then hides the context meter
+    /// instead of guessing a denominator.
     pub fn list(&self) -> ProviderListResponse {
         let document = self.lock();
         let providers = document.views();

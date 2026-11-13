@@ -10,10 +10,12 @@ let cache: { limit: number | null; at: number } | null = null
 /**
  * Compaction threshold for the usage meter, derived from the *effective*
  * provider's context window (80% of it, output reserved) and reported by
- * `GET /v1/runtime/providers` as `compaction_threshold_tokens`.
+ * `GET /v1/runtime/providers` as `compaction_threshold_tokens`. A provider
+ * that declares no window derives from the 256K default window, so the meter
+ * matches what the runtime actually compacts against.
  *
- * `null` means "unknown": no provider resolves or none declared a window, and
- * the meter must hide instead of dividing by a guessed denominator.
+ * `null` means "no provider resolves at all": the meter hides instead of
+ * dividing by a guessed denominator.
  *
  * The footer stays mounted across thread switches, so a one-shot fetch could
  * serve a stale limit forever after the user edits providers. The cached value

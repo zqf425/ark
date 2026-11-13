@@ -570,12 +570,14 @@ fn turn_limits_derive_the_threshold_from_the_provider_window() {
 }
 
 #[test]
-fn undeclared_provider_window_falls_back_to_a_fixed_threshold() {
+fn undeclared_provider_window_falls_back_to_the_256k_default() {
     let config = RuntimeConfig::default();
     let limits = super::turn_common::limits_for_turn(&config, None);
+    // 80% of the 256K default window: compaction stays on for undeclared
+    // windows, and the meter shown in the session divides by the same value.
     assert_eq!(
         limits.context_limit_tokens,
-        crate::model::FALLBACK_CONTEXT_LIMIT_TOKENS
+        ark_llm::DEFAULT_CONTEXT_WINDOW_TOKENS * 4 / 5
     );
 }
 

@@ -16,6 +16,15 @@ use std::collections::BTreeMap;
 /// same warning level the renderer's context meter shows.
 pub const COMPACTION_TRIGGER_RATIO: f64 = 0.8;
 
+/// Context window assumed when a provider (or its catalog) declares none.
+///
+/// This is the same 256K fallback the settings UI applies to catalog rows
+/// without a published window (`PROVIDER_DEFAULT_CONTEXT_WINDOW`), so the
+/// meter shown in the session and the compaction the runtime actually runs
+/// always divide by the same number. Conservative for today's frontier
+/// models; still large enough not to compact every few turns.
+pub const DEFAULT_CONTEXT_WINDOW_TOKENS: u64 = 256_000;
+
 /// The three supported wire families.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -123,11 +132,14 @@ impl ProviderConfig {
     ///
     /// One arithmetic rule for every consumer (turn limits, provider list
     /// view): compaction triggers at [`COMPACTION_TRIGGER_RATIO`] of the
-    /// window, reserving the user-configured `max_tokens` for the reply.
-    /// `None` when the window is undeclared — a guessed denominator would
-    /// silently compact against a limit the model never advertised.
+    /// window, reserving the user-configured `max_tokens` for the reply. A
+    /// provider that declares no window uses [`DEFAULT_CONTEXT_WINDOW_TOKENS`]
+    /// instead — compaction must never be disabled just because the window is
+    /// unknown, or the prompt would grow unbounded.
     pub fn compaction_threshold(&self) -> Option<u64> {
-        let window = self.context_window_tokens?;
+        let window = self
+            .context_window_tokens
+            .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS);
         let output_reserve = self.max_tokens.map(u64::from).unwrap_or(0);
         let usable = window.saturating_sub(output_reserve).max(1);
         Some((usable as f64 * COMPACTION_TRIGGER_RATIO) as u64)
@@ -190,9 +202,10 @@ mod tests {
     #[test]
     fn compaction_threshold_is_80_percent_with_output_reserved() {
         let mut config = ProviderConfig::new("p", "m");
-        assert!(
-            config.compaction_threshold().is_none(),
-            "no window, no meter"
+        // No declared window: the 256K default applies, compaction stays on.
+        assert_eq!(
+            config.compaction_threshold(),
+            Some((DEFAULT_CONTEXT_WINDOW_TOKENS as f64 * COMPACTION_TRIGGER_RATIO) as u64)
         );
         config.context_window_tokens = Some(500_000);
         assert_eq!(config.compaction_threshold(), Some(400_000));
@@ -202,6 +215,14 @@ mod tests {
         // A reserve at or above the window still yields a positive threshold.
         config.max_tokens = Some(500_000);
         assert_eq!(config.compaction_threshold(), Some(0));
+    }
+
+    #[test]
+    fn default_context_window_matches_the_settings_ui_fallback() {
+        // The settings inventory seeds rows without a published window with
+        // 256K; the runtime default must stay the same number or the meter
+        // and the actual compaction diverge.
+        assert_eq!(DEFAULT_CONTEXT_WINDOW_TOKENS, 256_000);
     }
 
     #[test]

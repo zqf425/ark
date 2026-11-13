@@ -59,7 +59,9 @@ describe('useContextLimit', () => {
     expect(harness.text()).toContain('200000')
   })
 
-  it('未声明窗口时上报 null，恢复后重新给出分母', async () => {
+  it('无 provider 时上报 null 并隐藏水位，恢复后重新给出分母', async () => {
+    // A provider that declares no window now derives from the 256K default,
+    // so `null` only means "no provider resolves at all".
     vi.useFakeTimers()
     listMock.mockResolvedValue(providers(undefined))
     harness = await mountProbe()

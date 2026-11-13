@@ -85,8 +85,9 @@ per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启
 
 回合的 compaction threshold 完全由模型上下文窗口推导，不再是可调配置：`wiring::limits_for_turn`
 按 `ark_llm::COMPACTION_TRIGGER_RATIO`（80%，与渲染层上下文环的警示水位一致）乘以窗口并预留条目
-`max_tokens`，未声明窗口时回退到保守固定值（`model::FALLBACK_CONTEXT_LIMIT_TOKENS`）。已运行回合
-继续使用创建时快照；窗口未声明的模型不禁用压缩，而是落回固定预算，防止 prompt 无界增长。
+`max_tokens`；未声明窗口的模型按默认窗口 `ark_llm::DEFAULT_CONTEXT_WINDOW_TOKENS`（256K，与设置页
+模型清单的兜底一致）推导，压缩不被禁用。已运行回合继续使用创建时快照；阈值始终存在，防止 prompt
+无界增长。
 
 会话标题自动生成经 `TitleModelAdapter`（`base.rs`）注入 `BaseServices::title_model`：它复用
 `resolve(None)` 的存活 provider 与 `select_from_config` 的同一计量 client，构造无工具、低温度、
