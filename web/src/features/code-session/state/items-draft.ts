@@ -13,7 +13,7 @@
  * object, so the row memo still bails out.
  */
 import type { ItemId, ThreadItem, TurnId, TurnState } from '../../../shared/contracts'
-import type { ChildCompletionNotice, CompactionNotice, ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput, RoundWindow, UsageAggregate } from './types'
+import type { ChildCompletionNotice, CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput, RoundWindow, UsageAggregate } from './types'
 
 export type ItemsDraft = {
   base: ItemsSnapshot
@@ -22,7 +22,6 @@ export type ItemsDraft = {
   turnState: Record<TurnId, TurnState> | null
   activeTurnId: TurnId | null
   lastSeq: number
-  errors: ErrorLine[] | null
   approvals: Record<string, PendingApproval> | null
   userInputs: Record<string, PendingUserInput> | null
   childCompletions: Record<string, ChildCompletionNotice> | null
@@ -43,7 +42,6 @@ export function draftOf(base: ItemsSnapshot): ItemsDraft {
     turnState: null,
     activeTurnId: base.activeTurnId,
     lastSeq: base.lastSeq,
-    errors: null,
     approvals: null,
     userInputs: null,
     childCompletions: null,
@@ -72,11 +70,6 @@ export function draftTurnState(draft: ItemsDraft): Record<TurnId, TurnState> {
   return draft.turnState
 }
 
-export function draftErrors(draft: ItemsDraft): ErrorLine[] {
-  draft.errors ??= [...draft.base.errors]
-  return draft.errors
-}
-
 export function draftApprovals(draft: ItemsDraft): Record<string, PendingApproval> {
   draft.approvals ??= { ...draft.base.approvals }
   return draft.approvals
@@ -100,7 +93,6 @@ export function commitDraft(draft: ItemsDraft): ItemsSnapshot {
     turnState: draft.turnState ?? base.turnState,
     activeTurnId: draft.activeTurnId,
     lastSeq: draft.lastSeq,
-    errors: draft.errors ?? base.errors,
     approvals: draft.approvals ?? base.approvals,
     userInputs: draft.userInputs ?? base.userInputs,
     childCompletions: draft.childCompletions ?? base.childCompletions,

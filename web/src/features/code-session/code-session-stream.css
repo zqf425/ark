@@ -77,14 +77,6 @@
   color: var(--ark-error);
 }
 
-.ark-stream__errors {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border-top: 1px dashed var(--ark-border-muted);
-  padding-top: 8px;
-}
-
 /* ---------- empty-state hero ---------- */
 
 .ark-stream__emptycall {

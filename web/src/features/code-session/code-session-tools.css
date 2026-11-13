@@ -173,21 +173,3 @@
   font-size: 12px;
   padding: 2px 0;
 }
-
-.ark-errorline {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  font-size: 11.5px;
-}
-
-.ark-errorline__code {
-  color: var(--ark-error);
-  flex: none;
-  font-family: var(--ark-mono);
-}
-
-.ark-errorline__message {
-  color: var(--ark-text-dim);
-  word-break: break-word;
-}

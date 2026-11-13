@@ -10,6 +10,12 @@
 结果（output/ok/duration_ms）内嵌在该条目的 tool payload 中，不会产生独立的 `ToolResult` 条目。
 下游（如组合根的回合种子回放）必须按此折叠形状消费，不得假设两条目配对。
 
+终态 `TurnFailed` 事件同样由条目投影折叠：每个失败的回合产出一个 `error` 条目（确定性 id
+`turn_failed:{turn_id}`，`status=failed`，text 为失败原因，归属该回合），这是渲染器在**中断处**
+内联展示失败原因的唯一数据源，live 流与重启/压缩后的回放因此渲染一致。`TurnAborted` 不投影条目
+（主动中断无失败语义）。`Error` 事件仍按 `error:{seq}` 投影为独立条目，`transient_retry` 只进
+事件日志，不投影渲染行。
+
 `items.jsonl` 一行是带水位的条目快照：快照本体加上它已覆盖的事件区间（`first_seq` 决定渲染顺序，
 `watermark_seq` 是已折叠进快照的最后一个事件序号）。流式 delta 事件**不追加行**——每行携带累计全文，
 逐片段写行会使文件随回复长度呈二次方放大；读路径从行快照起投影，仅重放各条目水位之后的 delta。
