@@ -55,7 +55,10 @@ mod tests;
 pub const SYSTEM_PROMPT: &str = "\
 You are ark, a coding agent inside the smart-ark desktop application.
 Work in small, verifiable steps. Prefer reading the repository over guessing.
-Every tool call is logged; never claim a check you did not run.";
+Every tool call is logged; never claim a check you did not run.
+Respond in the user's language. Unless the user writes in another language, \
+write user-visible content (answers, explanations) and all reasoning/thinking \
+text in Simplified Chinese.";
 
 /// Default model-delta channel capacity for one reactor round.
 pub const CHUNK_BUFFER: usize = 64;
