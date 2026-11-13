@@ -64,6 +64,11 @@ pub struct ThreadSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(as = "Option<f64>")]
     pub inherited_item_count: Option<u32>,
+    /// Thread's resolved workspace override, so the renderer can group threads
+    /// into projects without one detail request per row. `None` means the
+    /// thread follows the global default workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
     #[serde(default)]
     pub archived: bool,
 }

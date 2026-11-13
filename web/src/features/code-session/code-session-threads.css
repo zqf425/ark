@@ -262,6 +262,97 @@
   font: inherit;
 }
 
+/* ---------- project groups (smart-ark 风格：项目 → 会话) ---------- */
+
+.ark-projectgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ark-projectgroup__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 6px 9px;
+  border-radius: var(--ark-radius-sm);
+  color: var(--ark-text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ark-projectgroup__head:hover {
+  background: var(--ark-sidebar-row-hover);
+  color: var(--ark-text);
+}
+
+.ark-projectgroup__head:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: 1px;
+}
+
+.ark-projectgroup__head svg {
+  flex: none;
+  color: var(--ark-text-faint);
+}
+
+.ark-projectgroup__label {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--ark-text);
+}
+
+.ark-projectgroup__parent {
+  flex: none;
+  max-width: 20%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ark-text-faint);
+  font-size: 11px;
+}
+
+.ark-projectgroup__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.ark-projectgroup__hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ark-text-faint);
+  font-size: 10.5px;
+  direction: rtl;
+}
+
+.ark-projectgroup__count {
+  flex: none;
+  color: var(--ark-text-faint);
+  font-size: 10.5px;
+}
+
+/* Sessions sit slightly indented under their project, mirroring smart-ark. */
+.ark-projectgroup__threads {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 14px;
+}
+
 /* ---------- search + scope ---------- */
 
 .ark-threadlist__controls {

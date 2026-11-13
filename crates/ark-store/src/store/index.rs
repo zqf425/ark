@@ -50,6 +50,11 @@ pub struct IndexEntry {
     pub fork_at_seq: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inherited_item_count: Option<u32>,
+    /// Workspace override, mirrored from `thread.json` for the same reason as
+    /// the fork fields: the list endpoint groups threads by project without
+    /// reopening every metadata file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
 }
 
 impl IndexEntry {
@@ -73,6 +78,7 @@ impl IndexEntry {
             forked_from: None,
             fork_at_seq: None,
             inherited_item_count: None,
+            workspace: None,
         }
     }
 }

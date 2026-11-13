@@ -597,6 +597,7 @@ mod tests {
                 forked_from: None,
                 fork_at_seq: None,
                 inherited_item_count: None,
+                workspace: None,
                 archived: false,
             },
             items: Vec::new(),

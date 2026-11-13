@@ -18,4 +18,10 @@ fork_at_seq?: number,
  * The canvas folds exactly this prefix so a fork never looks like a
  * duplicate of its source.
  */
-inherited_item_count?: number, archived: boolean, };
+inherited_item_count?: number, 
+/**
+ * Thread's resolved workspace override, so the renderer can group threads
+ * into projects without one detail request per row. `None` means the
+ * thread follows the global default workspace.
+ */
+workspace?: string, archived: boolean, };

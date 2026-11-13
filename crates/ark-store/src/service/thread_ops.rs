@@ -195,7 +195,12 @@ fn entry_to_meta(entry: &IndexEntry) -> ThreadMeta {
         created_at: entry.created_at.unwrap_or(entry.updated_at),
         updated_at: entry.updated_at,
         archived: entry.archived,
-        runtime: ark_contract::ThreadRuntimeSettings::default(),
+        // The mirror keeps the list's project grouping in step with
+        // `thread.json` without reopening every metadata file.
+        runtime: ark_contract::ThreadRuntimeSettings {
+            workspace: entry.workspace.clone(),
+            ..Default::default()
+        },
         forked_from: entry.forked_from,
         fork_at_seq: entry.fork_at_seq,
         inherited_item_count: entry.inherited_item_count,

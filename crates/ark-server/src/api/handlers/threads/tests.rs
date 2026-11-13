@@ -164,7 +164,10 @@ fn summary_mapping_carries_watermark_and_fork_provenance() {
         created_at: Utc::now(),
         updated_at: Utc::now(),
         archived: false,
-        runtime: ark_contract::ThreadRuntimeSettings::default(),
+        runtime: ark_contract::ThreadRuntimeSettings {
+            workspace: Some("/tmp/project".into()),
+            ..Default::default()
+        },
         forked_from: Some(source),
         fork_at_seq: Some(12),
         inherited_item_count: Some(5),
@@ -175,6 +178,7 @@ fn summary_mapping_carries_watermark_and_fork_provenance() {
     assert_eq!(summary.forked_from, Some(source));
     assert_eq!(summary.fork_at_seq, Some(12));
     assert_eq!(summary.inherited_item_count, Some(5));
+    assert_eq!(summary.workspace.as_deref(), Some("/tmp/project"));
 }
 
 #[test]
@@ -787,8 +791,10 @@ async fn a_new_thread_seeds_the_configured_default_workspace() {
     let sessions =
         Arc::new(FileSessionStore::open(StoreConfig::new(dir.path())).expect("session store"));
     let store: Arc<dyn SessionStore> = sessions;
-    let mut config = RuntimeConfig::default();
-    config.default_workspace = Some(dir.path().to_path_buf());
+    let config = RuntimeConfig {
+        default_workspace: Some(dir.path().to_path_buf()),
+        ..Default::default()
+    };
     let state = AppState::new(
         store,
         Arc::new(EmptyTools),

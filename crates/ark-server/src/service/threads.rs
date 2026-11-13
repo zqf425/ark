@@ -54,6 +54,9 @@ pub fn summary_of(meta: &ThreadMeta) -> ThreadSummary {
         forked_from: meta.forked_from,
         fork_at_seq: meta.fork_at_seq,
         inherited_item_count: meta.inherited_item_count,
+        // The list groups threads into projects by workspace; `to_meta` fills
+        // this from `thread.json`, the index path mirrors it for list rows.
+        workspace: meta.runtime.workspace.clone(),
         archived: meta.archived,
     }
 }

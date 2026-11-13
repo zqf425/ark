@@ -6,7 +6,8 @@ import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../state/store'
 import { useThreadList } from '../hooks/use-thread-list'
 import { exportThread } from '../api/threads-api'
-import { filterThreads, type ThreadListScope } from './thread-list-filter'
+import { filterThreadsWithWorkspace, type ThreadListScope } from './thread-list-filter'
+import { groupThreadsByProject, type ThreadProject } from './thread-projects'
 import { ScheduleCreateDialog } from './ScheduleCreateDialog'
 
 function ThreadRow({
@@ -208,10 +209,36 @@ export function ThreadListPanel(): JSX.Element {
   const [query, setQuery] = useState('')
   /** The scheduled-task entry opens a dialog; the rail itself never navigates. */
   const [scheduleOpen, setScheduleOpen] = useState(false)
-  const visibleThreads = useMemo(() => filterThreads(threads, query, scope), [threads, query, scope])
+  /** Collapsed project paths; the default group starts expanded with the rest. */
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const visibleThreads = useMemo(
+    () => filterThreadsWithWorkspace(threads, query, scope),
+    [threads, query, scope]
+  )
+  const groups = useMemo(() => {
+    const { default: fallback, projects } = groupThreadsByProject(visibleThreads)
+    const list: ThreadProject[] = []
+    if (fallback.threads.length > 0) {
+      list.push({ ...fallback, label: t('thread.list.defaultProject') })
+    }
+    // Groups are built from already-filtered rows, so every group has at least
+    // one matching thread; the header itself must not be filtered by the
+    // needle or a title hit would hide its project.
+    list.push(...projects)
+    return list
+  }, [visibleThreads, t])
   const titlesById = useMemo(() => new Map(threads.map((row) => [row.thread_id as string, row.title])), [threads])
   const recentCount = useMemo(() => threads.filter((thread) => !thread.archived).length, [threads])
   const archivedCount = threads.length - recentCount
+
+  const toggleProject = (path: string): void => {
+    setCollapsed((previous) => {
+      const next = new Set(previous)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
 
   return (
     <aside className="ark-threadlist">
@@ -290,35 +317,82 @@ export function ThreadListPanel(): JSX.Element {
         ) : null}
 
         <ErrorBoundary label={t('thread.list.boundary')}>
-          <nav className="ark-threadlist__nav">
-            {visibleThreads.map((thread) => (
-              <ThreadRow
-                key={thread.thread_id}
-                thread={thread}
-                active={thread.thread_id === activeThreadId}
-                busy={busy}
-                sourceTitle={thread.forked_from ? titlesById.get(thread.forked_from) : undefined}
-                onSelect={() => select(thread.thread_id)}
-                onRename={async (title) => {
-                  await rename(thread.thread_id, title)
-                }}
-                onFork={async () => {
-                  await fork(thread.thread_id)
-                }}
-                onArchive={async () => {
-                  if (await archive(thread.thread_id)) setScope('archived')
-                }}
-                onRestore={async () => {
-                  if (await restore(thread.thread_id)) setScope('recent')
-                }}
-                onDelete={async () => {
-                  const name = thread.title || t('thread.row.untitled')
-                  if (window.confirm(t('thread.row.deleteConfirm', { title: name }))) {
-                    await remove(thread.thread_id)
-                  }
-                }}
-              />
-            ))}
+          <nav className="ark-threadlist__nav" aria-label={t('thread.list.projectsAria')}>
+            {groups.map((group) => {
+              const isCollapsed = collapsed.has(group.path)
+              return (
+                <section key={group.path || '__default__'} className="ark-projectgroup">
+                  <button
+                    type="button"
+                    className="ark-projectgroup__head"
+                    aria-expanded={!isCollapsed}
+                    aria-label={t('thread.list.groupToggle', { title: group.label })}
+                    onClick={() => toggleProject(group.path)}
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                      <path
+                        d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h9A1.5 1.5 0 0 1 21 10v7.5A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-10Z"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    <span className="ark-projectgroup__label" title={group.path || undefined}>
+                      {group.label}
+                    </span>
+                    {group.parent ? <span className="ark-projectgroup__parent">{group.parent}</span> : null}
+                    <span className="ark-projectgroup__meta">
+                      {group.path ? (
+                        <span
+                          className="ark-projectgroup__hint"
+                          title={group.path}
+                        >
+                          {group.path}
+                        </span>
+                      ) : (
+                        <span title={t('thread.list.defaultProjectHint')} />
+                      )}
+                      <span className="ark-projectgroup__count">
+                        {t('thread.list.groupCount', { count: group.threads.length })}
+                      </span>
+                    </span>
+                  </button>
+                  {!isCollapsed ? (
+                    <div className="ark-projectgroup__threads">
+                      {group.threads.map((thread) => (
+                        <ThreadRow
+                          key={thread.thread_id}
+                          thread={thread}
+                          active={thread.thread_id === activeThreadId}
+                          busy={busy}
+                          sourceTitle={thread.forked_from ? titlesById.get(thread.forked_from) : undefined}
+                          onSelect={() => select(thread.thread_id)}
+                          onRename={async (title) => {
+                            await rename(thread.thread_id, title)
+                          }}
+                          onFork={async () => {
+                            await fork(thread.thread_id)
+                          }}
+                          onArchive={async () => {
+                            if (await archive(thread.thread_id)) setScope('archived')
+                          }}
+                          onRestore={async () => {
+                            if (await restore(thread.thread_id)) setScope('recent')
+                          }}
+                          onDelete={async () => {
+                            const name = thread.title || t('thread.row.untitled')
+                            if (window.confirm(t('thread.row.deleteConfirm', { title: name }))) {
+                              await remove(thread.thread_id)
+                            }
+                          }}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              )
+            })}
           </nav>
         </ErrorBoundary>
       </div>

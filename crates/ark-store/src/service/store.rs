@@ -398,6 +398,7 @@ impl FileSessionStore {
         entry.forked_from = file.forked_from;
         entry.fork_at_seq = file.fork_at_seq;
         entry.inherited_item_count = file.inherited_item_count;
+        entry.workspace = file.workspace.clone();
         let mut index = self.lock_index()?;
         index.insert(entry);
         save_snapshot(&mut index, &self.paths.index_file())
