@@ -467,7 +467,7 @@ mod tests {
     async fn fetch_disables_redirect_following_for_the_ssrf_guard() {
         // A 3xx to a private host must never become a second connection: the
         // guard only resolved the first hop. Assert the per-request override.
-        let tool = WebFetchTool::new(Arc::new(RecordingHttp::default()));
+        let tool = WebFetchTool::new(Arc::new(RecordingHttp));
         let _ = tool
             .execute(
                 &ctx(),

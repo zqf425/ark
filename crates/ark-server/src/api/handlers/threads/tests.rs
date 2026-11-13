@@ -787,8 +787,10 @@ async fn a_new_thread_seeds_the_configured_default_workspace() {
     let sessions =
         Arc::new(FileSessionStore::open(StoreConfig::new(dir.path())).expect("session store"));
     let store: Arc<dyn SessionStore> = sessions;
-    let mut config = RuntimeConfig::default();
-    config.default_workspace = Some(dir.path().to_path_buf());
+    let config = RuntimeConfig {
+        default_workspace: Some(dir.path().to_path_buf()),
+        ..RuntimeConfig::default()
+    };
     let state = AppState::new(
         store,
         Arc::new(EmptyTools),
@@ -800,8 +802,14 @@ async fn a_new_thread_seeds_the_configured_default_workspace() {
     )
     .with_base_services(BaseServices::new().with_providers(Arc::new(Providers)));
 
-    let summary = crate::service::create_thread(&state, "seeded").await.expect("create");
-    let meta = state.store.get_thread(summary.thread_id).await.expect("thread");
+    let summary = crate::service::create_thread(&state, "seeded")
+        .await
+        .expect("create");
+    let meta = state
+        .store
+        .get_thread(summary.thread_id)
+        .await
+        .expect("thread");
     assert_eq!(
         meta.runtime.workspace.as_deref(),
         Some(dir.path().to_string_lossy().as_ref())
@@ -814,7 +822,13 @@ async fn without_a_default_workspace_a_new_thread_stays_unset() {
     let data_dir = dir.path().to_path_buf();
     let state = state(&data_dir);
 
-    let summary = crate::service::create_thread(&state, "plain").await.expect("create");
-    let meta = state.store.get_thread(summary.thread_id).await.expect("thread");
+    let summary = crate::service::create_thread(&state, "plain")
+        .await
+        .expect("create");
+    let meta = state
+        .store
+        .get_thread(summary.thread_id)
+        .await
+        .expect("thread");
     assert_eq!(meta.runtime.workspace, None);
 }
