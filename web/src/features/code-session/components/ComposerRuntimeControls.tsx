@@ -245,6 +245,17 @@ export function WorkspacePicker({ threadId }: { threadId: string | null }): JSX.
   }, [threadId])
 
   useEffect(() => {
+    // The pill label falls back to the host's active workspace when this
+    // thread has no override (that is exactly what a turn resolves), so load
+    // the view as soon as a thread is selected — not only when the menu opens.
+    let active = true
+    void getWorkspaceView()
+      .then((value) => { if (active) setView(value) })
+      .catch(() => { /* the label then falls back to （未设置） */ })
+    return () => { active = false }
+  }, [threadId])
+
+  useEffect(() => {
     if (!open) return
     let active = true
     void getWorkspaceView().then((value) => {
