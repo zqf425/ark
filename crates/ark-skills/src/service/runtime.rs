@@ -20,7 +20,7 @@ use ark_contract::{
     ThreadSkillsResponse,
 };
 
-use crate::config::{expand_home, SkillsConfig};
+use crate::config::{default_roots, expand_home, SkillsConfig};
 use crate::domain::skill::{path_display, LoadedSkill};
 use crate::service::activation::{self, Match};
 use crate::service::catalog::{fit_to_budget, render_catalog};
@@ -320,16 +320,19 @@ impl SkillRuntime {
 
     /// Roots that actually take part in a scan.
     ///
-    /// Configured roots are always included, so a typo surfaces as a warning.
-    /// Workspace-relative defaults are dropped when the directory is absent:
-    /// most workspaces have no `skills/` directory at all, and reporting that on
-    /// every `GET /v1/skills` would be noise rather than signal.
+    /// Configured roots are always included, so a typo surfaces as a warning —
+    /// except the conventional default roots (`~/.arkd/skills`,
+    /// `~/.agents/skills`), which most users will not have created; dropping
+    /// those when absent keeps every `GET /v1/skills` free of noise. Explicit
+    /// `extra_dirs` and workspace-relative defaults follow the existing rules:
+    /// extra roots always scan, workspace dirs only when they exist.
     fn scanned_roots(&self, config: &SkillsConfig) -> Vec<PathBuf> {
         let all = config.base_roots(&self.workspace);
         let optional: Vec<PathBuf> = config
             .workspace_dirs
             .iter()
             .map(|dir| expand_home(&self.workspace.join(dir.trim())))
+            .chain(default_roots())
             .collect();
         all.into_iter()
             .filter(|root| !optional.iter().any(|seen| seen == root) || root.is_dir())

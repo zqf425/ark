@@ -14,8 +14,11 @@
 Skill 是提示词和工具使用说明资产，不是第二个 agent 或任意代码执行通道。激活结果通过端口和契约
 提供给回合构建；路径扩展、长度和数量都受 `SkillsConfig` 约束。
 
-生产组合根把 `RuntimePaths.skills`（默认 `<root>/skills`）作为第一个全局扫描根，
-而不是在 crate 内重新推导 home；配置中的 `extra_dirs` 和工作区相对目录继续按既有顺序追加。
+生产组合根把 `RuntimePaths.skills`（默认 `<root>/skills`，即 `~/.arkd/skills`）作为第一个全局
+扫描根，共享约定根 `~/.agents/skills` 紧随其后（两者都来自 `ark_skills::default_roots()`，
+在目录不存在时静默跳过、不产生 warning），而不是在 crate 内重新推导 home；配置中的
+`extra_dirs` 和工作区相对目录继续按既有顺序追加。`SkillsConfig::default()` 的 roots 与该
+共享辅助函数一致，非组合根场景（嵌入方）拿到同样的默认目录集合。
 
 技能发现有两个配置面（`config.json` 的 `skills` 段，Hot 类）：`enabled` 总开关（关闭时所有
 skills 视图为空）与 `extra_dirs` 额外扫描根（绝对路径或 `~` 前缀，最多 16 个；工作区相对目录不可

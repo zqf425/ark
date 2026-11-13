@@ -64,7 +64,7 @@ export const SETTINGS_INTEGRATIONS_MESSAGES = {
   'settings.skills.configEnabled': ['启用技能发现', 'Enable skill discovery'],
   'settings.skills.configEnabledHint': ['关闭后所有 skills 视图为空，模型收不到技能目录。', 'When off, every skills view is empty and the model receives no catalog.'],
   'settings.skills.extraDirs': ['额外扫描目录（每行一个）', 'Extra scan roots (one per line)'],
-  'settings.skills.extraDirsHint': ['绝对路径或以 ~ 开头；最多 {max} 个。工作区内的 .agents/skills 与 skills 始终扫描。', 'Absolute or ~-prefixed paths; up to {max}. The workspace .agents/skills and skills directories are always scanned.'],
+  'settings.skills.extraDirsHint': ['绝对路径或以 ~ 开头；最多 {max} 个。全局默认扫描 ~/.arkd/skills 与 ~/.agents/skills，工作区内的 .agents/skills 与 skills 始终扫描。', 'Absolute or ~-prefixed paths; up to {max}. The global defaults ~/.arkd/skills and ~/.agents/skills plus the workspace .agents/skills and skills directories are always scanned.'],
   'settings.skills.extraDirsPlaceholder': ['/Users/me/my-skills', '/Users/me/my-skills'],
   'settings.skills.extraDirsTooMany': ['额外目录超过 {max} 个上限', 'More than {max} extra roots'],
   'settings.skills.saveFailed': ['保存技能配置失败', 'Failed to save the skills config'],

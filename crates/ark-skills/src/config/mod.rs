@@ -13,6 +13,33 @@ pub const DEFAULT_INSTRUCTION_BUDGET_BYTES: usize = 24_000;
 /// Default budget for the rendered skill catalog.
 pub const DEFAULT_CATALOG_BUDGET_BYTES: usize = 8_000;
 
+/// The app's own skill root (`~/.arkd/skills`), in precedence order before the
+/// shared convention.
+///
+/// Own home root, separate from smart-ark's `.ark`, so the two runtimes never
+/// discover or write each other's skills. A convention directory: silently
+/// skipped when absent instead of reporting a warning on every scan.
+pub fn own_skills_root() -> PathBuf {
+    home_dir().join(".arkd").join("skills")
+}
+
+/// The shared cross-tool skill convention (`~/.agents/skills`).
+///
+/// Also a convention directory: silently skipped when absent. The production
+/// composition root appends this after its `RuntimePaths.skills` root.
+pub fn shared_skills_root() -> PathBuf {
+    home_dir().join(".agents").join("skills")
+}
+
+/// Absolute default scan roots, in precedence order: [`own_skills_root`] then
+/// [`shared_skills_root`].
+///
+/// [`SkillsConfig::default`] seeds `roots` from this, so embedders without a
+/// composition root get the same directory set as the production runtime.
+pub fn default_roots() -> Vec<PathBuf> {
+    vec![own_skills_root(), shared_skills_root()]
+}
+
 /// Skill discovery and activation configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillsConfig {
@@ -34,9 +61,9 @@ impl Default for SkillsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            // Own home root (`.arkd`), separate from smart-ark's `.ark`, so the
-            // two runtimes never discover or write each other's skills.
-            roots: vec![home_dir().join(".arkd").join("skills")],
+            // Conventional defaults, shared with `default_roots()` so the
+            // "skip when absent" rule and the default list never drift.
+            roots: default_roots(),
             workspace_dirs: vec![".agents/skills".to_string(), "skills".to_string()],
             active_limit: DEFAULT_ACTIVE_LIMIT,
             instruction_budget_bytes: DEFAULT_INSTRUCTION_BUDGET_BYTES,
@@ -147,9 +174,13 @@ mod tests {
         assert_eq!(config.instruction_budget_bytes, 24_000);
         assert_eq!(config.catalog_budget_bytes, 8_000);
         assert_eq!(config.workspace_dirs, vec![".agents/skills", "skills"]);
-        assert_eq!(config.roots.len(), 1);
-        // 默认技能根必须落在本应用自己的 `.arkd` 主目录下，不得回退到 smart-ark 的 `.ark`。
-        assert_eq!(config.roots[0], home_dir().join(".arkd").join("skills"));
+        // 默认技能根：本应用自有 `.arkd` 主目录 + 共享的 `.agents` 约定目录。
+        assert_eq!(config.roots, default_roots());
+        assert_eq!(config.roots.len(), 2);
+        // 自有根必须落在本应用自己的 `.arkd` 主目录下，不得回退到 smart-ark 的 `.ark`。
+        assert_eq!(config.roots[0], own_skills_root());
+        // 共享约定根固定为家目录下的 `.agents/skills`。
+        assert_eq!(config.roots[1], shared_skills_root());
     }
 
     #[test]
