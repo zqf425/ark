@@ -104,6 +104,16 @@
   overflow-wrap: anywhere;
 }
 
+/* Workspace read-only value fills the row next to the change button. */
+.ark-settings__code--fill {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  background: var(--ark-bg-inset);
+  border: 1px solid var(--ark-border-muted);
+  border-radius: 5px;
+}
+
 /* ---------- fields (smart-ark control: rounded-xl + accent focus ring) ---- */
 
 .ark-field {

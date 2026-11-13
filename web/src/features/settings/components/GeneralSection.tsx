@@ -147,44 +147,27 @@ function DefaultModelPicker({ providers }: { providers: ProvidersApi }): JSX.Ele
   )
 }
 
-/** Workspace input + validate + status probe. */
+/** Read-only workspace display + single change button (native folder picker). */
 function WorkspaceEditor({ initial, onSave, saving }: { initial: string; onSave: (value: string) => Promise<void>; saving: boolean }): JSX.Element {
   const { t } = useI18n()
   const toast = useToast()
   const probe = useWorkspaceProbe()
-  const [draft, setDraft] = useState(initial)
-  const [validating, setValidating] = useState(false)
   const [browsing, setBrowsing] = useState(false)
   const desktop = isDesktopShell()
 
-  // Config reloads (e.g. after a save) must not fight with an in-progress edit:
-  // only adopt the new value when the field is untouched.
+  // The stored default wins over any earlier probe result; refresh it on mount
+  // and after every save so the status card tracks the actual config value.
   useEffect(() => {
-    setDraft((current) => (current.trim() === '' ? initial : current))
-  }, [initial])
-
-  const validate = async (): Promise<void> => {
-    const path = draft.trim()
-    if (!path) {
-      toast.push('error', t('settings.general.workspace.emptyPath'))
-      return
-    }
-    setValidating(true)
-    const outcome = await probe.validate(path)
-    setValidating(false)
-    if (outcome.ok) toast.push('success', t('settings.general.workspace.validateOk'), outcome.value.path)
-    else toast.push('error', t('settings.general.workspace.validateFailed'), describeOutcome(outcome))
-  }
+    const path = initial.trim()
+    if (path) void probe.probe(path)
+  }, [initial, probe])
 
   const browse = async (): Promise<void> => {
     setBrowsing(true)
     try {
       const folder = await pickFolder()
-      // null = cancelled or non-desktop environment: keep the current draft.
-      if (folder) {
-        setDraft(folder)
-        await onSave(folder)
-      }
+      // null = cancelled or non-desktop environment: keep the current value.
+      if (folder) await onSave(folder)
     } catch {
       toast.push('error', t('settings.general.workspace.pickFailed'))
     } finally {
@@ -193,32 +176,22 @@ function WorkspaceEditor({ initial, onSave, saving }: { initial: string; onSave:
   }
 
   const status = probe.status
+  const current = initial.trim()
 
   return (
     <>
-      <Field label={t('settings.general.workspace.label')} htmlFor="settings-workspace" hint={t('settings.general.workspace.hint')}>
+      <Field label={t('settings.general.workspace.label')} hint={t('settings.general.workspace.hint')}>
         <div className="ark-field__inline">
-          <input
-            id="settings-workspace"
-            className="ark-field__input"
-            value={draft}
-            spellCheck={false}
-            autoComplete="off"
-            placeholder={t('settings.general.workspace.placeholder')}
-            style={{ fontFamily: 'var(--ark-mono)', fontSize: 11.5 }}
-            onChange={(event) => setDraft(event.target.value)}
-          />
+          {current ? (
+            <code className="ark-settings__code ark-settings__code--fill">{current}</code>
+          ) : (
+            <span className="ark-settings__hint">{t('settings.general.workspace.unset')}</span>
+          )}
           {desktop ? (
             <Button size="sm" disabled={browsing || saving} onClick={() => void browse()}>
-              {browsing ? t('settings.general.workspace.browsing') : t('settings.general.workspace.browse')}
+              {browsing ? t('settings.general.workspace.browsing') : t('settings.general.workspace.change')}
             </Button>
           ) : null}
-          <Button size="sm" disabled={validating} onClick={() => void validate()}>
-            {validating ? t('settings.general.workspace.validating') : t('settings.general.workspace.validate')}
-          </Button>
-          <Button variant="primary" size="sm" disabled={saving} onClick={() => void onSave(draft.trim())}>
-            {saving ? t('settings.general.workspace.saving') : t('settings.general.workspace.save')}
-          </Button>
         </div>
       </Field>
 
@@ -265,9 +238,7 @@ function WorkspaceEditor({ initial, onSave, saving }: { initial: string; onSave:
           ]}
         />
       ) : (
-        <p className="ark-settings__hint">
-          {probe.loading ? t('settings.general.workspace.reading') : t('settings.general.workspace.probeHint')}
-        </p>
+        <p className="ark-settings__hint">{probe.loading ? t('settings.general.workspace.reading') : null}</p>
       )}
     </>
   )
@@ -350,11 +321,7 @@ export function GeneralSection({ settings, providers }: GeneralSectionProps): JS
           initial={config.default_workspace ?? ''}
           saving={saving === 'default_workspace'}
           onSave={(value) =>
-            savePatch(
-              { default_workspace: value },
-              'default_workspace',
-              value ? t('settings.general.workspace.saved') : t('settings.general.workspace.cleared')
-            )
+            savePatch({ default_workspace: value }, 'default_workspace', t('settings.general.workspace.updated'))
           }
         />
       ) : null}
