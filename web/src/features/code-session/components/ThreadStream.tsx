@@ -17,6 +17,7 @@ import {
   type TurnView
 } from '../state/selectors'
 import { TurnBlock } from './TurnBlock'
+import { LiveActivity } from './LiveActivity'
 import { ApprovalCard } from './ApprovalCard'
 import { ChildCompletionCard } from './ErrorRow'
 import { UserInputCard } from './UserInputCard'
@@ -294,6 +295,11 @@ export function ThreadStream({
           {userInputs.map((request) => (
             <UserInputCard key={request.request_id} request={request} onAnswered={answerInputLocally} />
           ))}
+
+          {/* Live mirror of the newest streaming item: the process card above
+              scrolls out of view, so "thinking vs stuck" is answered here. */}
+          <LiveActivity />
+
 
           {errors.length > 0 ? (
             <div className="ark-stream__errors">

@@ -70,6 +70,12 @@
   留在卡外。回合多于一个时在画布右缘提供逐回合跳转导航条。会话标题行提供「评审改动」
   （`POST /v1/threads/{id}/review`，同一 202 回合信封，进度走线程事件流）；会话列表行提供「导出」
   （`GET /v1/threads/{id}/export` 快照下载，blob 触发浏览器保存）。
+- 回合运行中，画布底部（注意力点）渲染一条实时活动行（`LiveActivity`）：镜像活跃回合最新的流式
+  item——reasoning 显示"思考中 + 已耗时 + 尾迹（约 140 字符）"，tool_call 显示"运行 {tool}"，其余流式
+  item 显示"正在生成"；数据完全来自已折叠的 item 投影（`activeTurnId` + 最新 streaming item），不新增
+  wire 契约、不与 Rust 双实现。动机：过程卡位于助手消息上方，画布自动吸底时它在视野外，纯思考阶段
+  画布毫无变化，健康流会被误读为卡死；该行让用户能实时感知推理方向并及时 steer。回合结束后随
+  `turnState` 离开 running 而消失，历史仍归过程卡。
 - 输入框「技能」面板消费线程级技能视图（`GET /v1/threads/{id}/skills`，合并 base/extra 并展示加载
   警告数，「重新扫描」调用 refresh 路由）；未选择线程时回落全局 `GET /v1/skills`。显式 `/id` 提及
   仍是唯一激活方式，不新增技能运行时字段。

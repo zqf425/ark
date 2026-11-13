@@ -346,3 +346,56 @@
   background: var(--ark-accent);
   width: 22px;
 }
+
+/* ---------- live activity row: the newest streaming item, mirrored at the
+   attention point. The work-process card keeps the durable history, but it
+   scrolls out of view while the canvas follows the bottom; during a pure
+   reasoning stretch this row is the only thing that visibly moves. ---------- */
+
+.ark-liveactivity {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+  padding: 2px 2px;
+  font-size: 12.5px;
+  color: var(--ark-text-dim);
+}
+
+.ark-liveactivity .ark-dot {
+  align-self: center;
+  flex: none;
+  width: 7px;
+  height: 7px;
+}
+
+.ark-liveactivity__label {
+  flex: none;
+  font-weight: 600;
+  color: var(--ark-accent);
+}
+
+.ark-liveactivity__meta {
+  flex: none;
+  font-family: var(--ark-mono);
+  font-size: 11px;
+  color: var(--ark-text-faint);
+}
+
+.ark-liveactivity__trail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ark-text-faint);
+  font-size: 12px;
+  animation: ark-trail-in 400ms ease;
+}
+
+@keyframes ark-trail-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
