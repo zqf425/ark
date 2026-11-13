@@ -217,6 +217,11 @@ export function seedFromItems(
  * reconnect watermark correct even for events the UI does not render.
  */
 export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnapshot {
+  // A frame at or below the seeded watermark is history the authoritative
+  // detail snapshot already contains. Folding it again appended the same text
+  // delta a second time and double-counted usage — the duplicated-message
+  // symptom. Drop it without allocating a new state object.
+  if (event.seq <= state.lastSeq) return state
   const draft = draftOf(state)
   if (event.seq > draft.lastSeq) draft.lastSeq = event.seq
   // Workbench panels subscribe to this revision instead of `lastSeq`: the

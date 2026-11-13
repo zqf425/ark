@@ -10,6 +10,7 @@ import {
   groupByTurn,
   hasLiveItems,
   recentErrors,
+  splitInheritedPrefix,
   userInputCards,
   type ItemView,
   type TurnGroup,
@@ -124,7 +125,23 @@ export function ThreadStream({
   const activeThread = useCodeSessionStore((s) => s.threads.find((thread) => thread.thread_id === threadId) ?? null)
 
   const itemView = useMemo<ItemView>(() => ({ itemOrder, itemsById }), [itemOrder, itemsById])
-  const turnView = useMemo<TurnView>(() => ({ itemOrder, itemsById, turnState }), [itemOrder, itemsById, turnState])
+  // A fork opens with a verbatim prefix of its source's transcript. Fold that
+  // prefix behind a disclosure control so the fork never reads as a second copy
+  // of the parent conversation; the rows stay one click away.
+  const inheritedCount = activeThread?.inherited_item_count ?? 0
+  const [showInherited, setShowInherited] = useState(false)
+  useEffect(() => {
+    setShowInherited(false)
+  }, [threadId])
+  const foldedCount = Math.min(inheritedCount, itemOrder.length)
+  const visibleItemView = useMemo<ItemView>(
+    () => (showInherited || foldedCount === 0 ? itemView : splitInheritedPrefix(itemView, foldedCount).visible),
+    [itemView, foldedCount, showInherited]
+  )
+  const turnView = useMemo<TurnView>(
+    () => ({ itemOrder: visibleItemView.itemOrder, itemsById: visibleItemView.itemsById, turnState }),
+    [visibleItemView, turnState]
+  )
 
   // Group identity is carried across recomputes so memoized turn blocks bail
   // out; the ref is a cache, not state (the result is a pure function of view).
@@ -143,7 +160,7 @@ export function ThreadStream({
   const userInputs = useMemo(() => userInputCards({ userInputs: userInputsById }), [userInputsById])
   const errors = useMemo(() => recentErrors(errorLines), [errorLines])
   const completions = useMemo(() => childCompletionNotices({ childCompletions: completionsById }), [completionsById])
-  const live = useMemo(() => hasLiveItems(itemView), [itemView])
+  const live = useMemo(() => hasLiveItems(visibleItemView), [visibleItemView])
 
   const { scrollRef, contentRef, atBottom, scrollToBottom } = useStickToBottom(threadId)
 
@@ -242,6 +259,19 @@ export function ThreadStream({
 
           {groups.length === 0 && detailStatus === 'ready' ? (
             <EmptyState title={t('canvas.emptyThreadTitle')} hint={t('canvas.emptyThreadHint')} />
+          ) : null}
+
+          {foldedCount > 0 ? (
+            <button
+              type="button"
+              className="ark-stream__inherited"
+              aria-expanded={showInherited}
+              onClick={() => setShowInherited((value) => !value)}
+            >
+              {showInherited
+                ? t('canvas.inherited.hide')
+                : t('canvas.inherited.show', { count: foldedCount })}
+            </button>
           ) : null}
 
           {groups.map((group) => (

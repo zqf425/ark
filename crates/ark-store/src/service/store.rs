@@ -395,6 +395,9 @@ impl FileSessionStore {
         entry.archived = file.archived;
         entry.parent_thread_id = file.parent_thread_id;
         entry.indexed_seq = indexed_seq;
+        entry.forked_from = file.forked_from;
+        entry.fork_at_seq = file.fork_at_seq;
+        entry.inherited_item_count = file.inherited_item_count;
         let mut index = self.lock_index()?;
         index.insert(entry);
         save_snapshot(&mut index, &self.paths.index_file())

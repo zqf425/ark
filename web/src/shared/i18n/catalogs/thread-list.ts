@@ -28,6 +28,8 @@ export const THREAD_LIST_MESSAGES = {
   'thread.row.untitled': ['未命名会话', 'Untitled thread'],
   'thread.row.menu': ['会话操作', 'Thread actions'],
   'thread.row.archived': ['已归档', 'Archived'],
+  'thread.row.forked': ['分叉会话', 'Forked thread'],
+  'thread.row.forkedFrom': ['分叉自 {title}', 'Forked from {title}'],
   'thread.row.rename': ['重命名', 'Rename'],
   'thread.row.fork': ['分叉', 'Fork'],
   'thread.row.restore': ['恢复', 'Restore'],

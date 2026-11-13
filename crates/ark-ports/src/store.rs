@@ -20,6 +20,16 @@ pub struct ThreadMeta {
     pub archived: bool,
     #[serde(default)]
     pub runtime: ThreadRuntimeSettings,
+    /// Provenance of a thread created by `fork_thread`; all `None` for a root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<ThreadId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_at_seq: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inherited_item_count: Option<u32>,
+    /// Durable event watermark, derived from the index/log (not `thread.json`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seq: Option<u64>,
 }
 
 /// Authoritative child-run record, appended to `children/runs.jsonl`.

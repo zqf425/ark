@@ -13,12 +13,25 @@ use ark_contract::{RuntimeEvent, ThreadItem};
 use ark_ports::{ChildRunRecord, SessionStore, SubscribeTicket, ThreadMeta};
 
 impl FileSessionStore {
+    /// Attach the derived event watermark to a metadata row.
+    ///
+    /// `ThreadFile::to_meta` is a pure domain mapping and cannot see the index;
+    /// the store fills in `last_seq` so every `SessionStore` result (list, get,
+    /// rename, archive, runtime, fork) carries the same durable watermark. The
+    /// server maps that straight onto `ThreadSummary`, which is what the SSE
+    /// client uses as `since_seq`.
+    fn meta_with_seq(&self, file: &ThreadFile) -> Result<ThreadMeta> {
+        let mut meta = file.to_meta();
+        meta.last_seq = Some(self.highest_seq_of(file.thread_id)?);
+        Ok(meta)
+    }
+
     /// Create the thread directory, the metadata file and the index row.
     pub(crate) fn create_thread_blocking(&self, title: &str) -> Result<ThreadMeta> {
         let file = ThreadFile::new(ThreadId::new(), title);
         self.create_thread_dir(&file)?;
         self.index_upsert(&file, 0)?;
-        Ok(file.to_meta())
+        self.meta_with_seq(&file)
     }
 
     /// Threads from the index, active first then most recently updated.
@@ -37,7 +50,7 @@ impl FileSessionStore {
         file.touch();
         crate::store::fs_util::write_json_atomic(&self.thread_paths(thread).thread_json(), &file)?;
         self.index_upsert(&file, self.highest_seq_of(thread)?)?;
-        Ok(file.to_meta())
+        self.meta_with_seq(&file)
     }
 
     pub(crate) fn set_archived_blocking(
@@ -50,7 +63,7 @@ impl FileSessionStore {
         file.touch();
         crate::store::fs_util::write_json_atomic(&self.thread_paths(thread).thread_json(), &file)?;
         self.index_upsert(&file, self.highest_seq_of(thread)?)?;
-        Ok(file.to_meta())
+        self.meta_with_seq(&file)
     }
 
     pub(crate) fn set_thread_runtime_blocking(
@@ -67,7 +80,7 @@ impl FileSessionStore {
         file.touch();
         crate::store::fs_util::write_json_atomic(&self.thread_paths(thread).thread_json(), &file)?;
         self.index_upsert(&file, self.highest_seq_of(thread)?)?;
-        Ok(file.to_meta())
+        self.meta_with_seq(&file)
     }
 
     /// Highest durable `seq` for a metadata refresh: the index watermark first,
@@ -106,7 +119,8 @@ impl FileSessionStore {
             )));
         }
         let target = ThreadId::new();
-        let forked = source.forked_from(target);
+        let mut forked = source.forked_from(target);
+        forked.fork_at_seq = Some(upto_seq);
         let paths = self.create_thread_dir(&forked)?;
         let mut body = String::new();
         for event in &events {
@@ -114,9 +128,16 @@ impl FileSessionStore {
             body.push_str(&crate::store::event_log::encode_event(&retargeted)?);
         }
         crate::store::fs_util::write_atomic(&paths.events_jsonl(), body.as_bytes())?;
-        crate::store::items_log::rebuild_items_blocking(&paths)?;
+        // The copied events project to a render prefix. Record its size so the
+        // canvas can fold exactly these inherited rows instead of presenting the
+        // fork as a second copy of the whole source transcript.
+        let inherited = crate::store::items_log::rebuild_items_blocking(&paths)?;
+        forked.inherited_item_count = Some(inherited.len() as u32);
+        crate::store::fs_util::write_json_atomic(&paths.thread_json(), &forked)?;
         self.index_upsert(&forked, upto_seq)?;
-        Ok(forked.to_meta())
+        let mut meta = forked.to_meta();
+        meta.last_seq = Some(upto_seq);
+        Ok(meta)
     }
 
     /// Append a child-run record and refresh the derived child index.
@@ -175,6 +196,13 @@ fn entry_to_meta(entry: &IndexEntry) -> ThreadMeta {
         updated_at: entry.updated_at,
         archived: entry.archived,
         runtime: ark_contract::ThreadRuntimeSettings::default(),
+        forked_from: entry.forked_from,
+        fork_at_seq: entry.fork_at_seq,
+        inherited_item_count: entry.inherited_item_count,
+        // The index watermark is the durable event high-water mark. Exposing it
+        // here keeps the list watermark in step with the detail watermark, so an
+        // SSE subscribe never replays history the canvas already seeded.
+        last_seq: Some(entry.indexed_seq),
     }
 }
 
@@ -189,7 +217,7 @@ impl SessionStore for FileSessionStore {
     }
 
     async fn get_thread(&self, thread: ThreadId) -> Result<ThreadMeta> {
-        Ok(self.require_thread_file(thread)?.to_meta())
+        self.meta_with_seq(&self.require_thread_file(thread)?)
     }
 
     async fn rename_thread(&self, thread: ThreadId, title: &str) -> Result<ThreadMeta> {

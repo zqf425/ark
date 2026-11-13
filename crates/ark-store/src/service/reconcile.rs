@@ -197,6 +197,9 @@ fn rebuild_entry(
     entry.updated_at = item.file.updated_at;
     entry.archived = item.file.archived;
     entry.indexed_seq = item.facts.max_seq;
+    entry.forked_from = item.file.forked_from;
+    entry.fork_at_seq = item.file.fork_at_seq;
+    entry.inherited_item_count = item.file.inherited_item_count;
     entry.status = crate::store::fs_util::read_json_opt::<SessionState>(&item.paths.session_json())
         .map(|state| state.status.as_str().to_string())
         .unwrap_or_else(|| "idle".to_string());

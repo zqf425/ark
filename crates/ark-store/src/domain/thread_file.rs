@@ -34,6 +34,15 @@ pub struct ThreadFile {
     pub autonomy: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Set on a fork: source thread, the source `seq` it was cut at, and how
+    /// many leading render items were copied. Let the canvas fold that prefix
+    /// instead of showing the parent's whole transcript twice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<ThreadId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_at_seq: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inherited_item_count: Option<u32>,
 }
 
 impl ThreadFile {
@@ -51,6 +60,9 @@ impl ThreadFile {
             model: None,
             autonomy: None,
             reasoning_effort: None,
+            forked_from: None,
+            fork_at_seq: None,
+            inherited_item_count: None,
         }
     }
 
@@ -78,6 +90,11 @@ impl ThreadFile {
                 autonomy: self.autonomy.clone(),
                 reasoning_effort: self.reasoning_effort.clone(),
             },
+            forked_from: self.forked_from,
+            fork_at_seq: self.fork_at_seq,
+            inherited_item_count: self.inherited_item_count,
+            // Derived from the event log/index, never stored in `thread.json`.
+            last_seq: None,
         }
     }
 
@@ -94,6 +111,9 @@ impl ThreadFile {
             model: None,
             autonomy: None,
             reasoning_effort: None,
+            forked_from: None,
+            fork_at_seq: None,
+            inherited_item_count: None,
         }
     }
 
@@ -112,6 +132,9 @@ impl ThreadFile {
             model: self.model.clone(),
             autonomy: self.autonomy.clone(),
             reasoning_effort: self.reasoning_effort.clone(),
+            forked_from: Some(self.thread_id),
+            fork_at_seq: None,
+            inherited_item_count: None,
         }
     }
 }
@@ -165,6 +188,7 @@ mod tests {
         assert_eq!(forked.thread_id, fork_id);
         assert_eq!(forked.model.as_deref(), Some("deepseek-chat"));
         assert_eq!(forked.title, "parent");
+        assert_eq!(forked.forked_from, Some(file.thread_id));
     }
 
     #[test]

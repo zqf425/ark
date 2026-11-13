@@ -20,6 +20,8 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.emptyThreadTitle': ['会话为空', 'Empty thread'],
   'canvas.emptyThreadHint': ['在下方输入框发送第一条消息。', 'Send the first message from the composer below.'],
   'canvas.jumpToLatest': ['跳到最新', 'Jump to latest'],
+  'canvas.inherited.show': ['展开 {count} 条继承消息', 'Show {count} inherited messages'],
+  'canvas.inherited.hide': ['收起继承消息', 'Hide inherited messages'],
 
   'canvas.process.title': ['执行过程', 'Work in progress'],
   'canvas.process.count': ['{count} 步', '{count} steps'],

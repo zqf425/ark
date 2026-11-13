@@ -27,6 +27,7 @@ export function useThreadStream(threadId: ThreadId | null): void {
   const setDetailStatus = useCodeSessionStore((s) => s.setDetailStatus)
   const setStreamStatus = useCodeSessionStore((s) => s.setStreamStatus)
   const noteThreadUsage = useCodeSessionStore((s) => s.noteThreadUsage)
+  const noteThreadSeq = useCodeSessionStore((s) => s.noteThreadSeq)
   // A rewind physically truncates history; bumping this token re-runs the whole
   // load + subscribe sequence from the fresh detail watermark.
   const reloadToken = useCodeSessionStore((s) => s.reloadToken)
@@ -59,6 +60,9 @@ export function useThreadStream(threadId: ThreadId | null): void {
         if (cancelled) return
         const watermark = detail.summary.last_seq ?? 0
         seedItems(detail.items, watermark, detail.child_completions, detail.runtime_snapshot)
+        // The detail watermark is authoritative; pull the rail row up to it in
+        // case the list was loaded before the newest events landed.
+        noteThreadSeq(threadId, watermark)
 
         // Usage history is event-folded server-side, not part of the item
         // stream; seed it once per load. Best effort: an unavailable counter
@@ -82,6 +86,17 @@ export function useThreadStream(threadId: ThreadId | null): void {
           onEvent: (event) => {
             if (cancelled) return
             ingestEvent(event)
+            // Delta events arrive once per streamed token; forwarding every
+            // seq would re-render the whole thread rail for each character.
+            // Milestones carry the newest seq, so the rail stays current
+            // without a render per token (`noteThreadSeq` is monotonic).
+            if (
+              event.thread_id === threadId &&
+              event.kind !== 'assistant_text_delta' &&
+              event.kind !== 'assistant_reasoning_delta'
+            ) {
+              noteThreadSeq(threadId, event.seq)
+            }
             // `thread_rewound` says the durable log was truncated and this seq
             // is a fresh, never-reused notification (docs/modules/ark-store.md).
             // Folding it is not enough: rows from the discarded suffix are gone
@@ -131,5 +146,5 @@ export function useThreadStream(threadId: ThreadId | null): void {
       controller.abort()
       setStreamStatus('closed')
     }
-  }, [threadId, reloadToken, ingestEvent, noteThreadUsage, requestStreamReload, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
+  }, [threadId, reloadToken, ingestEvent, noteThreadSeq, noteThreadUsage, requestStreamReload, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
 }

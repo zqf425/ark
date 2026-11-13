@@ -51,6 +51,19 @@ pub struct ThreadSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(as = "Option<f64>")]
     pub last_seq: Option<u64>,
+    /// Source thread when this thread is a fork; `None` for a root thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<ThreadId>,
+    /// Durable `seq` in the source log where the fork was cut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub fork_at_seq: Option<u64>,
+    /// Number of leading render items copied from the source at fork time.
+    /// The canvas folds exactly this prefix so a fork never looks like a
+    /// duplicate of its source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub inherited_item_count: Option<u32>,
     #[serde(default)]
     pub archived: bool,
 }

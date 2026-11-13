@@ -9,6 +9,8 @@ export type ThreadsSlice = {
   listError: string | null
   setThreads: (threads: ThreadSummary[]) => void
   upsertThread: (thread: ThreadSummary) => void
+  /** Monotonically advance one row's durable watermark from the live stream. */
+  noteThreadSeq: (threadId: ThreadId, seq: number) => void
   setActiveThread: (threadId: ThreadId | null) => void
   setListStatus: (status: LoadStatus, error?: string | null) => void
   removeThread: (threadId: ThreadId) => void
@@ -34,6 +36,21 @@ export const createThreadsSlice: StateCreator<ThreadsSlice, [], [], ThreadsSlice
     next[index] = thread
     set({ threads: next })
   },
+
+  /**
+   * Keep the rail's `last_seq` current without reordering rows. The list
+   * endpoint stays authoritative on refresh; this only avoids showing a stale
+   * number, and ignores stale/duplicate frames so it never rewinds the rail.
+   */
+  noteThreadSeq: (threadId, seq) => set((state) => {
+    const index = state.threads.findIndex((row) => row.thread_id === threadId)
+    if (index === -1) return {}
+    const row = state.threads[index]!
+    if (typeof row.last_seq === 'number' && row.last_seq >= seq) return {}
+    const next = [...state.threads]
+    next[index] = { ...row, last_seq: seq }
+    return { threads: next }
+  }),
 
   setActiveThread: (threadId) => set({ activeThreadId: threadId }),
 

@@ -36,7 +36,13 @@ pub fn summary_of(meta: &ThreadMeta) -> ThreadSummary {
         title: meta.title.clone(),
         created_at: meta.created_at,
         updated_at: meta.updated_at,
-        last_seq: None,
+        // The store derives the durable watermark from the index/log; the
+        // list, detail and fork rows must all carry it so the SSE client never
+        // subscribes from 0 and folds the seeded history a second time.
+        last_seq: meta.last_seq,
+        forked_from: meta.forked_from,
+        fork_at_seq: meta.fork_at_seq,
+        inherited_item_count: meta.inherited_item_count,
         archived: meta.archived,
     }
 }

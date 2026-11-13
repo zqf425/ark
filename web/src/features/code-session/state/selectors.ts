@@ -76,6 +76,27 @@ export function orderedItems(view: ItemView): ThreadItem[] {
   return rows
 }
 
+/**
+ * Split a fork's inherited prefix from the rows the canvas should render.
+ *
+ * `fork_thread` copies the source event `(0, fork_at_seq]`, so a fork opens
+ * with a verbatim prefix of its parent's transcript. `inherited_item_count`
+ * records exactly how many leading render rows that prefix produced. Folding
+ * those rows keeps a fork from looking like a duplicate of its source; the rows
+ * stay available behind a disclosure control in the canvas.
+ */
+export function splitInheritedPrefix(
+  view: ItemView,
+  count: number
+): { visible: ItemView; inheritedCount: number } {
+  const inheritedCount = Math.max(0, Math.min(count, view.itemOrder.length))
+  if (inheritedCount === 0) return { visible: view, inheritedCount: 0 }
+  return {
+    visible: { itemOrder: view.itemOrder.slice(inheritedCount), itemsById: view.itemsById },
+    inheritedCount
+  }
+}
+
 /** Both pending and resolved approvals stay visible for the current session. */
 export function approvalCards(view: Pick<ItemsSnapshot, 'approvals'>): PendingApproval[] {
   return Object.values(view.approvals).sort((a, b) => Date.parse(a.requested_at) - Date.parse(b.requested_at))

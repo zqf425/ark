@@ -136,11 +136,37 @@ fn summary_mapping_preserves_title_and_archive_flag() {
         updated_at: Utc::now(),
         archived: true,
         runtime: ark_contract::ThreadRuntimeSettings::default(),
+        forked_from: None,
+        fork_at_seq: None,
+        inherited_item_count: None,
+        last_seq: None,
     };
     let summary = summary_of(&meta);
     assert_eq!(summary.title, "hello");
     assert!(summary.archived);
     assert_eq!(summary.last_seq, None);
+}
+
+#[test]
+fn summary_mapping_carries_watermark_and_fork_provenance() {
+    let source = ThreadId::new();
+    let meta = ThreadMeta {
+        thread_id: ThreadId::new(),
+        title: "fork".into(),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        archived: false,
+        runtime: ark_contract::ThreadRuntimeSettings::default(),
+        forked_from: Some(source),
+        fork_at_seq: Some(12),
+        inherited_item_count: Some(5),
+        last_seq: Some(17),
+    };
+    let summary = summary_of(&meta);
+    assert_eq!(summary.last_seq, Some(17));
+    assert_eq!(summary.forked_from, Some(source));
+    assert_eq!(summary.fork_at_seq, Some(12));
+    assert_eq!(summary.inherited_item_count, Some(5));
 }
 
 #[test]

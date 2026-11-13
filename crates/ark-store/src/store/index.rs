@@ -42,6 +42,14 @@ pub struct IndexEntry {
     /// How far the projector has consumed this thread's event log.
     #[serde(default)]
     pub indexed_seq: u64,
+    /// Fork provenance, mirrored from `thread.json` so `list_threads` can
+    /// expose it without reopening every metadata file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<ThreadId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_at_seq: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inherited_item_count: Option<u32>,
 }
 
 impl IndexEntry {
@@ -62,6 +70,9 @@ impl IndexEntry {
             tokens_total: 0,
             path_rel: path_rel.into(),
             indexed_seq: 0,
+            forked_from: None,
+            fork_at_seq: None,
+            inherited_item_count: None,
         }
     }
 }

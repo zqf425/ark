@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { approvalCards, groupByTurn, hasLiveItems, userInputCards } from './selectors'
+import { approvalCards, groupByTurn, hasLiveItems, splitInheritedPrefix, userInputCards } from './selectors'
 import { emptyItemsState } from './items-reducer'
 
 describe('gate card selectors', () => {
@@ -114,5 +114,26 @@ describe('groupByTurn reference reuse', () => {
 
     expect(groups.map((group) => group.turnId)).toEqual([TURN_A, TURN_B])
     expect(hasLiveItems(baseView())).toBe(true)
+  })
+
+  it('只折叠分叉继承的前缀，保留其余行顺序', () => {
+    const view = baseView()
+    const { visible, inheritedCount } = splitInheritedPrefix(view, 1)
+
+    expect(inheritedCount).toBe(1)
+    expect(visible.itemOrder).toEqual([ITEM_B])
+    expect(visible.itemsById).toBe(view.itemsById)
+  })
+
+  it('没有继承项时返回原视图，不产生新对象', () => {
+    const view = baseView()
+    expect(splitInheritedPrefix(view, 0).visible).toBe(view)
+  })
+
+  it('继承数超过流长度时只折叠已有行', () => {
+    const { visible, inheritedCount } = splitInheritedPrefix(baseView(), 99)
+
+    expect(inheritedCount).toBe(2)
+    expect(visible.itemOrder).toEqual([])
   })
 })

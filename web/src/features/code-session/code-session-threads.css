@@ -168,6 +168,14 @@
   color: var(--ark-text-faint);
 }
 
+.ark-threadrow__fork {
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ark-accent);
+}
+
 .ark-threadrow__kebab {
   display: inline-flex;
   align-items: center;

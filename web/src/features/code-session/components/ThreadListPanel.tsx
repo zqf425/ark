@@ -13,6 +13,7 @@ function ThreadRow({
   thread,
   active,
   busy,
+  sourceTitle,
   onSelect,
   onRename,
   onArchive,
@@ -29,6 +30,8 @@ function ThreadRow({
   onRestore: () => Promise<void>
   onFork: () => Promise<void>
   onDelete: () => Promise<void>
+  /** Title of the source thread, when this row is a fork. */
+  sourceTitle?: string
 }): JSX.Element {
   const { t } = useI18n()
   const [editing, setEditing] = useState(false)
@@ -91,6 +94,14 @@ function ThreadRow({
           <span className="ark-threadrow__meta">
             <time>{formatRelative(thread.updated_at, t)}</time>
             {typeof thread.last_seq === 'number' ? <span>seq {thread.last_seq}</span> : null}
+            {thread.forked_from ? (
+              <span
+                className="ark-threadrow__fork"
+                title={sourceTitle ? t('thread.row.forkedFrom', { title: sourceTitle }) : t('thread.row.forked')}
+              >
+                {sourceTitle ? t('thread.row.forkedFrom', { title: sourceTitle }) : t('thread.row.forked')}
+              </span>
+            ) : null}
             {thread.archived ? <span>{t('thread.row.archived')}</span> : null}
           </span>
         </button>
@@ -198,6 +209,7 @@ export function ThreadListPanel(): JSX.Element {
   /** The scheduled-task entry opens a dialog; the rail itself never navigates. */
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const visibleThreads = useMemo(() => filterThreads(threads, query, scope), [threads, query, scope])
+  const titlesById = useMemo(() => new Map(threads.map((row) => [row.thread_id as string, row.title])), [threads])
   const recentCount = useMemo(() => threads.filter((thread) => !thread.archived).length, [threads])
   const archivedCount = threads.length - recentCount
 
@@ -285,6 +297,7 @@ export function ThreadListPanel(): JSX.Element {
                 thread={thread}
                 active={thread.thread_id === activeThreadId}
                 busy={busy}
+                sourceTitle={thread.forked_from ? titlesById.get(thread.forked_from) : undefined}
                 onSelect={() => select(thread.thread_id)}
                 onRename={async (title) => {
                   await rename(thread.thread_id, title)

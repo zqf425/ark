@@ -4,4 +4,18 @@ import type { ThreadId } from "./ThreadId";
 /**
  * One row of `GET /v1/threads`.
  */
-export type ThreadSummary = { thread_id: ThreadId, title: string, created_at: string, updated_at: string, last_seq?: number, archived: boolean, };
+export type ThreadSummary = { thread_id: ThreadId, title: string, created_at: string, updated_at: string, last_seq?: number, 
+/**
+ * Source thread when this thread is a fork; `None` for a root thread.
+ */
+forked_from?: ThreadId, 
+/**
+ * Durable `seq` in the source log where the fork was cut.
+ */
+fork_at_seq?: number, 
+/**
+ * Number of leading render items copied from the source at fork time.
+ * The canvas folds exactly this prefix so a fork never looks like a
+ * duplicate of its source.
+ */
+inherited_item_count?: number, archived: boolean, };

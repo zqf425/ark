@@ -49,6 +49,19 @@
   gap: inherit;
 }
 
+/* Disclosure control for a fork's inherited transcript prefix. */
+.ark-stream__inherited {
+  align-self: flex-start;
+  border: 1px dashed var(--ark-border-muted);
+  border-radius: var(--ark-radius-sm);
+  background: transparent;
+  color: var(--ark-text-faint);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
 .ark-turn {
   display: flex;
   flex-direction: column;

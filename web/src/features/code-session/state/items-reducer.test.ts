@@ -434,4 +434,45 @@ describe('items reducer workbench revision', () => {
     expect(state.workbenchRevision).toBe(2)
     expect(state.lastSeq).toBe(9)
   })
+
+  it('重放的旧 seq 增量不会把文本追加两次', () => {
+    const seeded = seedFromItems(
+      [{
+        item_id: ITEM,
+        turn_id: TURN,
+        kind: 'assistant_message',
+        status: 'streaming',
+        created_at: '2026-10-28T00:00:00Z',
+        text: 'a'
+      }],
+      5,
+      [],
+      { pending_approvals: [], pending_user_inputs: [] }
+    )
+    const replayed = applyEvent(seeded, {
+      kind: 'assistant_text_delta',
+      ...base,
+      seq: 3,
+      turn_id: TURN,
+      item_id: ITEM,
+      delta: 'b'
+    })
+
+    expect(replayed).toBe(seeded)
+    expect(replayed.itemsById[ITEM]?.text).toBe('a')
+  })
+
+  it('重放的 usage 事件不会重复累加', () => {
+    const seeded = seedFromItems([], 5, [], { pending_approvals: [], pending_user_inputs: [] })
+    const replayed = applyEvent(seeded, {
+      kind: 'usage',
+      ...base,
+      seq: 2,
+      turn_id: TURN,
+      usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 }
+    })
+
+    expect(replayed).toBe(seeded)
+    expect(replayed.usage).toBeNull()
+  })
 })
