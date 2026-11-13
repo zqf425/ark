@@ -66,6 +66,13 @@ impl TurnEvents {
         self
     }
 
+    /// Outcomes for the turn's opening user item. The item carries the same
+    /// record as `turn_started` so history replay renders the attachments the
+    /// live stream did, without re-deriving them from the event stream.
+    pub fn attachment_outcomes(&self) -> &[TurnAttachmentOutcome] {
+        &self.attachment_outcomes
+    }
+
     /// Sequence numbers are assigned by the session writer, never by producers.
     const UNASSIGNED: u64 = 0;
 

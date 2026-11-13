@@ -27,6 +27,12 @@ gated 在 `Notice` kind 上）。取消原因词表与自治权词表不在本 c
 `AttachmentEntry.sha256` 是上传时计算的小写十六进制 SHA-256，只用于完整性与后续去重：存储仍以 UUID
 寻址。该字段带 serde default，此字段存在前写入的元数据仍可读，空字符串表示未记录。
 
+附件投递结果 `TurnAttachmentOutcome`（`attachment_id`、`original_filename` 可选、`delivered`
+词表、`detail` 可选原因）同时出现在 `TurnStarted.attachment_outcomes` 与
+`ThreadItem.attachments`：事件是单回合审计记录，item 是渲染数据源，两者内容相同、消费方不同
+（见 `arkd` 与 `web` 模块文档）。`ThreadItem.attachments` 带 serde default 且省略空值，旧 item
+与无附件 item 均不受影响；`TurnAttachmentDelivery` / `TurnAttachmentOutcome` 已进 TS 生成 barrel。
+
 关联是授权边，而非第二份存储：`POST /v1/threads/{id}/attachments` 接受 `AttachmentAssociationRequest`
 （只有 `attachment_id`）并返回 `AttachmentAssociationResponse`；重复调用不追写第二个持久化事件。
 `RuntimeEvent` 新增 `attachment_associated`（`attachment_id` 为唯一业务载荷），是授权的唯一真源；

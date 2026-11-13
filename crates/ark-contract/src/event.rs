@@ -235,6 +235,10 @@ pub struct ChildCompletionNotice {
 #[ts(optional_fields)]
 pub struct TurnAttachmentOutcome {
     pub attachment_id: ark_common::AttachmentId,
+    /// Original upload filename, when metadata was readable. Chip labels in
+    /// the renderer come from here; an id alone would be unreadable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_filename: Option<String>,
     pub delivered: TurnAttachmentDelivery,
     /// Human-readable reason for anything that did not ride the seed as an
     /// image, e.g. the per-turn image budget or a missing model capability.

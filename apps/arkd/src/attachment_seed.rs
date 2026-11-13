@@ -55,6 +55,7 @@ pub fn resolve_attachments(
                 previews.push(format!("[attachment {id}: unavailable]"));
                 outcomes.push(TurnAttachmentOutcome {
                     attachment_id: *id,
+                    original_filename: None,
                     delivered: TurnAttachmentDelivery::Unavailable,
                     detail: Some(error.message),
                 });
@@ -65,6 +66,7 @@ pub fn resolve_attachments(
                     previews.push(preview_line(&entry));
                     outcomes.push(TurnAttachmentOutcome {
                         attachment_id: *id,
+                        original_filename: Some(entry.original_filename.clone()),
                         delivered: TurnAttachmentDelivery::PreviewText,
                         detail: None,
                     });
@@ -74,6 +76,7 @@ pub fn resolve_attachments(
                     previews.push(preview_line(&entry));
                     outcomes.push(TurnAttachmentOutcome {
                         attachment_id: *id,
+                        original_filename: Some(entry.original_filename.clone()),
                         delivered: TurnAttachmentDelivery::Degraded,
                         detail: Some("model did not declare vision support".into()),
                     });
@@ -86,6 +89,7 @@ pub fn resolve_attachments(
                     ));
                     outcomes.push(TurnAttachmentOutcome {
                         attachment_id: *id,
+                        original_filename: Some(entry.original_filename.clone()),
                         delivered: TurnAttachmentDelivery::Skipped,
                         detail: Some(format!(
                             "image of {} bytes exceeds the remaining per-turn budget",
@@ -103,6 +107,7 @@ pub fn resolve_attachments(
                         });
                         outcomes.push(TurnAttachmentOutcome {
                             attachment_id: *id,
+                            original_filename: Some(entry.original_filename.clone()),
                             delivered: TurnAttachmentDelivery::Image,
                             detail: None,
                         });
@@ -111,6 +116,7 @@ pub fn resolve_attachments(
                         previews.push(format!("[attachment {id}: unavailable]"));
                         outcomes.push(TurnAttachmentOutcome {
                             attachment_id: *id,
+                            original_filename: Some(entry.original_filename.clone()),
                             delivered: TurnAttachmentDelivery::Unavailable,
                             detail: Some(error.message),
                         });

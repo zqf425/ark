@@ -199,6 +199,12 @@
   border-color: transparent;
 }
 
+.ark-chip--warn {
+  color: var(--ark-warn);
+  background: var(--ark-warn-wash);
+  border-color: transparent;
+}
+
 .ark-chip--live {
   color: var(--ark-accent);
   background: var(--ark-accent-soft);

@@ -20,6 +20,7 @@
 
 use ts_rs::TS;
 
+use crate::event::{TurnAttachmentDelivery, TurnAttachmentOutcome};
 use crate::item::{ItemKind, ToolPayload};
 use crate::{
     ApplyResult, AttachmentAssociationRequest, AttachmentAssociationResponse,
@@ -35,13 +36,13 @@ use crate::{
     LlmRound, LlmRoundError, LlmRoundsResponse, McpServerEntry, McpServerListResponse,
     McpServerTestResponse, McpServerView, McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry,
     MemoryListResponse, PanelEntry, PendingApprovalView, PendingUserInputView, PlanView,
-    PluginDiagnosticView, PluginEnableRequest, PluginEntry, PluginHostReport,
-    PluginProvisionView, ProviderEntry, ProviderListResponse,
-    ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
-    ProviderModelInventoryItem, ProviderModelSummary, ProviderTestRequest, ProviderTestResponse,
-    ProviderView, ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest,
-    ReviewRequest, RewindRequest, RewindResponse, RunStatus, RuntimeConfigView, RuntimeEvent,
-    RuntimeInfo, ScheduleKind, ScheduledRunRecord, ScheduledTask, ScheduledTaskListResponse,
+    PluginDiagnosticView, PluginEnableRequest, PluginEntry, PluginHostReport, PluginProvisionView,
+    ProviderEntry, ProviderListResponse, ProviderModelCatalogConnection,
+    ProviderModelCatalogRequest, ProviderModelCatalogResponse, ProviderModelInventoryItem,
+    ProviderModelSummary, ProviderTestRequest, ProviderTestResponse, ProviderView,
+    ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, ReviewRequest,
+    RewindRequest, RewindResponse, RunStatus, RuntimeConfigView, RuntimeEvent, RuntimeInfo,
+    ScheduleKind, ScheduledRunRecord, ScheduledTask, ScheduledTaskListResponse,
     SessionResumeResponse, SkillDiagnostics, SkillLoadWarning, SkillSource, SkillSummary,
     SkillsSettings, SteerChildRequest, SubagentSettings, SwitchWorkspaceRequest, TaskSchedule,
     TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadExport, ThreadItem,
@@ -140,6 +141,8 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     ItemKind::export_all_to(dir)?;
     ItemStatus::export_all_to(dir)?;
     ToolPayload::export_all_to(dir)?;
+    TurnAttachmentDelivery::export_all_to(dir)?;
+    TurnAttachmentOutcome::export_all_to(dir)?;
     ThreadItem::export_all_to(dir)?;
     ChildCompletionNotice::export_all_to(dir)?;
     EventKind::export_all_to(dir)?;
@@ -324,6 +327,8 @@ const ROOT_NAMES: &[&str] = &[
     "ItemKind",
     "ItemStatus",
     "ToolPayload",
+    "TurnAttachmentDelivery",
+    "TurnAttachmentOutcome",
     "ThreadItem",
     "ChildCompletionNotice",
     "EventKind",

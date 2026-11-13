@@ -114,6 +114,11 @@ fn run_find(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> 
     Ok(ToolOutput::ok(body))
 }
 
+/// Pre-existing lint gate blocker on master: the recursive walker legitimately
+/// carries eight parameters; regrouping them would touch every recursive call
+/// site for zero behavior change, so the established `state.rs` precedent
+/// (`#[allow(clippy::too_many_arguments)]`) applies.
+#[allow(clippy::too_many_arguments)]
 fn walk(
     root: &Path,
     dir: &Path,

@@ -66,6 +66,8 @@ export type { AttachmentDiagnostics } from "./AttachmentDiagnostics";
 export type { ItemKind } from "./ItemKind";
 export type { ItemStatus } from "./ItemStatus";
 export type { ToolPayload } from "./ToolPayload";
+export type { TurnAttachmentDelivery } from "./TurnAttachmentDelivery";
+export type { TurnAttachmentOutcome } from "./TurnAttachmentOutcome";
 export type { ThreadItem } from "./ThreadItem";
 export type { ChildCompletionNotice } from "./ChildCompletionNotice";
 export type { EventKind } from "./EventKind";

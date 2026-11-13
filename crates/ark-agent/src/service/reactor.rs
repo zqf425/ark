@@ -299,9 +299,16 @@ impl Reactor {
             self.turn_started_written = true;
         }
         if let Some(text) = self.pending_user_message.take() {
-            let item = ThreadItem::new(self.events.turn_id, ItemKind::UserMessage)
+            // The turn's opening user item carries the attachment outcomes so
+            // the durable item renders attachment chips after a replay, not
+            // only while the live `turn_started` is observable. Steering
+            // messages have no attachments of their own and stay bare.
+            let mut item = ThreadItem::new(self.events.turn_id, ItemKind::UserMessage)
                 .with_text(text)
                 .completed();
+            if !self.events.attachment_outcomes().is_empty() {
+                item = item.with_attachments(self.events.attachment_outcomes().to_vec());
+            }
             self.writer.append(self.events.item_created(item)).await?;
         }
         let report = HistoryHygiene::new().repair(&mut self.history);
@@ -576,8 +583,9 @@ impl Reactor {
                 tool: None,
                 detail: None,
                 // StreamItem only buffers assistant/reasoning text, which never
-                // carries a marker.
+                // carries a marker or attachments.
                 marker: None,
+                attachments: None,
             };
             self.writer
                 .append(self.events.item_completed(completed))

@@ -130,6 +130,7 @@ export function sameItemContent(left: ThreadItem, right: ThreadItem): boolean {
     left.created_at === right.created_at &&
     left.text === right.text &&
     left.tool === right.tool &&
-    left.detail === right.detail
+    left.detail === right.detail &&
+    left.attachments === right.attachments
   )
 }

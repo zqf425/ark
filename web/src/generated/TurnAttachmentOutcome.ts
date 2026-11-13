@@ -5,7 +5,12 @@ import type { TurnAttachmentDelivery } from "./TurnAttachmentDelivery";
 /**
  * How one referenced attachment reached (or did not reach) the model seed.
  */
-export type TurnAttachmentOutcome = { attachment_id: AttachmentId, delivered: TurnAttachmentDelivery, 
+export type TurnAttachmentOutcome = { attachment_id: AttachmentId, 
+/**
+ * Original upload filename, when metadata was readable. Chip labels in
+ * the renderer come from here; an id alone would be unreadable.
+ */
+original_filename?: string, delivered: TurnAttachmentDelivery, 
 /**
  * Human-readable reason for anything that did not ride the seed as an
  * image, e.g. the per-turn image budget or a missing model capability.

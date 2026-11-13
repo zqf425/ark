@@ -38,6 +38,23 @@
   color: var(--ark-text);
 }
 
+/* Attachment chips: under the bubble text, inside the same card, wrapping. */
+.ark-msg__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 0.55rem;
+  max-width: 100%;
+}
+
+.ark-msg__attachments .ark-chip {
+  font-size: 11px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Assistant message: prose on the canvas, no card. */
 .ark-msg--assistant {
   background: transparent;

@@ -602,3 +602,141 @@ async fn duplicate_call_ids_each_get_their_own_gate_and_result() {
     );
     assert!(HistoryHygiene::new().is_legal(reactor.history()));
 }
+
+/// A turn seeded with attachments must land the delivery record on the opening
+/// `UserMessage` item, so history replay renders the same attachment chips the
+/// live stream did (the `turn_started` audit record alone is not observable
+/// after a reload).
+#[tokio::test]
+async fn the_opening_user_item_carries_the_attachment_outcomes() {
+    let outcomes = vec![ark_contract::TurnAttachmentOutcome {
+        attachment_id: "019689f4-8000-7000-8000-000000000001".parse().unwrap(),
+        original_filename: Some("pic.png".into()),
+        delivered: ark_contract::TurnAttachmentDelivery::Image,
+        detail: None,
+    }];
+    let model = Arc::new(CallsThenDoneModel {
+        first_round: vec![],
+        rounds: AtomicUsize::new(0),
+    });
+    let events = crate::exec::TurnEvents::new(ThreadId::new(), TurnId::new())
+        .with_attachments(vec![outcomes[0].attachment_id])
+        .with_attachment_outcomes(outcomes.clone());
+    let writer = Arc::new(MemoryWriter::for_turn(events.clone()));
+    let mut reactor = Reactor::new(ReactorConfig {
+        model,
+        tools: Arc::new(MapToolRunner::new()),
+        writer: Arc::clone(&writer) as Arc<dyn SessionWriter>,
+        gates: Arc::new(AllowAllGates),
+        sandbox: Arc::new(ReadOnlySandbox),
+        events,
+        cancel: CancelToken::new(),
+        seed: ModelSeed::default(),
+        machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+        chunk_buffer: 1,
+    });
+    reactor.push_user_message(ark_ports::ModelMessage::user("look at this"));
+
+    let outcome = reactor.run().await.unwrap();
+    assert_eq!(outcome, TurnOutcome::Completed);
+
+    let user_items: Vec<_> = writer
+        .recorded()
+        .iter()
+        .filter_map(|event| match event {
+            RuntimeEvent::ItemCreated { item, .. }
+                if item.kind == ark_contract::item::ItemKind::UserMessage =>
+            {
+                Some(item.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(user_items.len(), 1, "{user_items:?}");
+    assert_eq!(
+        user_items[0].attachments.as_deref(),
+        Some(outcomes.as_slice()),
+        "the item must carry the same outcomes recorded on turn_started"
+    );
+    let started = writer
+        .recorded()
+        .iter()
+        .find_map(|event| match event {
+            RuntimeEvent::TurnStarted {
+                attachment_outcomes,
+                ..
+            } => Some(attachment_outcomes.clone()),
+            _ => None,
+        })
+        .expect("turn_started is journaled before the user item");
+    assert_eq!(
+        started, outcomes,
+        "the audit record on the event is unchanged"
+    );
+}
+
+/// A steering message is a mid-turn correction, not a seeded attachment
+/// carrier: its item must stay bare even when the turn itself has attachments.
+#[tokio::test]
+async fn a_steering_item_does_not_inherit_attachment_outcomes() {
+    let outcomes = vec![ark_contract::TurnAttachmentOutcome {
+        attachment_id: "019689f4-8000-7000-8000-000000000002".parse().unwrap(),
+        original_filename: Some("pic.png".into()),
+        delivered: ark_contract::TurnAttachmentDelivery::Image,
+        detail: None,
+    }];
+    let model = Arc::new(CallsThenDoneModel {
+        first_round: vec![],
+        rounds: AtomicUsize::new(0),
+    });
+    let events = crate::exec::TurnEvents::new(ThreadId::new(), TurnId::new())
+        .with_attachments(vec![outcomes[0].attachment_id])
+        .with_attachment_outcomes(outcomes);
+    let writer = Arc::new(MemoryWriter::for_turn(events.clone()));
+    let mut reactor = Reactor::new(ReactorConfig {
+        model,
+        tools: Arc::new(MapToolRunner::new()),
+        writer: Arc::clone(&writer) as Arc<dyn SessionWriter>,
+        gates: Arc::new(AllowAllGates),
+        sandbox: Arc::new(ReadOnlySandbox),
+        events,
+        cancel: CancelToken::new(),
+        seed: ModelSeed::default(),
+        machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+        chunk_buffer: 1,
+    })
+    .with_steering(Arc::new({
+        let queue = SteerQueue::new();
+        assert!(queue.push("late correction"));
+        queue
+    }));
+
+    let outcome = reactor.run().await.unwrap();
+    assert_eq!(outcome, TurnOutcome::Completed);
+
+    let user_items: Vec<_> = writer
+        .recorded()
+        .iter()
+        .filter_map(|event| match event {
+            RuntimeEvent::ItemCreated { item, .. }
+                if item.kind == ark_contract::item::ItemKind::UserMessage =>
+            {
+                Some(item.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        user_items.len(),
+        1,
+        "only the steering message is a user item"
+    );
+    assert!(
+        user_items[0].text.as_deref() == Some("late correction"),
+        "the journaled item is the steering message: {user_items:?}"
+    );
+    assert!(
+        user_items[0].attachments.is_none(),
+        "a steering correction must not claim the turn's attachments"
+    );
+}
