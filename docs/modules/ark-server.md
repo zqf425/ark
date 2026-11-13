@@ -111,6 +111,22 @@
   导出：仅含摘要元数据与升序 `seq` 的完整权威事件日志，不含导出时间戳、凭证、API key、header 或
   附件载荷；相同 store 状态两次导出字节一致。
 
+## 会话标题自动生成
+
+`service/thread_titles.rs` 在首个显式用户回合完成后，把占位标题替换为模型生成的短标题。策略与调用
+分离：占位集合（`New thread`/`Untitled thread`/`新会话`，覆盖 HTTP 创建、store 归一化与 web 本地化
+三个兜底）、提示词、摘要（首条消息至多 2000 字节，标题钳制到 40 字节，均按字符边界截断）与 15 s
+超时都在本模块；provider 选择、计量与请求构造经 `BaseServices::title_model` 端口（[ark-ports](ark-ports.md)），
+由组合根注入 `TitleModelAdapter`，未注入的构建只是永不命名，不报错。
+
+- 只在**显式用户回合**（`TurnSource::User`）完成时触发：IM 线程已从首条消息派生标题，自动续跑没有
+  composer 文本；线程当前标题必须是占位——用户手动的改名是意图，永不覆盖。
+- 改名走 `SessionStore::rename_thread` 加 `PATCH /v1/threads/{id}` 同一款 `ThreadUpdated` 事件，只有
+  一条写路径；客户端因此对自动改名与手动改名一视同仁。命名任务在 supervisor 内刻意 detach：慢
+  provider 不能占住回合收尾；失败、超时或空标题一律保留原标题并记 warn，命名永不影响已完成的回合。
+- web 侧 `renameThreadRow` 把流上的 `thread_updated` 折叠进列表行（与手动改名共用），列表接口在下次
+  刷新时仍是权威。
+
 ## 定时任务调度服务
 
 [定时任务需求](../requirements/scheduled-tasks.md) 的「调度与执行」落在 `service/scheduler.rs`,

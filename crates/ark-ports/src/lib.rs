@@ -29,7 +29,7 @@ pub use backend::{
 };
 pub use base::{
     BaseServices, FolderDialogService, McpServerService, MemoryService, ModelEndpoint,
-    PluginHostService, ProviderService, SkillService, WorkspaceService,
+    PluginHostService, ProviderService, SkillService, TitleModel, WorkspaceService,
 };
 pub use bus::{
     HeaderMap, HttpCapability, McpCallResult, McpCapability, McpCatalog, McpToolSpec,

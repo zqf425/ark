@@ -97,6 +97,12 @@ export function useThreadStream(threadId: ThreadId | null): void {
             ) {
               noteThreadSeq(threadId, event.seq)
             }
+            // A background rename (manual PATCH or the auto title generator)
+            // lands on the rail immediately; the list endpoint stays
+            // authoritative on the next refresh.
+            if (event.thread_id === threadId && event.kind === 'thread_updated') {
+              useCodeSessionStore.getState().renameThreadRow(threadId, event.title)
+            }
             // `thread_rewound` says the durable log was truncated and this seq
             // is a fresh, never-reused notification (docs/modules/ark-store.md).
             // Folding it is not enough: rows from the discarded suffix are gone

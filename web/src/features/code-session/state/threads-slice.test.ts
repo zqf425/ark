@@ -45,3 +45,28 @@ describe('threads slice noteThreadSeq', () => {
     expect(useCodeSessionStore.getState().threads[0]?.last_seq).toBe(3)
   })
 })
+
+describe('threads slice renameThreadRow', () => {
+  beforeEach(() => {
+    useCodeSessionStore.setState({ threads: [row()], activeThreadId: null })
+  })
+
+  it('更新标题但不改变行序、水位或其它字段', () => {
+    const before = useCodeSessionStore.getState().threads[0]
+    useCodeSessionStore.getState().renameThreadRow(A, '自动标题')
+
+    const row0 = useCodeSessionStore.getState().threads[0]
+    expect(row0?.title).toBe('自动标题')
+    expect(row0?.last_seq).toBe(3)
+    expect(row0?.thread_id).toBe(before?.thread_id)
+    expect(useCodeSessionStore.getState().threads).toHaveLength(1)
+  })
+
+  it('忽略未知会话与空标题', () => {
+    const before = useCodeSessionStore.getState().threads
+    useCodeSessionStore.getState().renameThreadRow(UNKNOWN, 'x')
+    useCodeSessionStore.getState().renameThreadRow(A, '   ')
+
+    expect(useCodeSessionStore.getState().threads).toBe(before)
+  })
+})

@@ -130,6 +130,15 @@ pub fn spawn_turn(state: AppState, job: TurnJob) {
     let turn_id = job.turn_id;
     let thread_id = job.thread_id;
     let is_auto_continuation = matches!(&job.source, TurnSource::AutoContinuation);
+    // Captured before the job moves into the worker: this is the composer text
+    // the first turn was started with, used by the background title generator.
+    // Only explicit user turns name a thread — IM threads already derive their
+    // title from the first message, and auto-continuations have no composer
+    // text at all.
+    let first_user_text = match &job.source {
+        TurnSource::User(text) => Some(text.clone()),
+        TurnSource::Im { .. } | TurnSource::AutoContinuation => None,
+    };
     let turns = Arc::clone(&state.turns);
     let runner = Arc::clone(&state.runner);
     let supervisor_state = state.clone();
@@ -202,7 +211,30 @@ pub fn spawn_turn(state: AppState, job: TurnJob) {
                 // Automatic turns only chain through the explicit pending variant
                 // above, which requires every acknowledgement to have succeeded.
                 if !is_auto_continuation {
-                    crate::service::schedule_auto_continuation(supervisor_state, thread_id).await;
+                    crate::service::schedule_auto_continuation(supervisor_state.clone(), thread_id)
+                        .await;
+                }
+                // First explicit turn on a still-placeholder thread: ask the
+                // model for a short title in the background (design §7.9). The
+                // decision reads the thread title before the state moves into
+                // the detached task; the naming call itself never blocks the
+                // supervisor and cannot delay or reorder continuation work.
+                if let Some(task) = match first_user_text.as_deref() {
+                    Some(text) => {
+                        crate::service::thread_titles::title_task_for(
+                            &supervisor_state,
+                            thread_id,
+                            text,
+                        )
+                        .await
+                    }
+                    None => None,
+                } {
+                    crate::service::thread_titles::schedule_title_generation(
+                        supervisor_state,
+                        thread_id,
+                        task,
+                    );
                 }
             }
             TurnEnd::Failed { .. } | TurnEnd::Aborted(_) if is_auto_continuation => {
