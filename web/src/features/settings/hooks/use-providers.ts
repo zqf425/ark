@@ -24,6 +24,8 @@ import { attempt, describeApiError, type Outcome } from '../api/outcome'
 export type ProvidersApi = {
   providers: ProviderView[]
   defaultProviderId: string | null
+  /** Model pinned for the default provider; null means its stored `model`. */
+  defaultModel: string | null
   activeProviderId: string | null
   status: LoadStatus
   error: string | null
@@ -40,7 +42,7 @@ export type ProvidersApi = {
   get: (providerId: string) => Promise<Outcome<ProviderEntry>>
   upsert: (request: ProviderUpsertRequest) => Promise<Outcome<ProviderListResponse>>
   remove: (providerId: string) => Promise<Outcome<ProviderListResponse>>
-  setDefault: (providerId: string) => Promise<Outcome<ProviderListResponse>>
+  setDefault: (providerId: string, model?: string) => Promise<Outcome<ProviderListResponse>>
   test: (request: ProviderTestRequest) => Promise<Outcome<ProviderTestResponse>>
   models: (request: ProviderModelCatalogRequest) => Promise<Outcome<ProviderModelCatalogResponse>>
 }
@@ -48,6 +50,7 @@ export type ProvidersApi = {
 export function useProviders(): ProvidersApi {
   const [providers, setProviders] = useState<ProviderView[]>([])
   const [defaultProviderId, setDefaultProviderId] = useState<string | null>(null)
+  const [defaultModel, setDefaultModel] = useState<string | null>(null)
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null)
   const [status, setStatus] = useState<LoadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -58,6 +61,7 @@ export function useProviders(): ProvidersApi {
   const apply = useCallback((response: ProviderListResponse) => {
     setProviders(response.providers ?? [])
     setDefaultProviderId(response.default_provider_id ?? null)
+    setDefaultModel(response.default_model ?? null)
     setActiveProviderId(response.active_provider_id ?? null)
   }, [])
 
@@ -106,7 +110,8 @@ export function useProviders(): ProvidersApi {
     [mutate]
   )
   const setDefault = useCallback(
-    (providerId: string) => mutate(`default:${providerId}`, () => setDefaultProvider(providerId)),
+    (providerId: string, model?: string) =>
+      mutate(`default:${providerId}`, () => setDefaultProvider(providerId, model)),
     [mutate]
   )
   const test = useCallback(async (request: ProviderTestRequest) => {
@@ -126,5 +131,5 @@ export function useProviders(): ProvidersApi {
     void refresh()
   }, [refresh])
 
-  return { providers, defaultProviderId, activeProviderId, status, error, busy, catalogBusy, refresh, get, upsert, remove, setDefault, test, models }
+  return { providers, defaultProviderId, defaultModel, activeProviderId, status, error, busy, catalogBusy, refresh, get, upsert, remove, setDefault, test, models }
 }

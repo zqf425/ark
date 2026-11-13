@@ -107,6 +107,7 @@ impl ProviderStore {
         let document = self.lock();
         let providers = document.views();
         let default_provider_id = document.effective_default().map(str::to_string);
+        let default_model = document.effective_default_model();
         // The process binds to the default entry through `resolve(None)`, so the
         // active id is exactly the default that can actually serve a request.
         let active_provider_id = default_provider_id
@@ -118,6 +119,7 @@ impl ProviderStore {
         ProviderListResponse {
             providers,
             default_provider_id,
+            default_model,
             active_provider_id,
         }
     }
@@ -152,8 +154,14 @@ impl ProviderStore {
         if make_default {
             // Enabling and promoting in one call is the settings dialog's
             // "add provider" path; a disabled entry is never made default.
+            // A pinned default model belongs to the previous provider, so a
+            // real switch clears it; re-saving the same default keeps it.
             if entry.enabled {
+                let switches = next.default_provider_id.as_deref() != Some(entry.id.as_str());
                 next.default_provider_id = Some(entry.id);
+                if switches {
+                    next.default_model = None;
+                }
             }
         }
         self.commit(document, next)
@@ -175,12 +183,18 @@ impl ProviderStore {
         next.remove(id);
         if next.default_provider_id.as_deref() == Some(id) {
             next.default_provider_id = None;
+            next.default_model = None;
         }
         self.commit(document, next)
     }
 
-    /// Name the default provider. It must exist and be enabled.
-    pub fn set_default(&self, id: &str) -> Result<ProviderListResponse> {
+    /// Name the default provider, optionally pinning one of its models.
+    ///
+    /// `model` must be the entry's stored model or an inventory row id: the
+    /// pinned default is only ever an override of what that provider serves,
+    /// never a free-form id. `None` (or blank) pins the provider alone and
+    /// clears any previous pin so the entry's stored `model` applies again.
+    pub fn set_default(&self, id: &str, model: Option<&str>) -> Result<ProviderListResponse> {
         let id = id.trim();
         if id.is_empty() {
             return Err(ArkError::validation("provider id is required"));
@@ -196,8 +210,19 @@ impl ProviderStore {
                 "provider `{id}` is disabled; enable it before making it the default"
             )));
         }
+        let model = model.map(str::trim).filter(|value| !value.is_empty());
+        if let Some(model) = model {
+            let known =
+                model == entry.model.trim() || entry.models.iter().flatten().any(|item| item.id == model);
+            if !known {
+                return Err(ArkError::validation(format!(
+                    "provider `{id}` does not serve model `{model}`; import it into the inventory first"
+                )));
+            }
+        }
         let mut next = document.clone();
         next.default_provider_id = Some(id.to_string());
+        next.default_model = model.map(str::to_string);
         self.commit(document, next)
     }
 
@@ -207,35 +232,69 @@ impl ProviderStore {
     /// configured, when the named provider does not exist, or when the entry is
     /// disabled / has no key: an unusable provider must not become a client with
     /// an empty credential.
+    ///
+    /// When the default resolves, a pinned default model (see `set_default`)
+    /// replaces the entry's stored `model`, and the context window follows the
+    /// inventory row recorded for that model.
     pub fn resolve(&self, id: Option<&str>) -> Option<ProviderConfig> {
         let document = self.lock();
+        let is_default = id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none();
         let target = match id.map(str::trim).filter(|value| !value.is_empty()) {
             Some(explicit) => document.get(explicit),
             None => document
                 .effective_default()
                 .and_then(|default| document.get(default)),
         }?;
-        config_from_entry(target)
+        let mut config = config_from_entry(target)?;
+        if is_default {
+            if let Some(model) = document.effective_default_model() {
+                if model != config.model {
+                    config.model = model.clone();
+                    config.context_window_tokens = target
+                        .models
+                        .iter()
+                        .flatten()
+                        .find(|item| item.id == model)
+                        .and_then(|item| item.context_window_tokens);
+                }
+            }
+        }
+        Some(config)
     }
 
     /// Whether the resolved provider's model explicitly declared vision support.
     ///
     /// Same selection rules as [`Self::resolve`], but reads the catalog-reported
     /// `supports_vision` flag. Metadata belongs to the model id, never to the
-    /// provider entry: an override that names the stored default model reads
-    /// the entry-level flag, an override with an inventory row reads that row,
-    /// and an override with no row is unknown. `None` (unknown) must be treated
-    /// as "not declared": image parts are only sent on an explicit positive,
-    /// never inherited from another model or guessed from the model name.
+    /// provider entry: the effective model — a thread override, or the pinned
+    /// default model when the default provider resolves — reads the entry-level
+    /// flag when it matches the stored model, an inventory row's flag when one
+    /// exists, and is unknown otherwise. `None` (unknown) must be treated as
+    /// "not declared": image parts are only sent on an explicit positive, never
+    /// inherited from another model or guessed from the model name.
     pub fn resolve_vision(&self, id: Option<&str>, model: Option<&str>) -> Option<bool> {
         let document = self.lock();
-        let target = match id.map(str::trim).filter(|value| !value.is_empty()) {
-            Some(explicit) => document.get(explicit),
+        let explicit = id.map(str::trim).filter(|value| !value.is_empty());
+        let target = match explicit {
+            Some(name) => document.get(name),
             None => document
                 .effective_default()
                 .and_then(|default| document.get(default)),
         }?;
-        if let Some(model) = model.map(str::trim).filter(|value| !value.is_empty()) {
+        let model = model
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                explicit
+                    .is_none()
+                    .then(|| document.effective_default_model())
+                    .flatten()
+            });
+        if let Some(model) = model.as_deref() {
             if model == target.model {
                 return target.supports_vision;
             }
@@ -427,6 +486,7 @@ impl ProviderStore {
             ProviderListResponse {
                 providers,
                 default_provider_id,
+                default_model: None,
                 active_provider_id,
             }
         };
@@ -772,18 +832,18 @@ mod tests {
     fn the_default_must_exist_and_be_enabled() {
         let dir = temp_dir("set-default");
         let store = store(&dir);
-        assert!(store.set_default("ghost").is_err());
+        assert!(store.set_default("ghost", None).is_err());
         let mut off = entry("off", Some("sk-1234567890"));
         off.enabled = false;
         store.upsert(off, false).unwrap();
-        let err = store.set_default("off").unwrap_err();
+        let err = store.set_default("off", None).unwrap_err();
         assert!(err.message.contains("disabled"), "{}", err.message);
         store
             .upsert(entry("on", Some("sk-1234567890")), false)
             .unwrap();
         assert_eq!(
             store
-                .set_default("on")
+                .set_default("on", None)
                 .unwrap()
                 .default_provider_id
                 .as_deref(),

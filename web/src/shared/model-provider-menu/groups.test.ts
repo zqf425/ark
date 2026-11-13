@@ -38,13 +38,13 @@ describe('two-level provider/model menu grouping', () => {
     expect(toModelProviderGroups([disabled])).toEqual([{ id: 'off', label: 'off', models: [] }])
   })
 
-  it('default-provider groups expose exactly the configured default model', () => {
+  it('default-model groups expose the stored model plus the whole inventory', () => {
     const groups = toDefaultModelGroups([
       provider('p1', 'glm', ['glm', 'qwen', 'kimi']),
       provider('p2', 'gpt', [])
     ])
     expect(groups).toEqual([
-      { id: 'p1', label: 'p1', models: ['glm'] },
+      { id: 'p1', label: 'p1', models: ['glm', 'qwen', 'kimi'] },
       { id: 'p2', label: 'p2', models: ['gpt'] }
     ])
   })

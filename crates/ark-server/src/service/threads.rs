@@ -14,7 +14,18 @@ use crate::state::AppState;
 
 /// Create a thread and publish its `thread_created` event.
 pub async fn create_thread(state: &AppState, title: &str) -> Result<ThreadSummary> {
-    let meta = state.store.create_thread(title).await?;
+    let mut meta = state.store.create_thread(title).await?;
+    // A new thread starts in the configured default workspace, so the composer
+    // shows a real project instead of （未设置） without a manual switch. The
+    // seed happens before the `thread_created` event so an SSE client attached
+    // to the new thread never sees a workspace-less snapshot; an explicit
+    // thread-level workspace (fork inheritance, IM/scheduler callers) wins.
+    if meta.runtime.workspace.is_none() {
+        if let Some(workspace) = state.config.snapshot().default_workspace.as_deref() {
+            meta.runtime.workspace = Some(workspace.to_string_lossy().into_owned());
+            meta = state.store.set_thread_runtime(meta.thread_id, meta.runtime.clone()).await?;
+        }
+    }
     // Publish the creation so an SSE client attached to the new thread sees it
     // without a special case in the stream handler.
     let event = RuntimeEvent::ThreadCreated {

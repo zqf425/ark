@@ -37,30 +37,33 @@ function AppearancePreferences(): JSX.Element {
   const { locale, fontSize, theme, setLocale, setFontSize, setTheme, t } = useI18n()
   return (
     <SettingsSection title={t('settings.appearance.title')} desc={t('settings.appearance.desc')}>
-      <SelectField<UiLocale>
-        id="settings-language"
-        label={t('settings.language')}
-        value={locale}
-        options={['zh-CN', 'en-US']}
-        labels={{ 'zh-CN': t('settings.language.zh-CN'), 'en-US': t('settings.language.en-US') }}
-        onChange={setLocale}
-      />
-      <SelectField<UiFontSize>
-        id="settings-font-size"
-        label={t('settings.fontSize')}
-        value={fontSize}
-        options={['small', 'medium', 'large']}
-        labels={{ small: t('settings.fontSize.small'), medium: t('settings.fontSize.medium'), large: t('settings.fontSize.large') }}
-        onChange={setFontSize}
-      />
-      <SelectField<UiTheme>
-        id="settings-theme"
-        label={t('settings.theme')}
-        value={theme}
-        options={['light', 'dark', 'system']}
-        labels={{ light: t('settings.theme.light'), dark: t('settings.theme.dark'), system: t('settings.theme.system') }}
-        onChange={setTheme}
-      />
+      {/* Three independent device-local preferences share one row. */}
+      <div className="ark-settings__grid ark-settings__grid--appearance">
+        <SelectField<UiLocale>
+          id="settings-language"
+          label={t('settings.language')}
+          value={locale}
+          options={['zh-CN', 'en-US']}
+          labels={{ 'zh-CN': t('settings.language.zh-CN'), 'en-US': t('settings.language.en-US') }}
+          onChange={setLocale}
+        />
+        <SelectField<UiFontSize>
+          id="settings-font-size"
+          label={t('settings.fontSize')}
+          value={fontSize}
+          options={['small', 'medium', 'large']}
+          labels={{ small: t('settings.fontSize.small'), medium: t('settings.fontSize.medium'), large: t('settings.fontSize.large') }}
+          onChange={setFontSize}
+        />
+        <SelectField<UiTheme>
+          id="settings-theme"
+          label={t('settings.theme')}
+          value={theme}
+          options={['light', 'dark', 'system']}
+          labels={{ light: t('settings.theme.light'), dark: t('settings.theme.dark'), system: t('settings.theme.system') }}
+          onChange={setTheme}
+        />
+      </div>
     </SettingsSection>
   )
 }
@@ -85,15 +88,25 @@ function DefaultModelPicker({ providers }: { providers: ProvidersApi }): JSX.Ele
 
   const groups = toDefaultModelGroups(providers.providers)
   const currentProvider = providers.providers.find((row) => row.id === providers.defaultProviderId)
+  // A pinned default model wins; without one the provider's stored `model` is
+  // what a turn actually resolves, so the picker previews that.
+  const currentModel = providers.defaultModel ?? currentProvider?.model ?? ''
 
-  const change = async (providerId: string): Promise<void> => {
-    // Selecting another model of the same provider cannot change the stored
-    // default (the runtime keys it by provider id), so do not emit a no-op PATCH.
-    if (!providerId || providerId === providers.defaultProviderId) return
+  const change = async (selection: { providerId: string; model: string }): Promise<void> => {
+    const providerId = selection.providerId.trim()
+    const model = selection.model.trim()
+    if (!providerId) return
+    // Re-picking the exact stored pair is a no-op; switching provider without a
+    // model (blank) resets that provider to its stored `model`.
+    if (providerId === providers.defaultProviderId && model === (providers.defaultModel ?? '')) return
     setPending(true)
-    const outcome = await providers.setDefault(providerId)
+    const outcome = await providers.setDefault(providerId, model || undefined)
     setPending(false)
-    if (outcome.ok) toast.push('success', t('settings.general.defaultModel.switched', { providerId }))
+    if (outcome.ok)
+      toast.push(
+        'success',
+        t('settings.general.defaultModel.switched', { providerId, model: model || currentProvider?.model || '' })
+      )
     else toast.push('error', t('settings.general.defaultModel.switchFailed'), describeOutcome(outcome))
   }
 
@@ -103,7 +116,7 @@ function DefaultModelPicker({ providers }: { providers: ProvidersApi }): JSX.Ele
         <ModelProviderMenu
           id="settings-default-provider"
           groups={groups}
-          value={{ providerId: providers.defaultProviderId ?? '', model: currentProvider?.model ?? '' }}
+          value={{ providerId: providers.defaultProviderId ?? '', model: currentModel }}
           disabled={disabled}
           ariaLabel={t('settings.general.defaultModel.label')}
           placeholder={
@@ -111,7 +124,7 @@ function DefaultModelPicker({ providers }: { providers: ProvidersApi }): JSX.Ele
               ? t('settings.general.defaultModel.noProviders')
               : t('settings.general.defaultModel.unset')
           }
-          onSelect={(selection) => void change(selection.providerId)}
+          onSelect={(selection) => void change(selection)}
         />
       </Field>
 

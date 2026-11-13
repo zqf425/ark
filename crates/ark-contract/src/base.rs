@@ -343,6 +343,11 @@ pub struct ProviderListResponse {
     pub providers: Vec<ProviderView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_provider_id: Option<String>,
+    /// Model pinned for the default provider. `None` means "serve the
+    /// provider's stored `model`": the default is keyed by provider id and the
+    /// model only overrides what a turn resolves from that provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
     /// Provider id the running process is actually bound to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_provider_id: Option<String>,

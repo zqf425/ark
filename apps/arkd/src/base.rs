@@ -96,8 +96,8 @@ impl ProviderService for ProviderAdapter {
         self.inner.delete(id)
     }
 
-    fn set_default(&self, id: &str) -> Result<ProviderListResponse> {
-        self.inner.set_default(id)
+    fn set_default(&self, id: &str, model: Option<&str>) -> Result<ProviderListResponse> {
+        self.inner.set_default(id, model)
     }
 
     async fn test(&self, request: ProviderTestRequest) -> ProviderTestResponse {

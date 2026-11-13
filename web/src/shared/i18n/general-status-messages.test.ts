@@ -43,8 +43,12 @@ describe('general section and status bar i18n keys', () => {
 
 describe('translate placeholders', () => {
   it('替换 {name} 占位符并按语言切换句子', () => {
-    expect(translate('zh-CN', 'settings.general.defaultModel.switched', { providerId: 'deepseek' })).toBe('默认模型已切换为 deepseek')
-    expect(translate('en-US', 'settings.general.defaultModel.switched', { providerId: 'deepseek' })).toBe('Default model switched to deepseek')
+    expect(translate('zh-CN', 'settings.general.defaultModel.switched', { providerId: 'deepseek', model: 'deepseek-chat' })).toBe(
+      '默认模型已切换为 deepseek / deepseek-chat'
+    )
+    expect(translate('en-US', 'settings.general.defaultModel.switched', { providerId: 'deepseek', model: 'deepseek-chat' })).toBe(
+      'Default model switched to deepseek / deepseek-chat'
+    )
     expect(translate('en-US', 'status.refreshFailed', { error: 'HTTP 401' })).toBe('Recheck runtime. Last failure: HTTP 401')
     expect(translate('zh-CN', 'settings.general.changed', { keys: 'log_level' })).toBe('已变更：log_level')
   })

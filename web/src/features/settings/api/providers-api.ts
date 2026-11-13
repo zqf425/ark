@@ -35,9 +35,15 @@ export function deleteProvider(providerId: string): Promise<ProviderListResponse
   return del<ProviderListResponse>(`/v1/runtime/providers/${encodeURIComponent(providerId)}`)
 }
 
-/** `POST /v1/runtime/providers/{id}/default`. */
-export function setDefaultProvider(providerId: string): Promise<ProviderListResponse> {
-  return post<ProviderListResponse>(`/v1/runtime/providers/${encodeURIComponent(providerId)}/default`, {})
+/**
+ * `POST /v1/runtime/providers/{id}/default`. The optional model pins one of
+ * that provider's models as the default; omitting it keeps the provider's
+ * stored `model`.
+ */
+export function setDefaultProvider(providerId: string, model?: string): Promise<ProviderListResponse> {
+  return post<ProviderListResponse>(`/v1/runtime/providers/${encodeURIComponent(providerId)}/default`, {
+    model: model?.trim() ? model.trim() : null
+  })
 }
 
 /** `POST /v1/runtime/providers/test` — probe a stored id or an unsaved entry. */

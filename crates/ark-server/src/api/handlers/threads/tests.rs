@@ -59,7 +59,11 @@ impl ProviderService for Providers {
         unreachable!("not used by this test")
     }
 
-    fn set_default(&self, _id: &str) -> ark_common::Result<ark_contract::ProviderListResponse> {
+    fn set_default(
+        &self,
+        _id: &str,
+        _model: Option<&str>,
+    ) -> ark_common::Result<ark_contract::ProviderListResponse> {
         unreachable!("not used by this test")
     }
 

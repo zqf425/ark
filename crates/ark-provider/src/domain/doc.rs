@@ -16,6 +16,11 @@ pub struct ProvidersDocument {
     pub providers: Vec<ProviderEntry>,
     #[serde(default)]
     pub default_provider_id: Option<String>,
+    /// Model pinned for the default provider; `None` means "serve the entry's
+    /// stored `model`". Kept next to the default id so one write can never
+    /// persist a model without its provider.
+    #[serde(default)]
+    pub default_model: Option<String>,
 }
 
 impl ProvidersDocument {
@@ -50,6 +55,22 @@ impl ProvidersDocument {
     pub fn effective_default(&self) -> Option<&str> {
         let id = self.default_provider_id.as_deref()?;
         self.contains(id).then_some(id)
+    }
+
+    /// The model pinned for the default provider, if it is still valid.
+    ///
+    /// A pin survives provider edits only while the entry still serves that
+    /// model (its stored `model` or an inventory row); a stale pin — inventory
+    /// pruned, provider switched — is ignored rather than poisoning `resolve`.
+    pub fn effective_default_model(&self) -> Option<String> {
+        let entry = self.get(self.effective_default()?)?;
+        let model = self.default_model.as_deref()?.trim();
+        if model.is_empty() {
+            return None;
+        }
+        let known =
+            model == entry.model.trim() || entry.models.iter().flatten().any(|item| item.id == model);
+        known.then(|| model.to_string())
     }
 
     /// Project one stored entry into its redacted view.

@@ -61,6 +61,17 @@
   gap: 12px 16px;
 }
 
+/* Appearance preferences always share one row; only collapse on narrow cards. */
+.ark-settings__grid--appearance {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 640px) {
+  .ark-settings__grid--appearance {
+    grid-template-columns: 1fr;
+  }
+}
+
 .ark-settings__actions {
   display: flex;
   gap: 8px;

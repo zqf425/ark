@@ -55,7 +55,9 @@ pub trait ProviderService: Send + Sync {
 
     fn delete(&self, id: &str) -> Result<ProviderListResponse>;
 
-    fn set_default(&self, id: &str) -> Result<ProviderListResponse>;
+    /// Name the default provider, optionally pinning one of its models.
+    /// `model` must be the entry's stored model or an inventory row id.
+    fn set_default(&self, id: &str, model: Option<&str>) -> Result<ProviderListResponse>;
 
     /// Real connectivity probe; `request.entry` tests an unsaved draft.
     async fn test(&self, request: ProviderTestRequest) -> ProviderTestResponse;

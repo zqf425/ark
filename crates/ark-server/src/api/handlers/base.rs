@@ -93,16 +93,27 @@ pub async fn providers_delete(
 }
 
 /// `POST /v1/runtime/providers/{id}/default`.
+///
+/// The optional body pins one model of that provider; a missing body (or a
+/// blank model) keeps the provider's stored `model` as its default.
+#[derive(Debug, Default, Deserialize)]
+pub struct SetDefaultProviderBody {
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
 pub async fn providers_set_default(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    body: Option<Json<SetDefaultProviderBody>>,
 ) -> Result<Json<ProviderListResponse>, ApiError> {
     let service = state
         .base
         .providers
         .as_ref()
         .ok_or_else(|| missing("provider"))?;
-    Ok(Json(service.set_default(&id)?))
+    let model = body.and_then(|Json(body)| body.model);
+    Ok(Json(service.set_default(&id, model.as_deref())?))
 }
 
 /// `POST /v1/runtime/providers/test` — real request, bounded timeout.

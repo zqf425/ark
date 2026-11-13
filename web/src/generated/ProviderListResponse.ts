@@ -6,6 +6,12 @@ import type { ProviderView } from "./ProviderView";
  */
 export type ProviderListResponse = { providers: Array<ProviderView>, default_provider_id?: string, 
 /**
+ * Model pinned for the default provider. `None` means "serve the
+ * provider's stored `model`": the default is keyed by provider id and the
+ * model only overrides what a turn resolves from that provider.
+ */
+default_model?: string, 
+/**
  * Provider id the running process is actually bound to.
  */
 active_provider_id?: string, };

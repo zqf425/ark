@@ -14,7 +14,10 @@ export const SETTINGS_GENERAL_MESSAGES = {
   'settings.general.changed': ['已变更：{keys}', 'Changed: {keys}'],
   'settings.general.changedSeparator': ['、', ', '],
   'settings.general.defaultModel.label': ['默认模型', 'Default model'],
-  'settings.general.defaultModel.hint': ['选择即时生效：写入为 default provider。', 'Applies immediately: written as the default provider.'],
+  'settings.general.defaultModel.hint': [
+    '选择即时生效：写入为默认供应商与默认模型，可选任意供应商的任意模型。',
+    'Applies immediately: written as the default provider and model; any model of any provider can be picked.'
+  ],
   'settings.general.defaultModel.noProviders': ['（暂无供应商）', '(no providers)'],
   'settings.general.defaultModel.unset': ['（未设置）', '(not set)'],
   'settings.general.defaultModel.active': ['真正在用', 'In use'],
@@ -23,7 +26,10 @@ export const SETTINGS_GENERAL_MESSAGES = {
     'active is the provider actually serving requests; default is only the configured target, and a running thread may not switch until its next turn.'
   ],
   'settings.general.defaultModel.loadFailed': ['加载供应商失败', 'Failed to load providers'],
-  'settings.general.defaultModel.switched': ['默认模型已切换为 {providerId}', 'Default model switched to {providerId}'],
+  'settings.general.defaultModel.switched': [
+    '默认模型已切换为 {providerId} / {model}',
+    'Default model switched to {providerId} / {model}'
+  ],
   'settings.general.defaultModel.switchFailed': ['设置默认模型失败', 'Failed to set the default model'],
   'settings.general.workspace.label': ['默认工作空间', 'Default workspace'],
   'settings.general.workspace.hint': [
