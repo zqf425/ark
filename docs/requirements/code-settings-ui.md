@@ -195,9 +195,9 @@ UI 重构混入本需求。
 运行时调优不再提供「上下文压缩阈值」配置项（`tuning.context_limit_tokens` 从 `TuningSettings` /
 `TuningConfig` 移除，配置文件中的历史取值按未知键忽略并记录诊断）。压缩阈值改为从模型上下文窗口
 推导：有效 provider 声明的窗口 × 80%（`ark_llm::COMPACTION_TRIGGER_RATIO`，与渲染层上下文环的
-警示水位一致）并预留条目 `max_tokens`；窗口未声明时回退保守固定值（arkd
-`FALLBACK_CONTEXT_LIMIT_TOKENS` = 96K），不禁用压缩。
+警示水位一致）并预留条目 `max_tokens`；窗口未声明时按默认窗口 `ark_llm::DEFAULT_CONTEXT_WINDOW_TOKENS`
+（256K，与设置页模型清单未声明窗口的兜底一致）推导，压缩不被禁用。
 
-阈值经 `GET /v1/runtime/providers` 的 `compaction_threshold_tokens` 发布（无声明窗口时字段缺省），
-会话上下文环、footer 水位与控制台状态条以它为分母；字段缺省时隐藏水位而非猜测。设置页移除该输入项，
-模型清单行的「上下文窗口」成为压缩行为的唯一入口；界面文案明确「模型窗口的 80%」语义。
+阈值经 `GET /v1/runtime/providers` 的 `compaction_threshold_tokens` 发布（仅当完全无有效 provider 时
+字段缺省），会话上下文环、footer 水位与控制台状态条以它为分母；字段缺省时隐藏水位。设置页移除该
+输入项，模型清单行的「上下文窗口」成为压缩行为的唯一入口；界面文案明确「模型窗口的 80%」语义。

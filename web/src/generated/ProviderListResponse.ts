@@ -18,7 +18,8 @@ active_provider_id?: string,
 /**
  * Compaction threshold the runtime derives for the *effective* provider:
  * 80% of that provider's configured context window, reserving the
- * entry's `max_tokens` for output. `None` when no provider resolves or
- * none declared a window — the renderer then hides the context meter.
+ * entry's `max_tokens` for output. A provider that declares no window
+ * derives from the 256K default window; `None` only when no provider
+ * resolves at all — the renderer then hides the context meter.
  */
 compaction_threshold_tokens?: number, };

@@ -35,7 +35,12 @@ impl Default for TurnLimits {
             max_tool_calls: 200,
             max_identical_calls: 3,
             max_compactions: 2,
-            context_limit_tokens: 96_000,
+            // 80% of the 256K default context window
+            // (`ark_llm::DEFAULT_CONTEXT_WINDOW_TOKENS`, mirrored here because
+            // ark-agent must not depend on ark-llm); arkd derives the real
+            // per-turn value from the resolved provider, so this only backs
+            // direct `TurnLimits::default()` users.
+            context_limit_tokens: 204_800,
             keep_recent_messages: 12,
             tool_storm_window_size: 0,
             max_parallel_tool_calls: 0,

@@ -86,19 +86,18 @@ pub(crate) fn governed_transport() -> reqwest::Client {
 ///
 /// Derived from the resolved provider's context window — the session may fill
 /// [`ark_llm::COMPACTION_TRIGGER_RATIO`] of it before the prefix folds, with
-/// the user-configured `max_tokens` reserved for output. `None` (no provider
-/// or no declared window) falls back to a conservative fixed budget: an
-/// undeclared window must not silently disable compaction and let the prompt
-/// grow unbounded.
+/// the user-configured `max_tokens` reserved for output. An undeclared window
+/// uses [`ark_llm::DEFAULT_CONTEXT_WINDOW_TOKENS`] (256K, the same fallback
+/// the settings inventory applies), so compaction is never silently disabled
+/// and the prompt cannot grow unbounded.
 pub fn context_limit_tokens(provider: Option<&ProviderConfig>) -> u64 {
     provider
         .and_then(ark_llm::ProviderConfig::compaction_threshold)
-        .unwrap_or(FALLBACK_CONTEXT_LIMIT_TOKENS)
+        .unwrap_or(
+            (ark_llm::DEFAULT_CONTEXT_WINDOW_TOKENS as f64 * ark_llm::COMPACTION_TRIGGER_RATIO)
+                as u64,
+        )
 }
-
-/// Threshold when no provider window is declared: conservative enough for the
-/// smallest common hosted models, large enough not to compact every few turns.
-pub(crate) const FALLBACK_CONTEXT_LIMIT_TOKENS: u64 = 96_000;
 
 /// Extract a usable provider from the opaque `model_providers` value.
 ///
@@ -424,8 +423,9 @@ mod tests {
         // No user-configured output reserve: the full window drives the ratio.
         provider.max_tokens = None;
         assert_eq!(context_limit_tokens(Some(&provider)), 25_600);
-        // An undeclared window must not disable compaction: fall back instead.
-        assert_eq!(context_limit_tokens(None), FALLBACK_CONTEXT_LIMIT_TOKENS);
+        // An undeclared window must not disable compaction: the 256K default
+        // window applies (80% of it = 204_800).
+        assert_eq!(context_limit_tokens(None), 204_800);
     }
 
     #[tokio::test]
