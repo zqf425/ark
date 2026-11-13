@@ -30,7 +30,9 @@ re-export，刻意不引入 tokio-util 依赖）与 `select!` 完成；
 - 压缩保留 system 前缀和 `keep_recent_messages` 条末尾消息的原始内容；被折叠消息生成的 checkpoint
   优先列出短标识符（大写加数字、`KEY=VALUE` 或引号内短串），并受 `context_limit_tokens` 约束。
   后续压缩会替换已有 checkpoint，不会把它当作稳定 system 前缀累积。预算不足时 checkpoint 明示已裁剪，且只在 UTF-8 字符边界裁剪；`compaction_completed` 复用
-  `removed_items` 报告折叠消息数，并报告 checkpoint 字符数。
+  `removed_items` 报告折叠消息数，并报告 checkpoint 字符数。回合种子尾部的持久计划行
+  （`[thread plan]` 的 `Goal:` 与 `- [ ]`/`- [~]`/`- [x]` checkbox 行）同样被识别为结构化事实：
+  checkpoint 摘要整个历史（含种子尾部），把这些行带上才能让回合内压缩不丢失未完成待办。
 - 每个批次在执行器启动前持久化全部 `ToolCallStarted` 已校验参数，`ToolCallFinished` 持久化受工具上限限制的输出和 detail；这既是
   会话重放资料，也是服务端 Changes/File/Terminal 投影的唯一来源，不能由 web 解析自由文本补造。
 - 同一回合的正文 delta 与 reasoning delta 使用各自稳定的 item ID；两类内容不得合并为同一个渲染条目，

@@ -89,7 +89,9 @@ pub async fn update_todos(
     Json(body): Json<TodosRequest>,
 ) -> Result<Json<PlanView>, ApiError> {
     let thread = parse_thread(&id)?;
-    validate_todos(&body.todos)?;
+    // Shared with the model-facing `todo_write` tool: one validator, so the
+    // durable plan cannot be shaped differently by the writer.
+    workbench::validate_todos(&body.todos).map_err(ApiError::from)?;
     state.store.get_thread(thread).await?;
     state
         .store
@@ -172,46 +174,4 @@ pub async fn terminal(
 ) -> Result<Json<TerminalEntriesResponse>, ApiError> {
     let thread = parse_thread(&id)?;
     Ok(Json(workbench::terminal(&events(&state, thread).await?)))
-}
-
-fn validate_todos(todos: &[ark_contract::TodoEntry]) -> Result<(), ApiError> {
-    if todos.len() > 200 {
-        return Err(ApiError::new(
-            ark_common::ArkErrorCode::ValidationError,
-            "a plan supports at most 200 todos",
-        ));
-    }
-    let mut ids = std::collections::HashSet::new();
-    for todo in todos {
-        if todo.id.trim().is_empty() || todo.title.trim().is_empty() || !ids.insert(&todo.id) {
-            return Err(ApiError::new(
-                ark_common::ArkErrorCode::ValidationError,
-                "todo ids and titles must be non-empty and ids unique",
-            ));
-        }
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn todos_need_unique_non_empty_ids_and_titles() {
-        assert!(validate_todos(&[]).is_ok());
-        let duplicate = vec![
-            ark_contract::TodoEntry {
-                id: "same".into(),
-                title: "first".into(),
-                status: ark_contract::TodoStatus::Pending,
-            },
-            ark_contract::TodoEntry {
-                id: "same".into(),
-                title: "second".into(),
-                status: ark_contract::TodoStatus::Pending,
-            },
-        ];
-        assert!(validate_todos(&duplicate).is_err());
-    }
 }

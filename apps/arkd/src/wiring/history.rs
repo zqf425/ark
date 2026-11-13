@@ -126,6 +126,10 @@ fn truncate_utf8(text: &str) -> String {
 /// window (lost-in-the-middle). Re-emitting the current plan each turn keeps
 /// the objective and progress in the recent tail without duplicating the whole
 /// transcript. Returns `None` when the thread has no plan.
+///
+/// The todo lines use the shared `[ ]` / `[~]` / `[x]` vocabulary from
+/// `ark_server::service::workbench` — the same renderer the `todo_write` tool
+/// answers with — so the model reads one encoding wherever todos appear.
 pub(super) fn plan_seed_message(plan: &ark_contract::PlanView) -> Option<ModelMessage> {
     if plan.goal.is_none() && plan.todos.is_empty() {
         return None;
@@ -135,11 +139,7 @@ pub(super) fn plan_seed_message(plan: &ark_contract::PlanView) -> Option<ModelMe
         lines.push(format!("Goal: {}", goal.trim()));
     }
     for todo in &plan.todos {
-        let mark = match todo.status {
-            ark_contract::TodoStatus::Pending => "[ ]",
-            ark_contract::TodoStatus::InProgress => "[~]",
-            ark_contract::TodoStatus::Completed => "[x]",
-        };
+        let mark = ark_server::service::workbench::todo_marker(todo.status);
         lines.push(format!("- {mark} {}", todo.title.trim()));
     }
     Some(ModelMessage::system(lines.join("\n")))

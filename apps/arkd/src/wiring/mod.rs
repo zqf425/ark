@@ -305,6 +305,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         Arc::clone(&delegation) as Arc<dyn ark_ports::SubagentRunner>,
         Arc::clone(&skills),
         Arc::clone(plugins.http()) as Arc<dyn ark_ports::HttpCapability>,
+        Arc::clone(&store_port),
     )?);
     // One `mcp` group: external server adapters plus local plugin tools. Both
     // families are qualified `<provider>.<tool>`, so a collision is a real

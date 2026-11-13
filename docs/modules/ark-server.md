@@ -60,6 +60,9 @@
   读写端点（`GET/POST/DELETE /v1/threads/{id}/goal` 与 `/todos`）不经回合注册，直接向线程事件流追加
   `GoalUpdated`/`GoalCleared`/`TodosUpdated`/`TodosCleared` 权威事件（todos 经 `validate_todos` 校验），
   空文本 goal 与非法 todos 返回结构化 400；它们是 workbench 唯一的写路径，读侧 Plan 投影消费同一事件流。
+  `validate_todos`（上限 200、id/title 非空且 id 唯一）与 `todo_marker`（`[ ]`/`[~]`/`[x]` 渲染）作为
+  共享纯函数宿主在 `service/workbench.rs`：HTTP 路由与组合根的 `todo_write` 工具（见 arkd 设计）是
+  仅有的两个调用方，保证持久计划不会因写入路径不同而形状漂移。
 - `POST /v1/threads/{id}/fork` 以当前持久水位为切点物理复制前缀线程（不接受任意历史 seq：选择历史
   前缀需要明确的历史 UI，裸露数字会成为一个无法解释选中范围的半成品功能）。
 - `/v1/child-runs` 管理族（list/get/delete/abort/steer/resume/thread/events）只解包 HTTP 并转发

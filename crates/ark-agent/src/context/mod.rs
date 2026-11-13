@@ -69,6 +69,23 @@ mod checkpoint_tests {
     }
 
     #[test]
+    fn checkpoint_keeps_plan_todo_lines_from_the_seed() {
+        let checkpoint = ContextCheckpoint::from_messages(&[ModelMessage::system(
+            "[thread plan - current objective and progress]\n\
+             Goal: repair the parser\n\
+             - [x] read files\n\
+             - [~] fix wire format\n\
+             - [ ] run tests",
+        )]);
+
+        let rendered = checkpoint.render();
+        assert!(rendered.contains("Goal: repair the parser"));
+        assert!(rendered.contains("- [x] read files"));
+        assert!(rendered.contains("- [~] fix wire format"));
+        assert!(rendered.contains("- [ ] run tests"));
+    }
+
+    #[test]
     fn checkpoint_merges_only_facts_from_a_generated_checkpoint() {
         let checkpoint = ContextCheckpoint::from_messages(&[ModelMessage::system(
             "[context checkpoint]\n[remembered identifiers]\n- ZEBRA-77\nGoal: preserve legacy fact\n[3 earlier messages compacted]",

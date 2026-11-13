@@ -4,16 +4,22 @@ use std::sync::Arc;
 
 use super::*;
 
-/// Register every builtin, `web_fetch` and `delegate_task` for the parent agent.
+/// Register every builtin, `web_fetch`, `delegate_task` and `todo_write` for
+/// the parent agent.
 ///
 /// A conflict here is a programming error.
 pub(super) fn build_tools(
     runner: Arc<dyn ark_ports::SubagentRunner>,
     skills: Arc<ark_skills::SkillRuntime>,
     http: Arc<dyn ark_ports::HttpCapability>,
+    store: Arc<dyn SessionStore>,
 ) -> Result<ToolRegistry> {
     let registry = build_child_tools(skills, http)?;
     registry.register_all(ark_tool::delegation_tools(runner))?;
+    // The durable plan tool is parent-only: a child writes into its own child
+    // thread's event log, which the parent plan projection never reads, so a
+    // registration there would silently lose every write.
+    registry.register(Arc::new(crate::todo_tool::TodoWriteTool::new(store)))?;
     Ok(registry)
 }
 

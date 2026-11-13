@@ -18,6 +18,7 @@ mod memory_seed;
 mod model;
 mod paths;
 mod plugin_host;
+mod todo_tool;
 mod wiring;
 mod workspace;
 

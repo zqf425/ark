@@ -155,13 +155,19 @@ fn conversation_history_without_a_checkpoint_replays_everything() {
         ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::UserMessage)
             .with_text("first")
             .completed(),
-        ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::AssistantMessage)
-            .with_text("second")
-            .completed(),
+        ark_contract::ThreadItem::new(
+            TurnId::new(),
+            ark_contract::item::ItemKind::AssistantMessage,
+        )
+        .with_text("second")
+        .completed(),
     ];
     assert_eq!(
         conversation_history(&items),
-        vec![ModelMessage::user("first"), ModelMessage::assistant("second")]
+        vec![
+            ModelMessage::user("first"),
+            ModelMessage::assistant("second")
+        ]
     );
 }
 
@@ -171,9 +177,21 @@ fn plan_seed_restates_goal_and_todo_status() {
     let plan = PlanView {
         goal: Some("repair the parser".into()),
         todos: vec![
-            TodoEntry { id: "1".into(), title: "read files".into(), status: TodoStatus::Completed },
-            TodoEntry { id: "2".into(), title: "fix wire format".into(), status: TodoStatus::InProgress },
-            TodoEntry { id: "3".into(), title: "run tests".into(), status: TodoStatus::Pending },
+            TodoEntry {
+                id: "1".into(),
+                title: "read files".into(),
+                status: TodoStatus::Completed,
+            },
+            TodoEntry {
+                id: "2".into(),
+                title: "fix wire format".into(),
+                status: TodoStatus::InProgress,
+            },
+            TodoEntry {
+                id: "3".into(),
+                title: "run tests".into(),
+                status: TodoStatus::Pending,
+            },
         ],
     };
     let message = super::history::plan_seed_message(&plan).expect("a plan produces a seed");
@@ -181,7 +199,10 @@ fn plan_seed_restates_goal_and_todo_status() {
     assert!(message.content.contains("- [x] read files"));
     assert!(message.content.contains("- [~] fix wire format"));
     assert!(message.content.contains("- [ ] run tests"));
-    assert_eq!(super::history::plan_seed_message(&PlanView::default()), None);
+    assert_eq!(
+        super::history::plan_seed_message(&PlanView::default()),
+        None
+    );
 }
 
 /// A folded tool item as the store projects it: one `ToolCall` entry whose
@@ -680,14 +701,29 @@ fn request_user_input_is_registered_for_both_agent_tool_sets() {
         .contains(&"request_user_input".to_string()));
     assert!(child_tools.names().contains(&"web_fetch".to_string()));
 
-    // The parent set adds `delegate_task` on top of the child set.
-    let parent_tools =
-        build_tools(Arc::new(TestSubagentRunner), Arc::clone(&skills), http).expect("tools build");
+    // The parent set adds `delegate_task` and the durable plan tool on top of
+    // the child set.
+    let data_dir = tempfile::tempdir().expect("temp dir");
+    let store: Arc<dyn SessionStore> = Arc::new(
+        ark_store::FileSessionStore::open(ark_store::StoreConfig::new(data_dir.path()))
+            .expect("session store"),
+    );
+    let parent_tools = build_tools(
+        Arc::new(TestSubagentRunner),
+        Arc::clone(&skills),
+        http,
+        Arc::clone(&store),
+    )
+    .expect("tools build");
     let names = parent_tools.names();
     assert!(names.contains(&"request_user_input".to_string()));
     assert!(names.contains(&"bash".to_string()));
     assert!(names.contains(&"delegate_task".to_string()));
     assert!(names.contains(&"web_fetch".to_string()));
+    assert!(names.contains(&"todo_write".to_string()));
+
+    // The durable plan tool is parent-only: the child set must not offer it.
+    assert!(!child_tools.names().contains(&"todo_write".to_string()));
 
     // The wire schema fixes the prompt contract: {prompt: string, required}.
     let schema = parent_tools

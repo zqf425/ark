@@ -221,6 +221,13 @@ fn push_bounded(vec: &mut Vec<String>, value: String, max_chars: usize) {
 }
 
 fn is_structured_line(line: &str) -> bool {
+    // A plan-seed todo line (`- [ ] title`, from `plan_seed_message` /
+    // `todo_write`) carries the durable plan across a compaction boundary:
+    // the seed tail is restated every turn, but the checkpoint must also name
+    // it so an in-turn compact does not drop the objective list.
+    if line.starts_with("- [ ]") || line.starts_with("- [~]") || line.starts_with("- [x]") {
+        return true;
+    }
     [
         "Goal:",
         "Constraint:",
@@ -299,5 +306,7 @@ fn is_short_identifier(value: &str) -> bool {
             || (value
                 .chars()
                 .any(|character: char| character.is_ascii_uppercase())
-                && value.chars().any(|character: char| character.is_ascii_digit())))
+                && value
+                    .chars()
+                    .any(|character: char| character.is_ascii_digit())))
 }

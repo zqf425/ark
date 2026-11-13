@@ -6,10 +6,16 @@
 
 use std::collections::HashMap;
 
+use ark_common::ArkError;
 use ark_contract::{
-    FilePreview, PlanView, RuntimeEvent, TerminalEntriesResponse, TerminalEntry, WorkspaceChange,
-    WorkspaceChangesResponse,
+    FilePreview, PlanView, RuntimeEvent, TerminalEntriesResponse, TerminalEntry, TodoEntry,
+    TodoStatus, WorkspaceChange, WorkspaceChangesResponse,
 };
+
+/// Maximum todos one plan holds. The same bound guards the HTTP route and the
+/// model-facing `todo_write` tool, so neither path can bloat the event log or
+/// the per-turn seed beyond what the panel can render.
+const MAX_TODOS: usize = 200;
 
 /// Fold the latest goal and todo snapshots from a thread event stream.
 pub fn plan(events: &[RuntimeEvent]) -> PlanView {
@@ -24,6 +30,42 @@ pub fn plan(events: &[RuntimeEvent]) -> PlanView {
         }
     }
     view
+}
+
+/// Validate one replacement todo list.
+///
+/// The single validation host for every writer — the HTTP handler and the
+/// `todo_write` tool — so the durable plan cannot be shaped differently by the
+/// path that wrote it.
+pub fn validate_todos(todos: &[TodoEntry]) -> Result<(), ArkError> {
+    if todos.len() > MAX_TODOS {
+        return Err(ArkError::validation(format!(
+            "a plan supports at most {MAX_TODOS} todos"
+        )));
+    }
+    let mut ids = std::collections::HashSet::new();
+    for todo in todos {
+        if todo.id.trim().is_empty()
+            || todo.title.trim().is_empty()
+            || !ids.insert(todo.id.trim().to_string())
+        {
+            return Err(ArkError::validation(
+                "todo ids and titles must be non-empty and ids unique",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The `[ ]` / `[~]` / `[x]` checkbox vocabulary shared by the per-turn plan
+/// seed and the `todo_write` result. One renderer, so the model always reads
+/// the same todo encoding wherever it appears.
+pub fn todo_marker(status: TodoStatus) -> &'static str {
+    match status {
+        TodoStatus::Pending => "[ ]",
+        TodoStatus::InProgress => "[~]",
+        TodoStatus::Completed => "[x]",
+    }
 }
 
 /// Project successful `write` and `edit` calls into the latest mutation per path.
@@ -190,8 +232,46 @@ struct PendingTerminal {
 mod tests {
     use super::*;
     use ark_common::{ThreadId, TurnId};
-    use ark_contract::TodoEntry;
     use chrono::Utc;
+
+    fn todo(id: &str, title: &str, status: TodoStatus) -> TodoEntry {
+        TodoEntry {
+            id: id.into(),
+            title: title.into(),
+            status,
+        }
+    }
+
+    #[test]
+    fn todos_need_unique_non_empty_ids_and_titles() {
+        assert!(validate_todos(&[]).is_ok());
+        let duplicate = vec![
+            todo("same", "first", TodoStatus::Pending),
+            todo("same", "second", TodoStatus::Pending),
+        ];
+        assert!(validate_todos(&duplicate).is_err());
+        assert!(validate_todos(&[todo("a", " ", TodoStatus::Pending)]).is_err());
+        assert!(validate_todos(&[todo(" ", "t", TodoStatus::Pending)]).is_err());
+    }
+
+    #[test]
+    fn todo_validation_bounds_the_list() {
+        let many: Vec<TodoEntry> = (0..=200)
+            .map(|index| todo(&format!("t{index}"), "row", TodoStatus::Pending))
+            .collect();
+        assert!(validate_todos(&many).is_err());
+        let exact: Vec<TodoEntry> = (0..200)
+            .map(|index| todo(&format!("t{index}"), "row", TodoStatus::Pending))
+            .collect();
+        assert!(validate_todos(&exact).is_ok());
+    }
+
+    #[test]
+    fn todo_markers_cover_every_status() {
+        assert_eq!(todo_marker(TodoStatus::Pending), "[ ]");
+        assert_eq!(todo_marker(TodoStatus::InProgress), "[~]");
+        assert_eq!(todo_marker(TodoStatus::Completed), "[x]");
+    }
 
     #[test]
     fn changes_only_include_successful_writes_at_the_latest_path_version() {
@@ -242,11 +322,7 @@ mod tests {
                 seq: 2,
                 thread_id: thread,
                 timestamp: now,
-                todos: vec![TodoEntry {
-                    id: "one".into(),
-                    title: "write tests".into(),
-                    status: ark_contract::TodoStatus::Pending,
-                }],
+                todos: vec![todo("one", "write tests", TodoStatus::Pending)],
             },
         ];
         let projected = plan(&events);

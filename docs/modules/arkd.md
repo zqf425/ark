@@ -138,6 +138,13 @@ egress 授权（该构造器对插件清单路径不可达），并把同一能�
 的已扫描正文快照，避免 `ark-tool` 反向依赖 skills 实现。
 `request_user_input` 属于内置工具集，随 `ark_tool::builtins()` 在父/子两个注册表中可用；
 其执行由 `ark-agent` 的用户输入 gate 拦截，组合根不为它写任何特例。
+组合根另注册**仅父线程可用**的 `todo_write`（`todo_tool.rs`，与 `load_skill` 同一先例）：它持
+`Arc<dyn SessionStore>`，把模型给出的完整待办清单以权威 `TodosUpdated` 事件写入当前线程事件流。
+校验（条数上限、id/title 非空且 id 唯一、标题字符上限）与 checkbox 渲染（`[ ]`/`[~]`/`[x]`）
+分别以 `ark_server::service::workbench` 的 `validate_todos`/`todo_marker` 为唯一宿主，HTTP
+`POST /v1/threads/{id}/todos` 与本工具共用；可预期失败（校验不过、线程不存在）以 `ToolOutput::err`
+返回给模型，只有意外 I/O 错误才走 `Err` 路径。子注册表刻意不含它：子回合写入的是 child 线程的
+事件流，父侧 Plan 投影读不到，注册只会诱导模型做无效写入。
 
 生命周期 hooks（[需求设计](../requirements/hooks.md)）的唯一执行宿主是 `apps/arkd/src/hooks.rs`：
 父回合 `ToolRunnerAdapter` 与子回合 `ChildToolRunner` 都经 `run_around` 组合器包住工具派发，
@@ -158,6 +165,14 @@ facts extracted` 与 `: truncated` 两个变体）。判定 gated 在 `Notice` k
 `<root>/data/memory.json` 并追加**至多一条** `[user memory]` system 消息（按 `created_at` 升序，拼接后
 按 UTF-8 字符数限 4096，超限整条丢弃最新条目并追加 truncated 尾注）。读取或解析失败只记 warn 并跳过注入，
 空 store 不注入，均不影响回合结果。
+
+持久计划（goal + todos）同样走动态尾部：`run_turn` 每回合从线程事件流重投影 `PlanView`
+（`ark_server::service::workbench::plan`），经 `history::plan_seed_message` 以
+`[thread plan - current objective and progress]` system 消息注入 seed 末尾（最贴近新用户消息）。
+todo 行使用共享的 `[ ]`/`[~]`/`[x]` 词汇（`workbench::todo_marker`），与 `todo_write` 工具的
+回显一致。这使计划面板内容对上下文压缩免疫：压缩只折叠历史消息，seed 每回合从事件流重建，
+非完成待办因此始终留在模型可见的最近尾部；回合内压缩生成的 checkpoint 也将 checkbox 行纳入
+结构化事实（见 ark-agent 设计），双重防遗忘。
 
 ## 定时任务装配
 
