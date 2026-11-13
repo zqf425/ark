@@ -35,7 +35,8 @@ describe('general section and status bar copy', () => {
   it('通用区块与状态栏的文案都走消息键', () => {
     const general = stripComments(readComponent(GENERAL_SECTION))
     expect(general).toContain("t('settings.general.title')")
-    expect(general).toContain("t('settings.general.workspace.placeholder')")
+    expect(general).toContain("t('settings.general.workspace.label')")
+    expect(general).toContain("t('settings.general.workspace.change')")
     expect(general).toContain("t('settings.general.logLevel.label')")
 
     const statusBar = stripComments(readComponent(RUNTIME_STATUS_BAR))

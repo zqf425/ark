@@ -23,11 +23,12 @@ describe('general section and status bar i18n keys', () => {
     }
   })
 
-  it('覆盖简报点名的区块标题、工作空间 placeholder 与状态栏文案', () => {
+  it('覆盖简报点名的区块标题、工作空间提示与状态栏文案', () => {
     expect(translate('zh-CN', 'settings.general.title')).toBe('通用')
     expect(translate('en-US', 'settings.general.title')).toBe('General')
-    expect(translate('en-US', 'settings.general.workspace.placeholder')).toBe('D:\\code\\project or /home/me/project')
-    expect(translate('zh-CN', 'settings.general.workspace.placeholder')).toContain('或')
+    expect(translate('en-US', 'settings.general.workspace.change')).toBe('Change…')
+    expect(translate('zh-CN', 'settings.general.workspace.unset')).toContain('~/.arkd/workspace')
+    expect(translate('en-US', 'settings.general.workspace.unset')).toContain('~/.arkd/workspace')
     expect(translate('en-US', 'status.online.online')).toBe('Online')
     expect(translate('en-US', 'status.stream.closed')).toBe('Event stream closed')
     expect(translate('en-US', 'status.refresh')).toBe('Recheck runtime')

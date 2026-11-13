@@ -33,22 +33,17 @@ export const SETTINGS_GENERAL_MESSAGES = {
   'settings.general.defaultModel.switchFailed': ['设置默认模型失败', 'Failed to set the default model'],
   'settings.general.workspace.label': ['默认工作空间', 'Default workspace'],
   'settings.general.workspace.hint': [
-    '留空并保存 = 清除默认工作空间（提交空字符串）。',
-    'Save an empty value to clear the default workspace (submits an empty string).'
+    '新会话默认从这里开始；未设置时使用 ~/.arkd/workspace。点击「更改…」选择新目录后立即生效。',
+    'New threads start here; when unset, ~/.arkd/workspace is used. Click "Change…" to pick a new folder; the change applies immediately.'
   ],
-  'settings.general.workspace.placeholder': ['D:\\code\\project 或 /home/me/project', 'D:\\code\\project or /home/me/project'],
-  'settings.general.workspace.browse': ['浏览…', 'Browse…'],
+  'settings.general.workspace.unset': [
+    '未设置（使用 ~/.arkd/workspace）',
+    'Not set (using ~/.arkd/workspace)'
+  ],
+  'settings.general.workspace.change': ['更改…', 'Change…'],
+  'settings.general.workspace.updated': ['默认工作空间已更新', 'Default workspace updated'],
   'settings.general.workspace.browsing': ['选择中…', 'Selecting…'],
   'settings.general.workspace.pickFailed': ['文件夹选择器打开失败', 'Failed to open the folder picker'],
-  'settings.general.workspace.validate': ['校验', 'Validate'],
-  'settings.general.workspace.validating': ['校验中…', 'Validating…'],
-  'settings.general.workspace.save': ['保存', 'Save'],
-  'settings.general.workspace.saving': ['保存中…', 'Saving…'],
-  'settings.general.workspace.saved': ['默认工作空间已保存', 'Default workspace saved'],
-  'settings.general.workspace.cleared': ['默认工作空间已清除', 'Default workspace cleared'],
-  'settings.general.workspace.emptyPath': ['请先填写工作空间路径', 'Enter a workspace path first'],
-  'settings.general.workspace.validateOk': ['路径校验通过', 'Path validated'],
-  'settings.general.workspace.validateFailed': ['路径校验失败', 'Path validation failed'],
   'settings.general.workspace.statusFailed': ['工作空间状态读取失败', 'Failed to read the workspace status'],
   'settings.general.workspace.gitRepository': ['git 仓库', 'git repository'],
   'settings.general.workspace.exists': ['存在', 'exists'],
@@ -59,10 +54,6 @@ export const SETTINGS_GENERAL_MESSAGES = {
   'settings.general.workspace.clean': ['干净', 'clean'],
   'settings.general.workspace.changeCount': ['变更数', 'Changed files'],
   'settings.general.workspace.reading': ['读取工作空间状态…', 'Reading the workspace status…'],
-  'settings.general.workspace.probeHint': [
-    '点「校验」可读取该路径的存在性、git 分支与改动状态。',
-    'Select "Validate" to read this path\u2019s existence, git branch, and change state.'
-  ],
   'settings.general.logLevel.label': ['日志级别', 'Log level'],
   'settings.general.logLevel.hint': ['保存后立即生效（runtime 内部热切换）。', 'Applied immediately after saving (hot-swapped inside the runtime).'],
   'settings.general.logLevel.saved': ['日志级别已设为 {level}', 'Log level set to {level}'],
