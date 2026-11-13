@@ -43,7 +43,11 @@
   `GET /v1/threads/{id}/usage` 播种且只填充空通道（避免与实时事件重复计数）；上下文水位取最近一次
   样本的 `prompt_tokens` 对 tuning `context_limit_tokens` 的占比，仅作展示，不参与运行时决策。
   限额缓存带 TTL 并定时重取（footer 常驻挂载、跨线程不重挂，一次性获取会在设置页修改后永久陈旧）。
-  `compaction_completed` 以摘要形式显示最近一次压缩规模。
+  `compaction_completed` 以摘要形式显示最近一次压缩规模。footer 另展示最近一轮流式速度与会话累计
+  缓存命中率：速度由该轮首个到末个 delta 的实测窗口（短于 0.3s 不显示）折 `usage` 的
+  `completion_tokens`，窗口在回合/轮边界与 `usage` 折叠后清零，不保留陈旧值；命中率只取
+  `cache_hit_tokens / (cache_hit_tokens + cache_miss_tokens)`，两者按 `sum_opt` 语义累加，缺计数时
+  不显示，绝不用 `hit / prompt_tokens` 伪造。
 - 模型输出的 markdown 渲染集中在 `shared/ui` 的 `Markdown`（marked + DOMPurify 消毒后注入）与
   `code-highlight`（文件预览高亮）：模型输出是不可信输入，任何进入 `dangerouslySetInnerHTML` 的
   HTML 必须先经 DOMPurify；这是展示层能力，不与 Rust 侧业务逻辑双实现。
@@ -109,8 +113,9 @@
   总量仍取最近一次权威 `usage` 事件的 `prompt_tokens` 与 tuning 窗口；token 估算的唯一宿主仍是
   `ark-agent::TokenEstimator`，前端不重算 token。弹层内「压缩上下文」直接调用
   `POST /v1/threads/{id}/compact`。共享 `ModelProviderMenu` 提供「供应商 → 模型」二级菜单与搜索，
-  推理强度留在菜单 footer；所有选择打开时重读线程覆盖、写入仍走 `PATCH`。设置页使用生成契约提供同一全局权限，
-  展示“永远询问”“仅工作区修改”“完全访问”三档。
+  会话输入框用 `variant="flyout"`：供应商列表常驻、hover/focus 浮出独立滚动的模型卡，避免长模型
+  清单挤占输入框；推理强度留在菜单 footer；所有选择打开时重读线程覆盖、写入仍走 `PATCH`。
+  设置页使用生成契约提供同一全局权限，展示“永远询问”“仅工作区修改”“完全访问”三档。
 - 会话标题下方有紧凑统计条（`SessionStatsBar`）：轮次与模型调用数来自 `GET /v1/threads/{id}/usage`，
   墙钟耗时来自 `GET /v1/debug/llm-rounds`（服务端按权威 `usage` 事件折出的 `duration_ms`），并展示
   prompt/completion/total tokens、真实 `cache_hit_rate` 与 `cost_usd`；诊断分页 `truncated` 为真时把调用数

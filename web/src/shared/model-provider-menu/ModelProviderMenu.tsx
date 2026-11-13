@@ -54,6 +54,13 @@ export type ModelProviderMenuProps = {
   footer?: ReactNode | ((close: () => void) => ReactNode)
   /** Optional "follow default" entry at the top of the left column. */
   clearSelection?: ModelProviderClear
+  /**
+   * `columns` (default) keeps two side-by-side columns for settings forms.
+   * `flyout` mirrors smart-ark's session composer: one provider column, and
+   * hovering/focusing a provider floats its models as a separate scrollable
+   * submenu card beside the menu.
+   */
+  variant?: 'columns' | 'flyout'
 }
 
 /**
@@ -97,11 +104,13 @@ export function ModelProviderMenu({
   header,
   footer,
   clearSelection,
+  variant = 'columns',
   open: controlledOpen,
   onOpenChange,
   title
 }: ModelProviderMenuProps): JSX.Element {
   const { t } = useI18n()
+  const flyout = variant === 'flyout'
   const [internalOpen, setInternalOpen] = useState(false)
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : internalOpen
@@ -110,7 +119,12 @@ export function ModelProviderMenu({
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   const setOpen = (next: boolean): void => {
-    if (!next) setQuery('')
+    if (!next) {
+      setQuery('')
+      // Next open starts with the submenu collapsed; the re-anchor effect
+      // below reopens the stored selection's provider once the menu is open.
+      if (flyout) setActiveId(null)
+    }
     if (!isControlled) setInternalOpen(next)
     onOpenChange?.(next)
   }
@@ -131,9 +145,9 @@ export function ModelProviderMenu({
   // On open, and while an async provider list arrives, ensure some group is
   // active without ever overriding a provider already picked by the operator.
   useEffect(() => {
-    if (!open) return
+    if (!open || flyout) return
     setActiveId((current) => current ?? displayGroups[0]?.id ?? null)
-  }, [open, displayGroups])
+  }, [open, displayGroups, flyout])
 
   // Outside-click and Escape close the menu in both modes: `setOpen` routes a
   // controlled menu's close through `onOpenChange` instead of local state.
@@ -169,7 +183,11 @@ export function ModelProviderMenu({
       }
     })
     .filter((group) => group.models.length > 0)
-  const activeGroup = visibleGroups.find((group) => group.id === activeId) ?? visibleGroups[0] ?? null
+  // In flyout mode the submenu stays collapsed until a provider is hovered,
+  // focused or clicked (or the stored selection is re-anchored on open).
+  const activeGroup = visibleGroups.find((group) => group.id === activeId)
+    ?? (flyout ? null : visibleGroups[0])
+    ?? null
   const triggerLabel = resolved.group
     ? [resolved.group.label, resolved.model].filter(Boolean).join(' / ')
     : ''
@@ -179,6 +197,30 @@ export function ModelProviderMenu({
     onSelect({ providerId, model })
     setOpen(false)
   }
+
+  // Shared by the inline column and the flyout submenu: exactly the active
+  // provider's models, or a translated empty state. The flyout gives this list
+  // its own scroll container, so a long inventory stays fully selectable.
+  const modelItems: ReactNode = activeGroup && activeGroup.models.length > 0
+    ? activeGroup.models.map((model) => {
+        const selected = resolved.group?.id === activeGroup.id && resolved.model === model
+        return (
+          <button
+            key={`${activeGroup.id}:${model}`}
+            type="button"
+            role="menuitemradio"
+            aria-checked={selected}
+            className={`ark-mpm__item ark-mpm__model${selected ? ' ark-mpm__item--selected' : ''}`}
+            title={model}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => select(activeGroup.id, model)}
+          >
+            <span className="ark-mpm__item-label">{model}</span>
+            {selected ? <span className="ark-mpm__check" aria-hidden="true">✓</span> : null}
+          </button>
+        )
+      })
+    : <p className="ark-mpm__empty">{t('modelProviderMenu.noModels')}</p>
 
   return (
     <div className={`ark-mpm${className ? ` ${className}` : ''}`} ref={rootRef}>
@@ -205,7 +247,7 @@ export function ModelProviderMenu({
       </button>
       {open ? (
         <div
-          className={`ark-mpm__menu${menuClassName ? ` ${menuClassName}` : ''}`}
+          className={`ark-mpm__menu${flyout ? ' ark-mpm__menu--flyout' : ''}${menuClassName ? ` ${menuClassName}` : ''}`}
           role="menu"
           aria-label={ariaLabel}
         >
@@ -268,30 +310,22 @@ export function ModelProviderMenu({
                 ))
               )}
             </div>
-            <div className="ark-mpm__right" role="group" aria-label={t('modelProviderMenu.modelColumn')}>
-              {activeGroup && activeGroup.models.length > 0 ? (
-                activeGroup.models.map((model) => {
-                  const selected = resolved.group?.id === activeGroup.id && resolved.model === model
-                  return (
-                    <button
-                      key={`${activeGroup.id}:${model}`}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={selected}
-                      className={`ark-mpm__item ark-mpm__model${selected ? ' ark-mpm__item--selected' : ''}`}
-                      title={model}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => select(activeGroup.id, model)}
-                    >
-                      <span className="ark-mpm__item-label">{model}</span>
-                      {selected ? <span className="ark-mpm__check" aria-hidden="true">✓</span> : null}
-                    </button>
-                  )
-                })
-              ) : (
-                <p className="ark-mpm__empty">{t('modelProviderMenu.noModels')}</p>
-              )}
-            </div>
+            {flyout ? (
+              activeGroup ? (
+                <div
+                  className="ark-mpm__right ark-mpm__flyout"
+                  role="group"
+                  aria-label={`${activeGroup.label} · ${t('modelProviderMenu.modelColumn')}`}
+                >
+                  <p className="ark-mpm__flyout-title">{activeGroup.label}</p>
+                  {modelItems}
+                </div>
+              ) : null
+            ) : (
+              <div className="ark-mpm__right" role="group" aria-label={t('modelProviderMenu.modelColumn')}>
+                {modelItems}
+              </div>
+            )}
           </div>
           {footer ? (
             <div className="ark-mpm__footer">

@@ -84,6 +84,10 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.usage.tokens': ['输入 {prompt} · 输出 {completion}', 'prompt {prompt} · completion {completion}'],
   'canvas.usage.contextTitle': ['最近一次模型请求的上下文占用', 'Context fill of the most recent model request'],
   'canvas.usage.context': ['上下文 {used}/{limit}（{percent}%）', 'Context {used}/{limit} ({percent}%)'],
+  'canvas.usage.speed': ['{rate} tok/s', '{rate} tok/s'],
+  'canvas.usage.speedTitle': ['最近一个模型轮的流式输出速度（按本轮 delta 实测窗口折算）', 'Streaming output speed of the latest model round (measured over its delta window)'],
+  'canvas.usage.cache': ['缓存命中 {percent}%', 'cache hit {percent}%'],
+  'canvas.usage.cacheTitle': ['会话累计提示缓存命中率（仅来自权威命中/未命中计数）', 'Cumulative prompt-cache hit rate (authoritative hit/miss counters only)'],
   'canvas.compaction.title': ['最近一次上下文压缩', 'Most recent context compaction'],
   'canvas.compaction.notice': ['已压缩：移除 {removed} 条，检查点 {chars} 字符', 'Compacted: removed {removed} items, checkpoint {chars} chars'],
 

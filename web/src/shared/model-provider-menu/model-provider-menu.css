@@ -225,3 +225,64 @@
   outline: 2px solid var(--ark-accent);
   outline-offset: 1px;
 }
+
+/* ---------- flyout variant (session composer, mirrors smart-ark) ----------
+ * A single provider column; hovering/focusing a provider floats its models as a
+ * separate card beside the menu. That card owns its own scroll container, so a
+ * long model inventory is never clipped. `overflow: visible` lets the submenu
+ * escape the menu card's rounded bounds.
+ */
+.ark-mpm__menu--flyout {
+  width: 232px;
+  min-width: 0;
+  max-width: 232px;
+  max-height: none;
+  overflow: visible;
+}
+
+.ark-mpm__menu--flyout .ark-mpm__columns {
+  position: relative;
+}
+
+/* Only the provider column is in flow now; it scrolls on its own when there are
+   many providers, and the divider that split the settings columns is gone. */
+.ark-mpm__menu--flyout .ark-mpm__left {
+  flex: 1 1 100%;
+  border-right: 0;
+  max-height: 340px;
+}
+
+/* Floating model submenu: an independent card to the LEFT of the provider list
+ * (the composer menu is right-aligned above its pill, so the left has room).
+ * It stays mounted while the pointer travels into the card and scrolls
+ * internally when the model list is long.
+ */
+.ark-mpm__flyout {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 6px);
+  left: auto;
+  flex: none;
+  width: 260px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius-lg);
+  background: var(--ark-bg-raised);
+  box-shadow: var(--ark-shadow-2);
+}
+
+.ark-mpm__flyout-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -6px -6px 4px;
+  padding: 8px 9px 6px;
+  border-bottom: 1px solid var(--ark-border-muted);
+  background: var(--ark-bg-raised);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ark-text-faint);
+}

@@ -28,6 +28,11 @@ export type ErrorLine = {
  * events. `lastPromptTokens` is the newest sample's prompt size — the closest
  * client-side proxy for how full the context is; the limit itself comes from
  * runtime tuning (`context_limit_tokens`).
+ *
+ * Cache sums follow the same `sum_opt` semantics as `costUsd`: a sample without
+ * the counter contributes nothing and the sum stays null until one carries it.
+ * The hit rate is only ever derived from the hit/miss pair, never faked from
+ * `hit / prompt_tokens` — the same rule the Rust aggregate applies.
  */
 export type UsageAggregate = {
   samples: number
@@ -36,6 +41,21 @@ export type UsageAggregate = {
   totalTokens: number
   costUsd: number | null
   lastPromptTokens: number | null
+  cacheHitTokens: number | null
+  cacheMissTokens: number | null
+  /** Output speed of the newest model round, measured over its streaming window. */
+  lastRoundTokensPerSec: number | null
+}
+
+/**
+ * Streaming window of the in-flight model round: epoch ms of its first and
+ * latest delta. Reducer bookkeeping that pairs the next `usage` sample's
+ * provider-reported completion tokens with real streaming time to derive
+ * tok/s; not display state.
+ */
+export type RoundWindow = {
+  startMs: number
+  lastMs: number
 }
 
 /** Latest `compaction_completed` notice; diagnostics for the context meter. */
@@ -90,6 +110,8 @@ export type ItemsSnapshot = {
   rewoundFromSeq: number | null
   /** Aggregated `usage` events; null until the first sample or thread seed. */
   usage: UsageAggregate | null
+  /** Streaming window of the in-flight model round; null between rounds. */
+  roundWindow: RoundWindow | null
   /** Newest compaction notice, cleared on rewind with the rest of the projection. */
   lastCompaction: CompactionNotice | null
 }

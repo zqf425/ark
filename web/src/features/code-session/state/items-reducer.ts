@@ -44,6 +44,7 @@ export function emptyItemsState(): ItemsSnapshot {
     rewindRevision: 0,
     rewoundFromSeq: null,
     usage: null,
+    roundWindow: null,
     lastCompaction: null
   }
 }
@@ -56,6 +57,33 @@ const DELTA_ITEM_KIND: Partial<Record<RuntimeEvent['kind'], ItemKind>> = {
 
 const MAX_ERROR_LINES = 50
 const MAX_CHILD_COMPLETIONS = 50
+
+/**
+ * Streaming windows shorter than this are too noisy for a tok/s readout: a
+ * near-instant round would otherwise print absurd spikes. Rounds below the
+ * threshold simply show no speed.
+ */
+const MIN_STREAM_WINDOW_SECONDS = 0.3
+
+/** Epoch ms of a runtime event timestamp (ISO 8601 from the wire). */
+function eventMs(timestamp: string): number {
+  return Date.parse(timestamp)
+}
+
+/**
+ * Track the streaming window of the in-flight model round: from the round's
+ * first delta to its latest one. The next `usage` event pairs its
+ * provider-reported completion tokens with this window to derive tok/s.
+ */
+function trackDeltaWindow(draft: ItemsDraft, timestamp: string): void {
+  const ms = eventMs(timestamp)
+  draft.roundWindow = { startMs: draft.roundWindow?.startMs ?? ms, lastMs: ms }
+}
+
+/** A round boundary invalidates any in-flight streaming window. */
+function resetDeltaWindow(draft: ItemsDraft): void {
+  draft.roundWindow = null
+}
 
 /** Runtime events that change one of the server-side workbench projections. */
 const WORKBENCH_EVENT_KINDS: ReadonlySet<RuntimeEvent['kind']> = new Set([
@@ -206,19 +234,23 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
     case 'assistant_text_delta':
     case 'assistant_reasoning_delta':
       appendDelta(draft, event)
+      trackDeltaWindow(draft, event.timestamp)
       return commitDraft(draft)
 
     case 'turn_started':
       draft.activeTurnId = event.turn_id
       setTurn(draft, event.turn_id, 'running')
+      resetDeltaWindow(draft)
       return commitDraft(draft)
 
     case 'turn_completed':
       setTurn(draft, event.turn_id, 'completed')
+      resetDeltaWindow(draft)
       return commitDraft(draft)
 
     case 'turn_failed':
       setTurn(draft, event.turn_id, 'failed')
+      resetDeltaWindow(draft)
       pushError(draft, {
         seq: event.seq,
         timestamp: event.timestamp,
@@ -249,6 +281,7 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
 
     case 'turn_aborted':
       setTurn(draft, event.turn_id, 'aborted')
+      resetDeltaWindow(draft)
       return commitDraft(draft)
 
     case 'transient_retry':
@@ -334,9 +367,18 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       draft.childRunRevision += 1
       return commitDraft(draft)
 
-    case 'usage':
-      draft.usage = foldUsage(draft.usage, event.usage)
+    case 'usage': {
+      // tok/s pairs the round's provider-reported completion tokens with the
+      // window measured from its own deltas; both are dropped afterwards so a
+      // round without visible streaming shows no speed instead of a stale one.
+      const window = draft.roundWindow
+      const seconds = window ? (window.lastMs - window.startMs) / 1000 : 0
+      const tokensPerSec =
+        window && seconds >= MIN_STREAM_WINDOW_SECONDS ? event.usage.completion_tokens / seconds : null
+      draft.usage = foldUsage(draft.usage, event.usage, tokensPerSec)
+      resetDeltaWindow(draft)
       return commitDraft(draft)
+    }
 
     case 'compaction_completed': {
       const notice: CompactionNotice = {

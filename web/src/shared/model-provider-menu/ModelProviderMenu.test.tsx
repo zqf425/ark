@@ -178,3 +178,85 @@ describe('ModelProviderMenu (two-level provider -> model)', () => {
     expect(rightColumn(harness.host).textContent).toContain('deepseek-chat')
   })
 })
+
+describe('ModelProviderMenu flyout variant (session composer)', () => {
+  let harness: ReactHarness | null = null
+
+  beforeEach(() => installBrowserStubs())
+  afterEach(async () => {
+    await harness?.unmount()
+    harness = null
+  })
+
+  const flyout = (extra: Partial<ComponentProps<typeof ModelProviderMenu>> = {}) =>
+    renderMenu({ variant: 'flyout', ...extra })
+
+  async function hoverProvider(h: ReactHarness, label: string): Promise<void> {
+    const row = buttonWith(h.host, '.ark-mpm__provider', label)
+    await act(async () => {
+      row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    })
+  }
+
+  function submenu(h: ReactHarness): HTMLElement {
+    const node = h.host.querySelector('.ark-mpm__flyout')
+    if (!node) throw new Error('flyout submenu missing')
+    return node as HTMLElement
+  }
+
+  it('opens a single-column menu with no model submenu until a provider is hovered', async () => {
+    harness = await mountWithProviders(flyout())
+    await openMenu(harness)
+    expect(harness.host.querySelector('.ark-mpm__menu--flyout')).not.toBeNull()
+    expect(harness.host.querySelector('.ark-mpm__provider')).not.toBeNull()
+    expect(harness.host.querySelector('.ark-mpm__flyout')).toBeNull()
+    expect(harness.host.querySelector('.ark-mpm__right')).toBeNull()
+  })
+
+  it("hovering a provider name floats only that provider's models", async () => {
+    harness = await mountWithProviders(flyout())
+    await openMenu(harness)
+    await hoverProvider(harness, 'OpenAI')
+    const menu = submenu(harness)
+    expect(menu.textContent).toContain('gpt-5')
+    expect(menu.textContent).toContain('gpt-4o')
+    expect(menu.textContent).not.toContain('deepseek-chat')
+    expect(menu.querySelector('.ark-mpm__flyout-title')?.textContent).toContain('OpenAI')
+  })
+
+  it('hovering another provider swaps the submenu contents', async () => {
+    harness = await mountWithProviders(flyout())
+    await openMenu(harness)
+    await hoverProvider(harness, 'OpenAI')
+    await hoverProvider(harness, 'DeepSeek')
+    const menu = submenu(harness)
+    expect(menu.textContent).toContain('deepseek-chat')
+    expect(menu.textContent).not.toContain('gpt-5')
+  })
+
+  it('picks a model from the flyout submenu atomically and closes', async () => {
+    const onSelect = vi.fn()
+    harness = await mountWithProviders(flyout({ onSelect }))
+    await openMenu(harness)
+    await hoverProvider(harness, 'DeepSeek')
+    await clickButton(harness, '.ark-mpm__flyout .ark-mpm__model', 'deepseek-chat')
+    expect(onSelect).toHaveBeenCalledWith({ providerId: 'p2', model: 'deepseek-chat' })
+    expect(harness.host.querySelector('.ark-mpm__menu')).toBeNull()
+  })
+
+  it('keeps a long model inventory fully selectable in its own scroll container', async () => {
+    const many = Array.from({ length: 40 }, (_, i) => `model-${String(i).padStart(2, '0')}`)
+    harness = await mountWithProviders(flyout({
+      groups: [{ id: 'big', label: 'BigProvider', models: many }]
+    }))
+    await openMenu(harness)
+    await hoverProvider(harness, 'BigProvider')
+    const menu = submenu(harness)
+    // The submenu is its own scrollable card (CSS max-height + overflow-y:auto),
+    // so no model is dropped to fit the parent menu.
+    expect(menu.classList.contains('ark-mpm__flyout')).toBe(true)
+    expect(menu.querySelectorAll('.ark-mpm__model').length).toBe(40)
+    expect(menu.textContent).toContain('model-00')
+    expect(menu.textContent).toContain('model-39')
+  })
+})

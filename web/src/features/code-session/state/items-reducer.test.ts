@@ -328,7 +328,11 @@ describe('items reducer usage and compaction', () => {
       completionTokens: 500,
       totalTokens: 3000,
       costUsd: 0.02,
-      lastPromptTokens: 1500
+      cacheHitTokens: null,
+      cacheMissTokens: null,
+      lastPromptTokens: 1500,
+      // No deltas preceded these samples, so no streaming speed was measured.
+      lastRoundTokensPerSec: null
     })
   })
 
@@ -383,7 +387,10 @@ describe('items reducer usage and compaction', () => {
       completionTokens: 1000,
       totalTokens: 10000,
       costUsd: null,
-      lastPromptTokens: null
+      cacheHitTokens: null,
+      cacheMissTokens: null,
+      lastPromptTokens: null,
+      lastRoundTokensPerSec: null
     })
   })
 })

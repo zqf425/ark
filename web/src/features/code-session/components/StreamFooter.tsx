@@ -39,6 +39,13 @@ export function StreamFooter(): JSX.Element {
     ? usage.lastPromptTokens / contextLimit
     : null
 
+  // Cache hit rate only from the hit/miss pair, mirroring the Rust aggregate:
+  // never faked from `hit / prompt_tokens`, which would overstate efficiency.
+  const cacheRate =
+    usage?.cacheHitTokens != null && usage.cacheMissTokens != null && usage.cacheHitTokens + usage.cacheMissTokens > 0
+      ? usage.cacheHitTokens / (usage.cacheHitTokens + usage.cacheMissTokens)
+      : null
+
   return (
     <div className="ark-streamfooter">
       <span className={`ark-dot ark-dot--${streamStatus === 'open' ? 'ok' : 'warn'}`} aria-hidden="true" />
@@ -53,6 +60,16 @@ export function StreamFooter(): JSX.Element {
             completion: formatTokens(usage.completionTokens)
           })}
           {usage.costUsd != null ? ` · ${formatUsd(usage.costUsd, locale)}` : ''}
+        </span>
+      ) : null}
+      {usage?.lastRoundTokensPerSec != null ? (
+        <span className="ark-streamfooter__meta" title={t('canvas.usage.speedTitle')}>
+          {t('canvas.usage.speed', { rate: Math.round(usage.lastRoundTokensPerSec) })}
+        </span>
+      ) : null}
+      {cacheRate != null ? (
+        <span className="ark-streamfooter__meta" title={t('canvas.usage.cacheTitle')}>
+          {t('canvas.usage.cache', { percent: Math.round(cacheRate * 100) })}
         </span>
       ) : null}
       {contextRatio != null ? (

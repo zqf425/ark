@@ -610,6 +610,7 @@ export function ModelPicker({ threadId }: { threadId: string | null }): JSX.Elem
 
   return (
     <ModelProviderMenu
+      variant="flyout"
       className="ark-mpm--inline"
       menuClassName="ark-mpm__menu--above-end"
       groups={groups}

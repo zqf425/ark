@@ -13,7 +13,7 @@
  * object, so the row memo still bails out.
  */
 import type { ItemId, ThreadItem, TurnId, TurnState } from '../../../shared/contracts'
-import type { ChildCompletionNotice, CompactionNotice, ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput, UsageAggregate } from './types'
+import type { ChildCompletionNotice, CompactionNotice, ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput, RoundWindow, UsageAggregate } from './types'
 
 export type ItemsDraft = {
   base: ItemsSnapshot
@@ -31,6 +31,7 @@ export type ItemsDraft = {
   rewindRevision: number
   rewoundFromSeq: number | null
   usage: UsageAggregate | null
+  roundWindow: RoundWindow | null
   lastCompaction: CompactionNotice | null
 }
 
@@ -51,6 +52,7 @@ export function draftOf(base: ItemsSnapshot): ItemsDraft {
     rewindRevision: base.rewindRevision,
     rewoundFromSeq: base.rewoundFromSeq,
     usage: base.usage,
+    roundWindow: base.roundWindow,
     lastCompaction: base.lastCompaction
   }
 }
@@ -107,6 +109,9 @@ export function commitDraft(draft: ItemsDraft): ItemsSnapshot {
     rewindRevision: draft.rewindRevision,
     rewoundFromSeq: draft.rewoundFromSeq,
     usage: draft.usage,
+    // `roundWindow` is a value field, not a copy-on-write channel: null means
+    // "window reset", so it must not fall back to the base snapshot here.
+    roundWindow: draft.roundWindow,
     lastCompaction: draft.lastCompaction
   }
 }

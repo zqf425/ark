@@ -8,8 +8,17 @@
 import type { Usage, ThreadUsageResponse } from '../../../shared/contracts'
 import type { ItemsSnapshot, UsageAggregate } from './types'
 
-/** Fold one authoritative `usage` sample into the per-thread aggregate. */
-export function foldUsage(current: UsageAggregate | null, sample: Usage): UsageAggregate {
+/**
+ * Fold one authoritative `usage` sample into the per-thread aggregate.
+ *
+ * `tokensPerSec` is the speed the reducer measured for the round this sample
+ * closes; passing null (no measurable streaming window) keeps no stale value.
+ */
+export function foldUsage(
+  current: UsageAggregate | null,
+  sample: Usage,
+  tokensPerSec: number | null = null
+): UsageAggregate {
   return {
     samples: (current?.samples ?? 0) + 1,
     promptTokens: (current?.promptTokens ?? 0) + sample.prompt_tokens,
@@ -19,7 +28,19 @@ export function foldUsage(current: UsageAggregate | null, sample: Usage): UsageA
     // carried one — the same `sum_opt_f` semantics as the Rust aggregate, so
     // the footer never hides a cost the server would report.
     costUsd: sample.cost_usd != null ? (current?.costUsd ?? 0) + sample.cost_usd : current?.costUsd ?? null,
-    lastPromptTokens: sample.prompt_tokens
+    // Cache counters fold with the same `sum_opt` semantics: a sample without
+    // the counter contributes nothing, and the footer only derives a rate from
+    // the hit/miss pair — never from `hit / prompt_tokens`.
+    cacheHitTokens:
+      sample.cache_hit_tokens != null
+        ? (current?.cacheHitTokens ?? 0) + sample.cache_hit_tokens
+        : current?.cacheHitTokens ?? null,
+    cacheMissTokens:
+      sample.cache_miss_tokens != null
+        ? (current?.cacheMissTokens ?? 0) + sample.cache_miss_tokens
+        : current?.cacheMissTokens ?? null,
+    lastPromptTokens: sample.prompt_tokens,
+    lastRoundTokensPerSec: tokensPerSec
   }
 }
 
@@ -39,7 +60,11 @@ export function seedUsage(state: ItemsSnapshot, response: ThreadUsageResponse): 
       completionTokens: response.completion_tokens,
       totalTokens: response.total_tokens,
       costUsd: response.cost_usd ?? null,
-      lastPromptTokens: null
+      cacheHitTokens: response.cache_hit_tokens ?? null,
+      cacheMissTokens: response.cache_miss_tokens ?? null,
+      // The seed is a lifetime aggregate; it carries no per-round timing.
+      lastPromptTokens: null,
+      lastRoundTokensPerSec: null
     }
   }
 }
