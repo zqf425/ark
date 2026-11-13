@@ -24,10 +24,12 @@ export function ActivityRail(): JSX.Element {
   const view = useViewStore((s) => s.view)
   const setView = useViewStore((s) => s.setView)
   const activePanel = useCodeSessionStore((s) => s.activePanel)
-  const setActivePanel = useCodeSessionStore((s) => s.setActivePanel)
+  const openPanel = useCodeSessionStore((s) => s.openPanel)
 
-  const openPanel = (panel: PanelId): void => {
-    setActivePanel(panel)
+  // A rail click is an explicit "show me this context view" intent, so it is
+  // allowed to expand the inspector the user may have collapsed.
+  const showPanel = (panel: PanelId): void => {
+    openPanel(panel)
     setView('code')
   }
 
@@ -58,14 +60,14 @@ export function ActivityRail(): JSX.Element {
       icon: 'terminal',
       labelKey: 'console.rail.terminal',
       active: view === 'code' && activePanel === 'terminal',
-      run: () => openPanel('terminal')
+      run: () => showPanel('terminal')
     },
     {
       id: 'plan',
       icon: 'clock',
       labelKey: 'console.rail.plan',
       active: view === 'code' && activePanel === 'plan',
-      run: () => openPanel('plan')
+      run: () => showPanel('plan')
     }
   ]
 

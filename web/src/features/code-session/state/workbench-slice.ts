@@ -13,6 +13,8 @@ export type WorkbenchSlice = {
   rightCollapsed: boolean
   selectedFilePath: string | null
   setActivePanel: (panel: PanelId) => void
+  /** Explicit "open this context view" intent: selects the tab AND expands. */
+  openPanel: (panel: PanelId) => void
   setLeftWidth: (width: number) => void
   toggleLeft: () => void
   toggleRight: () => void
@@ -32,17 +34,20 @@ export const createWorkbenchSlice: StateCreator<WorkbenchSlice, [], [], Workbenc
   activePanel: 'changes',
   leftWidth: DEFAULT_LEFT,
   leftCollapsed: false,
-  // The inspector is a resident workbench column (proposal A): context stays
-  // visible next to the conversation, and the user can still collapse it.
-  rightCollapsed: false,
+  // The inspector starts closed: it is an on-demand context column, so the
+  // conversation gets the full canvas until the user asks for the panels.
+  rightCollapsed: true,
   selectedFilePath: null,
 
-  setActivePanel: (panel) => set({ activePanel: panel, rightCollapsed: false }),
+  // Selecting a tab is a layout change *inside* the inspector. It must never
+  // reopen a drawer the user closed — only `openPanel`/`toggleRight` do that.
+  setActivePanel: (panel) => set({ activePanel: panel }),
+  openPanel: (panel) => set({ activePanel: panel, rightCollapsed: false }),
   setLeftWidth: (width) => set({ leftWidth: clampSideWidth(width) }),
   toggleLeft: () => set((state) => ({ leftCollapsed: !state.leftCollapsed })),
   toggleRight: () => set((state) => ({ rightCollapsed: !state.rightCollapsed })),
-  selectFile: (path) => set({
-    selectedFilePath: path,
-    ...(path ? { activePanel: 'file', rightCollapsed: false } : {})
-  })
+  // Picking a file switches the tab only. The row can only be clicked while the
+  // inspector is already open, so forcing `rightCollapsed: false` here bought
+  // nothing and made a closed drawer spring back open.
+  selectFile: (path) => set(path ? { selectedFilePath: path, activePanel: 'file' } : { selectedFilePath: null })
 })

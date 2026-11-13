@@ -8,28 +8,30 @@
  * work on those controls stays intact.
  */
 
-/* User turn: right-aligned whale bubble -> left-aligned quote card. */
+/* User turn: a bubble hugging the right edge, like other agent clients.
+   The base rules live in code-session-bubbles.css; this only pins the
+   alignment here so a later layout pass cannot stretch it back to full width. */
 .ark-msg--user {
-  align-self: stretch;
-  align-items: stretch;
-  max-width: 100%;
-  border: 1px solid var(--ark-border);
-  border-left: 2px solid var(--ark-accent);
-  border-radius: 0 var(--ark-radius) var(--ark-radius) 0;
-  background: var(--ark-bg-raised);
-  box-shadow: none;
+  align-self: flex-end;
+  align-items: flex-end;
+  max-width: min(100%, 72%);
+  border: 1px solid var(--ark-user-border);
+  border-left: 1px solid var(--ark-user-border);
+  border-radius: 14px 14px 4px 14px;
+  background: var(--ark-user-message);
+  box-shadow: var(--ark-shadow-ctl);
   padding: 10px 14px;
 }
 
 .ark-msg--user .ark-msg__body {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   line-height: 1.65;
 }
 
 .ark-msg--user .ark-msg__head {
-  order: 0;
-  padding-right: 0;
+  order: 2;
+  padding-right: 2px;
 }
 
 /* Tool/process cards, gates and the composer shell: tighten radii. */
