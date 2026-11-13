@@ -20,8 +20,8 @@ pub mod domain;
 pub mod service;
 
 pub use config::{
-    expand_home, home_dir, SkillsConfig, DEFAULT_ACTIVE_LIMIT, DEFAULT_CATALOG_BUDGET_BYTES,
-    DEFAULT_INSTRUCTION_BUDGET_BYTES,
+    default_roots, expand_home, home_dir, own_skills_root, shared_skills_root, SkillsConfig,
+    DEFAULT_ACTIVE_LIMIT, DEFAULT_CATALOG_BUDGET_BYTES, DEFAULT_INSTRUCTION_BUDGET_BYTES,
 };
 pub use domain::skill::{slug, LoadedSkill};
 pub use service::catalog::render_catalog;

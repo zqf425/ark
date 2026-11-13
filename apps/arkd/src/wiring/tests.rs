@@ -824,7 +824,11 @@ fn skills_config_source_reads_the_latest_snapshot() {
     let global_skills = std::path::PathBuf::from("/tmp/global-skills");
     let source = skills_config_source(store.clone(), global_skills.clone());
     assert!(source().enabled);
+    // First root is the app-owned global dir; the shared `~/.agents/skills`
+    // convention follows (resolved from the real home, never `/tmp/...`).
     assert_eq!(source().roots[0], global_skills);
+    assert_eq!(source().roots[1], ark_skills::shared_skills_root());
+    assert!(source().roots[1].ends_with(".agents/skills"));
 
     let applied = store.apply(ark_contract::ConfigPatch {
         skills: Some(ark_contract::SkillsSettings {

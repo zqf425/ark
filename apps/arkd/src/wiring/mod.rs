@@ -464,7 +464,10 @@ fn skills_config_source(
 ) -> ark_skills::ConfigSource {
     Arc::new(move || {
         let settings = config.snapshot().skills.clone();
-        let mut skill_roots = vec![global_skills.clone()];
+        // First root stays the app-owned `<root>/skills` directory (writes and
+        // first-party skills live here); the shared `~/.agents/skills`
+        // convention follows, then the user's configured extra dirs.
+        let mut skill_roots = vec![global_skills.clone(), ark_skills::shared_skills_root()];
         skill_roots.extend(settings.extra_dirs.iter().map(std::path::PathBuf::from));
         ark_skills::SkillsConfig {
             enabled: settings.enabled,
