@@ -169,8 +169,10 @@ pub struct MemoryDiagnosticsResponse {
 
 /// One configured model provider.
 ///
-/// `api_key` is only ever an *input*: read paths go through [`ProviderView`],
-/// which reports `has_api_key` and a masked hint instead of the secret.
+/// `api_key` is an input on the upsert path. The list read path goes through
+/// [`ProviderView`], which reports `has_api_key` and a masked hint instead of
+/// the secret; `GET /v1/runtime/providers/{id}` is the explicit edit read that
+/// returns this full entry, including the stored key, to the settings form only.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct ProviderEntry {
@@ -304,7 +306,11 @@ impl ProviderEntry {
     }
 }
 
-/// Redacted provider as returned by `GET /v1/runtime/model-providers`.
+/// Redacted provider as returned by `GET /v1/runtime/providers`.
+///
+/// The edit form reads a full [`ProviderEntry`] from
+/// `GET /v1/runtime/providers/{id}`; this list view stays redacted so a secret
+/// never rides along with the table, capabilities or diagnostics responses.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct ProviderView {

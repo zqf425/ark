@@ -51,18 +51,21 @@ export function emptyDraft(): ProviderDraft {
   }
 }
 
-export function draftFromView(view: ProviderView): ProviderDraft {
+/** Seed the edit form. The list view is redacted, so the stored key is passed
+ *  in separately from the explicit `GET /v1/runtime/providers/{id}` read. */
+export function draftFromView(view: ProviderView, apiKey = ''): ProviderDraft {
   const format = (ENDPOINT_FORMATS as readonly string[]).includes(view.endpoint_format)
     ? (view.endpoint_format as EndpointFormat)
     : 'openai_chat'
   return {
     id: view.id,
+    // The label input is gone, but an already-saved label must round-trip so
+    // editing other fields does not silently drop it.
     label: view.label ?? '',
     base_url: view.base_url,
     endpoint_format: format,
     model: view.model,
-    // Never prefilled: the runtime only ever reports a hint, not the key.
-    api_key: '',
+    api_key: apiKey,
     enabled: view.enabled,
     headers_text: '',
     max_tokens: '',

@@ -47,6 +47,10 @@ pub struct ModelEndpoint {
 pub trait ProviderService: Send + Sync {
     fn list(&self) -> ProviderListResponse;
 
+    /// Full edit read, including the stored `api_key`. Only the settings edit
+    /// form may call this; `list()` stays deliberately redacted.
+    fn get(&self, id: &str) -> Result<ProviderEntry>;
+
     fn upsert(&self, entry: ProviderEntry, make_default: bool) -> Result<ProviderListResponse>;
 
     fn delete(&self, id: &str) -> Result<ProviderListResponse>;

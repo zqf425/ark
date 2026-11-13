@@ -4,8 +4,10 @@ import type { ProviderModelInventoryItem } from "./ProviderModelInventoryItem";
 /**
  * One configured model provider.
  *
- * `api_key` is only ever an *input*: read paths go through [`ProviderView`],
- * which reports `has_api_key` and a masked hint instead of the secret.
+ * `api_key` is an input on the upsert path. The list read path goes through
+ * [`ProviderView`], which reports `has_api_key` and a masked hint instead of
+ * the secret; `GET /v1/runtime/providers/{id}` is the explicit edit read that
+ * returns this full entry, including the stored key, to the settings form only.
  */
 export type ProviderEntry = { 
 /**

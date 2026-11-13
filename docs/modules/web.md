@@ -51,10 +51,13 @@
 - 模型输出的 markdown 渲染集中在 `shared/ui` 的 `Markdown`（marked + DOMPurify 消毒后注入）与
   `code-highlight`（文件预览高亮）：模型输出是不可信输入，任何进入 `dangerouslySetInnerHTML` 的
   HTML 必须先经 DOMPurify；这是展示层能力，不与 Rust 侧业务逻辑双实现。
-- 设置页的 tuning、provider 与 MCP 都使用生成契约；API key、MCP env/header 值只写不回读，编辑时的空
-  secret 字段表示保留，不表示删除。表单里用户自己输入的 secret 草稿用共享 `TextField` 的
-  `revealable` 变体：默认掩码，可显式切换为明文/掩码并带 `aria-pressed`；这只暴露当前草稿值，
-  运行时已存的 key 仍不回显，供应商列表依旧只显示 `has_api_key` 与 hint。
+- 设置页的 tuning、provider 与 MCP 都使用生成契约；MCP env/header 值只写不回读，编辑时的空
+  secret 字段表示保留，不表示删除。provider 的 api key 分两路：列表、能力与诊断只显示
+  `has_api_key` 与掩码 hint，而点「编辑」时单独请求 `GET /v1/runtime/providers/{id}` 取回完整条目，
+  把已存 key 回填到表单（避免编辑时看起来密钥丢了）；该端点仅供设置表单使用。
+  表单里的 secret 用共享 `TextField` 的 `revealable` 变体：默认掩码，可显式切换明文/掩码并带
+  `aria-pressed`。provider 表单不再有 label 输入框，api_key 占据该位置；已存的 label 仍在草稿中透传，
+  保存不会静默清空。
 - 新增/编辑 provider 可显式查询模型目录，在用户选择后才把远端明确声明的 context window 与识图能力写入
   待保存表单；传输层对目录未声明的能力仍保持 unknown、不按模型名称猜测，也不自动提交配置。导入对话框在
   目录解析之外做上下文嗅探：优先用目录明确声明的窗口（含 `max_model_len`、`top_provider.context_length`、

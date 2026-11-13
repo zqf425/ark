@@ -190,7 +190,8 @@ fn protected_routes() -> Router<AppState> {
         )
         .route(
             "/v1/runtime/providers/{id}",
-            delete(crate::api::handlers::base::providers_delete),
+            get(crate::api::handlers::base::providers_get)
+                .delete(crate::api::handlers::base::providers_delete),
         )
         .route(
             "/v1/runtime/providers/{id}/default",

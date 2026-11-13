@@ -43,6 +43,10 @@ impl ProviderService for Providers {
         ark_contract::ProviderListResponse::default()
     }
 
+    fn get(&self, _id: &str) -> ark_common::Result<ark_contract::ProviderEntry> {
+        unreachable!("not used by this test")
+    }
+
     fn upsert(
         &self,
         _entry: ark_contract::ProviderEntry,

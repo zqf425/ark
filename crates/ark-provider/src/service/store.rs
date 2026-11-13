@@ -8,9 +8,10 @@
 //! A failed write therefore leaves memory and disk both untouched, and a
 //! successful one leaves them identical.
 //!
-//! Secrets never leave this module unmasked: [`ProviderStore::list`] projects
-//! through [`ProvidersDocument::view_of`], and the only other exit
-//! ([`ProviderStore::resolve`]) hands the key to `ark-llm` in-process.
+//! `list()` projects through [`ProvidersDocument::view_of`] and is always
+//! redacted. The explicit [`ProviderStore::get`] returns the full stored entry,
+//! including its api key, only for the settings edit form; `resolve()` hands the
+//! key to `ark-llm` in-process. Neither exit is logged.
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -119,6 +120,22 @@ impl ProviderStore {
             default_provider_id,
             active_provider_id,
         }
+    }
+
+    /// Full entry for the settings edit form, including the stored api key.
+    ///
+    /// This is intentionally separate from `list()`: the table, capabilities
+    /// and diagnostics must stay redacted, while editing a saved provider must
+    /// not silently present an empty key.
+    pub fn get(&self, id: &str) -> Result<ProviderEntry> {
+        let id = id.trim();
+        if id.is_empty() {
+            return Err(ArkError::validation("provider id is required"));
+        }
+        self.lock()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| ArkError::not_found(format!("provider `{id}` does not exist")))
     }
 
     /// Add or replace a provider. Returns the updated list.
@@ -655,6 +672,22 @@ mod tests {
         assert_eq!(list.providers[0].api_key_hint.as_deref(), Some("sk-1***ef"));
         let json = serde_json::to_string(&list).unwrap();
         assert!(!json.contains("567890"), "{json}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn edit_read_returns_the_stored_key_while_list_stays_redacted() {
+        let dir = temp_dir("edit-read");
+        let store = store(&dir);
+        store
+            .upsert(entry("p", Some("sk-1234567890abcdef")), false)
+            .unwrap();
+        let full = store.get("p").unwrap();
+        assert_eq!(full.api_key.as_deref(), Some("sk-1234567890abcdef"));
+        let list = store.list();
+        let json = serde_json::to_string(&list).unwrap();
+        assert!(!json.contains("567890"), "{json}");
+        assert!(store.get("missing").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

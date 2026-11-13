@@ -2,9 +2,11 @@
  * Provider create/edit form.
  *
  * Pure form state: it never calls the api itself. The parent owns `busy` and
- * folds the returned `ProviderEntry` into a request. The API key field is
- * write-only — the runtime never returns it, so leaving it blank on edit means
- * "keep the stored key".
+ * folds the returned `ProviderEntry` into a request. Editing a saved provider
+ * seeds this form with the full entry (including the stored api key) from the
+ * explicit edit read; the list view itself stays redacted. The label field is
+ * gone from the UI but an existing label is kept in the draft so saving does
+ * not silently drop it.
  */
 import { useState } from 'react'
 import { Button } from '../../../shared/ui'
@@ -203,12 +205,16 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
           onChange={(value) => patch('id', value)}
         />
         <TextField
-          id="provider-label"
-          label={t('settings.providerForm.labelLabel')}
-          value={draft.label}
+          id="provider-api-key"
+          label="api_key"
+          revealable
+          value={draft.api_key}
           disabled={busy}
-          placeholder={t('settings.providerForm.labelPlaceholder')}
-          onChange={(value) => patch('label', value)}
+          placeholder={
+            editing ? t('settings.providerForm.apiKeyPlaceholderKeep') : t('settings.providerForm.apiKeyPlaceholderNew')
+          }
+          hint={editing ? t('settings.providerForm.apiKeyHintEditing') : t('settings.providerForm.apiKeyHintCreating')}
+          onChange={(value) => patch('api_key', value)}
         />
         <TextField
           id="provider-base-url"
@@ -275,18 +281,6 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
             ))}
           </div>
         </Field>
-        <TextField
-          id="provider-api-key"
-          label="api_key"
-          revealable
-          value={draft.api_key}
-          disabled={busy}
-          placeholder={
-            editing ? t('settings.providerForm.apiKeyPlaceholderKeep') : t('settings.providerForm.apiKeyPlaceholderNew')
-          }
-          hint={editing ? t('settings.providerForm.apiKeyHintEditing') : t('settings.providerForm.apiKeyHintCreating')}
-          onChange={(value) => patch('api_key', value)}
-        />
       </div>
 
       <div className="ark-card__foot">

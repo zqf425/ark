@@ -84,6 +84,10 @@ impl ProviderService for ProviderAdapter {
         self.inner.list()
     }
 
+    fn get(&self, id: &str) -> Result<ProviderEntry> {
+        self.inner.get(id)
+    }
+
     fn upsert(&self, entry: ProviderEntry, make_default: bool) -> Result<ProviderListResponse> {
         self.inner.upsert(entry, make_default)
     }

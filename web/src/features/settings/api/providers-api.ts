@@ -5,6 +5,7 @@
  * the new `default_provider_id` / `active_provider_id`.
  */
 import type {
+  ProviderEntry,
   ProviderListResponse,
   ProviderModelCatalogRequest,
   ProviderModelCatalogResponse,
@@ -17,6 +18,11 @@ import { del, get, post } from '../../../shared/api/client'
 /** `GET /v1/runtime/providers`. */
 export function listProviders(signal?: AbortSignal): Promise<ProviderListResponse> {
   return get<ProviderListResponse>('/v1/runtime/providers', signal ? { signal } : {})
+}
+
+/** `GET /v1/runtime/providers/{id}` — full editable entry, including the stored key. */
+export function getProvider(providerId: string): Promise<ProviderEntry> {
+  return get<ProviderEntry>(`/v1/runtime/providers/${encodeURIComponent(providerId)}`)
 }
 
 /** `POST /v1/runtime/providers` — create or replace one entry by id. */

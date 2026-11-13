@@ -44,6 +44,20 @@ pub async fn providers_list(
     Ok(Json(service.list()))
 }
 
+/// `GET /v1/runtime/providers/{id}` — the full editable entry, including the
+/// stored api key. Only the settings edit form calls this; the list stays redacted.
+pub async fn providers_get(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ProviderEntry>, ApiError> {
+    let service = state
+        .base
+        .providers
+        .as_ref()
+        .ok_or_else(|| missing("provider"))?;
+    Ok(Json(service.get(&id)?))
+}
+
 /// `POST /v1/runtime/providers` — create or update.
 #[derive(Debug, Deserialize)]
 pub struct UpsertProviderBody {

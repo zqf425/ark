@@ -2,7 +2,11 @@
 import type { ProviderModelInventoryItem } from "./ProviderModelInventoryItem";
 
 /**
- * Redacted provider as returned by `GET /v1/runtime/model-providers`.
+ * Redacted provider as returned by `GET /v1/runtime/providers`.
+ *
+ * The edit form reads a full [`ProviderEntry`] from
+ * `GET /v1/runtime/providers/{id}`; this list view stays redacted so a secret
+ * never rides along with the table, capabilities or diagnostics responses.
  */
 export type ProviderView = { id: string, label?: string, base_url: string, endpoint_format: string, model: string, enabled: boolean, is_default: boolean, has_api_key: boolean, 
 /**

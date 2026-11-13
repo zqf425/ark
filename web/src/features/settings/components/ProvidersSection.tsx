@@ -1,9 +1,9 @@
 /**
  * Provider list + create/edit form.
  *
- * The list only ever shows what the runtime returns: `has_api_key` and the
- * obfuscated `api_key_hint`. A plaintext key is never rendered, because the
- * runtime never sends one back.
+ * The list only ever renders the redacted `has_api_key` / `api_key_hint`.
+ * Opening an edit form explicitly reads the full entry, including the stored
+ * api key, so the field is prefilled instead of looking like it was lost.
  */
 import { useState } from 'react'
 import { Button, EmptyState, useToast } from '../../../shared/ui'
@@ -148,6 +148,18 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
     toast.push('error', t('settings.providers.saveFailed'), describeOutcome(outcome))
   }
 
+  /** Editing explicitly reads the full entry so the stored key is prefilled.
+   *  The redacted list view stays the only source for the table. */
+  const openEdit = async (view: ProviderView): Promise<void> => {
+    const outcome = await api.get(view.id)
+    if (!outcome.ok) {
+      toast.push('error', t('settings.providers.loadFailed'), describeOutcome(outcome))
+      return
+    }
+    setEditing(true)
+    setDraft(draftFromView(view, outcome.value.api_key ?? ''))
+  }
+
   const runTest = async (request: { provider_id?: string; entry?: ProviderEntry }, key: string): Promise<void> => {
     setTestState({ key })
     const outcome = await api.test(request)
@@ -192,10 +204,7 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
             provider={provider}
             api={api}
             testState={testState}
-            onEdit={() => {
-              setEditing(true)
-              setDraft(draftFromView(provider))
-            }}
+            onEdit={() => void openEdit(provider)}
             onTest={() => void runTest({ provider_id: provider.id }, `test:${provider.id}`)}
           />
         ))}

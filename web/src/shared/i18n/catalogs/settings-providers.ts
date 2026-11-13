@@ -6,7 +6,7 @@
  */
 export const SETTINGS_PROVIDERS_MESSAGES = {
   'settings.providers.title': ['供应商 / 模型', 'Providers / models'],
-  'settings.providers.desc': ['provider 配置与连接测试；api_key 只写不回显。', 'Provider configuration and connection tests; api_key is write-only and never echoed.'],
+  'settings.providers.desc': ['provider 配置与连接测试；列表只回显 api_key 掩码提示，编辑时读取完整条目。', 'Provider configuration and connection tests; the list echoes a masked api_key hint, while editing reads the full entry.'],
   'settings.providers.add': ['新增供应商', 'Add provider'],
   'settings.providers.emptyTitle': ['还没有供应商', 'No providers yet'],
   'settings.providers.emptyHint': ['至少需要一个 provider 才能发起模型请求。', 'At least one provider is required to make model requests.'],
@@ -49,8 +49,6 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
   'settings.providerForm.idPlaceholder': ['deepseek', 'deepseek'],
   'settings.providerForm.idHintEditing': ['id 是主键，编辑时不可修改。', 'id is the primary key and cannot be changed while editing.'],
   'settings.providerForm.idHintCreating': ['唯一标识，保存后用于 default provider。', 'Unique identifier, used as the default provider id after saving.'],
-  'settings.providerForm.labelLabel': ['label（可选）', 'label (optional)'],
-  'settings.providerForm.labelPlaceholder': ['DeepSeek 官方', 'DeepSeek official'],
   'settings.providerForm.defaultModelLabel': ['默认模型（model）', 'Default model (model)'],
   'settings.providerForm.modelsLabel': ['模型（首行为默认模型，id 可编辑；每行独立设置上下文与识图）', 'Models (first row is the default, editable id; each row sets its own context and vision)'],
   'settings.providerForm.modelsHint': [
@@ -61,7 +59,7 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
   'settings.providerForm.modelPlaceholder': ['deepseek-chat', 'deepseek-chat'],
   'settings.providerForm.apiKeyPlaceholderKeep': ['留空 = 保留原 key', 'Leave blank to keep the stored key'],
   'settings.providerForm.apiKeyPlaceholderNew': ['sk-…', 'sk-…'],
-  'settings.providerForm.apiKeyHintEditing': ['编辑时留空表示保留已存的 key，不会覆盖。', 'Leaving this blank while editing keeps the stored key instead of overwriting it.'],
+  'settings.providerForm.apiKeyHintEditing': ['已回填保存的 key；留空表示保留原 key，不会覆盖。', 'The stored key is prefilled; leave it blank to keep it instead of overwriting.'],
   'settings.providerForm.apiKeyHintCreating': ['仅写入运行时，列表只回显 has_api_key 与 hint。', 'Written to the runtime only; the list echoes just has_api_key and the hint.'],
   'settings.providerForm.enabledLabel': ['启用（enabled）', 'Enabled (enabled)'],
   'settings.providerForm.makeDefaultLabel': ['保存后设为默认', 'Set as default after saving'],

@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type {
   LoadStatus,
+  ProviderEntry,
   ProviderListResponse,
   ProviderModelCatalogRequest,
   ProviderModelCatalogResponse,
@@ -16,7 +17,7 @@ import type {
   ProviderUpsertRequest,
   ProviderView
 } from '../../../shared/contracts'
-import { deleteProvider, listProviderModels, listProviders, setDefaultProvider, testProvider, upsertProvider } from '../api/providers-api'
+import { deleteProvider, getProvider, listProviderModels, listProviders, setDefaultProvider, testProvider, upsertProvider } from '../api/providers-api'
 import { useMounted } from '../../../shared/api/use-mounted'
 import { attempt, describeApiError, type Outcome } from '../api/outcome'
 
@@ -35,6 +36,8 @@ export type ProvidersApi = {
    */
   catalogBusy: boolean
   refresh: () => Promise<void>
+  /** Full editable entry for one saved provider; only the edit form calls it. */
+  get: (providerId: string) => Promise<Outcome<ProviderEntry>>
   upsert: (request: ProviderUpsertRequest) => Promise<Outcome<ProviderListResponse>>
   remove: (providerId: string) => Promise<Outcome<ProviderListResponse>>
   setDefault: (providerId: string) => Promise<Outcome<ProviderListResponse>>
@@ -89,6 +92,11 @@ export function useProviders(): ProvidersApi {
     [apply]
   )
 
+  /** An edit read must not mark the table busy: it is a local form seed. */
+  const get = useCallback(async (providerId: string): Promise<Outcome<ProviderEntry>> => {
+    return attempt(() => getProvider(providerId))
+  }, [])
+
   const upsert = useCallback(
     (request: ProviderUpsertRequest) => mutate(`save:${request.id}`, () => upsertProvider(request)),
     [mutate]
@@ -118,5 +126,5 @@ export function useProviders(): ProvidersApi {
     void refresh()
   }, [refresh])
 
-  return { providers, defaultProviderId, activeProviderId, status, error, busy, catalogBusy, refresh, upsert, remove, setDefault, test, models }
+  return { providers, defaultProviderId, activeProviderId, status, error, busy, catalogBusy, refresh, get, upsert, remove, setDefault, test, models }
 }

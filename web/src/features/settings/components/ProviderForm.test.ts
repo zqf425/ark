@@ -1,6 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import { buildEntry, emptyDraft } from './ProviderDraft'
+import { buildEntry, draftFromView, emptyDraft } from './ProviderDraft'
 import { mergeImportedModels, updateInventoryItem } from './ProviderCatalog'
+
+describe('provider edit draft', () => {
+  it('prefills the stored api key and keeps an existing label on save', () => {
+    const draft = draftFromView({
+      id: 'gateway',
+      label: 'Gateway',
+      base_url: 'https://gateway.example/v1',
+      endpoint_format: 'openai_chat',
+      model: 'gpt-4o',
+      enabled: true,
+      is_default: true,
+      has_api_key: true,
+      api_key_hint: 'sk-1***ef',
+      models: []
+    }, 'sk-1234567890abcdef')
+
+    expect(draft.api_key).toBe('sk-1234567890abcdef')
+    expect(buildEntry(draft, true)).toMatchObject({
+      ok: true,
+      entry: { label: 'Gateway', api_key: 'sk-1234567890abcdef' }
+    })
+  })
+})
 
 describe('provider model inventory helpers', () => {
   it('imports catalog metadata into the entry the user saves', () => {

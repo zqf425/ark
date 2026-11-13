@@ -5,7 +5,9 @@
 `ark-provider` 管理模型 provider 的配置文档、校验、脱敏视图、默认条目管理、热更新映射、连通性探测和
 显式触发的模型目录查询。它依赖 `ark-llm` 把有效条目转为模型客户端，但不实现流协议解析。
 
-API key 只可作为写入输入；读取接口只能返回 `ProviderView` 的存在标记和掩码提示。持久化与内存
+API key 在 upsert 路径是写入输入，读取分两个出口：列表/能力/诊断一律走 `ProviderView`，只给
+`has_api_key` 与掩码提示；`GET /v1/runtime/providers/{id}` 是编辑专用读取，返回完整
+`ProviderEntry`（含已存 api key），仅设置表单使用，使编辑已保存条目时密钥字段不为空。持久化与内存
 快照更新由同一个 store 串行完成，确保下一次 resolve 立即读取一致配置。
 
 默认条目是管理面的一部分：`upsert(entry, make_default)` 可在写入时设默认（禁用条目不可设默认）、
@@ -15,8 +17,9 @@ provider id 的回合经 `resolve(None)` 使用该默认；`resolve_vision(id)` 
 只返回显式正向声明的 `supports_vision`（`None` 一律按未声明处理）。
 
 编辑现有 provider 时空 API key、headers、`max_tokens`、`temperature` 均表示未修改并保留存储值；这使
-只读脱敏视图不会在普通表单保存时破坏高级配置。显式清空需独立 patch 语义，不得复用空值。`models`
+普通表单保存不会破坏高级配置。显式清空需独立 patch 语义，不得复用空值。`models`
 刻意不在此列：设置表单持有完整清单（由脱敏视图播种），一次保存表达完整新列表，空列表即清空。
+表单会回填已存 api key 后原样提交，因此该保留语义仍是幂等的兜底而非编辑主路径。
 
 每个 provider 除默认 `model` 外还维护一个模型清单 `models`（`ProviderEntry.MODELS_MAX = 64`）：保存时
 归一化（trim、去重、去掉与默认 `model` 相同的项），超上限整体事务性拒绝而非静默截断。清单只做
