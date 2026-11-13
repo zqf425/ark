@@ -28,3 +28,14 @@ export async function pickFolder(): Promise<string | null> {
   if (!bridge) return null
   return bridge.invoke<string | null>('pick_folder')
 }
+
+/**
+ * Persist bytes at an absolute path (typically `pickFolder()` output plus a
+ * file name) via the desktop shell's `save_file` command. Throws when the
+ * shell is absent so callers can fall back to a browser download instead.
+ */
+export async function saveFile(path: string, bytes: Uint8Array): Promise<string> {
+  const bridge = internals()
+  if (!bridge) throw new Error('save_file requires the ark desktop shell')
+  return bridge.invoke<string>('save_file', { path, bytes: Array.from(bytes) })
+}

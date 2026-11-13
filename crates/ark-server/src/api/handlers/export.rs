@@ -6,23 +6,38 @@
 //! headers, or attachment payloads, and replays byte-identically for identical
 //! store state.
 
+use ark_common::ArkErrorCode;
 use ark_contract::{ThreadExport, THREAD_EXPORT_FORMAT_VERSION};
-use axum::extract::{Path, State};
+use axum::body::Body;
+use axum::extract::{Path, Query, State};
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
+use serde::Deserialize;
 
 use crate::api::error::ApiError;
+use crate::api::handlers::export_zip;
 use crate::api::handlers::threads::parse_thread;
 use crate::state::AppState;
+
+/// Query parameters of `GET /v1/threads/{id}/export`.
+#[derive(Debug, Default, Deserialize)]
+pub struct ExportQuery {
+    /// `zip` wraps the identical snapshot in a deterministic single-entry
+    /// archive; every other value (and no value) keeps the bare JSON body.
+    pub format: Option<String>,
+}
 
 /// `GET /v1/threads/{id}/export`.
 pub async fn export(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<ThreadExport>, ApiError> {
+    Query(query): Query<ExportQuery>,
+) -> Result<Response, ApiError> {
     let thread_id = parse_thread(&id)?;
     let meta = state.store.get_thread(thread_id).await?;
     let events = state.store.replay_events(thread_id, 0).await?;
-    Ok(Json(ThreadExport {
+    let export = ThreadExport {
         format_version: THREAD_EXPORT_FORMAT_VERSION,
         thread_id: meta.thread_id,
         title: meta.title,
@@ -31,7 +46,35 @@ pub async fn export(
         archived: meta.archived,
         runtime: meta.runtime,
         events,
-    }))
+    };
+    if query.format.as_deref() != Some("zip") {
+        return Ok(Json(export).into_response());
+    }
+
+    // The zip entry holds exactly the same serialization the JSON route
+    // would return, so both formats stay byte-identical for identical store
+    // state. The entry name uses the immutable thread id, never the title.
+    let json = serde_json::to_vec(&export).map_err(|error| {
+        ApiError::new(
+            ArkErrorCode::InternalError,
+            format!("serialize thread export: {error}"),
+        )
+    })?;
+    let entry_name = format!("thread-{}.json", export.thread_id);
+    let zip = export_zip::zip_single_entry(&entry_name, &json);
+    let filename = format!("thread-{}.zip", export.thread_id);
+    let disposition = format!("attachment; filename=\"{filename}\"");
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/zip")
+        .header(header::CONTENT_DISPOSITION, disposition)
+        .body(Body::from(zip))
+        .map_err(|error| {
+            ApiError::new(
+                ArkErrorCode::InternalError,
+                format!("build zip export response: {error}"),
+            )
+        })
 }
 
 #[cfg(test)]
@@ -188,5 +231,40 @@ mod tests {
         let missing = ark_common::ThreadId::new();
         let response = get_json(&app, &format!("/v1/threads/{missing}/export")).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn export_zip_wraps_the_snapshot_deterministically() {
+        let dir = TempDir::new();
+        let (app, store) = app(&dir);
+        let created = store
+            .create_thread("zip-me")
+            .await
+            .expect("create thread");
+        let uri = format!("/v1/threads/{}/export?format=zip", created.thread_id);
+
+        let first = get_json(&app, &uri).await;
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(
+            first.headers()[axum::http::header::CONTENT_TYPE],
+            "application/zip"
+        );
+        let bytes = axum::body::to_bytes(first.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(&bytes[..4], b"PK\x03\x04", "zip local header magic");
+
+        let (name, contents) =
+            super::export_zip::read_single_entry(&bytes).expect("single zip entry");
+        assert_eq!(name, format!("thread-{}.json", created.thread_id));
+        let body: serde_json::Value = serde_json::from_slice(&contents).unwrap();
+        assert_eq!(body["title"], "zip-me");
+        assert_eq!(body["thread_id"], created.thread_id.to_string());
+
+        let second = get_json(&app, &uri).await;
+        let bytes2 = axum::body::to_bytes(second.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(bytes, bytes2, "zip export must be byte-identical");
     }
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, EmptyState, ErrorBoundary } from '../../../shared/ui'
 import type { ThreadSummary } from '../../../shared/contracts'
 import { formatRelative } from '../../../shared/format'
@@ -33,6 +33,35 @@ function ThreadRow({
   const { t } = useI18n()
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(thread.title)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 })
+  const kebabRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
+  /** Anchor the menu to the kebab button; fixed positioning avoids row clipping. */
+  const openMenu = (): void => {
+    const rect = kebabRef.current?.getBoundingClientRect()
+    if (rect) setMenuPos({ top: rect.bottom + 4, left: Math.max(8, rect.right - 168) })
+    setMenuOpen(true)
+  }
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onPointerDown = (event: MouseEvent): void => {
+      const target = event.target as Node
+      if (menuRef.current?.contains(target) || kebabRef.current?.contains(target)) return
+      setMenuOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuOpen])
 
   const submitRename = async (): Promise<void> => {
     const next = title.trim()
@@ -45,68 +74,111 @@ function ThreadRow({
     setEditing(false)
   }
 
+  /** Close the menu, then surface failures (e.g. a failed export) visibly. */
+  const runMenuAction = (action: () => Promise<void>): void => {
+    setMenuOpen(false)
+    void action().catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      window.alert(t('thread.row.actionFailed', { message }))
+    })
+  }
+
   return (
     <div className={`ark-threadrow${active ? ' is-active' : ''}`}>
-      <button type="button" className="ark-threadrow__select" onClick={onSelect} title={thread.title}>
-        <span className="ark-threadrow__title">{thread.title || t('thread.row.untitled')}</span>
-        <span className="ark-threadrow__meta">
-          <time>{formatRelative(thread.updated_at, t)}</time>
-          {typeof thread.last_seq === 'number' ? <span>seq {thread.last_seq}</span> : null}
-          {thread.archived ? <span>{t('thread.row.archived')}</span> : null}
-        </span>
-      </button>
-      {active ? (
-        <div className="ark-threadrow__actions">
-          {editing ? (
-            <>
-              <input
-                className="ark-threadrow__rename"
-                value={title}
-                disabled={busy}
-                autoFocus
-                onChange={(event) => setTitle(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') void submitRename()
-                  if (event.key === 'Escape') {
-                    setEditing(false)
-                    setTitle(thread.title)
-                  }
-                }}
-              />
-              <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void submitRename()}>
-                {t('common.save')}
-              </button>
-              <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => setEditing(false)}>
-                {t('common.cancel')}
-              </button>
-            </>
+      <div className="ark-threadrow__main">
+        <button type="button" className="ark-threadrow__select" onClick={onSelect} title={thread.title}>
+          <span className="ark-threadrow__title">{thread.title || t('thread.row.untitled')}</span>
+          <span className="ark-threadrow__meta">
+            <time>{formatRelative(thread.updated_at, t)}</time>
+            {typeof thread.last_seq === 'number' ? <span>seq {thread.last_seq}</span> : null}
+            {thread.archived ? <span>{t('thread.row.archived')}</span> : null}
+          </span>
+        </button>
+        <button
+          type="button"
+          ref={kebabRef}
+          className="ark-threadrow__kebab"
+          aria-label={t('thread.row.menu')}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          disabled={busy && !menuOpen}
+          onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="5" r="1.9" fill="currentColor" />
+            <circle cx="12" cy="12" r="1.9" fill="currentColor" />
+            <circle cx="12" cy="19" r="1.9" fill="currentColor" />
+          </svg>
+        </button>
+      </div>
+      {editing ? (
+        <div className="ark-threadrow__renamebar">
+          <input
+            className="ark-threadrow__rename"
+            value={title}
+            disabled={busy}
+            autoFocus
+            onChange={(event) => setTitle(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void submitRename()
+              if (event.key === 'Escape') {
+                setEditing(false)
+                setTitle(thread.title)
+              }
+            }}
+          />
+          <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void submitRename()}>
+            {t('common.save')}
+          </button>
+          <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => setEditing(false)}>
+            {t('common.cancel')}
+          </button>
+        </div>
+      ) : null}
+      {menuOpen ? (
+        <div ref={menuRef} className="ark-threadrow__menu" role="menu" style={{ top: menuPos.top, left: menuPos.left }}>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busy}
+            onClick={() => {
+              setMenuOpen(false)
+              setTitle(thread.title)
+              setEditing(true)
+            }}
+          >
+            {t('thread.row.rename')}
+          </button>
+          <button type="button" role="menuitem" disabled={busy} onClick={() => runMenuAction(onFork)}>
+            {t('thread.row.fork')}
+          </button>
+          {thread.archived ? (
+            <button type="button" role="menuitem" disabled={busy} onClick={() => runMenuAction(onRestore)}>
+              {t('thread.row.restore')}
+            </button>
           ) : (
-            <>
-              <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => setEditing(true)}>
-                {t('thread.row.rename')}
-              </button>
-              <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void onFork()}>
-                {t('thread.row.fork')}
-              </button>
-              {thread.archived ? (
-                <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void onRestore()}>{t('thread.row.restore')}</button>
-              ) : (
-                <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void onArchive()}>{t('thread.row.archive')}</button>
-              )}
-              <button
-                type="button"
-                className="ark-linkbtn"
-                disabled={busy}
-                title={t('thread.row.exportHint')}
-                onClick={() => void exportThread(thread.thread_id, thread.title)}
-              >
-                {t('thread.row.export')}
-              </button>
-              <button type="button" className="ark-linkbtn ark-linkbtn--danger" disabled={busy} onClick={() => void onDelete()}>
-                {t('thread.row.delete')}
-              </button>
-            </>
+            <button type="button" role="menuitem" disabled={busy} onClick={() => runMenuAction(onArchive)}>
+              {t('thread.row.archive')}
+            </button>
           )}
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busy}
+            title={t('thread.row.exportHint')}
+            onClick={() => runMenuAction(() => exportThread(thread.thread_id, thread.title))}
+          >
+            {t('thread.row.export')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="is-danger"
+            disabled={busy}
+            onClick={() => runMenuAction(onDelete)}
+          >
+            {t('thread.row.delete')}
+          </button>
         </div>
       ) : null}
     </div>

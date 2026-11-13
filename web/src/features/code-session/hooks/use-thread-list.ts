@@ -53,7 +53,9 @@ export function useThreadList(): ThreadListApi {
   const create = useCallback(async () => {
     setBusy(true)
     try {
-      const created = await createThread({})
+      // The backend fallback stays locale-free, so the client supplies the
+      // display-language default title (zh-CN: "新会话").
+      const created = await createThread({ title: translateNow('thread.list.defaultTitle') })
       if (!mounted.current) return null
       upsertThread(created)
       setActiveThread(created.thread_id)

@@ -12,6 +12,7 @@ pub mod config_view;
 pub mod diagnostics;
 pub mod events;
 pub mod export;
+pub mod export_zip;
 pub mod gates;
 pub mod health;
 pub mod im;

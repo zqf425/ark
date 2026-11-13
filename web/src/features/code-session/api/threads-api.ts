@@ -11,6 +11,7 @@ import type {
   UpdateThreadRequest
 } from '../../../shared/contracts'
 import { buildUrl, del, get, patch, post, readToken } from '../../../shared/api/client'
+import { isDesktopShell, pickFolder, saveFile } from '../../../shared/desktop'
 
 /** `GET /v1/threads` — deterministic order; archived threads are filtered by the caller. */
 export function listThreads(signal?: AbortSignal): Promise<ThreadSummary[]> {
@@ -55,25 +56,38 @@ export function getThreadUsage(threadId: ThreadId, signal?: AbortSignal): Promis
 export type { TurnState }
 
 /**
- * `GET /v1/threads/{id}/export` — download the portable thread snapshot.
+ * `GET /v1/threads/{id}/export?format=zip` — save the thread snapshot zip.
  *
- * The response is a JSON attachment, not an envelope, so this bypasses the
- * JSON helpers and streams the body into a blob download; the auth header is
- * attached the same way `client.ts` does.
+ * The backend wraps the same deterministic snapshot JSON into a single-entry
+ * zip, so the response is a binary attachment, not an envelope: this bypasses
+ * the JSON helpers and attaches the auth header the way `client.ts` does.
+ *
+ * Inside the desktop shell the user first picks the target folder natively and
+ * the shell writes the file there; a cancelled picker aborts the export. In a
+ * plain browser the zip falls back to a normal download.
  */
 export async function exportThread(threadId: ThreadId, title: string): Promise<void> {
   const token = readToken()
   const headers: Record<string, string> = {}
   if (token) headers.authorization = `Bearer ${token}`
-  const response = await fetch(buildUrl(`/v1/threads/${threadId}/export`), { headers })
+  const response = await fetch(buildUrl(`/v1/threads/${threadId}/export?format=zip`), { headers })
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
   const blob = await response.blob()
   const safe = title.replace(/[^\w\u4e00-\u9fff.-]+/g, '_').slice(0, 60) || 'thread'
+  const filename = `${safe}-${threadId}.zip`
+
+  if (isDesktopShell()) {
+    const folder = await pickFolder()
+    if (!folder) return
+    await saveFile(`${folder}/${filename}`, new Uint8Array(await blob.arrayBuffer()))
+    return
+  }
+
   const url = URL.createObjectURL(blob)
   try {
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `${safe}-${threadId}.json`
+    anchor.download = filename
     anchor.click()
   } finally {
     URL.revokeObjectURL(url)

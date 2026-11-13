@@ -282,6 +282,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
+ "crc32fast",
  "futures",
  "reqwest 0.12.28",
  "serde",

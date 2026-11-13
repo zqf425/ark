@@ -7,6 +7,7 @@
 export const THREAD_LIST_MESSAGES = {
   'thread.list.title': ['会话', 'Threads'],
   'thread.list.create': ['新会话', 'New thread'],
+  'thread.list.defaultTitle': ['新会话', 'New thread'],
   'thread.list.creating': ['创建中…', 'Creating…'],
   'thread.list.schedule': ['定时任务', 'Scheduled task'],
   'thread.list.scheduleHint': ['新建一个按节奏自动执行的定时任务', 'Create a task that runs a prompt on a cadence'],
@@ -25,6 +26,7 @@ export const THREAD_LIST_MESSAGES = {
   'thread.list.count': ['显示 {visible}/{total}', 'Showing {visible}/{total}'],
 
   'thread.row.untitled': ['未命名会话', 'Untitled thread'],
+  'thread.row.menu': ['会话操作', 'Thread actions'],
   'thread.row.archived': ['已归档', 'Archived'],
   'thread.row.rename': ['重命名', 'Rename'],
   'thread.row.fork': ['分叉', 'Fork'],
@@ -32,7 +34,8 @@ export const THREAD_LIST_MESSAGES = {
   'thread.row.archive': ['归档', 'Archive'],
   'thread.row.delete': ['删除', 'Delete'],
   'thread.row.export': ['导出', 'Export'],
-  'thread.row.exportHint': ['下载会话快照 JSON', 'Download the thread snapshot as JSON'],
+  'thread.row.exportHint': ['选择文件夹，将会话打包为 zip 保存', 'Pick a folder and save the thread as a zip'],
+  'thread.row.actionFailed': ['操作失败：{message}', 'Action failed: {message}'],
   'thread.row.deleteConfirm': [
     '删除会话“{title}”？此操作不可恢复。',
     'Delete the thread "{title}"? This cannot be undone.'
