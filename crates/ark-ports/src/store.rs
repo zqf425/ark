@@ -30,6 +30,10 @@ pub struct ThreadMeta {
     /// Durable event watermark, derived from the index/log (not `thread.json`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_seq: Option<u64>,
+    /// Newest durable event timestamp, derived from the index/log. `None` when
+    /// the projection has not recorded one; readers fall back to `updated_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_event_at: Option<DateTime<Utc>>,
 }
 
 /// Authoritative child-run record, appended to `children/runs.jsonl`.

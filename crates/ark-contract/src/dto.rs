@@ -71,13 +71,24 @@ pub struct ThreadSummary {
     pub workspace: Option<String>,
     #[serde(default)]
     pub archived: bool,
+    /// Whether the runtime currently has a turn in flight for this thread.
+    ///
+    /// Live registry state, not durable state: only the process answering the
+    /// request knows it, and a restart always reads `false`.
+    #[serde(default)]
+    pub running: bool,
+    /// Timestamp of the newest durable event: the "last activity" a list
+    /// orders by. The index projects it so the order survives a restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_event_at: Option<DateTime<Utc>>,
 }
 
 /// `GET /v1/threads` query parameters.
 ///
 /// Ordering is the store's deterministic order (active first, then
-/// `updated_at` descending, thread id as final tiebreak); `offset` counts rows
-/// in that order so a page never repeats or skips rows between calls.
+/// last activity (`last_event_at ?? updated_at`) descending, thread id as
+/// final tiebreak); `offset` counts rows in that order so a page never
+/// repeats or skips rows between calls.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct ThreadListQuery {

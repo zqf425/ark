@@ -48,7 +48,9 @@ pub async fn list(
     let metas = state.store.list_threads().await?;
     // Deterministic filter-then-page: sorting here (instead of trusting index
     // order alone) keeps pagination stable across calls, because the tiebreak
-    // is the immutable id.
+    // is the immutable id. The activity key mirrors the index's own `sorted`:
+    // last durable event first, metadata update time as the fallback, so a
+    // rename or settings edit never outranks a thread that just streamed.
     let mut rows: Vec<&ark_ports::ThreadMeta> = metas
         .iter()
         .filter(|meta| query.archived.is_none_or(|want| meta.archived == want))
@@ -57,15 +59,26 @@ pub async fn list(
     rows.sort_by(|a, b| {
         a.archived
             .cmp(&b.archived)
-            .then_with(|| b.updated_at.cmp(&a.updated_at))
+            .then_with(|| {
+                b.last_event_at
+                    .or(Some(b.updated_at))
+                    .cmp(&a.last_event_at.or(Some(a.updated_at)))
+            })
             .then_with(|| a.thread_id.cmp(&b.thread_id))
     });
 
+    // One registry read per page, not per row: the lock is short but shared
+    // with turn registration.
+    let running = state.turns.active_thread_ids();
     let summaries = rows
         .iter()
         .skip(offset as usize)
         .take(limit.map_or(usize::MAX, |limit| limit as usize))
-        .map(|meta| summary_of(meta))
+        .map(|meta| {
+            let mut summary = summary_of(meta);
+            summary.running = running.contains(&meta.thread_id);
+            summary
+        })
         .collect();
     Ok(Json(summaries))
 }
@@ -127,6 +140,9 @@ pub(crate) async fn load_detail(
         .unwrap_or_default();
     let mut summary = summary_of(&meta);
     summary.last_seq = state.store.highest_seq(thread_id).await.ok();
+    // The detail row answers the same "is this thread busy" question the list
+    // row does; reading the registry once here keeps both views consistent.
+    summary.running = state.turns.active_for(thread_id).is_some();
     Ok(ThreadDetail {
         summary,
         items,

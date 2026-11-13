@@ -42,9 +42,11 @@
   或 sandbox，也不会写入伪用户消息。
 - 路径、HTTP 方法、字段名和兼容别名均是对外契约；变更前必须检查 `ark-contract`、`web` 与集成方。
 - `GET /v1/threads` 支持分页与筛选：`limit` 显式给出时 clamp 到 `[1, THREAD_PAGE_MAX_LIMIT]`，
-  `offset` 按确定顺序（active 优先、`updated_at` 降序、`thread_id` 兜底）取页，空页即最后一页；
-  `archived` 与 `q`（标题大小写不敏感子串）可与分页组合。`limit` 缺省保持旧行为返回全部线程
-  （响应仍为裸 `ThreadSummary` 数组），不得暗中套用默认页大小截断既有客户端。
+  `offset` 按确定顺序（active 优先、`last_event_at ?? updated_at` 降序、`thread_id` 兜底）取页，空页即
+  最后一页；`archived` 与 `q`（标题大小写不敏感子串）可与分页组合。`limit` 缺省保持旧行为返回全部线程
+  （响应仍为裸 `ThreadSummary` 数组），不得暗中套用默认页大小截断既有客户端。每行携带 `running`
+  （`TurnRegistry.active_thread_ids` 一次读取，表示该线程有 in-flight 回合，重启后恒为 false）与
+  `last_event_at`（索引投影的最新事件时间，列表排序与行内活动时间显示的真源）。
 - `GET /v1/threads/{id}` 的 `child_completions` 是最新 50 个不同通知 ID 的有界视图；它从 store 的窄
   completion 查询投影，不能全量回放普通会话事件。
 - `InteractiveGates` 只做 HTTP 决议与 reactor gate future 的一次性 rendezvous；`prepare_*` 同步插入

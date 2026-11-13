@@ -185,6 +185,12 @@ autonomy/reasoning_effort，即 `ThreadRuntimeSettings` 的逐字段平铺；全
 `indexed_seq` 和重建计划；它尚不是早期设计中设想的 SQLite/FTS。两者共享“日志权威、索引可重建、
 单写者”的架构约束。是否迁移 SQLite 由实际跨会话检索规模决定，不能把未实现目标写成现状。
 
+索引行除 `indexed_seq` 水位外还投影 `last_event_at`（最新权威事件的时间戳）。`append_event`
+在推进水位的同时写入它，rewind 用截断后日志的尾部事件时间重算，启动 reconcile 用同一次日志解析的
+尾部回填——三条路径都取事件自身时间，不取写入时的墙钟，列表排序由此跨重启稳定。`ThreadIndex::sorted`
+按（archived、`last_event_at ?? updated_at` 降序、thread_id）排序；重命名等只触碰 `updated_at` 的
+元数据操作不会把一个没有新事件的线程顶到正在流式输出的线程前面。
+
 ## 长期 memory
 
 当前实现使用 `<root>/data/memory.json` 保存用户显式维护的长期偏好和事实。文件通过

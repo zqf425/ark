@@ -599,6 +599,8 @@ mod tests {
                 inherited_item_count: None,
                 workspace: None,
                 archived: false,
+                running: false,
+                last_event_at: None,
             },
             items: Vec::new(),
             child_ids: Vec::new(),

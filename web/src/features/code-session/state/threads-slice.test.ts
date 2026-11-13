@@ -3,7 +3,8 @@ import type { ThreadSummary } from '../../../shared/contracts'
 import { useCodeSessionStore } from './store'
 
 const A = '00000000-0000-0000-0000-00000000000a'
-const UNKNOWN = '00000000-0000-0000-0000-00000000000b'
+const B = '00000000-0000-0000-0000-00000000000b'
+const UNKNOWN = '00000000-0000-0000-0000-00000000000c'
 
 function row(overrides: Partial<ThreadSummary> = {}): ThreadSummary {
   return {
@@ -12,6 +13,7 @@ function row(overrides: Partial<ThreadSummary> = {}): ThreadSummary {
     created_at: '2026-10-28T00:00:00Z',
     updated_at: '2026-10-28T00:00:00Z',
     archived: false,
+    running: false,
     last_seq: 3,
     ...overrides
   }
@@ -43,5 +45,61 @@ describe('threads slice noteThreadSeq', () => {
     useCodeSessionStore.getState().noteThreadSeq(UNKNOWN, 9)
 
     expect(useCodeSessionStore.getState().threads[0]?.last_seq).toBe(3)
+  })
+})
+
+describe('threads slice activity ordering', () => {
+  beforeEach(() => {
+    useCodeSessionStore.setState({ threads: [], activeThreadId: null })
+  })
+
+  it('noteThreadActivity 把正在流式输出的会话顶到列表最前', () => {
+    useCodeSessionStore.getState().setThreads([
+      row({ thread_id: A, title: '旧活动' }),
+      row({ thread_id: B, title: '新活动', updated_at: '2026-10-29T00:00:00Z' })
+    ])
+    expect(useCodeSessionStore.getState().threads.map((t) => t.title)).toEqual(['新活动', '旧活动'])
+
+    useCodeSessionStore.getState().noteThreadActivity(A, '2026-10-30T00:00:00Z')
+
+    expect(useCodeSessionStore.getState().threads.map((t) => t.title)).toEqual(['旧活动', '新活动'])
+  })
+
+  it('noteThreadActivity 忽略更旧的时间戳（乱序/重复帧不回退排序）', () => {
+    useCodeSessionStore.getState().setThreads([
+      row({ thread_id: A, last_event_at: '2026-10-30T00:00:00Z' })
+    ])
+    const before = useCodeSessionStore.getState().threads
+
+    useCodeSessionStore.getState().noteThreadActivity(A, '2026-10-29T00:00:00Z')
+
+    expect(useCodeSessionStore.getState().threads).toBe(before)
+  })
+
+  it('applyRunningFlags 合并轮询结果：在集合中为忙碌，缺席为空闲', () => {
+    useCodeSessionStore.getState().setThreads([
+      row({ thread_id: A, running: false }),
+      row({ thread_id: B, title: 'b' })
+    ])
+
+    useCodeSessionStore.getState().applyRunningFlags([B])
+
+    const threads = useCodeSessionStore.getState().threads
+    expect(threads.find((t) => t.thread_id === A)?.running).toBe(false)
+    expect(threads.find((t) => t.thread_id === B)?.running).toBe(true)
+  })
+
+  it('setThreadRunning 只改目标行的忙碌标记', () => {
+    useCodeSessionStore.getState().setThreads([
+      row({ thread_id: A }),
+      row({ thread_id: B, title: 'b' })
+    ])
+
+    useCodeSessionStore.getState().setThreadRunning(A, true)
+    useCodeSessionStore.getState().setThreadRunning(A, true)
+
+    const threads = useCodeSessionStore.getState().threads
+    expect(threads.find((t) => t.thread_id === A)?.running).toBe(true)
+    expect(threads.find((t) => t.thread_id === B)?.running).toBe(false)
   })
 })

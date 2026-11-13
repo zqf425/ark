@@ -55,6 +55,14 @@ pub struct IndexEntry {
     /// reopening every metadata file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+    /// Timestamp of the newest projected event: the durable "last activity".
+    ///
+    /// Absent on rows written before the field existed (and on rows rebuilt
+    /// from an empty log); readers fall back to `updated_at`. Kept in the index
+    /// rather than recomputed per request, so the list order is one snapshot
+    /// read even for hundreds of threads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_event_at: Option<DateTime<Utc>>,
 }
 
 impl IndexEntry {
@@ -79,6 +87,7 @@ impl IndexEntry {
             fork_at_seq: None,
             inherited_item_count: None,
             workspace: None,
+            last_event_at: None,
         }
     }
 }
@@ -205,13 +214,24 @@ impl ThreadIndex {
         &self.entries
     }
 
-    /// All threads, active first and then most recently updated.
+    /// All threads, active first and then most recently active.
+    ///
+    /// The activity key is `last_event_at`, falling back to `updated_at` for
+    /// rows that never recorded an event time (legacy snapshots, threads with
+    /// no events yet). A rename or settings edit touches `updated_at` without
+    /// producing an event, so it must never outrank a thread that just
+    /// streamed a token.
     pub fn sorted(&self) -> Vec<IndexEntry> {
         let mut sorted = self.entries.clone();
         sorted.sort_by(|a, b| {
             a.archived
                 .cmp(&b.archived)
-                .then_with(|| b.updated_at.cmp(&a.updated_at))
+                .then_with(|| {
+                    b.last_event_at
+                        .or(Some(b.updated_at))
+                        .cmp(&a.last_event_at.or(Some(a.updated_at)))
+                })
+                .then_with(|| a.thread_id.cmp(&b.thread_id))
         });
         sorted
     }
@@ -245,6 +265,25 @@ impl ThreadIndex {
         {
             if entry.indexed_seq != indexed_seq {
                 entry.indexed_seq = indexed_seq;
+                self.dirty = true;
+            }
+        }
+    }
+
+    /// Record the newest projected event time for `thread`.
+    ///
+    /// Called together with the watermark advance on every durable append.
+    /// Monotonic per call site: a rewind hands the writer's recomputed
+    /// timestamp, a catch-up replay the log's last event, so the value always
+    /// describes the row's current suffix rather than wall-clock now.
+    pub fn set_last_event_at(&mut self, thread: &ThreadId, at: DateTime<Utc>) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| &entry.thread_id == thread)
+        {
+            if entry.last_event_at != Some(at) {
+                entry.last_event_at = Some(at);
                 self.dirty = true;
             }
         }

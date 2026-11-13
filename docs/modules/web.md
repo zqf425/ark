@@ -77,7 +77,11 @@
 - Code 使用 ARK Console shell（方案 A）：46px 全局顶栏 + 52px 活动栏 + 26px 状态栏，主舞台在
   `code` 场景下是"线程列表 / 会话画布 / 常驻检查器"三列；顶栏承载工作区、Git head、运行态、模型、
   主题切换与 ⌘K 入口，状态栏承载连接、工作区、变更数、上下文占用、tokens 与版本。会话搜索和最近/
-  归档切换只过滤已加载的 `ThreadSummary`，不新增搜索 API；Plan、Changes、File、Terminal 是常驻
+  归档切换只过滤已加载的 `ThreadSummary`，不新增搜索 API；会话列表按服务器权威顺序渲染
+  （archived 优先级靠后、`last_event_at ?? updated_at` 降序），行内时间显示同一活动键；活跃会话的
+  忙碌标记来自实时事件流（`turn_started`/终态事件驱动 `activeTurnId`），其余已加载行由 5 秒轮询
+  `GET /v1/threads` 的 `running` 标记驱动，轮询帧在回合边界不得覆盖实时判定（见
+  `use-thread-running.ts`）。Plan、Changes、File、Terminal 是常驻
   检查器的四个 Tab（收起用 `hidden` 保挂载，面板草稿与服务端读模型不得因折叠丢失），不再使用带
   遮罩的浮动抽屉。`review`、`new`、`settings` 是同一 shell 下的全屏场景，由 `view-slice` 的 `view`
   选择；`commandOpen` 控制 ⌘K 命令面板。

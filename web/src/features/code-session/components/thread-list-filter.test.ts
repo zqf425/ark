@@ -8,6 +8,7 @@ const threads: ThreadSummary[] = [
     title: '梳理 provider 重试策略',
     created_at: '2026-10-28T00:00:00Z',
     updated_at: '2026-10-28T00:00:00Z',
+    running: false,
     archived: false
   },
   {
@@ -15,6 +16,7 @@ const threads: ThreadSummary[] = [
     title: '旧的 MCP 方案',
     created_at: '2026-10-27T00:00:00Z',
     updated_at: '2026-10-27T00:00:00Z',
+    running: false,
     archived: true
   }
 ]

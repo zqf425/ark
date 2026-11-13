@@ -5,6 +5,8 @@ import { formatRelative } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../state/store'
 import { useThreadList } from '../hooks/use-thread-list'
+import { useThreadRunning } from '../hooks/use-thread-running'
+import { activityKeyOf } from '../state/threads-slice'
 import { exportThread } from '../api/threads-api'
 import { filterThreadsWithWorkspace, type ThreadListScope } from './thread-list-filter'
 import { groupThreadsByProject, type ThreadProject } from './thread-projects'
@@ -91,9 +93,38 @@ function ThreadRow({
     <div className={`ark-threadrow${active ? ' is-active' : ''}`}>
       <div className="ark-threadrow__main">
         <button type="button" className="ark-threadrow__select" onClick={onSelect} title={thread.title}>
-          <span className="ark-threadrow__title">{thread.title || t('thread.row.untitled')}</span>
+          <span className="ark-threadrow__title">
+            {thread.running ? (
+              <span
+                className="ark-threadrow__spinner"
+                role="status"
+                aria-label={t('thread.row.running')}
+                title={t('thread.row.running')}
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false">
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="9"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeOpacity="0.25"
+                    strokeWidth="2.5"
+                  />
+                  <path
+                    d="M21 12a9 9 0 0 0-9-9"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </span>
+            ) : null}
+            {thread.title || t('thread.row.untitled')}
+          </span>
           <span className="ark-threadrow__meta">
-            <time>{formatRelative(thread.updated_at, t)}</time>
+            <time>{formatRelative(activityKeyOf(thread), t)}</time>
             {typeof thread.last_seq === 'number' ? <span>seq {thread.last_seq}</span> : null}
             {thread.forked_from ? (
               <span
@@ -205,6 +236,9 @@ export function ThreadListPanel(): JSX.Element {
   const listStatus = useCodeSessionStore((s) => s.listStatus)
   const listError = useCodeSessionStore((s) => s.listError)
   const { create, select, refresh, rename, archive, restore, remove, fork, busy } = useThreadList()
+  // Busy markers: the active thread from the live turn reducer, the rest from
+  // a slow list poll (see the hook's docs).
+  useThreadRunning(activeThreadId)
   const [scope, setScope] = useState<ThreadListScope>('recent')
   const [query, setQuery] = useState('')
   /** The scheduled-task entry opens a dialog; the rail itself never navigates. */

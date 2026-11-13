@@ -58,5 +58,9 @@ pub fn summary_of(meta: &ThreadMeta) -> ThreadSummary {
         // this from `thread.json`, the index path mirrors it for list rows.
         workspace: meta.runtime.workspace.clone(),
         archived: meta.archived,
+        // `running` is live registry state only the caller knows; the mapping
+        // from metadata alone cannot assert it.
+        running: false,
+        last_event_at: meta.last_event_at,
     }
 }

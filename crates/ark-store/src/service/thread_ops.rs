@@ -208,6 +208,7 @@ fn entry_to_meta(entry: &IndexEntry) -> ThreadMeta {
         // here keeps the list watermark in step with the detail watermark, so an
         // SSE subscribe never replays history the canvas already seeded.
         last_seq: Some(entry.indexed_seq),
+        last_event_at: entry.last_event_at,
     }
 }
 
@@ -258,7 +259,10 @@ impl SessionStore for FileSessionStore {
         let paths = self.resolve_paths(thread);
         let writer = self.registry.writer_for(thread, &paths)?;
         let stored = writer.append(event).await?;
-        self.index_set_watermark(thread, stored.seq());
+        // The stored timestamp is the honest last-activity time: the list
+        // orders by it, so a clock skew must move the row by the skew, not by
+        // the append latency.
+        self.index_advance(thread, stored.seq(), Some(stored.timestamp()));
         Ok(stored)
     }
 
@@ -324,7 +328,12 @@ impl SessionStore for FileSessionStore {
         let paths = self.resolve_paths(thread);
         let writer = self.registry.writer_for(thread, &paths)?;
         let result = writer.rewind(rewind_from_seq, target_turn_id).await?;
-        self.index_set_watermark(thread, result.last_seq);
+        // The rewind truncated the suffix: recompute the activity time from the
+        // surviving log instead of keeping the (now stale) tail timestamp.
+        let last_event_at = crate::store::event_log::read_log_blocking(&paths)
+            .ok()
+            .and_then(|log| log.events.last().map(|event| event.timestamp()));
+        self.index_advance(thread, result.last_seq, last_event_at);
         Ok(result)
     }
 

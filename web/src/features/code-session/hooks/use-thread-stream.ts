@@ -28,6 +28,7 @@ export function useThreadStream(threadId: ThreadId | null): void {
   const setStreamStatus = useCodeSessionStore((s) => s.setStreamStatus)
   const noteThreadUsage = useCodeSessionStore((s) => s.noteThreadUsage)
   const noteThreadSeq = useCodeSessionStore((s) => s.noteThreadSeq)
+  const noteThreadActivity = useCodeSessionStore((s) => s.noteThreadActivity)
   // A rewind physically truncates history; bumping this token re-runs the whole
   // load + subscribe sequence from the fresh detail watermark.
   const reloadToken = useCodeSessionStore((s) => s.reloadToken)
@@ -63,6 +64,9 @@ export function useThreadStream(threadId: ThreadId | null): void {
         // The detail watermark is authoritative; pull the rail row up to it in
         // case the list was loaded before the newest events landed.
         noteThreadSeq(threadId, watermark)
+        // Same for the busy marker and the activity key: the detail snapshot
+        // is fresher than any list page the rail may have been seeded from.
+        if (detail.summary.last_event_at) noteThreadActivity(threadId, detail.summary.last_event_at)
 
         // Usage history is event-folded server-side, not part of the item
         // stream; seed it once per load. Best effort: an unavailable counter
@@ -96,6 +100,14 @@ export function useThreadStream(threadId: ThreadId | null): void {
               event.kind !== 'assistant_reasoning_delta'
             ) {
               noteThreadSeq(threadId, event.seq)
+              noteThreadActivity(threadId, event.timestamp)
+            }
+            // A delta is the strongest "the model is replying" signal: it
+            // moves the row to the rail top right away. Throttled by the same
+            // monotonic guard as the seq note (older timestamps are dropped),
+            // so a burst of tokens costs one sort per event at worst.
+            else if (event.thread_id === threadId) {
+              noteThreadActivity(threadId, event.timestamp)
             }
             // `thread_rewound` says the durable log was truncated and this seq
             // is a fresh, never-reused notification (docs/modules/ark-store.md).
@@ -146,5 +158,5 @@ export function useThreadStream(threadId: ThreadId | null): void {
       controller.abort()
       setStreamStatus('closed')
     }
-  }, [threadId, reloadToken, ingestEvent, noteThreadSeq, noteThreadUsage, requestStreamReload, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
+  }, [threadId, reloadToken, ingestEvent, noteThreadActivity, noteThreadSeq, noteThreadUsage, requestStreamReload, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
 }

@@ -20,6 +20,7 @@ use crate::store::data_lock::DataLock;
 use crate::store::fs_util::{ensure_dir, remove_dir_all, sweep_temp_files, write_json_atomic};
 use crate::store::index::{load_snapshot, save_snapshot, IndexEntry, ThreadIndex};
 use ark_common::{ArkError, Result, ThreadId};
+use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -404,11 +405,20 @@ impl FileSessionStore {
         save_snapshot(&mut index, &self.paths.index_file())
     }
 
-    /// Update the indexed watermark without touching the rest of the row.
-    pub(crate) fn index_set_watermark(&self, thread: ThreadId, seq: u64) {
+    /// Advance the watermark and record `at` as the newest event time.
+    ///
+    /// `at` is the event's own timestamp (the writer stamps it), so a replayed
+    /// backlog or a rewind recompute projects the honest last-activity time
+    /// instead of the moment the index happened to run. `None` keeps the
+    /// current value (callers that only re-watermark, like rewind recovery
+    /// paths that cannot read the log).
+    pub(crate) fn index_advance(&self, thread: ThreadId, seq: u64, at: Option<DateTime<Utc>>) {
         match self.lock_index() {
             Ok(mut index) => {
                 index.set_watermark(&thread, seq);
+                if let Some(at) = at {
+                    index.set_last_event_at(&thread, at);
+                }
                 // Fire-and-forget is fine for the in-memory watermark (it is
                 // rebuilt from the log), but a failed snapshot write is a
                 // durability regression worth one warning line.

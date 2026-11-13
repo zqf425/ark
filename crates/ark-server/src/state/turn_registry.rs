@@ -136,6 +136,19 @@ impl TurnRegistry {
             .map(|slot| slot.summary.clone())
     }
 
+    /// Every thread that currently has an in-flight turn.
+    ///
+    /// One lock read for the whole list response, so the busy marker costs one
+    /// allocation per call instead of one registry probe per row.
+    pub fn active_thread_ids(&self) -> std::collections::HashSet<ThreadId> {
+        self.lock()
+            .slots
+            .values()
+            .filter(|slot| slot.summary.ended_at.is_none())
+            .map(|slot| slot.summary.thread_id)
+            .collect()
+    }
+
     /// The summary of a known turn, terminal or running.
     ///
     /// A terminal record only lives for the [`TERMINAL_TURNS_RETAINED`] window,

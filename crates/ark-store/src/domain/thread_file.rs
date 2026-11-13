@@ -95,6 +95,7 @@ impl ThreadFile {
             inherited_item_count: self.inherited_item_count,
             // Derived from the event log/index, never stored in `thread.json`.
             last_seq: None,
+            last_event_at: None,
         }
     }
 

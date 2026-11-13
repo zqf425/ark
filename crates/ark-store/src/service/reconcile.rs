@@ -18,6 +18,7 @@ use crate::store::index::{
 };
 use crate::store::items_log::{rebuild_items_blocking, thread_usage_blocking};
 use ark_common::{Result, ThreadId};
+use chrono::{DateTime, Utc};
 
 /// What one reconciliation pass did, per branch.
 #[derive(Debug, Default, Clone)]
@@ -65,6 +66,8 @@ struct DiskThread {
     paths: ThreadPaths,
     file: ThreadFile,
     facts: DiskFacts,
+    /// Newest event timestamp from the same log parse that produced `facts`.
+    last_event_at: Option<DateTime<Utc>>,
 }
 
 /// Run the full reconciliation pass and persist the index snapshot.
@@ -200,6 +203,11 @@ fn rebuild_entry(
     entry.forked_from = item.file.forked_from;
     entry.fork_at_seq = item.file.fork_at_seq;
     entry.inherited_item_count = item.file.inherited_item_count;
+    // The last-activity time comes from the authoritative log's tail, not the
+    // metadata file: a rename must not refresh it, and a legacy snapshot that
+    // never recorded the field is repaired right here. `item.facts` only
+    // carries the max seq, so this reads the tail of the same parse.
+    entry.last_event_at = item.last_event_at;
     entry.status = crate::store::fs_util::read_json_opt::<SessionState>(&item.paths.session_json())
         .map(|state| state.status.as_str().to_string())
         .unwrap_or_else(|| "idle".to_string());
@@ -234,6 +242,7 @@ fn scan_threads(store: &FileSessionStore) -> Result<Vec<DiskThread>> {
             facts: DiskFacts {
                 max_seq: parsed.max_seq,
             },
+            last_event_at: parsed.events.last().map(|event| event.timestamp()),
         });
     }
     Ok(found)
@@ -287,7 +296,7 @@ mod tests {
             .append_event(thread, event_at(thread, 1))
             .await
             .unwrap();
-        store.index_set_watermark(thread, 1);
+        store.index_advance(thread, 1, None);
         let report = store.reconcile().unwrap();
         assert_eq!(report.skipped, 1);
         assert!(report.caught_up.is_empty());
@@ -304,7 +313,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        store.index_set_watermark(thread, 1);
+        store.index_advance(thread, 1, None);
         let report = store.reconcile().unwrap();
         assert_eq!(report.caught_up, vec![thread]);
         let index = store.lock_index().unwrap();
@@ -319,7 +328,7 @@ mod tests {
             .append_event(thread, event_at(thread, 1))
             .await
             .unwrap();
-        store.index_set_watermark(thread, 99);
+        store.index_advance(thread, 99, None);
         let report = store.reconcile().unwrap();
         assert_eq!(report.rebuilt, vec![thread]);
         let index = store.lock_index().unwrap();

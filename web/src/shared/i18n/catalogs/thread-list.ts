@@ -32,6 +32,7 @@ export const THREAD_LIST_MESSAGES = {
 
   'thread.row.untitled': ['未命名会话', 'Untitled thread'],
   'thread.row.menu': ['会话操作', 'Thread actions'],
+  'thread.row.running': ['模型正在回复…', 'The model is replying…'],
   'thread.row.archived': ['已归档', 'Archived'],
   'thread.row.forked': ['分叉会话', 'Forked thread'],
   'thread.row.forkedFrom': ['分叉自 {title}', 'Forked from {title}'],

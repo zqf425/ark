@@ -148,11 +148,14 @@ fn summary_mapping_preserves_title_and_archive_flag() {
         fork_at_seq: None,
         inherited_item_count: None,
         last_seq: None,
+        last_event_at: None,
     };
     let summary = summary_of(&meta);
     assert_eq!(summary.title, "hello");
     assert!(summary.archived);
     assert_eq!(summary.last_seq, None);
+    // Metadata alone never asserts liveness; only the list/detail handlers can.
+    assert!(!summary.running);
 }
 
 #[test]
@@ -172,6 +175,7 @@ fn summary_mapping_carries_watermark_and_fork_provenance() {
         fork_at_seq: Some(12),
         inherited_item_count: Some(5),
         last_seq: Some(17),
+        last_event_at: Some(Utc::now()),
     };
     let summary = summary_of(&meta);
     assert_eq!(summary.last_seq, Some(17));
@@ -179,6 +183,7 @@ fn summary_mapping_carries_watermark_and_fork_provenance() {
     assert_eq!(summary.fork_at_seq, Some(12));
     assert_eq!(summary.inherited_item_count, Some(5));
     assert_eq!(summary.workspace.as_deref(), Some("/tmp/project"));
+    assert!(summary.last_event_at.is_some());
 }
 
 #[test]
@@ -308,6 +313,98 @@ async fn list_without_query_stays_compatible() {
     // Deterministic order: active first, then most recently updated, so
     // the newest active thread (seeded last, even index) leads.
     assert_eq!(summaries[0].title, "thread-54");
+}
+
+#[tokio::test]
+async fn list_marks_only_threads_with_an_in_flight_turn_as_running() {
+    let dir = test_dir("running");
+    let data_dir = dir.path().to_path_buf();
+    let state = state(&data_dir);
+    state
+        .store
+        .create_thread("idle")
+        .await
+        .expect("thread");
+    let busy = state
+        .store
+        .create_thread("busy")
+        .await
+        .expect("thread")
+        .thread_id;
+    let busy_turn = TurnId::new();
+    state
+        .turns
+        .try_register(busy, busy_turn, ark_agent::CancelToken::new())
+        .expect("register busy");
+
+    let summaries = list_response(state.clone(), ThreadListQuery::default()).await;
+    let running: Vec<_> = summaries
+        .iter()
+        .filter(|summary| summary.running)
+        .map(|summary| summary.thread_id)
+        .collect();
+    assert_eq!(running, vec![busy], "only the registered thread is busy");
+}
+
+#[tokio::test]
+async fn list_orders_by_last_event_time_not_metadata_updates() {
+    let dir = test_dir("activity-order");
+    let data_dir = dir.path().to_path_buf();
+    let state = state(&data_dir);
+    // `older` is created (and its metadata touched) after `newer`, but only
+    // `newer` receives events: the activity order must still lead with it,
+    // which is the "the thread that just streamed first" behaviour the rail
+    // promises. A pure `updated_at` order would put `older` on top.
+    let older = state
+        .store
+        .create_thread("older")
+        .await
+        .expect("thread")
+        .thread_id;
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let newer = state
+        .store
+        .create_thread("newer")
+        .await
+        .expect("thread")
+        .thread_id;
+    let turn = TurnId::new();
+    state
+        .store
+        .append_event(
+            older,
+            RuntimeEvent::TurnStarted {
+                seq: 0,
+                thread_id: older,
+                turn_id: turn,
+                timestamp: Utc::now() - chrono::Duration::seconds(30),
+                auto_continuation: false,
+                attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
+            },
+        )
+        .await
+        .expect("older event");
+    state
+        .store
+        .append_event(
+            newer,
+            RuntimeEvent::TurnCompleted {
+                seq: 0,
+                thread_id: newer,
+                turn_id: turn,
+                timestamp: Utc::now(),
+            },
+        )
+        .await
+        .expect("newer event");
+
+    let summaries = list_response(state.clone(), ThreadListQuery::default()).await;
+    let titles: Vec<&str> = summaries.iter().map(|s| s.title.as_str()).collect();
+    assert_eq!(titles, vec!["newer", "older"]);
+    // The activity projection must survive into the wire row.
+    let newer_row = summaries.iter().find(|s| s.title == "newer").unwrap();
+    assert!(newer_row.last_event_at.is_some());
 }
 
 #[tokio::test]

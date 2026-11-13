@@ -47,6 +47,7 @@ function detail(threadId: string, lastSeq: number, items: ThreadItem[], approval
       created_at: '2026-10-28T00:00:00Z',
       updated_at: '2026-10-28T00:00:00Z',
       last_seq: lastSeq,
+      running: false,
       archived: false
     },
     items,
