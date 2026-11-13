@@ -8,6 +8,8 @@ use ark_common::{ItemId, TurnId};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::event::TurnAttachmentOutcome;
+
 /// What a single item in the conversation stream represents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
@@ -86,6 +88,12 @@ pub struct ThreadItem {
     pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub marker: Option<ItemMarker>,
+    /// Per-attachment delivery record for a `UserMessage` that seeded the turn
+    /// with attachments. Rides the item (not only the `turn_started` event) so
+    /// history replay and thread detail render the same chips as the live
+    /// stream; `#[serde(default)]` keeps pre-existing items readable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<TurnAttachmentOutcome>>,
 }
 
 impl ThreadItem {
@@ -100,11 +108,17 @@ impl ThreadItem {
             tool: None,
             detail: None,
             marker: None,
+            attachments: None,
         }
     }
 
     pub fn with_marker(mut self, marker: ItemMarker) -> Self {
         self.marker = Some(marker);
+        self
+    }
+
+    pub fn with_attachments(mut self, attachments: Vec<TurnAttachmentOutcome>) -> Self {
+        self.attachments = Some(attachments);
         self
     }
 

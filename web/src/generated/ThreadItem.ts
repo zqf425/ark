@@ -4,6 +4,7 @@ import type { ItemKind } from "./ItemKind";
 import type { ItemMarker } from "./ItemMarker";
 import type { ItemStatus } from "./ItemStatus";
 import type { ToolPayload } from "./ToolPayload";
+import type { TurnAttachmentOutcome } from "./TurnAttachmentOutcome";
 import type { TurnId } from "./TurnId";
 
 /**
@@ -12,4 +13,11 @@ import type { TurnId } from "./TurnId";
  * `text` holds the accumulated content: a full message for terminal items, and
  * the partially accumulated text for streaming ones.
  */
-export type ThreadItem = { item_id: ItemId, turn_id: TurnId, kind: ItemKind, status: ItemStatus, created_at: string, text?: string, tool?: ToolPayload, detail?: string, marker?: ItemMarker, };
+export type ThreadItem = { item_id: ItemId, turn_id: TurnId, kind: ItemKind, status: ItemStatus, created_at: string, text?: string, tool?: ToolPayload, detail?: string, marker?: ItemMarker, 
+/**
+ * Per-attachment delivery record for a `UserMessage` that seeded the turn
+ * with attachments. Rides the item (not only the `turn_started` event) so
+ * history replay and thread detail render the same chips as the live
+ * stream; `#[serde(default)]` keeps pre-existing items readable.
+ */
+attachments?: Array<TurnAttachmentOutcome>, };

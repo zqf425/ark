@@ -136,6 +136,10 @@
   chips，回合结束的 live→idle 转变触发按顺序自动发送）；排队消息可逐条移除，纯本地状态不进 wire。
 - 附件经 `POST /v1/attachments`（Base64 JSON）上传后以 id 列表随 `TurnRequest.attachment_ids` 提交；
   上传失败走命令错误提示，已传 id 可在发送前移除（服务端无删除路由，孤儿附件由运行时清理策略负责）。
+- 消息画布用 `ThreadItem.attachments`（serde default，可为空）渲染用户消息下的附件 chips：
+  每个投递结果一枚 chip（文件名 + 投递通道 i18n 标签），`image`/`preview_text` 为中性样式，
+  `degraded`/`skipped`/`unavailable` 用警示色并以 `detail` 作 title 提示。字段由后端持久化，
+  历史回放与 live 流渲染一致；运行时未发附件字段的旧 item 保持原样。
 - 「技能」面板的消费面见上方"输入框「技能」面板"条目：线程级视图 + 全局回落，显式 `/id` 提及即激活
   是 arkd 的技能指定方式；不新增技能运行时字段。
 - 用户可见文本通过 `web/src/shared/i18n/` 的消息键与中英文资源提供；新增 UI 不得硬编码文案。

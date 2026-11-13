@@ -104,6 +104,8 @@ export type {
   TodoEntry,
   TodosRequest,
   TodoStatus,
+  TurnAttachmentDelivery,
+  TurnAttachmentOutcome,
   TurnId,
   TurnRequest,
   TurnSummary,

@@ -124,7 +124,8 @@ function upsertItem(draft: ItemsDraft, item: ThreadItem): void {
     ...item,
     text: item.text ?? existing.text,
     tool: item.tool ?? existing.tool,
-    detail: item.detail ?? existing.detail
+    detail: item.detail ?? existing.detail,
+    attachments: item.attachments ?? existing.attachments
   }
   if (sameItemContent(existing, merged)) return
   draftItems(draft)[item.item_id] = merged

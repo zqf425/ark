@@ -28,7 +28,10 @@
 provider 的模型目录显式声明 `supports_vision`（`ProviderStore::resolve_vision`，`None` 视为未声明）
 才读字节并以 base64 注入 `ModelMessage.images`；非图片/降级/超预算（每回合 20 MiB）/
 读取失败的附件以 `preview_text` 拼入用户消息文本，随持久 item 进入历史回放。每个附件的传递结果
-记入 `turn_started.attachment_outcomes`。agent 不读取文件系统；坏附件不得使回合失败。
+记入 `turn_started.attachment_outcomes`，并且同一记录随 `TurnEvents` 交给 reactor 写到本回合的
+`UserMessage` item（`ThreadItem.attachments`，serde default 向后兼容）：item 是渲染数据源，
+重载历史后 UI 才能渲染与 live 流一致的附件 chips——`turn_started` 只在本回合可观察。
+agent 不读取文件系统；坏附件不得使回合失败。
 关联回放不经过组合根——它由 `SessionStore` 的事件投影提供。
 
 `wiring/turn_common.rs` 是父/子两条 turn 路径的**共享规则宿主**，属本模块"仅装配"约束的显式例外：

@@ -34,6 +34,12 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.header.reviewFailed': ['发起评审失败', 'Failed to start review'],
 
   'canvas.author.you': ['你', 'You'],
+  'canvas.attachments.title': ['附件', 'Attachments'],
+  'canvas.attachments.image': ['图片', 'Image'],
+  'canvas.attachments.previewText': ['文本预览', 'Text preview'],
+  'canvas.attachments.degraded': ['未传图（模型无视觉能力）', 'No image (model lacks vision)'],
+  'canvas.attachments.skipped': ['超出图片预算', 'Over image budget'],
+  'canvas.attachments.unavailable': ['读取失败', 'Unavailable'],
   'canvas.reasoning': ['思考过程', 'Reasoning'],
   'canvas.aborted': ['已中断', 'Interrupted'],
   'canvas.failed': ['失败', 'Failed'],
