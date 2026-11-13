@@ -209,6 +209,11 @@ impl TurnRunner for AgentTurnRunner {
             completion_inbox(self.store.as_ref(), job.thread_id).await?
         };
         let history = conversation_history(&self.store.read_items(job.thread_id).await?);
+        // The durable plan is re-read every turn so restating the goal/todos in
+        // the recent tail cannot drift from what the workbench shows.
+        let plan = ark_server::service::workbench::plan(
+            &self.store.replay_events(job.thread_id, 0).await?,
+        );
         let thread = self.store.get_thread(job.thread_id).await?;
         let (source_text, user_text) = turn_source_texts(&job.source);
         // Capture once before building either the prompt or tool adapter. A
@@ -249,7 +254,7 @@ impl TurnRunner for AgentTurnRunner {
                 job.turn_id,
             ),
         ));
-        let seed_messages = self.parent_seed(&workspace, history, &source_text, &inbox);
+        let seed_messages = self.parent_seed(&workspace, history, &source_text, &inbox, &plan);
         // One snapshot per turn: every value below is derived from the same
         // config state, so a turn cannot mix a new model with old limits.
         let provider = resolve_thread_provider(
@@ -342,16 +347,18 @@ impl AgentTurnRunner {
     }
 
     /// Assemble the parent turn's seed: static prefix, replayed history, then
-    /// the dynamic tail (skills, memory, completion inbox).
+    /// the dynamic tail (skills, memory, completion inbox, thread plan).
     ///
     /// Only the static prefix may enter the prompt cache; everything after it
-    /// changes between turns, so it must stay out of the prefix.
+    /// changes between turns, so it must stay out of the prefix. The plan is
+    /// last on purpose: it must sit closest to the new user message.
     fn parent_seed(
         &self,
         workspace: &std::path::Path,
         history: Vec<ModelMessage>,
         source_text: &str,
         inbox: &CompletionInbox,
+        plan: &ark_contract::PlanView,
     ) -> Vec<ModelMessage> {
         let resolution = self.skills.resolve_for_turn(source_text);
         let mut seed_messages = super::turn_common::seed_prefix(workspace);
@@ -361,6 +368,9 @@ impl AgentTurnRunner {
             seed_messages.push(message);
         }
         if let Some(message) = inbox.system_message() {
+            seed_messages.push(message);
+        }
+        if let Some(message) = super::history::plan_seed_message(plan) {
             seed_messages.push(message);
         }
         seed_messages

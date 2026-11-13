@@ -235,10 +235,20 @@ fn after_user_input(input: &TurnInput) -> Action {
     dispatch(pending_dispatch, repeats, input, DispatchYield::default())
 }
 
+/// Compaction reports the *re-estimated* prefix size (the reactor measures the
+/// shortened history), so this is a real decision instead of the old blind `0`.
+/// If the prefix still overflows and budget remains, compact again; otherwise
+/// let the shared budget gate allow or refuse the model call.
 fn after_compaction(input: &TurnInput) -> Action {
-    let mut next = input.clone();
-    next.progress.prompt_estimate = 0;
-    call_model(&next)
+    let budget = TurnBudget::new(input.limits);
+    if budget.needs_compaction(input.progress.prompt_estimate)
+        && budget.compaction_available(&input.progress)
+    {
+        return Action::Compact {
+            keep_recent: input.limits.keep_recent_messages,
+        };
+    }
+    call_model(input)
 }
 
 /// Convenience for the machine: build a `Progress` with the round advanced.
@@ -684,6 +694,48 @@ mod tests {
         let kind = InputKind::CompactionSettled { removed_items: 3 };
         let action = step(TurnState::Compacting, &input(Progress::default(), kind));
         assert_eq!(action, Action::CallModel { round: 1 });
+    }
+
+    #[test]
+    fn compaction_retries_when_the_prefix_is_still_too_large() {
+        let progress = Progress {
+            prompt_estimate: u64::MAX / 2,
+            compactions: 1,
+            ..Progress::default()
+        };
+        let action = step(
+            TurnState::Compacting,
+            &input(progress, InputKind::CompactionSettled { removed_items: 3 }),
+        );
+        assert!(matches!(action, Action::Compact { .. }));
+    }
+
+    #[test]
+    fn compaction_spent_and_still_too_large_fails() {
+        let limits = TurnLimits {
+            max_compactions: 2,
+            context_limit_tokens: 10,
+            ..TurnLimits::default()
+        };
+        let progress = Progress {
+            prompt_estimate: 100,
+            compactions: 2,
+            ..Progress::default()
+        };
+        let action = step(
+            TurnState::Compacting,
+            &TurnInput::new(
+                limits,
+                progress,
+                InputKind::CompactionSettled { removed_items: 3 },
+            ),
+        );
+        assert!(matches!(
+            action,
+            Action::Finish {
+                outcome: TurnOutcome::Failed { .. }
+            }
+        ));
     }
 
     #[test]

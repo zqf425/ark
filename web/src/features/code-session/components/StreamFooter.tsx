@@ -88,7 +88,7 @@ export function StreamFooter(): JSX.Element {
         <span className="ark-streamfooter__meta" title={t('canvas.compaction.title')}>
           {t('canvas.compaction.notice', {
             removed: lastCompaction.removedItems,
-            chars: formatTokens(lastCompaction.checkpointChars)
+            chars: lastCompaction.checkpointChars
           })}
         </span>
       ) : null}

@@ -154,9 +154,11 @@ pub(crate) fn projected_item_id(event: &RuntimeEvent) -> Option<ItemId> {
             Some(keyed_item_id(&format!("user_input:{request_id}")))
         }
         RuntimeEvent::Error { seq, .. } => Some(keyed_item_id(&format!("error:{seq}"))),
-        RuntimeEvent::CompactionCompleted { turn_id, .. } => {
-            Some(keyed_item_id(&format!("compaction:{turn_id}")))
-        }
+        // `CompactionCompleted` is a control event, not a render row. The
+        // reactor already appended one `ItemCreated` checkpoint notice for the
+        // same compaction; projecting it again produced a second, redundant
+        // "N earlier items compacted" card. Keep the event in the log for
+        // diagnostics/usage, but never fold it into `items.jsonl`.
         _ => None,
     }
 }
@@ -321,12 +323,6 @@ impl ItemProjector {
                 message,
                 ..
             } => self.apply_error(*seq, message, *timestamp),
-            RuntimeEvent::CompactionCompleted {
-                turn_id,
-                timestamp,
-                removed_items,
-                ..
-            } => self.apply_compaction(*turn_id, *removed_items, *timestamp),
             _ => return None,
         };
         self.first.entry(item.item_id).or_insert(seq);
@@ -521,14 +517,6 @@ impl ItemProjector {
         let mut item = build(id, turn, ItemKind::Error, at);
         item.text = Some(message.to_string());
         item.status = ItemStatus::Failed;
-        self.upsert(item)
-    }
-
-    fn apply_compaction(&mut self, turn: TurnId, removed: u32, at: DateTime<Utc>) -> ThreadItem {
-        let id = keyed_item_id(&format!("compaction:{turn}"));
-        let mut item = build(id, turn, ItemKind::Notice, at);
-        item.text = Some(format!("{removed} earlier items compacted"));
-        item.status = ItemStatus::Completed;
         self.upsert(item)
     }
 

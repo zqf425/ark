@@ -64,7 +64,12 @@ impl TurnState {
             return false;
         }
         match (self, next) {
-            (_, Compacting) => matches!(self, Preparing | DispatchingTools | AwaitingModel),
+            // A compaction that did not shrink the prefix enough may run again
+            // while budget remains; `note_compaction` bounds the retries.
+            (_, Compacting) => matches!(
+                self,
+                Preparing | DispatchingTools | AwaitingModel | Compacting
+            ),
             (Preparing, AwaitingModel) => true,
             // Any working state must be able to write a terminal event: an
             // I/O error during `prepare()` otherwise leaves a turn with a
@@ -154,6 +159,14 @@ mod tests {
         assert!(TurnState::AwaitingUserInput.can_enter(TurnState::AwaitingUserInput));
         // The ask chain of one round ends in its approval chain (A2).
         assert!(TurnState::AwaitingUserInput.can_enter(TurnState::AwaitingApproval));
+    }
+
+    #[test]
+    fn compaction_can_retry_until_budget_is_spent() {
+        assert!(TurnState::Compacting.can_enter(TurnState::Compacting));
+        assert!(TurnState::Preparing.can_enter(TurnState::Compacting));
+        assert!(!TurnState::Finalizing.can_enter(TurnState::Compacting));
+        assert!(!TurnState::AwaitingApproval.can_enter(TurnState::Compacting));
     }
 
     #[test]

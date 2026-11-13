@@ -1241,6 +1241,9 @@ mod tests {
         assert!(checkpoint
             .content
             .contains("Goal: preserve legacy fact ZEBRA-77"));
+        // The durable boundary must summarise the kept tail too: the next turn
+        // replays only this note plus rows written after it.
+        assert!(checkpoint.content.contains("first recent message"));
         assert_eq!(
             reactor.history[0],
             ModelMessage::system("stable system prompt")

@@ -110,7 +110,7 @@ pub async fn interrupt(
 
 /// `POST /v1/threads/{id}/compact`.
 ///
-/// Transport only: existence checks, checkpoint detection and persistence are
+/// Transport only: existence checks, checkpoint rebuild and persistence are
 /// `service::ensure_checkpoint`'s job; this route declares the intent and keeps
 /// the boundary honest about what it did.
 pub async fn compact(
@@ -119,11 +119,6 @@ pub async fn compact(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let thread_id = parse_thread(&id)?;
     match crate::service::ensure_checkpoint(&state.store, thread_id).await? {
-        crate::service::CompactionOutcome::Existing(existing) => Ok(Json(
-            // Checkpoint items are always written with text; the default only
-            // guards the wire contract against a `null` slipping through.
-            serde_json::json!({ "thread_id": thread_id, "checkpoint": existing.text.unwrap_or_default() }),
-        )),
         crate::service::CompactionOutcome::Created {
             turn_id,
             checkpoint,

@@ -12,9 +12,20 @@ use super::*;
 /// the embedded `output`; terminal items replay the full call+result pair.
 /// Non-terminal items are dropped because providers reject requests whose
 /// tool calls have no result.
+///
+/// The newest context checkpoint is a durable compaction boundary: every row
+/// before it was folded into that note by an earlier turn. Replaying those rows
+/// would silently undo compaction on the very next turn. The original items
+/// remain on disk (rewind / export can still reach them); only the
+/// model-visible prefix is cut here. Identity comes from the structural
+/// marker, never from the note's text.
 pub(super) fn conversation_history(items: &[ark_contract::ThreadItem]) -> Vec<ModelMessage> {
+    let start = items
+        .iter()
+        .rposition(|item| item.is_context_checkpoint())
+        .unwrap_or(0);
     let mut history: Vec<ModelMessage> = Vec::new();
-    for item in items {
+    for item in &items[start..] {
         match item.kind {
             ark_contract::item::ItemKind::UserMessage => {
                 if let Some(text) = nonempty(item.text.as_deref()) {
@@ -107,6 +118,31 @@ fn truncate_utf8(text: &str) -> String {
         end -= 1;
     }
     text[..end].to_string()
+}
+
+/// Restate the durable thread goal and todos near the end of the seed.
+///
+/// A long history pushes early goals out of the model's effective attention
+/// window (lost-in-the-middle). Re-emitting the current plan each turn keeps
+/// the objective and progress in the recent tail without duplicating the whole
+/// transcript. Returns `None` when the thread has no plan.
+pub(super) fn plan_seed_message(plan: &ark_contract::PlanView) -> Option<ModelMessage> {
+    if plan.goal.is_none() && plan.todos.is_empty() {
+        return None;
+    }
+    let mut lines = vec!["[thread plan - current objective and progress]".to_string()];
+    if let Some(goal) = plan.goal.as_deref() {
+        lines.push(format!("Goal: {}", goal.trim()));
+    }
+    for todo in &plan.todos {
+        let mark = match todo.status {
+            ark_contract::TodoStatus::Pending => "[ ]",
+            ark_contract::TodoStatus::InProgress => "[~]",
+            ark_contract::TodoStatus::Completed => "[x]",
+        };
+        lines.push(format!("- {mark} {}", todo.title.trim()));
+    }
+    Some(ModelMessage::system(lines.join("\n")))
 }
 
 /// One-line workspace fact. Kept out of the static prefix on purpose: the cache

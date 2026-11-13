@@ -117,6 +117,73 @@ fn conversation_history_replays_context_checkpoints_as_system_messages() {
     );
 }
 
+#[test]
+fn conversation_history_starts_at_the_latest_checkpoint() {
+    let checkpoint = |text: &str| {
+        ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::Notice)
+            .with_text(text)
+            .with_marker(ark_contract::ItemMarker::ContextCheckpoint)
+            .completed()
+    };
+    let user = |text: &str| {
+        ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::UserMessage)
+            .with_text(text)
+            .completed()
+    };
+    let items = vec![
+        user("ancient request"),
+        checkpoint("[context checkpoint] first"),
+        user("middle request"),
+        checkpoint("[context checkpoint] latest"),
+        user("newest request"),
+    ];
+
+    // Only the newest boundary and rows written after it reach the model; the
+    // original rows stay on disk for rewind/export.
+    assert_eq!(
+        conversation_history(&items),
+        vec![
+            ModelMessage::system("[context checkpoint] latest"),
+            ModelMessage::user("newest request"),
+        ]
+    );
+}
+
+#[test]
+fn conversation_history_without_a_checkpoint_replays_everything() {
+    let items = vec![
+        ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::UserMessage)
+            .with_text("first")
+            .completed(),
+        ark_contract::ThreadItem::new(TurnId::new(), ark_contract::item::ItemKind::AssistantMessage)
+            .with_text("second")
+            .completed(),
+    ];
+    assert_eq!(
+        conversation_history(&items),
+        vec![ModelMessage::user("first"), ModelMessage::assistant("second")]
+    );
+}
+
+#[test]
+fn plan_seed_restates_goal_and_todo_status() {
+    use ark_contract::{PlanView, TodoEntry, TodoStatus};
+    let plan = PlanView {
+        goal: Some("repair the parser".into()),
+        todos: vec![
+            TodoEntry { id: "1".into(), title: "read files".into(), status: TodoStatus::Completed },
+            TodoEntry { id: "2".into(), title: "fix wire format".into(), status: TodoStatus::InProgress },
+            TodoEntry { id: "3".into(), title: "run tests".into(), status: TodoStatus::Pending },
+        ],
+    };
+    let message = super::history::plan_seed_message(&plan).expect("a plan produces a seed");
+    assert!(message.content.contains("Goal: repair the parser"));
+    assert!(message.content.contains("- [x] read files"));
+    assert!(message.content.contains("- [~] fix wire format"));
+    assert!(message.content.contains("- [ ] run tests"));
+    assert_eq!(super::history::plan_seed_message(&PlanView::default()), None);
+}
+
 /// A folded tool item as the store projects it: one `ToolCall` entry whose
 /// payload embeds the result (see `apply_tool_finished`).
 fn tool_item(
