@@ -4,8 +4,9 @@
  * `GET /v1/threads` query parameters.
  *
  * Ordering is the store's deterministic order (active first, then
- * `updated_at` descending, thread id as final tiebreak); `offset` counts rows
- * in that order so a page never repeats or skips rows between calls.
+ * last activity (`last_event_at ?? updated_at`) descending, thread id as
+ * final tiebreak); `offset` counts rows in that order so a page never
+ * repeats or skips rows between calls.
  */
 export type ThreadListQuery = { 
 /**

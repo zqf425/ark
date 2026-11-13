@@ -203,6 +203,7 @@ fn rebuild_entry(
     entry.forked_from = item.file.forked_from;
     entry.fork_at_seq = item.file.fork_at_seq;
     entry.inherited_item_count = item.file.inherited_item_count;
+    entry.workspace = item.file.workspace.clone();
     // The last-activity time comes from the authoritative log's tail, not the
     // metadata file: a rename must not refresh it, and a legacy snapshot that
     // never recorded the field is repaired right here. `item.facts` only

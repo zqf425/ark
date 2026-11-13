@@ -24,4 +24,16 @@ inherited_item_count?: number,
  * into projects without one detail request per row. `None` means the
  * thread follows the global default workspace.
  */
-workspace?: string, archived: boolean, };
+workspace?: string, archived: boolean, 
+/**
+ * Whether the runtime currently has a turn in flight for this thread.
+ *
+ * Live registry state, not durable state: only the process answering the
+ * request knows it, and a restart always reads `false`.
+ */
+running: boolean, 
+/**
+ * Timestamp of the newest durable event: the "last activity" a list
+ * orders by. The index projects it so the order survives a restart.
+ */
+last_event_at?: string, };
