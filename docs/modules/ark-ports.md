@@ -60,6 +60,10 @@ cursor }`，端口自有的落盘类型，同 `ThreadMeta` 先例，不进 ts_ex
   启动时装载一次，卸载是 `ark-plugin` 的服务操作而非平台路由。它随 `BaseServices::plugins`
   （`Option`）注入组合根，未装配时的空列表与“确实没有插件”必须可区分，因此实现未注入时 HTTP 层返回
   `runtime_unavailable`。报告中的贡献项从真正拥有它的总线读取，不得保留平行清单。
+- `TitleModel`（`base.rs`）是小型辅助模型调用（会话标题自动生成）的窄端口：入参是裁剪后的首条用户
+  消息摘要，出参是 `Option<String>`（`None` 表示当前没有可用 provider）。它随 `BaseServices::title_model`
+  （`Option`）注入；未注入的构建（headless/测试）只是不命名标题，不得报错。实现拥有 provider 解析、
+  用量计量与超时预算；策略（占位标题判定、提示词、字节预算）归 `ark-server`，端口不感知它们。
 - `latest_child_runs`（`store.rs`）是纯函数折叠，不是端口方法：`children/runs.jsonl` 是追加日志，一个 child
   合法拥有多行（`queued`/`running`/终态，以及每次 `resume` 追加的一行），因此 `list_child_runs` 的结果是
   **一行 = 一次状态转换**，而不是一个 child。任何计数或列表投影必须先经该函数折叠：保留每个 id 最后

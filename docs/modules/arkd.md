@@ -82,6 +82,11 @@ per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启
 模型目录明确提供 context window 时，组合根将全局 compaction
 threshold 收窄到可用输入空间（扣除用户明确设置的 max_tokens）；已运行回合继续使用创建时快照。
 
+会话标题自动生成经 `TitleModelAdapter`（`base.rs`）注入 `BaseServices::title_model`：它复用
+`resolve(None)` 的存活 provider 与 `select_from_config` 的同一计量 client，构造无工具、低温度、
+`max_tokens=64` 的小请求。组合根只装配端口，占位判定、提示词与超时归 `ark-server`
+（[ark-server](ark-server.md)）；未配置 provider 时适配器返回 `None`，标题保持占位。
+
 工作区由组合根持有 canonical-root/generation 状态。父回合在 runner 入口捕获 lease，动态 prompt 和所有
 工具调用都使用同一 root；子回合继承 delegation tool context 的 workspace。切换只改变后续回合，且必须
 在没有 parent/child active run 时完成；它不会重启 arkd、sidecar、端口或 data-dir。

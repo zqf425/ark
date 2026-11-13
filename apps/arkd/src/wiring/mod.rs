@@ -357,6 +357,10 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
 
     let base = BaseServices::new()
         .with_providers(Arc::new(ProviderAdapter::new(Arc::clone(&providers))))
+        .with_title_model(Arc::new(crate::base::TitleModelAdapter::new(
+            Arc::clone(&providers),
+            Arc::clone(&usage),
+        )))
         .with_skills(Arc::new(SkillAdapter::new(Arc::clone(&skills))))
         .with_workspace(Arc::new(WorkspaceAdapter::new(
             Arc::clone(&workspace),

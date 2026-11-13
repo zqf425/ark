@@ -17,6 +17,12 @@ export type ThreadsSlice = {
   setThreadRunning: (threadId: ThreadId, running: boolean) => void
   /** Merge a list poll's busy set; rows outside the set read as idle. */
   applyRunningFlags: (running: ThreadId[]) => void
+  /**
+   * Fold a `thread_updated` rename into one rail row without touching its
+   * other fields or the row order. The list endpoint remains authoritative on
+   * refresh; this only keeps the title current between refreshes.
+   */
+  renameThreadRow: (threadId: ThreadId, title: string) => void
   setActiveThread: (threadId: ThreadId | null) => void
   setListStatus: (status: LoadStatus, error?: string | null) => void
   removeThread: (threadId: ThreadId) => void
@@ -125,6 +131,15 @@ export const createThreadsSlice: StateCreator<ThreadsSlice, [], [], ThreadsSlice
   }),
 
   setActiveThread: (threadId) => set({ activeThreadId: threadId }),
+
+  renameThreadRow: (threadId, title) => set((state) => {
+    const next = title.trim()
+    const index = next ? state.threads.findIndex((row) => row.thread_id === threadId) : -1
+    if (index === -1) return {}
+    const rows = [...state.threads]
+    rows[index] = { ...rows[index]!, title: next }
+    return { threads: rows }
+  }),
 
   setListStatus: (status, error = null) => set({ listStatus: status, listError: error }),
 
