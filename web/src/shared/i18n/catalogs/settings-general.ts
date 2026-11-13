@@ -31,6 +31,9 @@ export const SETTINGS_GENERAL_MESSAGES = {
     'Save an empty value to clear the default workspace (submits an empty string).'
   ],
   'settings.general.workspace.placeholder': ['D:\\code\\project 或 /home/me/project', 'D:\\code\\project or /home/me/project'],
+  'settings.general.workspace.browse': ['浏览…', 'Browse…'],
+  'settings.general.workspace.browsing': ['选择中…', 'Selecting…'],
+  'settings.general.workspace.pickFailed': ['文件夹选择器打开失败', 'Failed to open the folder picker'],
   'settings.general.workspace.validate': ['校验', 'Validate'],
   'settings.general.workspace.validating': ['校验中…', 'Validating…'],
   'settings.general.workspace.save': ['保存', 'Save'],

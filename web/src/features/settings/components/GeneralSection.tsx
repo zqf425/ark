@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react'
 import { Button, useToast } from '../../../shared/ui'
 import { useI18n, type MessageKey, type UiFontSize, type UiLocale, type UiTheme } from '../../../shared/i18n'
+import { isDesktopShell, pickFolder } from '../../../shared/desktop'
 import { LOG_LEVELS, type LogLevel } from '../../../shared/contracts'
 import { useSettings, useWorkspaceProbe } from '../hooks/use-settings'
 import type { ProvidersApi } from '../hooks/use-providers'
@@ -140,6 +141,8 @@ function WorkspaceEditor({ initial, onSave, saving }: { initial: string; onSave:
   const probe = useWorkspaceProbe()
   const [draft, setDraft] = useState(initial)
   const [validating, setValidating] = useState(false)
+  const [browsing, setBrowsing] = useState(false)
+  const desktop = isDesktopShell()
 
   // Config reloads (e.g. after a save) must not fight with an in-progress edit:
   // only adopt the new value when the field is untouched.
@@ -160,6 +163,22 @@ function WorkspaceEditor({ initial, onSave, saving }: { initial: string; onSave:
     else toast.push('error', t('settings.general.workspace.validateFailed'), describeOutcome(outcome))
   }
 
+  const browse = async (): Promise<void> => {
+    setBrowsing(true)
+    try {
+      const folder = await pickFolder()
+      // null = cancelled or non-desktop environment: keep the current draft.
+      if (folder) {
+        setDraft(folder)
+        await onSave(folder)
+      }
+    } catch {
+      toast.push('error', t('settings.general.workspace.pickFailed'))
+    } finally {
+      setBrowsing(false)
+    }
+  }
+
   const status = probe.status
 
   return (
@@ -176,6 +195,11 @@ function WorkspaceEditor({ initial, onSave, saving }: { initial: string; onSave:
             style={{ fontFamily: 'var(--ark-mono)', fontSize: 11.5 }}
             onChange={(event) => setDraft(event.target.value)}
           />
+          {desktop ? (
+            <Button size="sm" disabled={browsing || saving} onClick={() => void browse()}>
+              {browsing ? t('settings.general.workspace.browsing') : t('settings.general.workspace.browse')}
+            </Button>
+          ) : null}
           <Button size="sm" disabled={validating} onClick={() => void validate()}>
             {validating ? t('settings.general.workspace.validating') : t('settings.general.workspace.validate')}
           </Button>
