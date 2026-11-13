@@ -3,18 +3,35 @@
 //! The shell starts one local runtime when no listener already owns the port.
 //! It deliberately does not import an ark crate: process lifecycle is its only
 //! responsibility and Agent/provider/plugin decisions remain in `arkd`.
+//!
+//! The main window is created only after `arkd` answers `/health`: the page's
+//! first act is `GET /v1/threads`, and a window that loads before the runtime
+//! binds its listener turns the dev proxy's connection refusal into a bare
+//! `HTTP 500` error in the thread list (retry-only recovery). Gating the window
+//! on the same health probe the shell already trusts removes the race at its
+//! source instead of papering over it in the renderer.
 
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 const RUNTIME_PORT: u16 = 18_791;
 const RUNTIME_ADDRESS: &str = "127.0.0.1:18791";
+
+/// How often the readiness watcher re-probes `/health`.
+const READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// Fallback cap for the readiness wait. Debug builds reach here through
+/// `cargo run`, which may compile first, so the default stays generous; an
+/// exited child aborts the wait early, so a broken runtime never stalls the
+/// window for the full budget.
+const DEFAULT_READY_TIMEOUT_SECS: u64 = 120;
+const READY_TIMEOUT_ENV: &str = "ARK_DESKTOP_READY_TIMEOUT_SECS";
 
 /// The process started by this shell, if any.
 ///
@@ -30,14 +47,16 @@ pub struct ManagedRuntime(Mutex<Option<tauri_plugin_shell::process::CommandChild
 /// or killed. That prevents a desktop window from talking to an unrelated local
 /// service and preserves the single-writer invariant for its data directory.
 pub fn launch(app: &AppHandle) -> tauri::Result<()> {
-    if let Some(is_arkd) = probe_existing_listener() {
-        if is_arkd {
-            log::info!("reusing arkd already listening on {RUNTIME_ADDRESS}");
-            return Ok(());
+    match probe_existing_listener() {
+        // A verified arkd already owns the port: the page can load right away.
+        Some(true) => return create_main_window(app),
+        Some(false) => {
+            return Err(tauri::Error::Anyhow(anyhow::anyhow!(
+                "desktop runtime port {RUNTIME_ADDRESS} is occupied by a non-arkd service"
+            )))
         }
-        return Err(tauri::Error::Anyhow(anyhow::anyhow!(
-            "desktop runtime port {RUNTIME_ADDRESS} is occupied by a non-arkd service"
-        )));
+        // Port is free: spawn the runtime and gate the window on readiness.
+        None => {}
     }
 
     let command = runtime_command(app)?;
@@ -46,29 +65,106 @@ pub fn launch(app: &AppHandle) -> tauri::Result<()> {
         .map_err(|error| tauri::Error::Anyhow(anyhow::anyhow!(error)))?;
     app.state::<ManagedRuntime>().set(child);
 
-    tauri::async_runtime::spawn(async move {
-        while let Some(event) = events.recv().await {
-            match event {
-                CommandEvent::Stdout(line) => {
-                    log::info!("arkd: {}", String::from_utf8_lossy(&line))
+    // The runtime's exit is observable outside the logging task: the readiness
+    // watcher aborts as soon as the child dies instead of burning its whole
+    // timeout against a process that will never bind.
+    let exited = Arc::new(AtomicBool::new(false));
+
+    tauri::async_runtime::spawn({
+        let exited = exited.clone();
+        async move {
+            while let Some(event) = events.recv().await {
+                match event {
+                    CommandEvent::Stdout(line) => {
+                        log::info!("arkd: {}", String::from_utf8_lossy(&line))
+                    }
+                    CommandEvent::Stderr(line) => {
+                        log::warn!("arkd: {}", String::from_utf8_lossy(&line))
+                    }
+                    CommandEvent::Terminated(payload) => {
+                        log::warn!("arkd exited: {payload:?}");
+                        exited.store(true, Ordering::Relaxed);
+                    }
+                    _ => {}
                 }
-                CommandEvent::Stderr(line) => {
-                    log::warn!("arkd: {}", String::from_utf8_lossy(&line))
-                }
-                CommandEvent::Terminated(payload) => log::warn!("arkd exited: {payload:?}"),
-                _ => {}
             }
+            // The event stream closing also means the process is gone.
+            exited.store(true, Ordering::Relaxed);
         }
     });
 
+    tauri::async_runtime::spawn(readiness_watch(app.clone(), exited));
+    Ok(())
+}
+
+/// Wait for the runtime to answer `/health`, then create the main window.
+///
+/// A timeout or an exited child still opens the window so the renderer can
+/// show its own error state instead of the app appearing not to start.
+async fn readiness_watch(app: AppHandle, exited: Arc<AtomicBool>) {
+    let timeout = ready_timeout();
+    let ready = wait_until_ready(probe_existing_listener, exited, timeout).await;
+    if !ready {
+        log::warn!(
+            "arkd did not answer /health within {}s; opening the window anyway",
+            timeout.as_secs()
+        );
+    }
+    if let Err(error) = create_main_window(&app) {
+        log::error!("failed to create the main window: {error}");
+    }
+}
+
+/// Poll the health probe until it reports a verified arkd, the process exits,
+/// or the timeout elapses. Returns whether the runtime became ready.
+async fn wait_until_ready<F>(mut probe: F, exited: Arc<AtomicBool>, timeout: Duration) -> bool
+where
+    F: FnMut() -> Option<bool>,
+{
+    let deadline = Instant::now() + timeout;
+    loop {
+        if probe() == Some(true) {
+            return true;
+        }
+        if exited.load(Ordering::Relaxed) {
+            return false;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(READY_POLL_INTERVAL).await;
+    }
+}
+
+/// Readiness budget, overridable for faster dev loops.
+fn ready_timeout() -> Duration {
+    let secs = std::env::var(READY_TIMEOUT_ENV)
+        .ok()
+        .and_then(|raw| raw.parse().ok())
+        .unwrap_or(DEFAULT_READY_TIMEOUT_SECS);
+    Duration::from_secs(secs)
+}
+
+/// Create the app window with the settings that used to live in
+/// `tauri.conf.json` (`windows[0]`); the label must stay `"main"` so the
+/// `default` capability keeps applying.
+fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
+    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+        .title("ark")
+        .inner_size(1440.0, 920.0)
+        .min_inner_size(960.0, 640.0)
+        .resizable(true)
+        .build()?;
+    let _ = window.set_focus();
     Ok(())
 }
 
 /// `None` means the port is currently free; `Some(false)` is an unknown service.
 fn probe_existing_listener() -> Option<bool> {
-    let address = RUNTIME_ADDRESS
-        .parse()
-        .expect("the compiled-in runtime address is valid");
+    let address = match RUNTIME_ADDRESS.to_socket_addrs() {
+        Ok(mut addrs) => addrs.next()?,
+        Err(_) => return None,
+    };
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(100)).ok()?;
     stream
         .set_read_timeout(Some(Duration::from_millis(250)))
@@ -179,6 +275,7 @@ fn desktop_data_dir(app: &AppHandle) -> tauri::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
 
     #[test]
     fn runtime_arguments_isolate_the_desktop_port_and_data_directory() {
@@ -204,5 +301,71 @@ mod tests {
         assert!(!is_arkd_health_response(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n{\"ok\":true,\"status\":\"live\"}"
         ));
+    }
+
+    #[test]
+    fn readiness_wait_succeeds_as_soon_as_the_probe_reports_arkd() {
+        let probes = Arc::new(AtomicUsizeProbe::default());
+        let counter = probes.clone();
+        let ready = tauri::async_runtime::block_on(wait_until_ready(
+            move || {
+                counter.bump();
+                Some(true)
+            },
+            Arc::new(AtomicBool::new(false)),
+            Duration::from_secs(5),
+        ));
+        assert!(ready);
+        assert_eq!(probes.count(), 1);
+    }
+
+    #[test]
+    fn readiness_wait_gives_up_immediately_when_the_runtime_process_exits() {
+        let probes = Arc::new(AtomicUsizeProbe::default());
+        let counter = probes.clone();
+        let ready = tauri::async_runtime::block_on(wait_until_ready(
+            move || {
+                counter.bump();
+                None
+            },
+            Arc::new(AtomicBool::new(true)),
+            Duration::from_secs(600),
+        ));
+        assert!(!ready);
+        // Must not have burned the (long) timeout against a dead process.
+        assert_eq!(probes.count(), 1);
+    }
+
+    #[test]
+    fn readiness_wait_keeps_polling_until_the_timeout_elapses() {
+        let probes = Arc::new(AtomicUsizeProbe::default());
+        let counter = probes.clone();
+        let ready = tauri::async_runtime::block_on(wait_until_ready(
+            move || {
+                counter.bump();
+                None
+            },
+            Arc::new(AtomicBool::new(false)),
+            Duration::from_millis(600),
+        ));
+        assert!(!ready);
+        assert!(probes.count() >= 2, "the probe must be retried, not fired once");
+    }
+
+    /// Tiny shared counter so the injected probe can report how often it ran.
+    #[derive(Default)]
+    struct AtomicUsizeProbe(AtomicUsize);
+    impl AtomicUsizeProbe {
+        fn bump(&self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+        fn count(&self) -> usize {
+            self.0.load(Ordering::Relaxed)
+        }
+    }
+    impl Clone for AtomicUsizeProbe {
+        fn clone(&self) -> Self {
+            Self(AtomicUsize::new(self.0.load(Ordering::Relaxed)))
+        }
     }
 }

@@ -16,3 +16,5 @@ log = "0.4"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
+# The readiness watcher sleeps between `/health` polls on tauri's tokio runtime.
+tokio = { version = "1", default-features = false, features = ["time"] }

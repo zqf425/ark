@@ -14,17 +14,7 @@
     "frontendDist": "../../../web/dist"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "ark",
-        "width": 1440,
-        "height": 920,
-        "minWidth": 960,
-        "minHeight": 640,
-        "resizable": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:18791; img-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
     }
