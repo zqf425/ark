@@ -44,6 +44,15 @@ headless/远程构建不装配，避免在无人可见的机器上弹窗。macOS
 （arkd 主线程运行 tokio）改用 `osascript choose folder`；其余平台保持 `rfd`。选择结果只是用户选中的真实
 存在目录，不做 workspace 校验；保存仍走既有 validate/switch/PATCH 路径。
 
+### 会话级工作空间选择（2026-11-14 补充）
+
+输入框工作空间 pill 的选择语义对齐主流编码 agent（Cursor/Claude Code/Cline）：工作空间是**会话级设置**，
+选择即写入当前线程覆盖（`PATCH /v1/threads/{id}` 的 `runtime.workspace`），本线程下个回合生效（runner 每
+回合取 lease，覆盖优先于全局默认）。仅当**本会话**模型正在流式回复（`activeTurnId !== null`）时禁止修改；
+其他会话有回合在运行不阻塞该操作，也不产生全局 switch 的 409。「新增项目空间」经原生选择框后走
+`validate` + PATCH,不再调用 `POST /v1/workspace/switch`。全局默认工作空间切换（含进程级 busy 409 语义）
+保留在设置页与 Changes 面板,服务端行为不变。
+
 ## 当前实现（2026-11-03 更新）
 
 - `WorkspaceRoots` 持有 canonical root 与 generation；父 turn 在 runner 入口获取 lease，prompt 与每次

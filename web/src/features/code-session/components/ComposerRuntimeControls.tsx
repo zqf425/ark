@@ -18,7 +18,7 @@ import { describeError } from '../../../shared/api/error-describe'
 import type { SkillSummary, ThreadRuntimeSettings, WorkspaceView } from '../../../shared/contracts'
 import { compactThread, getThread, updateThread } from '../api/threads-api'
 import { pickWorkspaceFolder } from '../api/workspace-api'
-import { getWorkspaceView, switchWorkspace, validateWorkspace } from '../../settings/api/workspace-api'
+import { getWorkspaceView, validateWorkspace } from '../../settings/api/workspace-api'
 import { listThreadSkills } from '../api/skills-api'
 import { getRuntimeConfig } from '../../settings/api/settings-api'
 import { useProviders } from '../../settings/hooks/use-providers'
@@ -206,9 +206,12 @@ export function AutonomyPicker({ threadId }: { threadId: string | null }): JSX.E
 
 /**
  * One pill opens a list of the host's active + recent projects. Picking a row
- * switches the global workspace and pins the same path as this thread's
- * override; "add" opens the native folder chooser, validates the path through
- * the runtime, then performs the same switch. No path is typed by hand.
+ * pins the path as this thread's session-level override (`PATCH
+ * /v1/threads/{id}`), so the next turn of THIS thread resolves it (runner
+ * leases are per-turn); "add" opens the native folder chooser and validates
+ * the path through the runtime first. The host-global root is not touched:
+ * other sessions must stay free to run turns against the old default while
+ * this session re-points. No path is typed by hand.
  */
 export function WorkspacePicker({ threadId }: { threadId: string | null }): JSX.Element {
   const { t } = useI18n()
@@ -284,7 +287,11 @@ export function WorkspacePicker({ threadId }: { threadId: string | null }): JSX.
     messageKey: 'canvas.workspace.selected' | 'canvas.workspace.added'
   ): Promise<void> => {
     if (!threadId || !canSwitch) return
-    await switchWorkspace({ path })
+    // Session-level semantics (matching mainstream coding agents): the pick
+    // writes this thread's override and applies to this thread's next turn.
+    // Only the model currently streaming in THIS thread blocks the change —
+    // the global switch (with its process-wide busy 409) stays on the
+    // settings/changes panels and is deliberately not part of this flow.
     await updateThread(threadId, { runtime: { workspace: path } })
     const [nextView, nextRuntime] = await Promise.all([getWorkspaceView(), fetchRuntime(threadId)])
     setView(nextView)
