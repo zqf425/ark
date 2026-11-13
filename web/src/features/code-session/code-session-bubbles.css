@@ -94,6 +94,59 @@
   font-size: 12px;
 }
 
+/* ---------- checkpoint: collapsed compaction handoff ---------- */
+
+/* Summary mirrors `.ark-reasoning`: quiet, accent-ruled, clearly not an error.
+   The body is model-facing handoff prose shown verbatim, preformatted. */
+.ark-checkpoint {
+  border-left: 2px solid var(--ark-accent-soft);
+  padding-left: 12px;
+  color: var(--ark-text-dim);
+  max-width: 100%;
+}
+
+.ark-checkpoint__summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  list-style: none;
+}
+
+.ark-checkpoint__summary::-webkit-details-marker {
+  display: none;
+}
+
+.ark-checkpoint__summary::before {
+  content: '▸';
+  color: var(--ark-text-faint);
+  font-size: 10px;
+  transition: transform 120ms ease;
+}
+
+.ark-checkpoint[open] .ark-checkpoint__summary::before {
+  transform: rotate(90deg);
+}
+
+.ark-checkpoint__meta {
+  color: var(--ark-text-faint);
+  font-family: var(--ark-mono);
+  font-size: 11px;
+}
+
+.ark-checkpoint__body {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ark-text-faint);
+  font-size: 12px;
+  line-height: 1.6;
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--ark-mono);
+}
+
 /* ---------- reasoning: quiet, accent-ruled aside ---------- */
 
 .ark-reasoning {

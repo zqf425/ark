@@ -95,6 +95,8 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.usage.cacheTitle': ['会话累计提示缓存命中率（仅来自权威命中/未命中计数）', 'Cumulative prompt-cache hit rate (authoritative hit/miss counters only)'],
   'canvas.compaction.title': ['最近一次上下文压缩', 'Most recent context compaction'],
   'canvas.compaction.notice': ['已压缩：折叠 {removed} 条消息，检查点 {chars} 字符', 'Compacted: folded {removed} messages, checkpoint {chars} chars'],
+  'canvas.checkpoint.title': ['上下文已压缩', 'Context compacted'],
+  'canvas.checkpoint.folded': ['已折叠 {count} 条较早消息', '{count} earlier messages folded'],
 
   'canvas.relative.justNow': ['刚刚', 'just now'],
   'canvas.relative.minutes': ['{count} 分钟前', '{count}m ago'],

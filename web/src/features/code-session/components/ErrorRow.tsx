@@ -2,6 +2,7 @@ import { memo, useState } from 'react'
 import type { ThreadItem } from '../../../shared/contracts'
 import { formatClock } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
+import { CheckpointCard } from './CheckpointCard'
 import { childCompletionStatusKey } from '../child-completion-status'
 import type { ChildCompletionNotice } from '../state/types'
 
@@ -27,6 +28,10 @@ export const ErrorRow = memo(function ErrorRow({ item }: { item: ThreadItem }): 
 
 /** Neutral notice row (compaction, abort reason, notices from the loop). */
 export const NoticeRow = memo(function NoticeRow({ item }: { item: ThreadItem }): JSX.Element {
+  // A compaction checkpoint is system handoff prose, not a human-facing note:
+  // show it as a collapsed summary card instead of a wall of model-facing text
+  // that reads like a failure after a restart.
+  if (item.marker === 'context_checkpoint') return <CheckpointCard item={item} />
   return (
     <div className="ark-notice">
       <span className="ark-notice__text">{item.text ?? item.detail ?? ''}</span>
