@@ -11,12 +11,10 @@
  * what allows the canvas to memoize its projections.
  */
 import type { ItemId, ItemKind, RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot, TurnId, TurnState } from '../../../shared/contracts'
-import { translateNow } from '../../../shared/i18n/current'
 import {
   commitDraft,
   draftApprovals,
   draftChildCompletions,
-  draftErrors,
   draftItemOrder,
   draftItems,
   draftOf,
@@ -26,7 +24,7 @@ import {
   type ItemsDraft
 } from './items-draft'
 import { foldUsage } from './usage'
-import type { ChildCompletionNotice, CompactionNotice, ErrorLine, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
+import type { ChildCompletionNotice, CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
 
 export function emptyItemsState(): ItemsSnapshot {
   return {
@@ -35,7 +33,6 @@ export function emptyItemsState(): ItemsSnapshot {
     turnState: {},
     activeTurnId: null,
     lastSeq: 0,
-    errors: [],
     approvals: {},
     userInputs: {},
     childCompletions: {},
@@ -55,7 +52,6 @@ const DELTA_ITEM_KIND: Partial<Record<RuntimeEvent['kind'], ItemKind>> = {
   assistant_reasoning_delta: 'reasoning'
 }
 
-const MAX_ERROR_LINES = 50
 const MAX_CHILD_COMPLETIONS = 50
 
 /**
@@ -165,10 +161,6 @@ function setTurn(draft: ItemsDraft, turnId: TurnId, state: TurnState): void {
   if (terminal && draft.activeTurnId === turnId) draft.activeTurnId = null
 }
 
-function pushError(draft: ItemsDraft, line: ErrorLine): void {
-  draft.errors = [...draftErrors(draft), line].slice(-MAX_ERROR_LINES)
-}
-
 /** Keep UI-only completion cards bounded even if a stream is unusually long. */
 function recordChildCompletion(draft: ItemsDraft, notice: ChildCompletionNotice): void {
   if (currentChildCompletion(draft, notice.notification_id)) return
@@ -255,14 +247,11 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       return commitDraft(draft)
 
     case 'turn_failed':
+      // The failure reason renders inline at the interruption point: the
+      // server-side projector folds `turn_failed` into a durable `error`
+      // item of that turn, which arrives here as a regular item event.
       setTurn(draft, event.turn_id, 'failed')
       resetDeltaWindow(draft)
-      pushError(draft, {
-        seq: event.seq,
-        timestamp: event.timestamp,
-        code: 'internal_error',
-        message: event.message
-      })
       return commitDraft(draft)
 
     case 'thread_rewound': {
@@ -291,21 +280,10 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       return commitDraft(draft)
 
     case 'transient_retry':
-      pushError(draft, {
-        seq: event.seq,
-        timestamp: event.timestamp,
-        code: 'model_request_failed',
-        message: translateNow('canvas.retryAttempt', { attempt: event.attempt, message: event.message })
-      })
-      return commitDraft(draft)
-
     case 'error':
-      pushError(draft, {
-        seq: event.seq,
-        timestamp: event.timestamp,
-        code: event.code,
-        message: event.message
-      })
+      // Diagnostic events without a durable item: transient retries and
+      // stream-level diagnostics surface through logs/toasts, never as a
+      // footer pinned under the stream.
       return commitDraft(draft)
 
     case 'approval_requested': {

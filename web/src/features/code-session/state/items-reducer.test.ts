@@ -242,7 +242,6 @@ describe('items reducer reference stability', () => {
     expect(next.turnState).toBe(start.turnState)
     expect(next.approvals).toBe(start.approvals)
     expect(next.userInputs).toBe(start.userInputs)
-    expect(next.errors).toBe(start.errors)
     expect(next.childCompletions).toBe(start.childCompletions)
   })
 
@@ -474,5 +473,66 @@ describe('items reducer workbench revision', () => {
 
     expect(replayed).toBe(seeded)
     expect(replayed.usage).toBeNull()
+  })
+})
+
+/**
+ * A terminal failure renders inline at the interruption point: the server-side
+ * projector folds `turn_failed` into a durable `error` item of that turn, which
+ * reaches the reducer as a regular item event. The reducer itself only flips
+ * the turn state — no separate footer channel.
+ */
+describe('items reducer turn_failed', () => {
+  const THREAD_ID = '00000000-0000-0000-0000-000000000001'
+  const TURN_ID = '00000000-0000-0000-0000-000000000003'
+
+  it('只翻转回合状态，不再额外追加底部错误行', () => {
+    let state = emptyItemsState()
+    state = applyEvent(state, {
+      kind: 'turn_started',
+      seq: 1,
+      thread_id: THREAD_ID,
+      turn_id: TURN_ID,
+      timestamp: '2026-10-28T00:00:00Z',
+      auto_continuation: false,
+      attachment_ids: [],
+      attachment_outcomes: []
+    })
+    state = applyEvent(state, {
+      kind: 'turn_failed',
+      seq: 2,
+      thread_id: THREAD_ID,
+      turn_id: TURN_ID,
+      timestamp: '2026-10-28T00:00:01Z',
+      message: 'turn budget: max model rounds reached',
+      model_request_failed: false
+    })
+
+    expect(state.turnState[TURN_ID]).toBe('failed')
+    expect(state.activeTurnId).toBeNull()
+    expect(state.itemsById).toEqual({})
+    expect(state.itemOrder).toEqual([])
+  })
+
+  it('服务端投影的 error item 照常落到行投影，展示在中断处', () => {
+    const state = applyEvent(emptyItemsState(), {
+      kind: 'item_created',
+      seq: 1,
+      thread_id: THREAD_ID,
+      turn_id: TURN_ID,
+      timestamp: '2026-10-28T00:00:01Z',
+      item: {
+        item_id: '00000000-0000-0000-0000-000000000004',
+        turn_id: TURN_ID,
+        kind: 'error',
+        status: 'failed',
+        created_at: '2026-10-28T00:00:01Z',
+        text: 'turn budget: max model rounds reached'
+      }
+    })
+
+    expect(state.itemOrder).toEqual(['00000000-0000-0000-0000-000000000004'])
+    expect(state.itemsById['00000000-0000-0000-0000-000000000004']?.kind).toBe('error')
+    expect(state.itemsById['00000000-0000-0000-0000-000000000004']?.status).toBe('failed')
   })
 })

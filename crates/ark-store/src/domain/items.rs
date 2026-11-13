@@ -154,6 +154,13 @@ pub(crate) fn projected_item_id(event: &RuntimeEvent) -> Option<ItemId> {
             Some(keyed_item_id(&format!("user_input:{request_id}")))
         }
         RuntimeEvent::Error { seq, .. } => Some(keyed_item_id(&format!("error:{seq}"))),
+        // A terminal `turn_failed` is the interruption point the renderer must
+        // show inline: the projector folds it into one durable `error` item
+        // attributed to the failed turn, so the live stream and a replay after
+        // a restart render the same row at the same place.
+        RuntimeEvent::TurnFailed { turn_id, .. } => {
+            Some(keyed_item_id(&format!("turn_failed:{turn_id}")))
+        }
         // `CompactionCompleted` is a control event, not a render row. The
         // reactor already appended one `ItemCreated` checkpoint notice for the
         // same compaction; projecting it again produced a second, redundant
@@ -323,6 +330,12 @@ impl ItemProjector {
                 message,
                 ..
             } => self.apply_error(*seq, message, *timestamp),
+            RuntimeEvent::TurnFailed {
+                turn_id,
+                timestamp,
+                message,
+                ..
+            } => self.apply_turn_failed(*turn_id, message, *timestamp),
             _ => return None,
         };
         self.first.entry(item.item_id).or_insert(seq);
@@ -514,6 +527,18 @@ impl ItemProjector {
     fn apply_error(&mut self, seq: u64, message: &str, at: DateTime<Utc>) -> ThreadItem {
         let id = keyed_item_id(&format!("error:{seq}"));
         let turn = self.current_turn.unwrap_or_else(orphan_turn);
+        let mut item = build(id, turn, ItemKind::Error, at);
+        item.text = Some(message.to_string());
+        item.status = ItemStatus::Failed;
+        self.upsert(item)
+    }
+
+    /// Fold a terminal `turn_failed` into the durable `error` item of that
+    /// turn. The id is deterministic on the turn id, so a replay (possibly
+    /// after compaction or a restart) reproduces the same row the live stream
+    /// appended; a duplicate fold keeps the first snapshot untouched.
+    fn apply_turn_failed(&mut self, turn: TurnId, message: &str, at: DateTime<Utc>) -> ThreadItem {
+        let id = keyed_item_id(&format!("turn_failed:{turn}"));
         let mut item = build(id, turn, ItemKind::Error, at);
         item.text = Some(message.to_string());
         item.status = ItemStatus::Failed;
@@ -760,6 +785,64 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].turn_id, turn);
         assert_eq!(items[0].status, ItemStatus::Failed);
+    }
+
+    #[test]
+    fn turn_failed_folds_into_one_durable_error_item() {
+        // The terminal failure is the interruption point the renderer shows
+        // inline: exactly one `error` item per failed turn, attributed to that
+        // turn and replay-stable through the deterministic id.
+        let turn = turn();
+        let thread = ark_common::ThreadId::new();
+        let now = Utc::now();
+        let events = vec![
+            RuntimeEvent::TurnStarted {
+                seq: 1,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: now,
+                auto_continuation: false,
+                attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
+            },
+            RuntimeEvent::TurnFailed {
+                seq: 2,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: now,
+                message: "turn budget: max model rounds reached".into(),
+                model_request_failed: false,
+            },
+        ];
+        let items = project_items(&events);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, ItemKind::Error);
+        assert_eq!(items[0].turn_id, turn);
+        assert_eq!(items[0].status, ItemStatus::Failed);
+        assert_eq!(
+            items[0].text.as_deref(),
+            Some("turn budget: max model rounds reached")
+        );
+
+        // Replaying the same log (a restart rebuild) produces identical rows.
+        let replayed = project_items(&events);
+        assert_eq!(replayed, items);
+    }
+
+    #[test]
+    fn turn_aborted_projects_no_error_item() {
+        // An abort is a deliberate user action, not a failure: no error row.
+        let turn = turn();
+        let thread = ark_common::ThreadId::new();
+        let now = Utc::now();
+        let events = vec![RuntimeEvent::TurnAborted {
+            seq: 1,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: now,
+            reason: "user requested".into(),
+        }];
+        assert!(project_items(&events).is_empty());
     }
 
     #[test]

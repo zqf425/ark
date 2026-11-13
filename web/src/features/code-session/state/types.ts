@@ -1,5 +1,4 @@
 import type {
-  ArkErrorCode,
   LoadStatus,
   ChildCompletionNotice,
   ItemId,
@@ -14,14 +13,6 @@ import type {
 import type { StreamStatus } from '../api/events-api'
 
 export type { ChildCompletionNotice, LoadStatus } from '../../../shared/contracts'
-
-/** One runtime `error` event surfaced inline in the stream. */
-export type ErrorLine = {
-  seq: number
-  timestamp: string
-  code: ArkErrorCode | 'unknown'
-  message: string
-}
 
 /**
  * Per-thread usage projection, folded from the runtime's authoritative `usage`
@@ -88,7 +79,6 @@ export type ItemsSnapshot = {
   turnState: Record<TurnId, TurnState>
   activeTurnId: TurnId | null
   lastSeq: number
-  errors: ErrorLine[]
   approvals: Record<string, PendingApproval>
   userInputs: Record<string, PendingUserInput>
   childCompletions: Record<string, ChildCompletionNotice>

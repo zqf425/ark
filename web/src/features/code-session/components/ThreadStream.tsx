@@ -9,7 +9,6 @@ import {
   childCompletionNotices,
   groupByTurn,
   hasLiveItems,
-  recentErrors,
   splitInheritedPrefix,
   userInputCards,
   type ItemView,
@@ -119,7 +118,6 @@ export function ThreadStream({
   const activeTurnId = useCodeSessionStore((s) => s.activeTurnId)
   const approvalsById = useCodeSessionStore((s) => s.approvals)
   const userInputsById = useCodeSessionStore((s) => s.userInputs)
-  const errorLines = useCodeSessionStore((s) => s.errors)
   const completionsById = useCodeSessionStore((s) => s.childCompletions)
   const detailStatus = useCodeSessionStore((s) => s.detailStatus)
   const detailError = useCodeSessionStore((s) => s.detailError)
@@ -159,7 +157,6 @@ export function ThreadStream({
   )
   const approvals = useMemo(() => approvalCards({ approvals: approvalsById }), [approvalsById])
   const userInputs = useMemo(() => userInputCards({ userInputs: userInputsById }), [userInputsById])
-  const errors = useMemo(() => recentErrors(errorLines), [errorLines])
   const completions = useMemo(() => childCompletionNotices({ childCompletions: completionsById }), [completionsById])
   const live = useMemo(() => hasLiveItems(visibleItemView), [visibleItemView])
 
@@ -299,18 +296,6 @@ export function ThreadStream({
           {/* Live mirror of the newest streaming item: the process card above
               scrolls out of view, so "thinking vs stuck" is answered here. */}
           <LiveActivity />
-
-
-          {errors.length > 0 ? (
-            <div className="ark-stream__errors">
-              {errors.map((line) => (
-                <div className="ark-errorline" key={`${line.seq}-${line.timestamp}`}>
-                  <code className="ark-errorline__code">{line.code}</code>
-                  <span className="ark-errorline__message">{line.message}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
         </div>
       </div>
 

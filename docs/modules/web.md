@@ -78,6 +78,10 @@
   wire 契约、不与 Rust 双实现。动机：过程卡位于助手消息上方，画布自动吸底时它在视野外，纯思考阶段
   画布毫无变化，健康流会被误读为卡死；该行让用户能实时感知推理方向并及时 steer。回合结束后随
   `turnState` 离开 running 而消失，历史仍归过程卡。
+- 错误只在**中断处**展示：终态 `turn_failed` 由服务端投影为该回合的持久 `error` 条目
+  （见 [ark-store](ark-store.md)），以普通 item 行内联渲染在失败回合内，历史回放一致；渲染器不为
+  `turn_failed`/`error`/`transient_retry` 维护独立的"最近错误"页脚通道或常驻画布底部的错误块。
+  传输层与诊断类事件（`transient_retry` 等）不产生渲染行，只留事件日志。
 - 输入框「技能」面板消费线程级技能视图（`GET /v1/threads/{id}/skills`，合并 base/extra 并展示加载
   警告数，「重新扫描」调用 refresh 路由）；未选择线程时回落全局 `GET /v1/skills`。显式 `/id` 提及
   仍是唯一激活方式，不新增技能运行时字段。
