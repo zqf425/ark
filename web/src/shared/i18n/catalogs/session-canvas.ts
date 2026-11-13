@@ -25,6 +25,9 @@ export const SESSION_CANVAS_MESSAGES = {
 
   'canvas.process.title': ['执行过程', 'Work in progress'],
   'canvas.process.count': ['{count} 步', '{count} steps'],
+  'canvas.activity.thinking': ['思考中', 'Thinking'],
+  'canvas.activity.tool': ['运行 {tool}', 'Running {tool}'],
+  'canvas.activity.writing': ['正在生成', 'Generating'],
   'canvas.jumpRail.aria': ['回合导航', 'Turn navigation'],
   'canvas.jumpRail.turn': ['第 {index} 个回合', 'Turn {index}'],
 
