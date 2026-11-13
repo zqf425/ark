@@ -20,4 +20,6 @@ pub mod service;
 
 pub use config::{LogFormat, TracingConfig};
 pub use domain::{UsageRecorder, UsageTotals};
-pub use service::tracing_init::{init_tracing, try_init_tracing, TracingGuard};
+pub use service::tracing_init::{
+    init_tracing, try_init_tracing, try_init_tracing_with_file, TracingGuard,
+};

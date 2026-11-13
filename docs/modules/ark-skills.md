@@ -14,6 +14,9 @@
 Skill 是提示词和工具使用说明资产，不是第二个 agent 或任意代码执行通道。激活结果通过端口和契约
 提供给回合构建；路径扩展、长度和数量都受 `SkillsConfig` 约束。
 
+生产组合根把 `RuntimePaths.skills`（默认 `<root>/skills`）作为第一个全局扫描根，
+而不是在 crate 内重新推导 home；配置中的 `extra_dirs` 和工作区相对目录继续按既有顺序追加。
+
 技能发现有两个配置面（`config.json` 的 `skills` 段，Hot 类）：`enabled` 总开关（关闭时所有
 skills 视图为空）与 `extra_dirs` 额外扫描根（绝对路径或 `~` 前缀，最多 16 个；工作区相对目录不可
 配置，因为切换 workspace 会改变其含义）。组合根注入的是一个读取 live config snapshot 的

@@ -61,5 +61,5 @@ stdout,然后优雅停机退出。
   `assistant_text_delta` 流式写 stdout(逐块 flush),`turn_completed`/`turn_failed`/
   `turn_aborted` 决定退出码 0/1,启动失败为 2;终态后 `POST /v1/shutdown` 并等 drain。
 - 日志隔离:`TracingConfig::to_stderr()`(ark-obs 新增 writer 选项,`BoxMakeWriter` 实现),
-  `arkd run` 的日志全部走 stderr,stdout 只承载模型输出——已实测验证。
+  `arkd run` 的控制台日志全部走 stderr,stdout 只承载模型输出；tracing 同步追加到 `<root>/log/arkd.log`，不依赖 shell 重定向——已实测验证。
 - 冒烟:无 provider 配置下完成装配→回合→本地确定性模型回显→exit 0 全链路。

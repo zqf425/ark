@@ -128,6 +128,8 @@ pub struct AppState {
     pub started_at: DateTime<Utc>,
     pub version: String,
     pub data_dir: PathBuf,
+    /// Directory containing config.json. Defaults to data_dir for compatibility.
+    pub config_dir: PathBuf,
     /// Sub-agent surface (design §7.8). Absent in a build without delegation,
     /// which makes the `child-runs` routes answer a structured `unavailable`
     /// instead of panicking on an unwrap.
@@ -199,6 +201,7 @@ impl AppState {
             runner,
             started_at: Utc::now(),
             version: version.into(),
+            config_dir: data_dir.clone(),
             data_dir,
             subagents: SubagentServices::default(),
             auth_token: None,
@@ -210,6 +213,12 @@ impl AppState {
             shutdown: Arc::new(shutdown),
             turns_completed: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Override the directory used to persist config.json.
+    pub fn with_config_dir(mut self, config_dir: PathBuf) -> Self {
+        self.config_dir = config_dir;
+        self
     }
 
     /// Attach the hook bus (requirements/plugin-hook-bus.md).

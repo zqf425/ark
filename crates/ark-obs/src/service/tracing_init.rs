@@ -6,8 +6,12 @@
 
 use crate::config::{LogFormat, TracingConfig};
 use std::fmt;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write};
+use std::path::Path;
+use std::sync::{Arc, Mutex, PoisonError};
 use tracing::{Event, Subscriber};
-use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::fmt::format::Writer as FormatWriter;
 use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
@@ -22,18 +26,37 @@ pub struct TracingGuard {
 
 /// Install the global subscriber, returning an error when one already exists.
 pub fn try_init_tracing(config: &TracingConfig) -> Result<TracingGuard, String> {
-    use tracing_subscriber::fmt::writer::BoxMakeWriter;
+    install(config, console_writer(config.stderr()))
+}
 
+/// Install tracing to the configured console stream and an append-only file.
+pub fn try_init_tracing_with_file(
+    config: &TracingConfig,
+    path: impl AsRef<Path>,
+) -> Result<TracingGuard, String> {
+    if let Some(parent) = path.as_ref().parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path.as_ref())
+        .map_err(|error| error.to_string())?;
+    install(
+        config,
+        TeeMakeWriter {
+            stderr: config.stderr(),
+            file: Arc::new(Mutex::new(file)),
+        },
+    )
+}
+
+fn install<W>(config: &TracingConfig, writer: W) -> Result<TracingGuard, String>
+where
+    W: for<'writer> tracing_subscriber::fmt::MakeWriter<'writer> + Send + Sync + 'static,
+{
     let filter: EnvFilter = config.env_filter();
     let registry = tracing_subscriber::registry().with(filter);
-    // Stdout is the long-standing default; headless modes redirect to stderr
-    // so stdout can carry pure payload (requirements/headless-run.md).
-    let writer = if config.stderr() {
-        BoxMakeWriter::new(std::io::stderr)
-    } else {
-        BoxMakeWriter::new(std::io::stdout)
-    };
-
     match config.format() {
         LogFormat::Compact => registry
             .with(
@@ -54,8 +77,69 @@ pub fn try_init_tracing(config: &TracingConfig) -> Result<TracingGuard, String> 
             .try_init()
             .map_err(|err| err.to_string())?,
     }
-
     Ok(TracingGuard::default())
+}
+
+fn console_writer(stderr: bool) -> tracing_subscriber::fmt::writer::BoxMakeWriter {
+    use tracing_subscriber::fmt::writer::BoxMakeWriter;
+    if stderr {
+        BoxMakeWriter::new(io::stderr)
+    } else {
+        BoxMakeWriter::new(io::stdout)
+    }
+}
+
+#[derive(Clone)]
+struct TeeMakeWriter {
+    stderr: bool,
+    file: Arc<Mutex<File>>,
+}
+
+impl<'writer> tracing_subscriber::fmt::MakeWriter<'writer> for TeeMakeWriter {
+    type Writer = TeeWriter;
+
+    fn make_writer(&'writer self) -> Self::Writer {
+        TeeWriter {
+            stderr: self.stderr,
+            file: Arc::clone(&self.file),
+        }
+    }
+}
+
+struct TeeWriter {
+    stderr: bool,
+    file: Arc<Mutex<File>>,
+}
+
+impl Write for TeeWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let file_result = self
+            .file
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .write_all(bytes);
+        let console_result = if self.stderr {
+            io::stderr().write_all(bytes)
+        } else {
+            io::stdout().write_all(bytes)
+        };
+        file_result.and(console_result)?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        let file_result = self
+            .file
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .flush();
+        let console_result = if self.stderr {
+            io::stderr().flush()
+        } else {
+            io::stdout().flush()
+        };
+        file_result.and(console_result)
+    }
 }
 
 /// Install the global subscriber, tolerating an earlier installation.
@@ -92,7 +176,7 @@ where
     fn format_event(
         &self,
         _ctx: &FmtContext<'_, S, N>,
-        mut writer: Writer<'_>,
+        mut writer: FormatWriter<'_>,
         event: &Event<'_>,
     ) -> fmt::Result {
         let meta = event.metadata();
@@ -154,6 +238,31 @@ mod tests {
         }
         // The tolerant entry point never reports failure by panicking.
         let _ = init_tracing(&config);
+    }
+
+    #[test]
+    fn tee_writer_appends_without_truncating() {
+        let path = std::env::temp_dir().join(format!(
+            "ark-obs-append-{}-{}.log",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"before\n").expect("seed log");
+        let file = OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("open append-only log");
+        let mut writer = TeeWriter {
+            stderr: true,
+            file: Arc::new(Mutex::new(file)),
+        };
+        writer.write_all(b"after\n").expect("append log");
+        writer.flush().expect("flush log");
+        assert_eq!(std::fs::read(&path).expect("read log"), b"before\nafter\n");
+        std::fs::remove_file(path).expect("remove owned test log");
     }
 
     #[test]

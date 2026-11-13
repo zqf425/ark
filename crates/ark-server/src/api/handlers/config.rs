@@ -29,7 +29,7 @@ pub async fn apply(
         // reported but does not roll back the live config: the running process
         // is already on the new version and only durability is at risk.
         let snapshot = state.config.snapshot();
-        let path = ark_config::config_path(&state.data_dir);
+        let path = ark_config::config_path(&state.config_dir);
         if let Err(message) = ark_config::save(&path, &snapshot) {
             tracing::warn!(%message, "config applied in memory but not persisted");
         }

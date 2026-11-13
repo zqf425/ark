@@ -55,7 +55,7 @@ headless/远程构建不装配，避免在无人可见的机器上弹窗。macOS
 - `POST /v1/workspace/pick` 已接入：`FolderDialogService` 端口 + arkd `NativeFolderDialog` 适配器
   （macOS 走 `osascript choose folder`，取消与启动失败都折叠为 `path` 省略并记 warn）；web 输入框的工作空间
   pill 直接列出 active/recent 项目供选择，「新增项目空间」经原生选择框与 validate 后切到新项目，不再要求手填路径。
-- recent descriptors 以 canonical 路径 best-effort 原子写入 `<data-dir>/workspace-recent.json`，arkd 启动时
+- recent descriptors 以 canonical 路径 best-effort 原子写入 `<root>/workspace/workspace-recent.json`，arkd 启动时
   恢复；文件缺失或损坏时降级为空集合，已失效、非目录、重复及当前 active 条目会被忽略。写入失败只记录
   告警，不阻断 workspace switch。recent 仅是可重建的展示数据，不参与 workspace lease 或工具授权判断。
   web Changes 面板消费 active workspace、recent 与有界 Git diff，但不读取目录、Git 或未跟踪文件内容。

@@ -778,8 +778,10 @@ fn skills_config_source_reads_the_latest_snapshot() {
     // skills patch must be visible through it without rebuilding the runtime
     // (skills is a `Hot` reload class).
     let store = Arc::new(ConfigStore::new(RuntimeConfig::default()));
-    let source = skills_config_source(store.clone());
+    let global_skills = std::path::PathBuf::from("/tmp/global-skills");
+    let source = skills_config_source(store.clone(), global_skills.clone());
     assert!(source().enabled);
+    assert_eq!(source().roots[0], global_skills);
 
     let applied = store.apply(ark_contract::ConfigPatch {
         skills: Some(ark_contract::SkillsSettings {

@@ -91,7 +91,7 @@ checkpoint 的 `last_turn_id` 初始化 `current_turn`；有合法版本化 mark
 
 ## 定时任务存储
 
-`<data_dir>/schedules.json` 由 `ScheduleFileStore`（`service/schedule.rs`）持有：进程内 Mutex 串行读改写，每次重写都经 `store::write_json_atomic`（同目录临时文件 + fsync + rename）原子替换，因此崩溃后磁盘上只可能是完整的旧文档或完整的新文档。内存快照只在写成功后才推进，写失败不会让进程内的状态领先于磁盘。
+`<root>/tasks/schedules.json` 由 `ScheduleFileStore`（`service/schedule.rs`）持有：进程内 Mutex 串行读改写，每次重写都经 `store::write_json_atomic`（同目录临时文件 + fsync + rename）原子替换，因此崩溃后磁盘上只可能是完整的旧文档或完整的新文档。内存快照只在写成功后才推进，写失败不会让进程内的状态领先于磁盘。
 
 文件缺失按空任务表处理；**存在但不可读**同样折叠为空表，但会 `tracing::warn!` 记录路径——拒绝启动等于为一个十秒即可重建的设置拖垮整个 runtime，而静默丢失又会让用户的定时任务无故消失，告警是两者之间唯一可接受的位置。
 
@@ -99,7 +99,7 @@ checkpoint 的 `last_turn_id` 初始化 `current_turn`；有合法版本化 mark
 
 ## IM 渠道存储
 
-`<data_dir>/im.json` 由 `ImFileStore`（`service/im.rs`）持有，模式与 `ScheduleFileStore`
+`<root>/IM/im.json` 由 `ImFileStore`（`service/im.rs`）持有，模式与 `ScheduleFileStore`
 一致：Mutex 串行读改写 + `write_json_atomic` 原子替换 + 不可读折叠为空表并告警。文档形状
 为 `{ channels: [ImChannelRecord], bindings: [ImBinding] }`：渠道记录携带服务端入站游标
 （由编排层节流落盘，本层不节流），绑定随首条消息写入；渠道与绑定同文档是因为二者同域变更、
@@ -107,14 +107,14 @@ checkpoint 的 `last_turn_id` 初始化 `current_turn`；有合法版本化 mark
 
 ## 目录与恢复
 
-全局附件存储位于 `<data_dir>/attachments/<attachment-id>`，其不可变元数据表位于
-`<data_dir>/attachments.json`。二进制与 JSON 均先写同目录临时文件后 rename；元数据使用
+全局附件存储位于 `<root>/data/attachments/<attachment-id>`，其不可变元数据表位于
+`<root>/data/attachments.json`。二进制与 JSON 均先写同目录临时文件后 rename；元数据使用
 `ark_common::write_json_file`，故为 UTF-8 无 BOM。读取同时要求元数据和最终二进制文件存在，
 所以崩溃留下的临时文件或已删除条目不会被暴露。`AttachmentId` 是 UUID newtype，文件路径只由该
 服务端生成 ID 组成，绝不拼接客户端路径。
 
 崩溃残留的临时文件由启动清扫回收：`FileSessionStore::with_diagnostics` 在取得数据目录锁之后、
-装载索引之前，对整个 `<data_dir>` 递归执行 `sweep_temp_files`（`store/fs_util.rs`），删除修改时间
+装载索引之前，对整个 `<root>/data` 递归执行 `sweep_temp_files`（`store/fs_util.rs`），删除修改时间
 早于 5 分钟前的隐藏 `*.tmp` 文件（即原子写 `.{name}.{uuid}.tmp` 兄弟文件）。数据目录锁只排除本进程
 与其他 arkd 实例，排除不了 `--data-dir` 指向共享目录时其他程序正在写的隐藏 `*.tmp`，时效阈值就是
 为此保留的安全距离。可见名的 `*.tmp`（如 ark-config 的 `config.json.tmp`）不是本仓原子写产物，
@@ -187,7 +187,7 @@ autonomy/reasoning_effort，即 `ThreadRuntimeSettings` 的逐字段平铺；全
 
 ## 长期 memory
 
-当前实现使用 `<data_dir>/memory.json` 保存用户显式维护的长期偏好和事实。文件通过
+当前实现使用 `<root>/data/memory.json` 保存用户显式维护的长期偏好和事实。文件通过
 `ark_common::write_json_file` 原子替换，进程内 mutex 将读改写串行化，写失败不会提交内存中的变更。
 两条读取路径的损坏语义不同：启动时 `open()` 用 `read_json_file_opt`，缺失或损坏文件均以空集合恢复，
 不阻断 arkd 启动；每回合 prompt 注入路径用 `read_json_file`，损坏文件上报为错误，由调用方

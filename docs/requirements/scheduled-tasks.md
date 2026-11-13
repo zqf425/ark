@@ -16,7 +16,7 @@ manual/at/interval/weekly/monthly 五种节奏周期性向运行时发起一个�
 
 | smart-ark 概念 | 本需求取舍 |
 |---|---|
-| 任务存应用设置 JSON | 独立 `<data-dir>/schedules.json`(运行态高频更新,不进 config) |
+| 任务存应用设置 JSON | 独立 `<root>/tasks/schedules.json`(运行态高频更新,不进 config) |
 | 主进程 setInterval tick | arkd 进程内调度循环(ark-server service 层) |
 | 经 HTTP 自调用建线程+回合 | 进程内复用 start_turn 全部校验路径(同 continuation 先例) |
 | disableUserInput | 线程 runtime `autonomy=unattended` 覆盖(gate 永不等待无人) |
@@ -139,7 +139,7 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
 - `POST /v1/schedules/{id}/run` 在主开关关闭、任务已停用或任务仍在运行时返回 `Conflict`/409;主开关
   (`config.schedules.enabled`,`ReloadClass::Hot`)只影响触发,不影响 CRUD。
 - 路由 `/v1/schedules`(GET/POST)、`/v1/schedules/{id}`(PATCH/DELETE)、`/v1/schedules/{id}/run`(POST)。
-- 组合根 `apps/arkd/src/wiring/mod.rs` 用同一 `data_dir` 创建 `ScheduleFileStore`;调度循环的
+- 组合根 `apps/arkd/src/wiring/mod.rs` 用 `<root>/tasks` 创建 `ScheduleFileStore`;调度循环的
   `spawn` 在 `apps/arkd/src/main.rs`(`Wiring::schedules.spawn(...)`),仅随 `arkd serve` 启动——
   headless `run` 刻意不启动调度循环(一次性回合不触发到期任务);`Ctrl-C`/drain 这类只置标志位的
   关闭路径由 tick 顶部的 `is_shutting_down()` 收敛。

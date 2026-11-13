@@ -28,7 +28,7 @@
    Electron IPC/运行时分支带回核心。
 2. **`arkd` 保持进程隔离。** 外壳不链接或调用 ark crate，只使用固定参数启动本地进程；这样崩溃隔离、CLI
    可用性和组合根唯一性都不变。
-3. **桌面专属 loopback 与数据目录。** CLI/直接 Web 开发继续用 18790；桌面使用 18791，并传入应用数据目录。
+3. **桌面专属 loopback、共享默认根。** CLI/直接 Web 开发继续用 18790；桌面使用 18791。debug/release 都显式传入 `~/.arkd/data` 和 `~/.arkd/workspace`，不再使用 Tauri 应用数据目录、Documents 或仓库根。
    已有监听只有 `/health` 确认是 arkd 才复用；未知服务只报冲突、不杀进程、不猜测身份。这既避免旧 smart-ark
    的端口碰撞，也避免两个 arkd 并发写同一会话目录。
 4. **CORS 白名单而非通配符。** 仅允许 Tauri 自身的跨平台 origin，外部网页不能通过浏览器跨域读取本地 Agent

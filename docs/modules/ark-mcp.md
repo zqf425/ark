@@ -7,6 +7,8 @@
 
 ## 核心规则
 
+- 外部 server 配置由组合根以 `<root>/mcp` 构造 registry，持久化文件为
+  `<root>/mcp/mcp-servers.json`；该 crate 只把传入目录视为文件宿主，不自行推导全局根。
 - 工具名为 `<plugin_id>.<tool>`；重复注册失败，目录是能力自描述的单一来源。
 - 外部 server 成功连接后，其 `<server_id>.<tool>` adapter 由组合根发布到父工具 registry；配置 upsert/delete
   会重新发现并替换该组，重复名称以明确冲突返回，连接失败不阻断其他 server 或进程启动。

@@ -10,6 +10,15 @@
 
 入口命令：`serve`（常驻 HTTP/SSE 运行时）与 `run`（[headless 单回合](../requirements/headless-run.md)，
 含 `--review` [审查预设](../requirements/review-preset.md)）。
+
+## 持久化目录
+
+默认根为 `~/.arkd`，CLI 默认传入 `--data-dir ~/.arkd/data` 与
+`--workspace ~/.arkd/workspace`。组合根通过 `RuntimePaths` 创建 `data`、`config`、`log`、
+`skills`、`mcp`、`tasks`、`workspace` 和大小写严格的 `IM`，并按
+[持久化目录需求](../requirements/persistence-layout.md)装配各 store。启动不会搬迁或删除旧文件。
+显式 `--workspace` 只覆盖实际工具工作区；recent 元数据仍写入分类后的
+`workspace/workspace-recent.json`。
 `run` 复用同一 `wiring::build` 装配，但**必须经真实 HTTP/SSE 边界驱动自身**（进程内 reqwest 客户端），
 不得为 headless 另开一条绕过授权与事件语义的内部路径；其日志经 `TracingConfig::to_stderr`
 走 stderr，stdout 只承载模型输出。
@@ -78,7 +87,7 @@ threshold 收窄到可用输入空间（扣除用户明确设置的 max_tokens�
 在没有 parent/child active run 时完成；它不会重启 arkd、sidecar、端口或 data-dir。
 
 recent workspace descriptors 是可重建的展示数据，以 canonical 路径 best-effort 原子写入
-`<data-dir>/workspace-recent.json`。启动时缺失或损坏的文件按空集合处理，失效、非目录、重复及当前 active
+`<root>/workspace/workspace-recent.json`。启动时缺失或损坏的文件按空集合处理，失效、非目录、重复及当前 active
 条目会被忽略；写入失败只记录告警，不能阻断 arkd 启动或 workspace switch。recent 不参与 lease、路径
 containment 或任何工具授权判断。
 
@@ -91,7 +100,7 @@ UI catalog 由组合根创建唯一 `UiBus`：授予本构建实际具备的能�
 
 本地插件同样走这唯一的 `UiBus`。`plugin_host::assemble` 在 UI 段之后、`tools.replace_group("mcp", ...)`
 之前构造一组共享实例：一个 `HttpBus`（默认 `HttpPolicy`、`CredentialVault` 与容量受限的
-`InMemoryDiagnosticSink`）、一个独立的 `ark_mcp::McpBus` 和一个 `PluginHost`（根为 `<data-dir>/plugins`）。
+`InMemoryDiagnosticSink`）、一个独立的 `ark_mcp::McpBus` 和一个 `PluginHost`（根为 `<root>/data/plugins`）。
 装配只做构造与转发，不按 `plugin_id` 分支；装载策略、隔离与 fail-closed 撤权都在 `ark-plugin` 内部。
 `HostHandles.events` 恒为 `None`：平台句柄暴露原始事件 sink，交给插件就能向任意 thread 追加事件，
 本版不需要这个能力，所以它不存在而不是被隔离模型解释。
@@ -135,13 +144,13 @@ facts extracted` 与 `: truncated` 两个变体）。判定 gated 在 `Notice` k
 前缀，永远不算检查点；也不得改回裸前缀匹配，改渲染格式同样会让历史识别静默失效。
 
 用户长期 memory 也走动态尾部：`run_turn` 在 skills 目录之后、completion inbox 之前，每回合重新读取
-`<data-dir>/memory.json` 并追加**至多一条** `[user memory]` system 消息（按 `created_at` 升序，拼接后
+`<root>/data/memory.json` 并追加**至多一条** `[user memory]` system 消息（按 `created_at` 升序，拼接后
 按 UTF-8 字符数限 4096，超限整条丢弃最新条目并追加 truncated 尾注）。读取或解析失败只记 warn 并跳过注入，
 空 store 不注入，均不影响回合结果。
 
 ## 定时任务装配
 
-组合根以同一 `data_dir` 创建 `ark_store::ScheduleFileStore`,注入 `ark_ports::ScheduleStore`;
+组合根以 `<root>/tasks` 创建 `ark_store::ScheduleFileStore`,注入 `ark_ports::ScheduleStore`;
 任务表独立于 `config.json`:运行时每次完成都会重写它,高频变更放在 settings 文件里会与配置存储的
 版本机制相互干扰。`wiring/mod.rs` 因此:
 
@@ -152,7 +161,7 @@ facts extracted` 与 `: truncated` 两个变体）。判定 gated 在 `Notice` k
 4. 调度循环订阅 `shutdown_receiver()`,在 `Ctrl-C`/drain 只置标志位的路径上靠每轮 tick 顶部的
    `is_shutting_down()` 收敛。
 
-IM 渠道编排（`ark_server::ImService`）走同一模式：`wiring/mod.rs` 用同一 `data_dir` 创建
+IM 渠道编排（`ark_server::ImService`）走同一模式：`wiring/mod.rs` 用 `<root>/IM` 创建
 `ark_store::ImFileStore`，注入 `ark_ports::ImStore`；适配器的 `reqwest::Client` 由组合根经
 `ark_http::transport_client`（与模型流量同一 `HttpPolicy` 代理/TLS 设置）构造，长轮询渠道
 以 `client_timeout=None` 传参；`AppState::with_im` 挂到路由后，`serve` 在 `main.rs` 于

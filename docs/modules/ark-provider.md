@@ -7,8 +7,9 @@
 
 API key 在 upsert 路径是写入输入，读取分两个出口：列表/能力/诊断一律走 `ProviderView`，只给
 `has_api_key` 与掩码提示；`GET /v1/runtime/providers/{id}` 是编辑专用读取，返回完整
-`ProviderEntry`（含已存 api key），仅设置表单使用，使编辑已保存条目时密钥字段不为空。持久化与内存
-快照更新由同一个 store 串行完成，确保下一次 resolve 立即读取一致配置。
+`ProviderEntry`（含已存 api key），仅设置表单使用，使编辑已保存条目时密钥字段不为空。生产组合根以
+`<root>/config` 构造 store，实际文档为 `<root>/config/providers.json`；provider crate 只使用调用方传入的
+目录，不自行推导全局根。持久化与内存快照更新由同一个 store 串行完成，确保下一次 resolve 立即读取一致配置。
 
 默认条目是管理面的一部分：`upsert(entry, make_default)` 可在写入时设默认（禁用条目不可设默认）、
 `set_default` 要求目标存在且启用、删除默认条目即清空默认；`default_provider_id` 持久化在

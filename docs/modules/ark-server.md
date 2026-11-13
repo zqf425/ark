@@ -5,6 +5,10 @@
 `ark-server` 是 HTTP/SSE transport adapter：路由、鉴权、中间件、请求解包、SSE 编码和优雅停机。
 业务决策委派给注入的 agent、store、配置、provider、skill 与工作区服务；handler 不得直接写业务分支。
 
+`AppState::new` 默认让 `config_dir` 等于 `data_dir`，保持测试和其他调用方兼容；生产组合根通过
+`with_config_dir` 注入 `<root>/config`。运行时配置和子代理配置的保存 handler 都使用该字段，确保
+保存路径与 arkd 启动加载的 `<root>/config/config.json` 一致。
+
 ## SSE 与生命周期
 
 - `GET /v1/mcp-info` 是原子能力的自描述发现文档（[mcp-server-surface 需求](../requirements/mcp-server-surface.md)）：

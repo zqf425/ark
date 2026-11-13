@@ -17,5 +17,5 @@ untracked；不读取 untracked 文件内容。文件数为 200、总 patch 为 
 不重复整组差异；被字节上限截断时所有文件行的 `truncated` 均置位。
 
 active workspace 与 generation 由 `arkd` 的进程状态持有；recent descriptors 在进程内展示，并在启动时
-从 `data-dir` 下的可重建缓存恢复。recent 不属于本模块的 Git 检查职责，也不得作为路径 containment 或
+从 `<root>/workspace/workspace-recent.json` 可重建缓存恢复。recent 不属于本模块的 Git 检查职责，也不得作为路径 containment 或
 工具授权依据。

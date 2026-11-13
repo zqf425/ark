@@ -230,20 +230,19 @@ fn runtime_args(data_dir: &Path, workspace: &Path) -> [String; 7] {
 #[cfg(debug_assertions)]
 fn runtime_command(app: &AppHandle) -> tauri::Result<tauri_plugin_shell::process::Command> {
     let root = repository_root();
-    let data_dir = desktop_data_dir(app)?;
+    let (data_dir, workspace) = desktop_paths();
     Ok(app
         .shell()
         .command("cargo")
         .set_process_group(true)
         .current_dir(&root)
         .args(["run", "--package", "arkd", "--"])
-        .args(runtime_args(&data_dir, &root)))
+        .args(runtime_args(&data_dir, &workspace)))
 }
 
 #[cfg(not(debug_assertions))]
 fn runtime_command(app: &AppHandle) -> tauri::Result<tauri_plugin_shell::process::Command> {
-    let workspace = default_workspace(app)?;
-    let data_dir = desktop_data_dir(app)?;
+    let (data_dir, workspace) = desktop_paths();
     app.shell()
         .sidecar("arkd")
         .map(|command| {
@@ -263,13 +262,22 @@ fn repository_root() -> PathBuf {
         .to_path_buf()
 }
 
-#[cfg(not(debug_assertions))]
-fn default_workspace(app: &AppHandle) -> tauri::Result<PathBuf> {
-    app.path().document_dir()
+fn desktop_paths() -> (PathBuf, PathBuf) {
+    #[cfg(windows)]
+    let candidates = ["ARK_HOME", "USERPROFILE", "HOME"];
+    #[cfg(not(windows))]
+    let candidates = ["ARK_HOME", "HOME", "USERPROFILE"];
+    let home = candidates
+        .into_iter()
+        .find_map(|key| std::env::var_os(key).filter(|value| !value.is_empty()))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    desktop_paths_from(&home)
 }
 
-fn desktop_data_dir(app: &AppHandle) -> tauri::Result<PathBuf> {
-    app.path().app_data_dir().map(|path| path.join("runtime"))
+fn desktop_paths_from(home: &Path) -> (PathBuf, PathBuf) {
+    let root = home.join(".arkd");
+    (root.join("data"), root.join("workspace"))
 }
 
 #[cfg(test)]
@@ -290,6 +298,17 @@ mod tests {
                 "--workspace".to_string(),
                 "D:/work".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn debug_and_release_paths_share_the_arkd_home_layout() {
+        assert_eq!(
+            desktop_paths_from(Path::new("/home/user")),
+            (
+                PathBuf::from("/home/user/.arkd/data"),
+                PathBuf::from("/home/user/.arkd/workspace")
+            )
         );
     }
 
@@ -349,7 +368,10 @@ mod tests {
             Duration::from_millis(600),
         ));
         assert!(!ready);
-        assert!(probes.count() >= 2, "the probe must be retried, not fired once");
+        assert!(
+            probes.count() >= 2,
+            "the probe must be retried, not fired once"
+        );
     }
 
     /// Tiny shared counter so the injected probe can report how often it ran.

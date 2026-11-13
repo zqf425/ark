@@ -39,6 +39,7 @@ use crate::base::{
 use crate::cli::ServeArgs;
 use crate::load_skill::LoadSkillTool;
 use crate::model;
+use crate::paths::RuntimePaths;
 use crate::workspace::WorkspaceRoots;
 
 mod history;
@@ -84,22 +85,23 @@ pub struct Wiring {
     pub plugins: crate::plugin_host::PluginRuntime,
 }
 
-/// Load `data/config.json` for startup, keeping the three outcomes apart.
+/// Load `config/config.json` for startup, keeping the three outcomes apart.
 ///
 /// A missing file is a normal first run (defaults, no log line); an unreadable or
 /// unparseable file is an error the caller turns into a boot failure; a file that
 /// only partially matches the schema loads as before, but `load_or_default`
 /// names every defaulted or ignored key in a warning, so a GUI-shaped document
 /// can no longer downgrade `auto_continue`/`max_concurrency` silently.
-fn load_startup_config(data_dir: &std::path::Path) -> std::result::Result<RuntimeConfig, String> {
-    ark_config::load_or_default(&ark_config::config_path(data_dir))
+fn load_startup_config(config_dir: &std::path::Path) -> std::result::Result<RuntimeConfig, String> {
+    ark_config::load_or_default(&ark_config::config_path(config_dir))
 }
 
 /// Build the runtime for `args`.
 pub async fn build(args: &ServeArgs) -> Result<Wiring> {
-    std::fs::create_dir_all(&args.data_dir)?;
-    let config_path = ark_config::config_path(&args.data_dir);
-    let loaded = load_startup_config(&args.data_dir).map_err(|message| {
+    let paths = RuntimePaths::from_data_dir(&args.data_dir);
+    paths.ensure()?;
+    let config_path = ark_config::config_path(&paths.config);
+    let loaded = load_startup_config(&paths.config).map_err(|message| {
         ark_common::ArkError::validation(format!(
             "cannot load {}: {message}",
             config_path.display()
@@ -107,22 +109,22 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     })?;
     let runtime_config = RuntimeConfig {
         port: args.port,
-        data_dir: args.data_dir.clone(),
+        data_dir: paths.data.clone(),
         ..loaded
     };
     let config = Arc::new(ConfigStore::new(runtime_config));
 
     // Real store: the session directory is the system of record.
-    let store = Arc::new(FileSessionStore::open(StoreConfig::new(&args.data_dir))?);
+    let store = Arc::new(FileSessionStore::open(StoreConfig::new(&paths.data))?);
     let attachments: Arc<dyn ark_ports::AttachmentStore> = Arc::new(AttachmentStore::open(
-        &args.data_dir,
+        &paths.data,
         DEFAULT_MAX_ATTACHMENT_BYTES,
     )?);
     // Scheduled tasks live in their own document (`schedules.json`), not in the
     // config file: the runtime rewrites them on every run, and a settings file
     // that changes that often would fight the config store's versioning.
     let schedules = Arc::new(ark_server::SchedulerService::new(Arc::new(
-        ark_store::ScheduleFileStore::open(&args.data_dir)?,
+        ark_store::ScheduleFileStore::open(&paths.tasks)?,
     )));
     // IM channels live in their own document (`im.json`), same reasoning as
     // `schedules.json`. The transport client reuses the governed model/HTTP
@@ -138,7 +140,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
                 reqwest::Client::new()
             });
     let im = ark_server::ImService::new(
-        Arc::new(ark_store::ImFileStore::open(&args.data_dir)?),
+        Arc::new(ark_store::ImFileStore::open(&paths.im)?),
         im_client.clone(),
     );
     // WeChat QR login is an optional capability wired by the composition root;
@@ -162,15 +164,18 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     ));
     // A workspace root is leased once per turn. Switching is handled through
     // the workspace HTTP surface and never re-reads the Hot config mid-turn.
-    let roots = Arc::new(WorkspaceRoots::new(args.workspace.clone(), &args.data_dir)?);
+    let roots = Arc::new(WorkspaceRoots::new(
+        args.workspace.clone(),
+        &paths.workspace,
+    )?);
     let usage = Arc::new(UsageRecorder::new());
 
     // ---- platform services (design §7.5.4) ----
     //
-    // Built here and only here. Each store owns its own file under `data_dir`,
-    // and the HTTP layer sees them through the `ark-ports` traits below.
+    // Built here and only here. Each service receives its categorized runtime
+    // directory, and the HTTP layer sees it through the `ark-ports` traits below.
     let providers = Arc::new(ark_provider::ProviderStore::with_catalog_client(
-        args.data_dir.clone(),
+        paths.config.clone(),
         ark_llm::ModelCatalogClient::new(crate::model::governed_transport()),
     ));
     // Skills config is a `Hot` field: the runtime reads it through this source
@@ -179,12 +184,12 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     // switching workspaces goes through its own HTTP surface and leases a new
     // root per turn.
     let skills = Arc::new(ark_skills::SkillRuntime::new(
-        skills_config_source(config.clone()),
+        skills_config_source(config.clone(), paths.skills.clone()),
         roots.current(),
     ));
     let workspace = Arc::new(ark_workspace::WorkspaceInspector::new());
-    let mcp = Arc::new(ark_mcp::McpServerRegistry::new(args.data_dir.clone()));
-    let memory = Arc::new(ark_store::MemoryFileStore::open(&args.data_dir)?);
+    let mcp = Arc::new(ark_mcp::McpServerRegistry::new(paths.mcp.clone()));
+    let memory = Arc::new(ark_store::MemoryFileStore::open(&paths.data)?);
 
     // ---- UI catalog (design §7.5.3) ----
     //
@@ -218,7 +223,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     // handing it over would let a plugin append arbitrary events to any thread.
     // Nothing in this version needs it, so the field stays `None`.
     let plugin_mcp = Arc::new(ark_mcp::McpBus::default());
-    let plugins = crate::plugin_host::assemble(&args.data_dir, &ui_bus, Arc::clone(&plugin_mcp))?;
+    let plugins = crate::plugin_host::assemble(&paths.data, &ui_bus, Arc::clone(&plugin_mcp))?;
 
     // The runtime's own `web_fetch` tool shares the plugins' governed egress
     // under its `ark.builtin.web` identity. The unrestricted allowlist is only
@@ -346,7 +351,9 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     ));
     // The provision enable flow registers its declared external MCP server
     // through the same adapter the GUI edits (requirements/plugin-provisioning.md).
-    plugins.host().attach_mcp_servers(Arc::clone(&mcp_adapter) as Arc<dyn ark_ports::McpServerService>);
+    plugins
+        .host()
+        .attach_mcp_servers(Arc::clone(&mcp_adapter) as Arc<dyn ark_ports::McpServerService>);
 
     let base = BaseServices::new()
         .with_providers(Arc::new(ProviderAdapter::new(Arc::clone(&providers))))
@@ -367,9 +374,10 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         Arc::clone(&config),
         Arc::clone(&usage),
         runner,
-        args.data_dir.clone(),
+        paths.data.clone(),
         env!("CARGO_PKG_VERSION"),
     )
+    .with_config_dir(paths.config.clone())
     .with_attachments(attachments)
     .with_base_services(base)
     .with_subagents(
@@ -445,10 +453,13 @@ pub(crate) fn autonomy_from_override_or_default(
 ///
 /// Extracted from `build` so a test can assert that a saved skills patch is
 /// visible through the same closure the composition root injects.
-fn skills_config_source(config: Arc<ConfigStore>) -> ark_skills::ConfigSource {
+fn skills_config_source(
+    config: Arc<ConfigStore>,
+    global_skills: std::path::PathBuf,
+) -> ark_skills::ConfigSource {
     Arc::new(move || {
         let settings = config.snapshot().skills.clone();
-        let mut skill_roots = ark_skills::SkillsConfig::default().roots;
+        let mut skill_roots = vec![global_skills.clone()];
         skill_roots.extend(settings.extra_dirs.iter().map(std::path::PathBuf::from));
         ark_skills::SkillsConfig {
             enabled: settings.enabled,

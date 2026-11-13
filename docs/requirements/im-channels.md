@@ -27,7 +27,7 @@ IM 渠道(凭证+策略),对应平台上的私聊/群聊消息自动映射到 ar
 | 飞书 OAuth 设备码注册 app | v1 用户在渠道表单手工填 appId/appSecret;设备码流为非目标 |
 | 微信经 `@tencent-weixin/openclaw-weixin` npm 插件 | 原生实现 iLink bot 协议(长轮询+发送+二维码登录),npm 包仅作协议参照、不作运行时依赖;媒体 CDN 上传下载为非目标 |
 | Telegram `net.fetch` 长轮询 | 原生 `getUpdates` 长轮询(零新增依赖,reqwest 已在 workspace) |
-| 渠道/会话绑定存应用设置 JSON | 独立 `<data-dir>/im.json`(与渠道配置同域、需原子级联删除,不进 config 版本机制) |
+| 渠道/会话绑定存应用设置 JSON | 独立 `<root>/IM/im.json`(与渠道配置同域、需原子级联删除,不进 config 版本机制) |
 
 ## 范围
 
@@ -107,7 +107,7 @@ GET 不回传,客户端不可写。
   容量校验 `ensure_channel_capacity` 居 `ark-im`(同 `ark-schedule::ensure_capacity`
   先例),超限拒绝创建(`validation_error`)。微信登录自动建渠道路径同样经该校验,
   超限时登录失败并返回结构化错误,不创建第 21 个渠道。
-- 凭证沿用 provider `api_key` 的 v1 简化:明文落盘 `<data-dir>/im.json`;读接口一律换
+- 凭证沿用 provider `api_key` 的 v1 简化:明文落盘 `<root>/IM/im.json`;读接口一律换
   `ImCredentialsView`(web 只写不回读)。迁 OS keyring 是全局后续事项,不在本需求。
 - **安全默认**:渠道 `autonomy` 缺省 `unattended` 意味着 IM 触发的回合在本机无人值守执行
   工具;因此白名单默认拒绝(空 = 不放行新会话)与总开关默认关闭都是刻意的安全默认值,

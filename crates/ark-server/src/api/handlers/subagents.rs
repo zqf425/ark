@@ -25,7 +25,7 @@ pub async fn configure(
     });
     if matches!(result, ark_contract::ApplyResult::Applied { .. }) {
         let snapshot = state.config.snapshot();
-        let path = ark_config::config_path(&state.data_dir);
+        let path = ark_config::config_path(&state.config_dir);
         if let Err(message) = ark_config::save(&path, &snapshot) {
             tracing::warn!(%message, "subagent config applied in memory but not persisted");
         }

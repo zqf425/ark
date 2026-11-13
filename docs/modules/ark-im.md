@@ -159,6 +159,9 @@ iLink bot 协议(`ilink/bot/getupdates` 长轮询 35s + `ilink/bot/sendmessage`,
 
 ## 存储
 
+生产组合根把 `<root>/IM`（目录名大小写严格）传给 `ImFileStore`，因此文档位于
+`<root>/IM/im.json`。本 crate 与存储实现只消费注入的端口或目录，不自行推导全局根。
+
 `im.json`(`{ channels: [ImChannelRecord], bindings: [ImBinding] }`;前者居 `ark-ports`
 并携带游标,后者居 `ark-contract`;`ark-store` 同时依赖两者)经 `ark_ports::ImStore` 读写,实现
 `ark-store::ImFileStore`:Mutex 串行 + tmp+rename 原子写 + 损坏恢复,同

@@ -16,6 +16,7 @@ mod hooks;
 mod load_skill;
 mod memory_seed;
 mod model;
+mod paths;
 mod plugin_host;
 mod wiring;
 mod workspace;
@@ -41,8 +42,10 @@ async fn main() -> ExitCode {
         }
         Ok(Command::Serve(args)) => serve(args).await,
         Ok(Command::Run(args)) => {
-            let _ =
-                ark_obs::try_init_tracing(&TracingConfig::from_env().with_ansi(false).to_stderr());
+            if let Err(message) = init_runtime_tracing(&args.data_dir, true) {
+                eprintln!("arkd: cannot initialize logging: {message}");
+                return ExitCode::FAILURE;
+            }
             headless::run(args).await
         }
         Err(message) => {
@@ -55,7 +58,10 @@ async fn main() -> ExitCode {
 
 /// Run the HTTP/SSE runtime until shutdown.
 async fn serve(args: ServeArgs) -> ExitCode {
-    let _ = ark_obs::try_init_tracing(&TracingConfig::from_env().with_ansi(false));
+    if let Err(message) = init_runtime_tracing(&args.data_dir, false) {
+        eprintln!("arkd: cannot initialize logging: {message}");
+        return ExitCode::FAILURE;
+    }
     let wiring = match wiring::build(&args).await {
         Ok(wiring) => wiring,
         Err(err) => {
@@ -106,4 +112,15 @@ async fn serve(args: ServeArgs) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn init_runtime_tracing(data_dir: &std::path::Path, stderr: bool) -> Result<(), String> {
+    let paths = paths::RuntimePaths::from_data_dir(data_dir);
+    paths.ensure().map_err(|error| error.to_string())?;
+    let config = if stderr {
+        TracingConfig::from_env().with_ansi(false).to_stderr()
+    } else {
+        TracingConfig::from_env().with_ansi(false)
+    };
+    ark_obs::try_init_tracing_with_file(&config, paths.log_file()).map(|_| ())
 }

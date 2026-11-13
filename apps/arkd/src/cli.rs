@@ -93,13 +93,13 @@ pub struct ServeArgs {
 }
 
 impl ServeArgs {
-    /// Defaults: port 18790, data in `~/.arkd/data`, workspace = cwd.
+    /// Defaults: port 18790, data in `~/.arkd/data`, workspace in `~/.arkd/workspace`.
     pub fn defaults() -> Self {
         Self {
             port: DEFAULT_PORT,
             data_dir: default_data_dir(),
             auth_token: None,
-            workspace: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            workspace: default_workspace(),
         }
     }
 }
@@ -109,11 +109,25 @@ impl ServeArgs {
 /// The app owns its own home root (`.arkd`) instead of reusing smart-ark's
 /// `.ark`, so the two runtimes never write into the same data directory.
 pub fn default_data_dir() -> PathBuf {
-    home_dir().join(".arkd").join("data")
+    arkd_home().join("data")
+}
+
+/// `~/.arkd/workspace`, used as the actual workspace unless overridden.
+pub fn default_workspace() -> PathBuf {
+    arkd_home().join("workspace")
+}
+
+/// Root shared by all default runtime categories.
+pub fn arkd_home() -> PathBuf {
+    home_dir().join(".arkd")
 }
 
 fn home_dir() -> PathBuf {
-    for key in ["ARK_HOME", "USERPROFILE", "HOME"] {
+    #[cfg(windows)]
+    let candidates = ["ARK_HOME", "USERPROFILE", "HOME"];
+    #[cfg(not(windows))]
+    let candidates = ["ARK_HOME", "HOME", "USERPROFILE"];
+    for key in candidates {
         if let Ok(value) = std::env::var(key) {
             if !value.trim().is_empty() {
                 return PathBuf::from(value);
@@ -155,7 +169,7 @@ fn parse_run(args: Vec<String>) -> Result<Command, String> {
         port: 0,
         data_dir: default_data_dir(),
         auth_token: None,
-        workspace: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        workspace: default_workspace(),
     };
     let mut positional: Vec<String> = Vec::new();
     let mut iter = args.into_iter();
@@ -252,7 +266,7 @@ USAGE:
 DEFAULTS:
     --port       18790 (run: probe a free ephemeral port)
     --data-dir   ~/.arkd/data
-    --workspace  current directory
+    --workspace  ~/.arkd/workspace
 ";
 
 #[cfg(test)]
@@ -275,12 +289,30 @@ mod tests {
     }
 
     #[test]
+    fn default_workspace_stays_inside_the_arkd_home_root() {
+        assert_eq!(
+            default_workspace(),
+            home_dir().join(".arkd").join("workspace")
+        );
+    }
+
+    #[test]
     fn flags_are_parsed() {
-        let command = parse(["serve", "--port", "19001", "--data-dir", "D:/tmp/ark"]).unwrap();
+        let command = parse([
+            "serve",
+            "--port",
+            "19001",
+            "--data-dir",
+            "D:/tmp/ark",
+            "--workspace",
+            "D:/tmp/work",
+        ])
+        .unwrap();
         match command {
             Command::Serve(args) => {
                 assert_eq!(args.port, 19001);
                 assert_eq!(args.data_dir, PathBuf::from("D:/tmp/ark"));
+                assert_eq!(args.workspace, PathBuf::from("D:/tmp/work"));
             }
             other => panic!("expected serve, got {other:?}"),
         }

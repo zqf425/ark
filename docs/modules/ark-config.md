@@ -5,6 +5,10 @@
 `ark-config` 负责加载、校验、持久化和原子替换运行时配置快照。它不负责让某个具体组件生效；
 订阅者在组合根按确定顺序消费已校验的变更。
 
+生产组合根从 `<root>/config/config.json` 加载，并把相同的 `config_dir` 注入 `AppState`；
+HTTP 配置与子代理配置保存都回写该路径。`AppState::new` 默认仍令 `config_dir == data_dir`，
+以保持测试和非 arkd 调用方兼容。Provider 表同属配置，位于 `<root>/config/providers.json`。
+
 ## 热更新模型
 
 每个字段有 `ReloadClass`：
