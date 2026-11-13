@@ -12,9 +12,11 @@
  * button becomes a steering action (追加) and a second action queues the draft
  * locally; queued drafts flush automatically when the turn ends, in order.
  * Message state is local: the runtime owns conversation state, and the user's
- * own message returns as a `ThreadItem`.
+ * own message returns as a `ThreadItem`. The unsent draft itself lives in the
+ * session store keyed by thread id, so switching threads (which remounts this
+ * component) keeps each thread's draft instead of dropping it.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Button } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import { translateNow } from '../../../shared/i18n/current'
@@ -67,8 +69,14 @@ function StopGlyph(): JSX.Element {
 
 export function Composer({ threadId }: { threadId: string | null }): JSX.Element {
   const { t } = useI18n()
+  // The unsent draft lives in the store keyed by thread, so switching sessions
+  // (which remounts this component) restores each thread's own draft instead
+  // of dropping it. `draft` below is the boolean send-in-flight flag.
   const draft = useCodeSessionStore((s) => s.sending)
   const set = useCodeSessionStore((s) => s.setSending)
+  const draftText = useCodeSessionStore((s) => (threadId ? (s.drafts[threadId] ?? '') : ''))
+  const setDraft = useCodeSessionStore((s) => s.setDraft)
+  const clearDraft = useCodeSessionStore((s) => s.clearDraft)
   const streamStatus = useCodeSessionStore((s) => s.streamStatus)
   const commandError = useCodeSessionStore((s) => s.commandError)
   const setCommandError = useCodeSessionStore((s) => s.setCommandError)
@@ -108,6 +116,22 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const sendDisabled = !canSendToThread(threadId, draft, streamStatus)
   const live = canInterrupt
 
+  // Store-backed textarea: writes keep the per-thread draft in sync, and the
+  // height follows the stored content so a restored long draft is not clamped
+  // to one row.
+  const resize = (node: HTMLTextAreaElement): void => {
+    node.style.height = 'auto'
+    node.style.height = `${Math.min(node.scrollHeight, MAX_ROWS * 22)}px`
+  }
+
+  // A restored multi-line draft (thread switch remount) must size its rows on
+  // mount; resize() reads scrollHeight, so this runs after the DOM settles.
+  // Typing already resizes through onChange, so only the (re)mount matters.
+  useLayoutEffect(() => {
+    const node = inputRef.current
+    if (node && draftText) resize(node)
+  }, [threadId])
+
   // A live→idle transition is the queue's drain signal. One message per drain:
   // the turn this triggers ends later and drains the next one the same way.
   const wasLive = useRef(false)
@@ -128,17 +152,12 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   }, [live, queued, send])
 
   const resetInput = (): void => {
-    const node = inputRef.current
-    if (!node) return
-    node.value = ''
-    node.style.height = 'auto'
+    if (threadId) clearDraft(threadId)
   }
 
   const submit = async (): Promise<void> => {
-    const node = inputRef.current
-    if (!node) return
     if (!canSendToThread(threadId, draft, streamStatus)) return
-    const text = node.value
+    const text = draftText
     if (!text.trim()) return
     const ids = attachments.map((picked) => picked.id)
     // The runtime rejects turn starts that carry unassociated attachment ids,
@@ -153,7 +172,9 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     }
     const ok = live ? await steer(text) : await send(text, ids)
     if (ok) {
-      resetInput()
+      // Clear only the text that was actually sent; anything typed during the
+      // request stays in the draft and a failure keeps everything.
+      if (threadId && useCodeSessionStore.getState().drafts[threadId] === text) clearDraft(threadId)
       if (!live) setAttachments([])
       setCommandError(null)
       set(false)
@@ -161,9 +182,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   }
 
   const queueDraft = (): void => {
-    const node = inputRef.current
-    if (!node) return
-    const text = node.value.trim()
+    const text = draftText.trim()
     if (!text) return
     setQueued((current) => [...current, text])
     resetInput()
@@ -231,10 +250,9 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   }
 
   const mentionSkill = (id: string): void => {
-    const node = inputRef.current
-    if (!node) return
-    node.value = `${node.value ? `${node.value.trimEnd()} ` : ''}/${id} `
-    node.focus()
+    const next = draftText ? `${draftText.trimEnd()} /${id} ` : `/${id} `
+    if (threadId) setDraft(threadId, next)
+    inputRef.current?.focus()
     setSkillsOpen(false)
   }
 
@@ -300,13 +318,14 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
           ref={inputRef}
           className="ark-composer__input"
           rows={1}
+          value={draftText}
           placeholder={placeholder}
           aria-label={live ? t('canvas.composer.steerAria') : t('canvas.composer.sendAria')}
           disabled={inputDisabled}
           onChange={(event) => {
             const node = event.currentTarget
-            node.style.height = 'auto'
-            node.style.height = `${Math.min(node.scrollHeight, MAX_ROWS * 22)}px`
+            resize(node)
+            if (threadId) setDraft(threadId, node.value)
           }}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {

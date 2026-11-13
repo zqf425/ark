@@ -148,6 +148,11 @@
   类型）。`/v1/runtime/tuning` 与 `/v1/runtime/model-providers` 是运行时的 501 占位路由，不是缺口。
 - 输入框在活跃回合提供两种非中断动作：「追加」（steer，立即注入下一轮）与「排队」（本地暂存为
   chips，回合结束的 live→idle 转变触发按顺序自动发送）；排队消息可逐条移除，纯本地状态不进 wire。
+- 未发送草稿按线程保存在 store（`runtime-slice` 的 `drafts: Record<ThreadId, string>`，`setDraft`/
+  `clearDraft`）：Composer 因 `key={threadId}` 在切换会话时重挂载，textarea 不持草稿，挂载时从
+  store 恢复本线程草稿，输入即写回（受控 textarea）。发送成功仅清除与已发送文本一致的草稿条目，
+  发送失败或被闸门拦截（`sending`、SSE 非 `open`）时草稿原样保留；排队动作把文本移入组件本地
+  队列并清掉对应 store 草稿。草稿只存内存、不进 wire、不持久化到磁盘，刷新页面即清空。
 - 附件经 `POST /v1/attachments`（Base64 JSON）上传后以 id 列表随 `TurnRequest.attachment_ids` 提交；
   上传失败走命令错误提示，已传 id 可在发送前移除（服务端无删除路由，孤儿附件由运行时清理策略负责）。
 - 消息画布用 `ThreadItem.attachments`（serde default，可为空）渲染用户消息下的附件 chips：
