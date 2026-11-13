@@ -82,8 +82,11 @@ per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启
 模型与目录流量的 `reqwest::Client` 由组合根经
 `ark_http::transport_client`（同一 `HttpPolicy` 的代理/TLS 设置；SSE 流式响应不设 client 级总超时）
 注入 `HttpModelClient` 与 `ModelCatalogClient`，组合根不得为模型路径另建裸 client。
-模型目录明确提供 context window 时，组合根将全局 compaction
-threshold 收窄到可用输入空间（扣除用户明确设置的 max_tokens）；已运行回合继续使用创建时快照。
+
+回合的 compaction threshold 完全由模型上下文窗口推导，不再是可调配置：`wiring::limits_for_turn`
+按 `ark_llm::COMPACTION_TRIGGER_RATIO`（80%，与渲染层上下文环的警示水位一致）乘以窗口并预留条目
+`max_tokens`，未声明窗口时回退到保守固定值（`model::FALLBACK_CONTEXT_LIMIT_TOKENS`）。已运行回合
+继续使用创建时快照；窗口未声明的模型不禁用压缩，而是落回固定预算，防止 prompt 无界增长。
 
 会话标题自动生成经 `TitleModelAdapter`（`base.rs`）注入 `BaseServices::title_model`：它复用
 `resolve(None)` 的存活 provider 与 `select_from_config` 的同一计量 client，构造无工具、低温度、

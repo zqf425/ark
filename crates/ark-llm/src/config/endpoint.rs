@@ -8,6 +8,14 @@ use ark_common::{ArkError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Fraction of the model's context window at which compaction triggers.
+///
+/// The threshold is derived, not configured: a session may fill up to this
+/// share of the declared window before the prefix folds. 80% keeps headroom
+/// for the next user message and the reply inside the remaining 20% — the
+/// same warning level the renderer's context meter shows.
+pub const COMPACTION_TRIGGER_RATIO: f64 = 0.8;
+
 /// The three supported wire families.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -111,6 +119,20 @@ impl ProviderConfig {
         }
     }
 
+    /// Compaction threshold derived from this provider's context window.
+    ///
+    /// One arithmetic rule for every consumer (turn limits, provider list
+    /// view): compaction triggers at [`COMPACTION_TRIGGER_RATIO`] of the
+    /// window, reserving the user-configured `max_tokens` for the reply.
+    /// `None` when the window is undeclared — a guessed denominator would
+    /// silently compact against a limit the model never advertised.
+    pub fn compaction_threshold(&self) -> Option<u64> {
+        let window = self.context_window_tokens?;
+        let output_reserve = self.max_tokens.map(u64::from).unwrap_or(0);
+        let usable = window.saturating_sub(output_reserve).max(1);
+        Some((usable as f64 * COMPACTION_TRIGGER_RATIO) as u64)
+    }
+
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
         self
@@ -164,6 +186,28 @@ impl ProviderConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compaction_threshold_is_80_percent_with_output_reserved() {
+        let mut config = ProviderConfig::new("p", "m");
+        assert!(
+            config.compaction_threshold().is_none(),
+            "no window, no meter"
+        );
+        config.context_window_tokens = Some(500_000);
+        assert_eq!(config.compaction_threshold(), Some(400_000));
+        config.max_tokens = Some(32_000);
+        // (500_000 - 32_000) * 0.8 = 374_400.
+        assert_eq!(config.compaction_threshold(), Some(374_400));
+        // A reserve at or above the window still yields a positive threshold.
+        config.max_tokens = Some(500_000);
+        assert_eq!(config.compaction_threshold(), Some(0));
+    }
+
+    #[test]
+    fn compaction_trigger_ratio_is_the_ui_warning_level() {
+        assert!((COMPACTION_TRIGGER_RATIO - 0.8).abs() < f64::EPSILON);
+    }
 
     #[test]
     fn blank_base_url_falls_back_to_the_provider_default() {

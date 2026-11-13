@@ -28,8 +28,6 @@ pub struct TuningConfig {
     pub max_tool_calls: u32,
     /// A call whose signature repeats this often is suppressed.
     pub max_identical_calls: u32,
-    /// Prompt estimate that triggers compaction.
-    pub context_limit_tokens: u64,
     /// Messages kept verbatim when compacting.
     pub keep_recent_messages: usize,
     /// Model-delta channel capacity per round.
@@ -51,7 +49,6 @@ impl Default for TuningConfig {
             max_tokens: 1_000_000,
             max_tool_calls: 200,
             max_identical_calls: 3,
-            context_limit_tokens: 96_000,
             keep_recent_messages: 12,
             chunk_buffer: 64,
             sse_heartbeat_secs: 15,
@@ -75,7 +72,6 @@ impl TuningConfig {
         self.max_tokens = self.max_tokens.clamp(0, 100_000_000);
         self.max_tool_calls = self.max_tool_calls.clamp(1, 5_000);
         self.max_identical_calls = self.max_identical_calls.clamp(1, 100);
-        self.context_limit_tokens = self.context_limit_tokens.clamp(1_000, 10_000_000);
         self.keep_recent_messages = self.keep_recent_messages.clamp(1, 10_000);
         self.chunk_buffer = self.chunk_buffer.clamp(1, 4_096);
         self.sse_heartbeat_secs = self.sse_heartbeat_secs.clamp(0, 3_600);
@@ -93,7 +89,6 @@ impl From<&TuningConfig> for TuningSettings {
             max_tokens: value.max_tokens,
             max_tool_calls: value.max_tool_calls,
             max_identical_calls: value.max_identical_calls,
-            context_limit_tokens: value.context_limit_tokens,
             keep_recent_messages: value.keep_recent_messages,
             chunk_buffer: value.chunk_buffer,
             sse_heartbeat_secs: value.sse_heartbeat_secs,
@@ -111,7 +106,6 @@ impl From<TuningSettings> for TuningConfig {
             max_tokens: value.max_tokens,
             max_tool_calls: value.max_tool_calls,
             max_identical_calls: value.max_identical_calls,
-            context_limit_tokens: value.context_limit_tokens,
             keep_recent_messages: value.keep_recent_messages,
             chunk_buffer: value.chunk_buffer,
             sse_heartbeat_secs: value.sse_heartbeat_secs,

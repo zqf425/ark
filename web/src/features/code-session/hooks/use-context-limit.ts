@@ -1,19 +1,24 @@
 import { useEffect, useState } from 'react'
-import { getRuntimeConfig } from '../../settings/api/settings-api'
+import { listProviders } from '../../settings/api/providers-api'
 
 /** How long a fetched limit may serve as the meter's denominator. */
 const CACHE_TTL_MS = 60_000
 
-/** Module-level cache with a TTL: the tuning limit can change in settings. */
-let cache: { limit: number; at: number } | null = null
+/** Module-level cache with a TTL: the provider table can change in settings. */
+let cache: { limit: number | null; at: number } | null = null
 
 /**
- * Context window limit (`tuning.context_limit_tokens`) for the usage meter.
+ * Compaction threshold for the usage meter, derived from the *effective*
+ * provider's context window (80% of it, output reserved) and reported by
+ * `GET /v1/runtime/providers` as `compaction_threshold_tokens`.
+ *
+ * `null` means "unknown": no provider resolves or none declared a window, and
+ * the meter must hide instead of dividing by a guessed denominator.
  *
  * The footer stays mounted across thread switches, so a one-shot fetch could
- * serve a stale limit forever after the user edits tuning settings. The cached
- * value therefore expires after `CACHE_TTL_MS` and the hook re-fetches on a
- * matching interval; a failed refresh keeps the previous denominator.
+ * serve a stale limit forever after the user edits providers. The cached value
+ * therefore expires after `CACHE_TTL_MS` and the hook re-fetches on a matching
+ * interval; a failed refresh keeps the previous denominator.
  */
 export function useContextLimit(): number | null {
   const [limit, setLimit] = useState<number | null>(cache?.limit ?? null)
@@ -22,10 +27,10 @@ export function useContextLimit(): number | null {
     let cancelled = false
     const refresh = (): void => {
       if (cache && Date.now() - cache.at < CACHE_TTL_MS) return
-      void getRuntimeConfig()
-        .then((config) => {
+      void listProviders()
+        .then((response) => {
           if (cancelled) return
-          cache = { limit: config.tuning.context_limit_tokens, at: Date.now() }
+          cache = { limit: response.compaction_threshold_tokens ?? null, at: Date.now() }
           setLimit(cache.limit)
         })
         .catch(() => {})

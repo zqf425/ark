@@ -536,21 +536,26 @@ async fn failed_parent_turn_leaves_the_completion_for_redelivery() {
 }
 
 #[test]
-fn provider_context_window_caps_the_next_turn_and_reserves_requested_output() {
-    let config = RuntimeConfig {
-        tuning: ark_config::TuningConfig {
-            context_limit_tokens: 100_000,
-            ..ark_config::TuningConfig::default()
-        },
-        ..RuntimeConfig::default()
-    };
+fn turn_limits_derive_the_threshold_from_the_provider_window() {
+    let config = RuntimeConfig::default();
     let mut provider = ProviderConfig::new("p", "m");
     provider.context_window_tokens = Some(32_000);
     provider.max_tokens = Some(4_096);
 
     let limits = super::turn_common::limits_for_turn(&config, Some(&provider));
 
-    assert_eq!(limits.context_limit_tokens, 27_904);
+    // 80% of (32_000 - 4_096): tuning no longer carries a threshold field.
+    assert_eq!(limits.context_limit_tokens, 22_323);
+}
+
+#[test]
+fn undeclared_provider_window_falls_back_to_a_fixed_threshold() {
+    let config = RuntimeConfig::default();
+    let limits = super::turn_common::limits_for_turn(&config, None);
+    assert_eq!(
+        limits.context_limit_tokens,
+        crate::model::FALLBACK_CONTEXT_LIMIT_TOKENS
+    );
 }
 
 #[test]

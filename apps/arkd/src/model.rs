@@ -82,26 +82,23 @@ pub(crate) fn governed_transport() -> reqwest::Client {
         })
 }
 
-/// Cap a configured compaction threshold to the selected model's known window.
+/// The compaction threshold the turn runs with.
 ///
-/// Parameter: `configured` is the runtime-wide threshold; `provider` supplies
-/// optional catalog metadata and requested output tokens. Returns a positive
-/// threshold that reserves requested output only when the user configured one.
-pub fn context_limit_tokens(configured: u64, provider: Option<&ProviderConfig>) -> u64 {
-    let configured = configured.max(1);
+/// Derived from the resolved provider's context window — the session may fill
+/// [`ark_llm::COMPACTION_TRIGGER_RATIO`] of it before the prefix folds, with
+/// the user-configured `max_tokens` reserved for output. `None` (no provider
+/// or no declared window) falls back to a conservative fixed budget: an
+/// undeclared window must not silently disable compaction and let the prompt
+/// grow unbounded.
+pub fn context_limit_tokens(provider: Option<&ProviderConfig>) -> u64 {
     provider
-        .and_then(|provider| {
-            provider
-                .context_window_tokens
-                .map(|window| (provider, window))
-        })
-        .map(|(provider, window)| {
-            let output_reserve = provider.max_tokens.map(u64::from).unwrap_or(0);
-            window.saturating_sub(output_reserve).max(1)
-        })
-        .map(|model_limit| configured.min(model_limit))
-        .unwrap_or(configured)
+        .and_then(ark_llm::ProviderConfig::compaction_threshold)
+        .unwrap_or(FALLBACK_CONTEXT_LIMIT_TOKENS)
 }
+
+/// Threshold when no provider window is declared: conservative enough for the
+/// smallest common hosted models, large enough not to compact every few turns.
+pub(crate) const FALLBACK_CONTEXT_LIMIT_TOKENS: u64 = 96_000;
 
 /// Extract a usable provider from the opaque `model_providers` value.
 ///
@@ -418,13 +415,17 @@ mod tests {
     }
 
     #[test]
-    fn explicit_model_window_caps_context_after_reserving_output() {
+    fn threshold_is_80_percent_of_the_window_after_reserving_output() {
         let mut provider = ProviderConfig::new("p", "m");
         provider.context_window_tokens = Some(32_000);
         provider.max_tokens = Some(4_096);
-        assert_eq!(context_limit_tokens(100_000, Some(&provider)), 27_904);
-        assert_eq!(context_limit_tokens(20_000, Some(&provider)), 20_000);
-        assert_eq!(context_limit_tokens(20_000, None), 20_000);
+        // (32_000 - 4_096) * 0.8 = 22_323 (floor).
+        assert_eq!(context_limit_tokens(Some(&provider)), 22_323);
+        // No user-configured output reserve: the full window drives the ratio.
+        provider.max_tokens = None;
+        assert_eq!(context_limit_tokens(Some(&provider)), 25_600);
+        // An undeclared window must not disable compaction: fall back instead.
+        assert_eq!(context_limit_tokens(None), FALLBACK_CONTEXT_LIMIT_TOKENS);
     }
 
     #[tokio::test]

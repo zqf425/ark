@@ -28,8 +28,6 @@ export const SETTINGS_RUNTIME_MESSAGES = {
   'settings.tuning.field.maxToolCalls.hint': ['单回合工具调用上限。', 'Upper bound on tool calls per turn.'],
   'settings.tuning.field.maxIdenticalCalls.label': ['重复调用阈值', 'Identical call threshold'],
   'settings.tuning.field.maxIdenticalCalls.hint': ['同一调用签名达到此次数后被抑制。', 'A repeated call signature is suppressed once it reaches this count.'],
-  'settings.tuning.field.contextLimitTokens.label': ['上下文压缩阈值（token）', 'Compaction threshold (tokens)'],
-  'settings.tuning.field.contextLimitTokens.hint': ['预计 prompt 达到该值时触发压缩。', 'Compaction triggers when the estimated prompt reaches this value.'],
   'settings.tuning.field.keepRecentMessages.label': ['压缩保留消息数', 'Messages kept on compaction'],
   'settings.tuning.field.keepRecentMessages.hint': ['压缩时原样保留的最近消息数。', 'Recent messages kept verbatim during compaction.'],
   'settings.tuning.field.chunkBuffer.label': ['流式 chunk 缓冲', 'Stream chunk buffer'],

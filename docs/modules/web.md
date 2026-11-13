@@ -43,7 +43,9 @@
   不全量解析所有 patch）；`patch` 缺失（二进制或超出字节上限）时明确提示，浏览器不自行 diff。
 - 会话流 footer 展示线程用量与上下文水位：用量由权威 `usage` 事件逐条累加，打开线程时以
   `GET /v1/threads/{id}/usage` 播种且只填充空通道（避免与实时事件重复计数）；上下文水位取最近一次
-  样本的 `prompt_tokens` 对 tuning `context_limit_tokens` 的占比，仅作展示，不参与运行时决策。
+  样本的 `prompt_tokens` 对 `GET /v1/runtime/providers` 发布的 `compaction_threshold_tokens`
+  （模型窗口的 80%，输出预留后取整）的占比，仅作展示，不参与运行时决策；阈值缺失（模型未声明窗口）
+  时隐藏水位而不是猜测分母。
   限额缓存带 TTL 并定时重取（footer 常驻挂载、跨线程不重挂，一次性获取会在设置页修改后永久陈旧）。
   `compaction_completed` 以摘要形式显示最近一次压缩规模。footer 另展示最近一轮流式速度与会话累计
   缓存命中率：速度由该轮首个到末个 delta 的实测窗口（短于 0.3s 不显示）折 `usage` 的

@@ -26,8 +26,8 @@ export type ErrorLine = {
 /**
  * Per-thread usage projection, folded from the runtime's authoritative `usage`
  * events. `lastPromptTokens` is the newest sample's prompt size — the closest
- * client-side proxy for how full the context is; the limit itself comes from
- * runtime tuning (`context_limit_tokens`).
+ * client-side proxy for how full the context is; the limit itself is the
+ * runtime's derived compaction threshold (80% of the model's declared window).
  *
  * Cache sums follow the same `sum_opt` semantics as `costUsd`: a sample without
  * the counter contributes nothing and the sum stays null until one carries it.

@@ -351,6 +351,13 @@ pub struct ProviderListResponse {
     /// Provider id the running process is actually bound to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_provider_id: Option<String>,
+    /// Compaction threshold the runtime derives for the *effective* provider:
+    /// 80% of that provider's configured context window, reserving the
+    /// entry's `max_tokens` for output. `None` when no provider resolves or
+    /// none declared a window — the renderer then hides the context meter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub compaction_threshold_tokens: Option<u64>,
 }
 
 /// `POST /v1/runtime/model-providers/test`.

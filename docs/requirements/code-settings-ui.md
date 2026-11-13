@@ -187,3 +187,17 @@ localStorage。该偏好是纯渲染状态，不能写入 runtime 配置、更�
 设置导航和新增加的外观区域已使用消息键。后续所有用户可见 UI 文案必须接入该资源，新增功能须同时提供
 中英文案和相应测试；不得继续增加硬编码用户文案。现有功能将在后续界面迭代中逐步迁移，以避免把无关
 UI 重构混入本需求。
+
+## 阶段 H：压缩阈值归属模型上下文窗口
+
+> 状态：**当前实现**。
+
+运行时调优不再提供「上下文压缩阈值」配置项（`tuning.context_limit_tokens` 从 `TuningSettings` /
+`TuningConfig` 移除，配置文件中的历史取值按未知键忽略并记录诊断）。压缩阈值改为从模型上下文窗口
+推导：有效 provider 声明的窗口 × 80%（`ark_llm::COMPACTION_TRIGGER_RATIO`，与渲染层上下文环的
+警示水位一致）并预留条目 `max_tokens`；窗口未声明时回退保守固定值（arkd
+`FALLBACK_CONTEXT_LIMIT_TOKENS` = 96K），不禁用压缩。
+
+阈值经 `GET /v1/runtime/providers` 的 `compaction_threshold_tokens` 发布（无声明窗口时字段缺省），
+会话上下文环、footer 水位与控制台状态条以它为分母；字段缺省时隐藏水位而非猜测。设置页移除该输入项，
+模型清单行的「上下文窗口」成为压缩行为的唯一入口；界面文案明确「模型窗口的 80%」语义。

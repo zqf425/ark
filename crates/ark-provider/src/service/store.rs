@@ -103,6 +103,12 @@ impl ProviderStore {
     }
 
     /// The redacted list view. Never contains a plaintext key.
+    ///
+    /// `compaction_threshold_tokens` reports the threshold the runtime derives
+    /// for the effective provider: 80% of that provider's context window minus
+    /// its reserved output. `None` when no provider resolves or the window is
+    /// undeclared — the renderer then hides the context meter instead of
+    /// guessing a denominator.
     pub fn list(&self) -> ProviderListResponse {
         let document = self.lock();
         let providers = document.views();
@@ -110,17 +116,21 @@ impl ProviderStore {
         let default_model = document.effective_default_model();
         // The process binds to the default entry through `resolve(None)`, so the
         // active id is exactly the default that can actually serve a request.
-        let active_provider_id = default_provider_id
-            .as_deref()
+        let resolved = document
+            .effective_default()
             .and_then(|id| document.get(id))
-            .and_then(config_from_entry)
-            .map(|config| config.provider_id);
+            .and_then(config_from_entry);
+        let active_provider_id = resolved.as_ref().map(|config| config.provider_id.clone());
+        let threshold = resolved
+            .as_ref()
+            .and_then(ProviderConfig::compaction_threshold);
         drop(document);
         ProviderListResponse {
             providers,
             default_provider_id,
             default_model,
             active_provider_id,
+            compaction_threshold_tokens: threshold,
         }
     }
 
@@ -212,8 +222,8 @@ impl ProviderStore {
         }
         let model = model.map(str::trim).filter(|value| !value.is_empty());
         if let Some(model) = model {
-            let known =
-                model == entry.model.trim() || entry.models.iter().flatten().any(|item| item.id == model);
+            let known = model == entry.model.trim()
+                || entry.models.iter().flatten().any(|item| item.id == model);
             if !known {
                 return Err(ArkError::validation(format!(
                     "provider `{id}` does not serve model `{model}`; import it into the inventory first"
@@ -478,16 +488,18 @@ impl ProviderStore {
         let list = {
             let providers = guard.views();
             let default_provider_id = guard.effective_default().map(str::to_string);
-            let active_provider_id = default_provider_id
-                .as_deref()
+            let resolved = guard
+                .effective_default()
                 .and_then(|id| guard.get(id))
-                .and_then(config_from_entry)
-                .map(|config| config.provider_id);
+                .and_then(config_from_entry);
             ProviderListResponse {
                 providers,
                 default_provider_id,
                 default_model: None,
-                active_provider_id,
+                active_provider_id: resolved.as_ref().map(|config| config.provider_id.clone()),
+                compaction_threshold_tokens: resolved
+                    .as_ref()
+                    .and_then(ProviderConfig::compaction_threshold),
             }
         };
         Ok(list)

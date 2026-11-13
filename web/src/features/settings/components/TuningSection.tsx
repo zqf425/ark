@@ -50,7 +50,6 @@ const GROUPS: readonly TuningGroup[] = [
   {
     titleKey: 'settings.tuning.group.context',
     fields: [
-      { key: 'context_limit_tokens', labelKey: 'settings.tuning.field.contextLimitTokens.label', hintKey: 'settings.tuning.field.contextLimitTokens.hint', min: 1_000, max: 10_000_000 },
       { key: 'keep_recent_messages', labelKey: 'settings.tuning.field.keepRecentMessages.label', hintKey: 'settings.tuning.field.keepRecentMessages.hint', min: 1, max: 10_000 }
     ]
   },

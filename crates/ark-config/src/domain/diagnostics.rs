@@ -50,7 +50,6 @@ pub const TUNING_KEYS: &[&str] = &[
     "max_tokens",
     "max_tool_calls",
     "max_identical_calls",
-    "context_limit_tokens",
     "keep_recent_messages",
     "chunk_buffer",
     "sse_heartbeat_secs",

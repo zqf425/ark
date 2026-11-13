@@ -45,7 +45,10 @@ unknown 元数据。线程覆盖模型时经 `resolve_for_model` / `resolve_visi
 `max_tokens` 是供应商级字段，对所有模型生效，不属于任何一行。
 
 `headers`、`temperature`、`max_tokens` 不是仅供展示的字段：有效条目必须将它们映射到每个实际模型请求。
-目录已知的上下文窗口会在下一父/子回合收窄全局压缩阈值；若用户设置了输出上限，应先预留该输出空间。
+目录已知的上下文窗口在回合内按 80% 比例（`ark_llm::COMPACTION_TRIGGER_RATIO`）推导压缩阈值，若用户设置了
+输出上限，应先预留该输出空间；该阈值同时随 `GET /v1/runtime/providers` 的
+`compaction_threshold_tokens` 发布给渲染层（无声明窗口时字段缺省，界面隐藏水位而非猜测分母）。
+运行时调优不再提供全局压缩阈值配置：上下文大小一律归属模型条目。
 
 ## 验证
 

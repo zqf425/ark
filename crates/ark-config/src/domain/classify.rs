@@ -89,9 +89,6 @@ pub fn tuning_diff(old: &TuningConfig, new: &TuningConfig) -> Vec<FieldPath> {
     if old.max_identical_calls != new.max_identical_calls {
         out.push(FieldPath::new("tuning.max_identical_calls"));
     }
-    if old.context_limit_tokens != new.context_limit_tokens {
-        out.push(FieldPath::new("tuning.context_limit_tokens"));
-    }
     if old.keep_recent_messages != new.keep_recent_messages {
         out.push(FieldPath::new("tuning.keep_recent_messages"));
     }

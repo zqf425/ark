@@ -106,7 +106,7 @@ pub(crate) fn limits_for_turn(
         },
         max_tool_calls: tuning.max_tool_calls.max(1),
         max_identical_calls: tuning.max_identical_calls.max(1),
-        context_limit_tokens: model::context_limit_tokens(tuning.context_limit_tokens, provider),
+        context_limit_tokens: model::context_limit_tokens(provider),
         keep_recent_messages: tuning.keep_recent_messages.max(1),
         max_compactions: TurnLimits::default().max_compactions,
         tool_storm_window_size: tuning.tool_storm_window_size,

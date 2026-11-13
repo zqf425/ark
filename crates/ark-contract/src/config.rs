@@ -134,8 +134,6 @@ pub struct TuningSettings {
     #[ts(as = "f64")]
     pub max_identical_calls: u32,
     #[ts(as = "f64")]
-    pub context_limit_tokens: u64,
-    #[ts(as = "f64")]
     pub keep_recent_messages: usize,
     #[ts(as = "f64")]
     pub chunk_buffer: usize,
@@ -160,7 +158,6 @@ impl Default for TuningSettings {
             max_tokens: 1_000_000,
             max_tool_calls: 200,
             max_identical_calls: 3,
-            context_limit_tokens: 96_000,
             keep_recent_messages: 12,
             chunk_buffer: 64,
             sse_heartbeat_secs: 15,

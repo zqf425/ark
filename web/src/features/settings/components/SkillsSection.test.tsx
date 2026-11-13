@@ -41,7 +41,6 @@ function config(): RuntimeConfigView {
       max_tokens: 1_000_000,
       max_tool_calls: 200,
       max_identical_calls: 3,
-      context_limit_tokens: 100_000,
       keep_recent_messages: 20,
       chunk_buffer: 64,
       sse_heartbeat_secs: 15,

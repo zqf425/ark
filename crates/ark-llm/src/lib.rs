@@ -35,7 +35,7 @@ pub use common::{
     parse_tool_arguments, repair_messages, FailureKind, RetryPolicy, RetryState, SseEvent,
     SseParser, StreamAccumulator, UsageParser,
 };
-pub use config::{EndpointFormat, ProviderConfig};
+pub use config::{EndpointFormat, ProviderConfig, COMPACTION_TRIGGER_RATIO};
 pub use domain::{StreamEvent, ToolFragment};
 pub use provider::route::Family;
 pub use provider::StreamParser;

@@ -5,5 +5,5 @@
 pub mod endpoint;
 pub mod url;
 
-pub use endpoint::{EndpointFormat, ProviderConfig};
+pub use endpoint::{EndpointFormat, ProviderConfig, COMPACTION_TRIGGER_RATIO};
 pub use url::{anthropic_messages_url, model_catalog_url, openai_chat_url, openai_responses_url};
