@@ -9,7 +9,7 @@
  * good. Both branches must end with an empty projection.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ThreadDetail, ThreadItem } from '../../../shared/contracts'
+import type { RuntimeEvent, ThreadDetail, ThreadItem } from '../../../shared/contracts'
 import { installBrowserStubs, mountWithProviders, settle, type ReactHarness } from '../../../shared/testing/react-harness'
 import { getThread, getThreadUsage } from '../api/threads-api'
 import { subscribeThreadEvents } from '../api/events-api'
@@ -207,5 +207,75 @@ describe('useThreadStream thread ownership', () => {
     await settle()
     // B's own aggregate, never A's leftover.
     expect(useCodeSessionStore.getState().usage?.totalTokens).toBe(7)
+  })
+})
+
+describe('useThreadStream rail activity', () => {
+  let harness: ReactHarness | null = null
+  let onEvent: ((event: RuntimeEvent) => void) | null = null
+
+  beforeEach(() => {
+    installBrowserStubs()
+    getThreadMock.mockReset()
+    getThreadUsageMock.mockReset()
+    getThreadUsageMock.mockReturnValue(new Promise<never>(() => undefined))
+    onEvent = null
+    subscribeMock.mockImplementation((_options) => {
+      onEvent = _options.onEvent
+      return new Promise<void>(() => undefined)
+    })
+    useCodeSessionStore.getState().resetItems()
+  })
+
+  afterEach(async () => {
+    await harness?.unmount()
+    harness = null
+  })
+
+  function seedRail(threadId: string): void {
+    useCodeSessionStore.setState({
+      threads: [{
+        thread_id: threadId,
+        title: 'rail',
+        created_at: '2026-10-28T00:00:00Z',
+        updated_at: '2026-10-28T00:00:00Z',
+        archived: false,
+        running: false,
+        last_event_at: '2026-10-29T00:00:00Z'
+      }],
+      activeThreadId: threadId
+    })
+  }
+
+  it('a synthetic heartbeat frame does not reorder the rail', async () => {
+    seedRail(THREAD_A)
+    getThreadMock.mockResolvedValue(detail(THREAD_A, 7, []))
+    harness = await mountWithProviders(<Probe threadId={THREAD_A} />)
+    await settle()
+
+    // The server's opening frame for an empty backlog is stamped `now`.
+    onEvent?.({ kind: 'heartbeat', seq: 7, thread_id: THREAD_A, timestamp: '2026-11-20T00:00:00Z' } as never)
+
+    const row = useCodeSessionStore.getState().threads.find((t) => t.thread_id === THREAD_A)
+    expect(row?.last_event_at).toBe('2026-10-29T00:00:00Z')
+  })
+
+  it('a real milestone event still advances the rail activity key', async () => {
+    seedRail(THREAD_A)
+    getThreadMock.mockResolvedValue(detail(THREAD_A, 7, []))
+    harness = await mountWithProviders(<Probe threadId={THREAD_A} />)
+    await settle()
+
+    onEvent?.({
+      kind: 'turn_completed',
+      seq: 8,
+      thread_id: THREAD_A,
+      turn_id: TURN_A,
+      timestamp: '2026-11-20T00:00:00Z'
+    } as never)
+
+    const row = useCodeSessionStore.getState().threads.find((t) => t.thread_id === THREAD_A)
+    expect(row?.last_event_at).toBe('2026-11-20T00:00:00Z')
+    expect(row?.last_seq).toBe(8)
   })
 })

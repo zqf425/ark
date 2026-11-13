@@ -346,6 +346,96 @@ async fn list_marks_only_threads_with_an_in_flight_turn_as_running() {
     assert_eq!(running, vec![busy], "only the registered thread is busy");
 }
 
+/// A thread whose newest durable turn event is `turn_started` (no terminal
+/// record yet) reads busy even when the registry forgot it — a restart drops
+/// the process-local registry, and the durable log is the only surviving
+/// evidence of the in-flight turn (smart-ark busy rule).
+#[tokio::test]
+async fn list_falls_back_to_the_durable_log_for_running_after_a_registry_loss() {
+    let dir = test_dir("running-durable");
+    let data_dir = dir.path().to_path_buf();
+    let state = state(&data_dir);
+    let open = state
+        .store
+        .create_thread("open-turn")
+        .await
+        .expect("thread")
+        .thread_id;
+    let settled = state
+        .store
+        .create_thread("settled-turn")
+        .await
+        .expect("thread")
+        .thread_id;
+    let idle = state
+        .store
+        .create_thread("idle")
+        .await
+        .expect("thread")
+        .thread_id;
+    let turn = TurnId::new();
+    state
+        .store
+        .append_event(
+            open,
+            RuntimeEvent::TurnStarted {
+                seq: 0,
+                thread_id: open,
+                turn_id: turn,
+                timestamp: Utc::now(),
+                auto_continuation: false,
+                attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
+            },
+        )
+        .await
+        .expect("open turn");
+    let done = TurnId::new();
+    state
+        .store
+        .append_event(
+            settled,
+            RuntimeEvent::TurnStarted {
+                seq: 0,
+                thread_id: settled,
+                turn_id: done,
+                timestamp: Utc::now(),
+                auto_continuation: false,
+                attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
+            },
+        )
+        .await
+        .expect("settled turn starts");
+    state
+        .store
+        .append_event(
+            settled,
+            RuntimeEvent::TurnCompleted {
+                seq: 0,
+                thread_id: settled,
+                turn_id: done,
+                timestamp: Utc::now(),
+            },
+        )
+        .await
+        .expect("settled turn completes");
+    // No registry entry anywhere: the simulation of a restart.
+
+    let summaries = list_response(state.clone(), ThreadListQuery::default()).await;
+    let running: Vec<_> = summaries
+        .iter()
+        .filter(|summary| summary.running)
+        .map(|summary| summary.thread_id)
+        .collect();
+    assert_eq!(
+        running,
+        vec![open],
+        "an unterminated durable turn reads busy; a settled one does not"
+    );
+    assert!(!running.contains(&idle), "a thread with no turn events is idle");
+}
+
 #[tokio::test]
 async fn list_orders_by_last_event_time_not_metadata_updates() {
     let dir = test_dir("activity-order");

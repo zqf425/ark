@@ -113,10 +113,14 @@ export const createThreadsSlice: StateCreator<ThreadsSlice, [], [], ThreadsSlice
   }),
 
   /**
-   * Fold one list poll's busy set into the loaded rows: membership in the
-   * set is the server's verdict, absence reads as idle. Rows the poll could
-   * not see (paging) keep their previous flag; `setThreads` remains the
-   * authoritative bulk path.
+   * Fold one list poll's busy set into the loaded rows. Membership is always
+   * folded in; **absence clears a row's flag only for the active thread**,
+   * where the live turn reducer is the authority and a poll frame captured
+   * across a turn boundary must not resurrect a settled turn. Background
+   * rows keep a stale busy flag until the server affirmatively reports them
+   * idle: an in-flight poll frame (up to one interval old) may predate a
+   * turn that started after the switch, and clearing on absence made a
+   * just-deactivated thread's spinner vanish for up to one poll interval.
    */
   applyRunningFlags: (running) => set((state) => {
     const runningSet = new Set(running)
@@ -124,6 +128,13 @@ export const createThreadsSlice: StateCreator<ThreadsSlice, [], [], ThreadsSlice
     const next = state.threads.map((row) => {
       const flag = runningSet.has(row.thread_id)
       if (row.running === flag) return row
+      if (!flag && row.thread_id !== state.activeThreadId && row.running) {
+        // Background row reported idle by a possibly stale frame: the server
+        // may simply not have folded this thread's newest turn_started yet.
+        // Degrading to "keep" is cosmetic-safe (spinner shows at most one
+        // interval longer); clearing is a visible regression.
+        return row
+      }
       changed = true
       return { ...row, running: flag }
     })

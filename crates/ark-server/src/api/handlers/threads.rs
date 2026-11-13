@@ -25,6 +25,58 @@ use crate::state::AppState;
 pub const DEFAULT_TITLE: &str = "New thread";
 const MAX_CHILD_COMPLETION_NOTICES: usize = 50;
 
+/// Resolve each listed thread's durable "turn in flight" verdict.
+///
+/// The turn registry is process-local truth: a restart drops it, and turns
+/// started by another process (IM channel, scheduled run in a separate
+/// renderer) never register here. Mirrors the smart-ark busy rule — a thread
+/// reads busy when its newest durable turn-lifecycle event has not reached a
+/// terminal state (`turn_completed` / `turn_failed` / `turn_aborted`) — so the
+/// marker survives restarts. Only threads outside the registry's active set
+/// are probed: an active registry entry is already authoritative and the log
+/// fold stays off the hot path.
+async fn durable_running_ids(
+    state: &AppState,
+    registry_active: &HashSet<ThreadId>,
+    candidates: impl IntoIterator<Item = ThreadId>,
+) -> HashSet<ThreadId> {
+    let mut running = HashSet::new();
+    for thread_id in candidates {
+        if registry_active.contains(&thread_id) {
+            running.insert(thread_id);
+            continue;
+        }
+        // `interaction_events` is the bounded turn/gate vocabulary, so this
+        // fold is cheap even for long logs. A probe failure must not break
+        // the list: the registry verdict (idle) stands.
+        let events = match state.store.replay_interaction_events(thread_id).await {
+            Ok(events) => events,
+            Err(_) => continue,
+        };
+        // The *newest* turn-lifecycle event decides, the same fold
+        // `interrupted_user_lifecycle` uses: gate records are skipped, and
+        // `any()` would be wrong because an older `turn_started` behind a
+        // newer terminal record must not resurrect a settled turn.
+        let verdict = events
+            .iter()
+            .rev()
+            .find(|event| {
+                matches!(
+                    event,
+                    RuntimeEvent::TurnStarted { .. }
+                        | RuntimeEvent::TurnCompleted { .. }
+                        | RuntimeEvent::TurnFailed { .. }
+                        | RuntimeEvent::TurnAborted { .. }
+                )
+            })
+            .is_some_and(|event| matches!(event, RuntimeEvent::TurnStarted { .. }));
+        if verdict {
+            running.insert(thread_id);
+        }
+    }
+    running
+}
+
 /// `GET /v1/threads`.
 ///
 /// Returns a bounded page of the store's deterministic ordering (active first,
@@ -68,8 +120,12 @@ pub async fn list(
     });
 
     // One registry read per page, not per row: the lock is short but shared
-    // with turn registration.
-    let running = state.turns.active_thread_ids();
+    // with turn registration. Rows the registry does not know about fall back
+    // to the durable log's newest turn-lifecycle event (restarts, turns
+    // started by other processes), so the busy marker survives a restart.
+    let registry_running = state.turns.active_thread_ids();
+    let ids: Vec<ThreadId> = rows.iter().map(|meta| meta.thread_id).collect();
+    let running = durable_running_ids(&state, &registry_running, ids).await;
     let summaries = rows
         .iter()
         .skip(offset as usize)

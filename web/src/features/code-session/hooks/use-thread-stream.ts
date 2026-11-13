@@ -90,10 +90,24 @@ export function useThreadStream(threadId: ThreadId | null): void {
           onEvent: (event) => {
             if (cancelled) return
             ingestEvent(event)
-            // Delta events arrive once per streamed token; forwarding every
-            // seq would re-render the whole thread rail for each character.
-            // Milestones carry the newest seq, so the rail stays current
-            // without a render per token (`noteThreadSeq` is monotonic).
+            // Event classes (mirrors the server-side projector in smart-ark's
+            // runtime-event-reducer: transport/synthetic frames mutate no
+            // projection field):
+            // - deltas stream once per token; they are the strongest "the
+            //   model is replying" signal and bump the activity key only;
+            // - milestone kinds advance the rail's watermark and activity;
+            // - synthetic/transport frames (heartbeat, sse_idle_timeout,
+            //   transient_retry) carry no thread activity: a subscribe's
+            //   opening heartbeat is stamped `Utc::now()` by the server, so
+            //   counting it re-ordered the rail to put the thread that was
+            //   merely *clicked* on top.
+            if (
+              event.kind === 'heartbeat' ||
+              event.kind === 'sse_idle_timeout' ||
+              event.kind === 'transient_retry'
+            ) {
+              return
+            }
             if (
               event.thread_id === threadId &&
               event.kind !== 'assistant_text_delta' &&
