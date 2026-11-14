@@ -44,4 +44,14 @@ describe('renderMarkdown', () => {
     const html = renderMarkdown('```\nplain\n```\n')
     expect(html).toContain('ark-md-code__lang">text')
   })
+
+  it('中文紧邻的 ** 强调不再残留字面星号（CJK flanking 修复）', () => {
+    const html = renderMarkdown('这个技能是**在运行时上新建会话**的手册。')
+    expect(html).toContain('<strong>在运行时上新建会话</strong>')
+    expect(html).not.toContain('**')
+  })
+
+  it('拉丁文本的强调行为保持不变', () => {
+    expect(renderMarkdown('plain **bold** text')).toContain('<strong>bold</strong>')
+  })
 })
