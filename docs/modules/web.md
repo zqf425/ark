@@ -211,7 +211,11 @@
 - 「技能」面板的消费面见上方"输入框「技能」面板"条目：线程级视图 + 全局回落，显式 `/id` 提及即激活
   是 arkd 的技能指定方式；不新增技能运行时字段。用户消息正文里的 `/id` 提及在渲染层识别
   （`skill-mention.ts`，仅当 token 与已加载技能 id 精确匹配时）并渲染成 `.ark-mention` 芯片，
-  未知斜杠词（路径、URL）保持纯文本；识别只影响展示，复制按钮仍复制逐字原文。
+  未知斜杠词（路径、URL）保持纯文本；识别只影响展示，复制按钮仍复制逐字原文。**UserBubble 必须从
+  `StreamRow`/`TurnBlock` 拿到所属 threadId**（芯片依赖该线程的技能缓存），脱离流的独立渲染
+  传 `null` 回落纯文本。输入框草稿侧，`DraftHighlight` 镜像层在 textarea 之下按同字体度量
+  （`.ark-composer__editor-font`）重绘草稿：完整提及与光标下进行中 token（虚线边）渲染为芯片，
+  镜像层 `pointer-events: none` 且文本透明，不影响输入/选择/IME/复制。
 - 用户可见文本通过 `web/src/shared/i18n/` 的消息键与中英文资源提供；新增 UI 不得硬编码文案。
   该目录已按域拆分为 `catalogs/*`（`common`、`errors`、`session`、`thread-list`、`workbench`、
   `session-canvas`、`settings-*`）：每个 catalog 输出一张

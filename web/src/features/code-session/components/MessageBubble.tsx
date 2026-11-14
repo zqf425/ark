@@ -70,10 +70,15 @@ export function AttachmentChips({ outcomes }: { outcomes: TurnAttachmentOutcome[
  * runtime activates on the same token (`ark-skills::activation`). Rendering the
  * token as a chip makes the invocation visible without changing the text —
  * the copy button still copies the verbatim draft.
+ *
+ * `threadId` is the owning stream's id: mention chips need the thread's loaded
+ * skill set, and this is the one legitimate fetch path for a history row (the
+ * read is cached and shared with the composer's palette). `null` renders plain
+ * text, so a detached row never becomes an API caller.
  */
-function MentionBody({ text }: { text: string }): JSX.Element {
+function MentionBody({ text, threadId }: { text: string; threadId: string | null }): JSX.Element {
   const { t } = useI18n()
-  const { skills } = useThreadSkills(null)
+  const { skills } = useThreadSkills(threadId)
   if (!skills || skills.length === 0) return <>{text}</>
   return (
     <>
@@ -106,7 +111,7 @@ function MentionBody({ text }: { text: string }): JSX.Element {
 }
 
 /** User message bubble. Text is the runtime's accumulated `text`, verbatim. */
-export const UserBubble = memo(function UserBubble({ item }: { item: ThreadItem }): JSX.Element {
+export const UserBubble = memo(function UserBubble({ item, threadId = null }: { item: ThreadItem; threadId?: string | null }): JSX.Element {
   const { t, locale } = useI18n()
   const text = item.text ?? ''
   return (
@@ -125,7 +130,7 @@ export const UserBubble = memo(function UserBubble({ item }: { item: ThreadItem 
         />
       </header>
       <div className="ark-msg__body">
-        <MentionBody text={text} />
+        <MentionBody text={text} threadId={threadId} />
       </div>
       {item.attachments && item.attachments.length > 0 ? (
         <AttachmentChips outcomes={item.attachments} />

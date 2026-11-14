@@ -44,12 +44,14 @@ function describe(error: unknown): string {
  * the client: pick a component by `item.kind`, no semantic reconstruction.
  *
  * Memoized on the item object: the reducer keeps the identity of every item a
- * fold did not touch, so a streamed token re-renders exactly one row.
+ * fold did not touch, so a streamed token re-renders exactly one row. The
+ * thread id rides along for the user bubble's skill-mention chips; it is stable
+ * per mounted stream, so the memo still holds for streamed tokens.
  */
-export const StreamRow = memo(function StreamRow({ item }: { item: ThreadItem }): JSX.Element | null {
+export const StreamRow = memo(function StreamRow({ item, threadId }: { item: ThreadItem; threadId: string | null }): JSX.Element | null {
   switch (item.kind) {
     case 'user_message':
-      return <UserBubble item={item} />
+      return <UserBubble item={item} threadId={threadId} />
     case 'assistant_message':
       return <AssistantBubble item={item} />
     case 'reasoning':
@@ -162,7 +164,7 @@ export const TurnBlock = memo(function TurnBlock({
     <div className="ark-turn" id={`ark-turn-${group.turnId}`}>
       {user.map((item) => (
         <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
-          <StreamRow item={item} />
+          <StreamRow item={item} threadId={threadId} />
         </ErrorBoundary>
       ))}
       {user.length > 0 && userText !== null ? (
@@ -189,7 +191,7 @@ export const TurnBlock = memo(function TurnBlock({
           <div className="ark-process__body">
             {process.map((item) => (
               <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
-                <StreamRow item={item} />
+                <StreamRow item={item} threadId={threadId} />
               </ErrorBoundary>
             ))}
           </div>
@@ -197,7 +199,7 @@ export const TurnBlock = memo(function TurnBlock({
       ) : null}
       {reply.map((item) => (
         <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
-          <StreamRow item={item} />
+          <StreamRow item={item} threadId={threadId} />
         </ErrorBoundary>
       ))}
       <ErrorBoundary label={t('thread.canvas.boundaryRewind')}>

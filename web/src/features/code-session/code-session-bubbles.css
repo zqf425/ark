@@ -336,3 +336,10 @@
   align-items: center;
   flex: none;
 }
+
+/* The in-progress token in the composer's mirror layer: same chip shape, but a
+   dashed edge so "still typing" reads differently from a completed mention. */
+.ark-mention--typing {
+  border: 1px dashed color-mix(in srgb, var(--ark-skill) 55%, transparent);
+  padding: 0 6px;
+}
