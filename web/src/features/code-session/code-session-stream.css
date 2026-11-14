@@ -182,51 +182,6 @@
   border-color: var(--ark-accent-dim);
 }
 
-/* ---------- usage footer: a centered frosted pill ---------- */
-
-.ark-streamfooter {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  width: fit-content;
-  margin: 0 auto;
-  padding: 3px 12px;
-  border: 1px solid var(--ark-border-muted);
-  border-radius: var(--ark-radius-sm);
-  background: var(--ark-card-ghost);
-  backdrop-filter: blur(8px);
-  font-size: 11px;
-  color: var(--ark-text-faint);
-}
-
-.ark-streamfooter__label {
-  color: var(--ark-text-dim);
-}
-
-.ark-streamfooter__meta {
-  font-family: var(--ark-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.ark-streamfooter__meta.is-live {
-  color: var(--ark-accent);
-}
-
-.ark-streamfooter__meta.is-warning {
-  color: var(--ark-warn);
-}
-
-.ark-streamfooter__error {
-  color: var(--ark-error);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 42ch;
-}
-
 /* ---------- turn process card (smart-ark work card) ---------- */
 
 .ark-process {

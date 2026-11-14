@@ -21,7 +21,6 @@ import { ApprovalCard } from './ApprovalCard'
 import { ChildCompletionCard } from './ErrorRow'
 import { UserInputCard } from './UserInputCard'
 import { Composer } from './Composer'
-import { StreamFooter } from './StreamFooter'
 import { SessionStatsBar } from './SessionStatsBar'
 import { ChildRunsPanel } from './ChildRunsPanel'
 import { rewindAvailabilityByTurn } from './rewind-flow'
@@ -319,7 +318,6 @@ export function ThreadStream({
         </button>
       ) : null}
 
-      <StreamFooter />
       {/*
         Runtime overrides live inside the composer: model/permission/reasoning,
         the workspace project menu and context/compaction are all toolbar pills,

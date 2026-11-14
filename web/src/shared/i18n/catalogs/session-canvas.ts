@@ -101,7 +101,6 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.footer.generating': ['生成中', 'Generating'],
 
   'canvas.usage.title': ['模型用量（来自权威 usage 事件）', 'Model usage (from authoritative usage events)'],
-  'canvas.usage.tokens': ['输入 {prompt} · 输出 {completion}', 'prompt {prompt} · completion {completion}'],
   'canvas.usage.contextTitle': ['最近一次模型请求的上下文占用', 'Context fill of the most recent model request'],
   'canvas.usage.context': ['上下文 {used}/{limit}（{percent}%）', 'Context {used}/{limit} ({percent}%)'],
   'canvas.usage.speed': ['{rate} tok/s', '{rate} tok/s'],
