@@ -13,6 +13,7 @@ pub mod thread_titles;
 pub mod threads;
 pub mod turns;
 pub mod workbench;
+pub mod workspace_projects;
 
 pub use attachment_auth::{
     associated_attachment_ids, authorize_turn_attachments, thread_attachment_ids,
