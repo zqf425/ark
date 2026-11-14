@@ -11,7 +11,11 @@
  * `groupByTurn`), so a token streaming into the newest turn leaves every
  * earlier turn untouched — no re-render, no boundary re-mount. The process
  * card auto-expands while the turn runs and auto-collapses when it settles;
- * a user toggle pins it for the life of the block.
+ * a user toggle pins it for the life of the block. The pin writes only from
+ * real user toggles: the native `toggle` event also fires for React's own
+ * open-state writes (mount, controlled updates), and those echoes are
+ * filtered in `useEchoSafeToggle` — without the filter the mount echo pins
+ * the card open and a settled turn never collapses.
  */
 import { memo, useState } from 'react'
 import type { ThreadItem } from '../../../shared/contracts'
@@ -19,6 +23,7 @@ import { useI18n } from '../../../shared/i18n'
 import type { TurnGroup } from '../state/selectors'
 import { Button, ErrorBoundary, useToast } from '../../../shared/ui'
 import { splitTurnSections } from './turn-sections'
+import { useEchoSafeToggle } from './use-echo-safe-toggle'
 import { UserBubble, AssistantBubble, FinalReplyCard, ReasoningBlock } from './MessageBubble'
 import { ToolCard } from './ToolCard'
 import { ErrorRow, NoticeRow, ToolResultRow } from './ErrorRow'
@@ -157,8 +162,10 @@ export const TurnBlock = memo(function TurnBlock({
   const { user, process, reply } = splitTurnSections(group.items, live ? 'running' : 'settled')
 
   // `null` = follow the live state; a user toggle pins the card either way.
-  const [pinned, setPinned] = useState<boolean | null>(null)
-  const open = pinned ?? live
+  // The hook ignores native `toggle` echoes of React's own writes (mount and
+  // controlled updates both fire the event), so `pinned` means a real user
+  // click — that is what lets the card auto-collapse once the turn settles.
+  const { open, onToggle } = useEchoSafeToggle(live)
   const userText = userTextOfTurn(group)
 
   return (
@@ -182,7 +189,7 @@ export const TurnBlock = memo(function TurnBlock({
         <details
           className={`ark-process${live ? ' is-live' : ''}`}
           open={open}
-          onToggle={(event) => setPinned(event.currentTarget.open)}
+          onToggle={onToggle}
         >
           <summary className="ark-process__head">
             <span className={`ark-dot ${live ? 'ark-dot--live' : 'ark-dot--idle'}`} aria-hidden="true" />
