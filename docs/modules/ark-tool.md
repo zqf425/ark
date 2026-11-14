@@ -33,6 +33,18 @@
   `sh -c 'server &'` 留下的后台进程不会继续持有继承来的 stdout/stderr 管道。成功回收后必须
   `disarm`：pid 可能被复用，不能再发组信号。输出收集与超时语义不变（仍是
   `timeout(wait_with_output)`，超时返回带 `timeout` detail 的结构化错误）。
+- `find`/`grep` 的递归遍历跳过固定忽略名单（`target`、`node_modules`、`dist`、`.git`、`.tmp`、
+  `.worktrees`，见 `exec::common::IGNORED_DIR_NAMES`）。名单在搜索根之下的每一层生效；把 `path`
+  显式指进被忽略目录仍会扫描。该名单既是防噪（minified bundle 命中会灌爆上下文）也是防量：忽略前
+  一次 grep 遍历约 41 万个文件（实测 11.9 秒纯遍历），忽略后约 931 个（19 毫秒）。
+- `find`/`grep` 的同步目录扫描经 `tokio::task::spawn_blocking` 执行并受共享扫描预算约束
+  （`exec::common::BlockingScan`，复用 bash 的 clamp 超时）。直接在 async 执行器里扫描曾把 tokio
+  worker 阻塞十余分钟，回合取消信号无法被 poll，"停止"按钮杀不掉 grep；扫描函数在目录与文件粒度
+  检查 `ScanDeadline::is_expired`，超时返回带预算毫秒数的结构化错误。
+- `grep` 是无正则引擎的纯子串扫描。pattern 含正则元字符（`. * + ? ( ) [ ] { } | ^ $ \`）时返回
+  结构化错误并指向 `bash` 的 `grep -E`/`-F`，不再静默按字面量匹配——那会产出"no matches"假阴性
+  （实测一次 686 秒扫描换来错误结论）。命中的单行按匹配位置截断到 400 字符（固定前缀会把匹配本身
+  截掉），防止单行 minified 文件绕过行数上限灌爆模型上下文（实测一次拉入 254k 字符）。
 
 ## 验证
 
@@ -41,3 +53,8 @@
 `bash` 另有 Unix 进程树回归：命令派生孙进程（`sleep 30 & echo $! > …; wait`）并记录其 pid，超时后
 孙进程必须退出；外层 `tokio::time::timeout` 取消调用时同样必须退出。Windows 的 `taskkill /T /F`
 分支只有编译覆盖，需在 Windows 上单独验证。
+
+`find`/`grep` 另有：忽略名单回归（六个目录不进、显式 `path` 指进被忽略目录仍可搜）、正则元字符
+pattern 拒绝（含交替 `|` 场景）、单行 bundle 命中按匹配位置截断（输出长度有界且仍含 needle）。
+`grep` 的 blocking 执行正确性由并发测试与 `bash` 树回归共同覆盖；扫描超时路径依赖 `BlockingScan`
+的共享预算，与 bash 超时同一 `clamp_timeout` 常量，不单测墙钟。

@@ -6,8 +6,34 @@
 use ark_common::{ArkError, Result};
 use ark_ports::{SandboxDecision, ToolContext, ToolOutput};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::domain::paths;
+use crate::policy::truncate::{clamp_timeout, DEFAULT_LIMITS};
+
+/// Directory names the recursive walkers (`find`, `grep`) never enter.
+///
+/// The list covers build outputs and dependency caches (`target`,
+/// `node_modules`, `dist`), version-control objects (`.git`) and the scratch
+/// layout every worktree and agent task uses (`.tmp`, `.worktrees`, per
+/// AGENTS.md §2/§7.1). These dwarf real sources: before the list existed, one
+/// grep over this workspace walked ~380k files for eleven minutes (session
+/// 936001de, two calls, 1005 s). Names are judged on every directory **below**
+/// the search root, so an explicit `path` into an ignored directory still
+/// scans it deliberately.
+pub const IGNORED_DIR_NAMES: [&str; 6] = [
+    "target",
+    "node_modules",
+    "dist",
+    ".git",
+    ".tmp",
+    ".worktrees",
+];
+
+/// Whether the walkers skip a directory entry with this name.
+pub fn is_ignored_dir_name(name: &str) -> bool {
+    IGNORED_DIR_NAMES.contains(&name)
+}
 
 /// Resolve a tool-supplied path inside the workspace, or fail with validation.
 pub fn workspace_path(ctx: &ToolContext, input: Option<&str>) -> Result<PathBuf> {
@@ -70,6 +96,72 @@ pub fn write_text(path: &std::path::Path, text: &str) -> Result<()> {
 pub fn with_detail(mut output: ToolOutput, detail: impl Into<String>) -> ToolOutput {
     output.detail = Some(detail.into());
     output
+}
+
+/// Run a synchronous directory scan on the blocking pool with the bash timeout
+/// budget.
+///
+/// `grep` and `find` are plain `std::fs` walks; inlining them into the async
+/// executor blocked a tokio worker for the whole scan, which both starved the
+/// runtime (other turns queued behind it) and made the turn's cancellation
+/// unpollable — a user pressing "stop" could not interrupt an eleven-minute
+/// grep. `spawn_blocking` moves the walk off the workers; the deadline is the
+/// same clamped budget `bash` already uses, so every long-running builtin
+/// shares one bound. `handle.is_expired()` lets the inner loop stop early
+/// instead of burning the pool until the timeout fires.
+pub(crate) struct BlockingScan {
+    deadline: Duration,
+}
+
+impl BlockingScan {
+    pub(crate) fn start() -> Self {
+        Self {
+            deadline: Duration::from_millis(clamp_timeout(None, &DEFAULT_LIMITS)),
+        }
+    }
+
+    /// Run `scan` off the async workers; a deadline overrun becomes a
+    /// structured error naming the budget, mirroring the bash timeout detail.
+    pub(crate) async fn run<T, F>(&self, scan: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&ScanDeadline) -> Result<T> + Send + 'static,
+    {
+        let deadline = self.deadline;
+        let started = std::time::Instant::now();
+        let handle = tokio::task::spawn_blocking(move || {
+            let expired = ScanDeadline { started, deadline };
+            scan(&expired)
+        });
+        match tokio::time::timeout(deadline, handle).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(join_err)) => Err(ArkError::new(
+                ark_common::ArkErrorCode::ToolExecutionFailed,
+                format!("background scan failed: {join_err}"),
+            )),
+            Err(_) => Err(ArkError::new(
+                ark_common::ArkErrorCode::ToolExecutionFailed,
+                format!(
+                    "scan timed out after {} ms; narrow the search path or add a glob",
+                    deadline.as_millis()
+                ),
+            )),
+        }
+    }
+}
+
+/// Cooperative deadline the inner walk checks between entries.
+pub(crate) struct ScanDeadline {
+    started: std::time::Instant,
+    deadline: Duration,
+}
+
+impl ScanDeadline {
+    /// True once the shared scan budget is spent; checked per directory and
+    /// per file so a huge tree stops within one entry of the deadline.
+    pub(crate) fn is_expired(&self) -> bool {
+        self.started.elapsed() >= self.deadline
+    }
 }
 
 #[cfg(test)]
