@@ -89,7 +89,8 @@ export const createThreadsSlice: StateCreator<ThreadsSlice, [], [], ThreadsSlice
 
   /**
    * Advance the activity key from the live stream, then restore the server
-   * order so the streaming thread rises to the top of the rail in real time.
+   * order. Callers only fire this on turn boundaries (the user posted a
+   * message or the turn ended), so in-flight events never reorder the rail.
    * A stale or older timestamp is ignored: the list poll stays authoritative.
    */
   noteThreadActivity: (threadId, at) => set((state) => {

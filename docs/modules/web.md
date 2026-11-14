@@ -98,7 +98,12 @@
   （archived 优先级靠后、`last_event_at ?? updated_at` 降序），行内时间显示同一活动键；活跃会话的
   忙碌标记来自实时事件流（`turn_started`/终态事件驱动 `activeTurnId`），其余已加载行由 5 秒轮询
   `GET /v1/threads` 的 `running` 标记驱动，轮询帧在回合边界不得覆盖实时判定（见
-  `use-thread-running.ts`）。Plan、Changes、File、Terminal 是常驻
+  `use-thread-running.ts`）。客户端只在**回合边界**推进活动键并随之重排：用户发消息
+  （`turn_started`/`turn_steered`）与回合终态（`turn_completed`/`turn_failed`/`turn_aborted`）；
+  delta、工具调用、gate 等回合内事件只推进行内 `last_seq` 水位，detail 播种（点击会话触发的
+  `GET /v1/threads/{id}` 重载）也不同步行内活动键——否则被订阅（即被点开）的运行中会话会持续
+  压过其它行，多会话并行时表现为"点开谁谁置顶"。行内活动键的陈旧由下一次列表刷新（服务器权威）
+  纠偏。Plan、Changes、File、Terminal 是常驻
   检查器的四个 Tab（收起用 `hidden` 保挂载，面板草稿与服务端读模型不得因折叠丢失），不再使用带
   遮罩的浮动抽屉。`review`、`new`、`settings` 是同一 shell 下的全屏场景，由 `view-slice` 的 `view`
   选择；`commandOpen` 控制 ⌘K 命令面板。
