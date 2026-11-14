@@ -293,6 +293,9 @@ export function WorkspacePicker({ threadId }: { threadId: string | null }): JSX.
     // the global switch (with its process-wide busy 409) stays on the
     // settings/changes panels and is deliberately not part of this flow.
     await updateThread(threadId, { runtime: { workspace: path } })
+    // Reflect the switch in the rail right away so the project grouping moves
+    // with it; the next list refresh stays authoritative.
+    useCodeSessionStore.getState().setThreadWorkspaceRow(threadId, path)
     const [nextView, nextRuntime] = await Promise.all([getWorkspaceView(), fetchRuntime(threadId)])
     setView(nextView)
     setRuntime(nextRuntime)

@@ -1,10 +1,11 @@
 /**
  * Pure grouping for the thread rail's project view (对齐 smart-ark：左侧列表
- * 先按会话工作空间聚合成项目，再列会话)。
+ * 先按会话的**实际生效**工作空间聚合成项目，再列会话)。
  *
- * 分组键是 `ThreadSummary.workspace`——`GET /v1/threads` 行内已携带的解析后
- * 工作空间覆盖；未设置覆盖的会话落进一个"默认项目"，与全局默认工作空间一致，
- * 前端不再逐行拉 detail 或猜测路径。
+ * 分组键优先取 `ThreadSummary.workspace`——`GET /v1/threads` 行内已携带的解析后
+ * 工作空间覆盖；未设置覆盖的会话回退到运行时当前生效的工作空间（active root，
+ * 与回合同一解析顺序，见 arkd `resolve_workspace`），仍然无主时才落进一个
+ * "默认项目"。前端不再逐行拉 detail 或猜测路径。
  */
 import type { ThreadSummary } from '../../../shared/contracts'
 
@@ -34,14 +35,23 @@ function parentLabel(path: string, label: string): string {
 }
 
 /**
- * Group threads by their workspace. Insertion order follows the input, so the
- * project list inherits the runtime's deterministic ordering: the project whose
- * thread was updated most recently first. Projects stay mutually exclusive—
- * one thread belongs to exactly one group.
+ * Group threads by their effective workspace. A thread without its own
+ * workspace override inherits the runtime's active root (same resolution order
+ * as a turn), mirroring smart-ark's sidebar where a session runs inside the
+ * currently selected project until it explicitly points elsewhere.
+ *
+ * Ordering mirrors smart-ark: the active workspace's group comes first — even
+ * when it holds no threads, so the "current project" is always visible — and
+ * the remaining projects follow in input order, inheriting the runtime's
+ * deterministic ordering (the project whose thread was updated most recently
+ * first). Projects stay mutually exclusive—one thread belongs to exactly one
+ * group.
  */
 export function groupThreadsByProject(
-  threads: readonly ThreadSummary[]
+  threads: readonly ThreadSummary[],
+  activeWorkspace?: string
 ): { default: ThreadProject; projects: ThreadProject[] } {
+  const active = activeWorkspace?.trim() ?? ''
   const buckets = new Map<string, ThreadProject>()
   const defaultProject: ThreadProject = {
     path: DEFAULT_PROJECT_PATH,
@@ -49,21 +59,33 @@ export function groupThreadsByProject(
     parent: '',
     threads: []
   }
-  for (const thread of threads) {
-    const path = thread.workspace?.trim() ?? ''
-    if (!path) {
-      defaultProject.threads.push(thread)
-      continue
-    }
+  const ensureProject = (path: string): ThreadProject => {
     let project = buckets.get(path)
     if (!project) {
       const label = workspaceBasename(path)
       project = { path, label, parent: parentLabel(path, label), threads: [] }
       buckets.set(path, project)
     }
-    project.threads.push(thread)
+    return project
   }
-  return { default: defaultProject, projects: [...buckets.values()] }
+  for (const thread of threads) {
+    const path = thread.workspace?.trim() || active
+    if (!path) {
+      defaultProject.threads.push(thread)
+      continue
+    }
+    ensureProject(path).threads.push(thread)
+  }
+  const projects = [...buckets.values()]
+  if (active) {
+    // The active root may hold no thread of its own; still surface its group
+    // first so the rail reflects the project the composer is pointed at.
+    const activeProject = ensureProject(active)
+    const rest = projects.filter((project) => project.path !== active)
+    rest.unshift(activeProject)
+    return { default: defaultProject, projects: rest }
+  }
+  return { default: defaultProject, projects }
 }
 
 /**

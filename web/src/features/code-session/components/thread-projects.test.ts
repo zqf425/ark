@@ -65,6 +65,50 @@ describe('groupThreadsByProject', () => {
     expect(grouped.projects.every((project) => project.label === 'ark')).toBe(true)
     expect(grouped.projects.map((project) => project.parent).sort()).toEqual(['code', 'work'])
   })
+
+  it('inherits the active workspace for threads without an override', () => {
+    const grouped = groupThreadsByProject(
+      [row({ thread_id: 'a' as ThreadSummary['thread_id'] }), row({ workspace: '/w/qdc' })],
+      '/code/ark'
+    )
+    expect(grouped.default.threads).toHaveLength(0)
+    const ark = grouped.projects.find((project) => project.path === '/code/ark')
+    expect(ark?.threads.map((thread) => thread.thread_id)).toEqual(['a'])
+    expect(grouped.projects.map((project) => project.path)).toEqual(['/code/ark', '/w/qdc'])
+  })
+
+  it('prefers the explicit override over the active workspace', () => {
+    const grouped = groupThreadsByProject(
+      [row({ workspace: '/w/override' })],
+      '/code/ark'
+    )
+    // The override owns the thread; the active root still leads the rail, but
+    // as an empty group.
+    expect(grouped.projects.map((project) => project.path)).toEqual([
+      '/code/ark',
+      '/w/override'
+    ])
+    expect(grouped.projects[0]?.threads).toHaveLength(0)
+    expect(grouped.projects[1]?.threads).toHaveLength(1)
+    expect(grouped.default.threads).toHaveLength(0)
+  })
+
+  it('surfaces the active workspace first even without threads', () => {
+    const grouped = groupThreadsByProject(
+      [row({ workspace: '/w/old' })],
+      '/code/ark'
+    )
+    expect(grouped.projects.map((project) => project.path)).toEqual([
+      '/code/ark',
+      '/w/old'
+    ])
+    expect(grouped.projects[0]?.threads).toHaveLength(0)
+  })
+
+  it('keeps the runtime ordering untouched when no active workspace is given', () => {
+    const grouped = groupThreadsByProject([row({ workspace: '/w/old' }), row({ workspace: '/w/new' })])
+    expect(grouped.projects.map((project) => project.path)).toEqual(['/w/old', '/w/new'])
+  })
 })
 
 describe('projectMatchesNeedle', () => {

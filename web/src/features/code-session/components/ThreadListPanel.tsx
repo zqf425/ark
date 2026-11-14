@@ -8,6 +8,7 @@ import { useThreadList } from '../hooks/use-thread-list'
 import { useThreadRunning } from '../hooks/use-thread-running'
 import { activityKeyOf } from '../state/threads-slice'
 import { exportThread } from '../api/threads-api'
+import { getWorkspaceView } from '../../settings/api/workspace-api'
 import { filterThreadsWithWorkspace, type ThreadListScope } from './thread-list-filter'
 import { groupThreadsByProject, type ThreadProject } from './thread-projects'
 import { ScheduleCreateDialog } from './ScheduleCreateDialog'
@@ -243,6 +244,25 @@ export function ThreadListPanel(): JSX.Element {
   const [query, setQuery] = useState('')
   /** The scheduled-task entry opens a dialog; the rail itself never navigates. */
   const [scheduleOpen, setScheduleOpen] = useState(false)
+  /**
+   * The runtime's active workspace root: the fallback grouping key for
+   * threads without an override (same resolution order as a turn) and the
+   * first group in the rail, mirroring smart-ark's sidebar.
+   */
+  const [activeWorkspace, setActiveWorkspace] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    void getWorkspaceView()
+      .then((view) => {
+        if (!cancelled) setActiveWorkspace(view.active?.path ?? '')
+      })
+      .catch(() => {
+        // Without the view the rail keeps grouping by overrides only.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   /** Collapsed project paths; the default group starts expanded with the rest. */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const visibleThreads = useMemo(
@@ -250,7 +270,7 @@ export function ThreadListPanel(): JSX.Element {
     [threads, query, scope]
   )
   const groups = useMemo(() => {
-    const { default: fallback, projects } = groupThreadsByProject(visibleThreads)
+    const { default: fallback, projects } = groupThreadsByProject(visibleThreads, activeWorkspace)
     const list: ThreadProject[] = []
     if (fallback.threads.length > 0) {
       list.push({ ...fallback, label: t('thread.list.defaultProject') })
@@ -260,7 +280,7 @@ export function ThreadListPanel(): JSX.Element {
     // needle or a title hit would hide its project.
     list.push(...projects)
     return list
-  }, [visibleThreads, t])
+  }, [visibleThreads, activeWorkspace, t])
   const titlesById = useMemo(() => new Map(threads.map((row) => [row.thread_id as string, row.title])), [threads])
   const recentCount = useMemo(() => threads.filter((thread) => !thread.archived).length, [threads])
   const archivedCount = threads.length - recentCount

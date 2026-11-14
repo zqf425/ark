@@ -23,6 +23,12 @@ export type ThreadsSlice = {
    * refresh; this only keeps the title current between refreshes.
    */
   renameThreadRow: (threadId: ThreadId, title: string) => void
+  /**
+   * Fold a per-session workspace change into one rail row so the project
+   * grouping follows a composer switch immediately, without waiting for the
+   * next list refresh.
+   */
+  setThreadWorkspaceRow: (threadId: ThreadId, workspace: string) => void
   setActiveThread: (threadId: ThreadId | null) => void
   setListStatus: (status: LoadStatus, error?: string | null) => void
   removeThread: (threadId: ThreadId) => void
@@ -149,6 +155,19 @@ export const createThreadsSlice: StateCreator<ThreadsSlice, [], [], ThreadsSlice
     if (index === -1) return {}
     const rows = [...state.threads]
     rows[index] = { ...rows[index]!, title: next }
+    return { threads: rows }
+  }),
+
+  /**
+   * Fold a per-session workspace change into one rail row so the project
+   * grouping follows the switch immediately, without waiting for the next
+   * list refresh (the list endpoint stays authoritative otherwise).
+   */
+  setThreadWorkspaceRow: (threadId, workspace) => set((state) => {
+    const index = state.threads.findIndex((row) => row.thread_id === threadId)
+    if (index === -1) return {}
+    const rows = [...state.threads]
+    rows[index] = { ...rows[index]!, workspace: workspace || undefined }
     return { threads: rows }
   }),
 
