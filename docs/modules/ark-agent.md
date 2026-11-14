@@ -16,6 +16,13 @@
 re-export，刻意不引入 tokio-util 依赖）与 `select!` 完成；
 任何退出路径都必须写终态并清理活动注册，不得留下“磁盘记录 running 但任务已丢失”的状态。
 
+gate broker 面（`exec/gate.rs`）包括 `AllowAllGates`、`DenyAllGates` 与 `AutoDenyGates`
+（[审批规则需求](../requirements/approval-rules.md) §4）：后者包装任意内层 broker，
+无人值守处置为 `deny`（默认）时不注册 gate、立即以结构化原因拒绝，`allow` 时透传内层；
+`prepare_user_input` 恒透传（用户输入不是审批面）。规则拒绝（`SandboxDecision::Deny`）
+的调用在 reactor 的 `approval_asks` 阶段就不产生审批 ask——拒绝已是终态，开 gate 等于允许
+HTTP 侧批准一条策略表明确拒绝的调用。
+
 ## 关键约束
 
 - 子代理不是第二个 agent：它是同一 `Reactor` 驱动的独立 child turn。

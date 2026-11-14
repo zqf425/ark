@@ -46,8 +46,8 @@ pub use domain::{
     ToolCallRequest, ToolExecution, TurnInput, TurnLimits, TurnOutcome, TurnState,
 };
 pub use exec::{
-    AllowAllGates, ApprovalReply, ApprovalRequest, DenyAllGates, EventSinkWriter, GateBroker,
-    GateFuture, MemoryWriter, SessionWriter, ToolRunner, TurnEvents, UserInputRequest,
+    AllowAllGates, ApprovalReply, ApprovalRequest, AutoDenyGates, DenyAllGates, EventSinkWriter,
+    GateBroker, GateFuture, MemoryWriter, SessionWriter, ToolRunner, TurnEvents, UserInputRequest,
 };
 pub use policy::{
     AccessKind, BudgetVerdict, ParallelPolicy, StormBreaker, StormReport, SuppressedCall,

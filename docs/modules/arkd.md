@@ -164,6 +164,12 @@ assistant 行），后接一条截断到 16 KiB UTF-8 字节的 `ModelRole::Tool
 facts extracted` 与 `: truncated` 两个变体）。判定 gated 在 `Notice` kind 上：用户消息可以打出任意
 前缀，永远不算检查点；也不得改回裸前缀匹配，改渲染格式同样会让历史识别静默失效。
 
+审批规则（[需求设计](../requirements/approval-rules.md)）在回合入口接线：父路径与子路径都用
+`ark_tool::ApprovalPolicy` 包装既有 autonomy 策略（每回合用配置快照构造，规则属 Hot）；reactor 侧
+gate 注入 `AutoDenyGates` 包装 `InteractiveGates`——`approvals.on_unattended=deny`（默认）时无人
+值守回合的审批请求立即被结构化拒绝，不再挂死到 `sse_idle_timeout`；`AppState` 仍持裸
+`InteractiveGates`（HTTP handler 按 id resolve，从不等待）。
+
 用户长期 memory 也走动态尾部：`run_turn` 在 skills 目录之后、completion inbox 之前，每回合重新读取
 `<root>/data/memory.json` 并追加**至多一条** `[user memory]` system 消息（按 `created_at` 升序，拼接后
 按 UTF-8 字符数限 4096，超限整条丢弃最新条目并追加 truncated 尾注）。读取或解析失败只记 warn 并跳过注入，

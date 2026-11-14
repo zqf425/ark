@@ -22,6 +22,7 @@ pub const FIELD_CLASSES: &[(&str, ReloadClass)] = &[
     // whole patch and the settings UI could never save it.
     ("skills", ReloadClass::Hot),
     ("hooks", ReloadClass::Hot),
+    ("approvals", ReloadClass::Hot),
     ("schedules", ReloadClass::Hot),
     ("im", ReloadClass::Hot),
     ("tuning", ReloadClass::Hot),

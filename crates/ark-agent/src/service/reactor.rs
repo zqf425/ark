@@ -1006,6 +1006,30 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_denied_decision_never_reaches_the_approval_ask() {
+        // A rule-denied call (`SandboxDecision::Deny`) must not open a gate:
+        // the refusal is already final, and opening a gate would let an HTTP
+        // client approve a call the policy table explicitly rejected.
+        let writer = Arc::new(MemoryWriter::new());
+        let reactor = reactor(writer);
+        let calls = vec![ToolCallRequest::new(
+            "call-1",
+            "bash",
+            serde_json::json!({ "command": "rm -rf /" }),
+        )
+        .with_sandbox(SandboxDecision::Deny)];
+
+        let asks = reactor.approval_asks(&calls);
+
+        assert!(asks.is_empty(), "a denied call must not open a gate");
+        // It rides as a plain call: the runner refuses `Deny` defensively and
+        // produces the synthetic failure result, keeping the event pairing.
+        assert_eq!(reactor.approval_asks(&calls.clone()).len(), 0);
+        let gated: Vec<&ToolCallRequest> = calls.iter().collect();
+        assert_eq!(gated.len(), 1);
+    }
+
     /// Streams an empty response, but during the first (and would-be final)
     /// round a steer arrives — the race that used to drop the correction.
     #[derive(Debug)]

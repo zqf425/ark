@@ -153,11 +153,14 @@ pub fn load_host(
     let provision_specs: Vec<ProvisionSpec> = ready
         .iter()
         .filter_map(|item| {
-            item.declarations.provision.as_ref().map(|section| ProvisionSpec {
-                plugin_id: item.manifest.id.clone(),
-                plugin_dir: item.directory.clone(),
-                section: section.clone(),
-            })
+            item.declarations
+                .provision
+                .as_ref()
+                .map(|section| ProvisionSpec {
+                    plugin_id: item.manifest.id.clone(),
+                    plugin_dir: item.directory.clone(),
+                    section: section.clone(),
+                })
         })
         .collect();
     let provision = if provision_specs.is_empty() {
@@ -317,7 +320,10 @@ impl PluginHost {
             // The declared request, not the grant: a user reads here what the
             // plugin asked for (requirements/plugin-hook-bus.md, 权限与安全).
             hook_points: manifest.hook_points(),
-            provision: self.provision.as_ref().and_then(|flow| flow.status(&manifest.id)),
+            provision: self
+                .provision
+                .as_ref()
+                .and_then(|flow| flow.status(&manifest.id)),
         })
     }
 

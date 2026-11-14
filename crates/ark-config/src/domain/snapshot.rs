@@ -6,9 +6,10 @@
 //! value, so a rejected patch cannot leave the live snapshot half updated.
 
 use ark_contract::{
-    ConfigPatch, FieldPath, HookSettings, ImSettings, ScheduleSettings, SkillsSettings,
-    SubagentSettings, TuningSettings, SKILLS_EXTRA_DIRS_MAX, SKILLS_EXTRA_DIR_MAX_CHARS,
-    SUBAGENT_CONCURRENCY_MAX, SUBAGENT_CONCURRENCY_MIN,
+    ApprovalAction, ApprovalSettings, ConfigPatch, FieldPath, HookSettings, ImSettings,
+    ScheduleSettings, SkillsSettings, SubagentSettings, TuningSettings, UnattendedApproval,
+    SKILLS_EXTRA_DIRS_MAX, SKILLS_EXTRA_DIR_MAX_CHARS, SUBAGENT_CONCURRENCY_MAX,
+    SUBAGENT_CONCURRENCY_MIN,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -142,6 +143,10 @@ pub struct RuntimeConfig {
     /// Agent lifecycle hooks (requirements/hooks.md). Classed `Hot`: every tool
     /// call reads the live snapshot, so a patch applies to the very next call.
     pub hooks: HookSettings,
+    /// Approval rule table and unattended disposition
+    /// (requirements/approval-rules.md). Classed `Hot`: each turn snapshot
+    /// builds its sandbox policy from the live value.
+    pub approvals: ApprovalSettings,
     /// Scheduled-task master switch (requirements/scheduled-tasks.md). Classed
     /// `Hot`: the tick loop re-reads it every 30s, so disabling schedules takes
     /// effect without a restart and without touching `schedules.json`.
@@ -166,6 +171,7 @@ impl Default for RuntimeConfig {
             subagents: SubagentSettings::default(),
             skills: SkillsSettings::default(),
             hooks: HookSettings::default(),
+            approvals: ApprovalSettings::default(),
             schedules: ScheduleSettings::default(),
             im: ImSettings::default(),
             tuning: TuningConfig::default(),
@@ -216,6 +222,7 @@ impl RuntimeConfig {
             return Err("tuning contains an out-of-range value".to_string());
         }
         validate_hooks(&self.hooks)?;
+        validate_approvals(&self.approvals)?;
         Ok(())
     }
 
@@ -294,6 +301,12 @@ impl RuntimeConfig {
                 changed.push(FieldPath::new("hooks"));
             }
         }
+        if let Some(value) = &patch.approvals {
+            if next.approvals != *value {
+                next.approvals = value.clone();
+                changed.push(FieldPath::new("approvals"));
+            }
+        }
         if let Some(value) = &patch.schedules {
             if next.schedules != *value {
                 next.schedules = *value;
@@ -337,6 +350,40 @@ fn validate_hooks(hooks: &HookSettings) -> Result<(), String> {
     Ok(())
 }
 
+/// Approval rule bounds (requirements/approval-rules.md): a real policy table
+/// fits comfortably, and the wire strings are closed enums validated here so
+/// the policy layer never sees an unknown action.
+fn validate_approvals(settings: &ApprovalSettings) -> Result<(), String> {
+    if settings.rules.len() > 128 {
+        return Err("approvals.rules has more than 128 rules".to_string());
+    }
+    for rule in &settings.rules {
+        if rule.pattern.len() > 4 * 1024 {
+            return Err("approvals rule pattern exceeds 4 KiB".to_string());
+        }
+        for tool in &rule.tools {
+            if tool.trim().is_empty() {
+                return Err("approvals rule contains an empty tool name".to_string());
+            }
+            if tool.len() > 64 {
+                return Err("approvals rule tool name exceeds 64 characters".to_string());
+            }
+        }
+        if !ApprovalAction::VALUES.contains(&match rule.action {
+            ApprovalAction::Allow => "allow",
+            ApprovalAction::Deny => "deny",
+        }) {
+            return Err("approvals rule action is not one of allow, deny".to_string());
+        }
+    }
+    // `UnattendedApproval` is a closed serde enum, so an unknown string fails
+    // deserialization before this point; nothing left to check here beyond
+    // keeping the type in scope for the match below.
+    let _ = settings.on_unattended == UnattendedApproval::Allow
+        || settings.on_unattended == UnattendedApproval::Deny;
+    Ok(())
+}
+
 /// Skills scan-root bounds (docs/modules/ark-skills.md).
 ///
 /// Entries must be absolute or `~`-prefixed: a workspace-relative root would
@@ -376,6 +423,7 @@ fn validate_skills(skills: &SkillsSettings) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark_contract::{ApprovalAction, ApprovalRule, UnattendedApproval};
 
     #[test]
     fn valid_log_levels_pass_and_unknown_ones_fail() {
@@ -509,6 +557,74 @@ mod tests {
         };
         assert!(RuntimeConfig {
             hooks: too_many,
+            ..RuntimeConfig::default()
+        }
+        .validate()
+        .is_err());
+    }
+
+    #[test]
+    fn an_approvals_patch_applies_hot_and_validates_bounds() {
+        let config = RuntimeConfig::default();
+        let approvals = ApprovalSettings {
+            rules: vec![ApprovalRule {
+                tools: vec!["bash".into()],
+                pattern: "cargo *".into(),
+                action: ApprovalAction::Allow,
+            }],
+            on_unattended: UnattendedApproval::Deny,
+        };
+        let patch = ConfigPatch {
+            approvals: Some(approvals.clone()),
+            ..ConfigPatch::default()
+        };
+        let (next, changed) = config.candidate(&patch).unwrap();
+        assert_eq!(next.approvals, approvals);
+        assert_eq!(changed, vec![FieldPath::new("approvals")]);
+
+        // Bounds: more than 128 rules is rejected before it can land.
+        let too_many = ApprovalSettings {
+            rules: (0..129)
+                .map(|index| ApprovalRule {
+                    tools: Vec::new(),
+                    pattern: format!("rule {index}"),
+                    action: ApprovalAction::Allow,
+                })
+                .collect(),
+            on_unattended: UnattendedApproval::Deny,
+        };
+        assert!(RuntimeConfig {
+            approvals: too_many,
+            ..RuntimeConfig::default()
+        }
+        .validate()
+        .is_err());
+
+        // Bounds: an oversized pattern is rejected.
+        assert!(RuntimeConfig {
+            approvals: ApprovalSettings {
+                rules: vec![ApprovalRule {
+                    tools: Vec::new(),
+                    pattern: "x".repeat(4 * 1024 + 1),
+                    action: ApprovalAction::Deny,
+                }],
+                on_unattended: UnattendedApproval::Deny,
+            },
+            ..RuntimeConfig::default()
+        }
+        .validate()
+        .is_err());
+
+        // Bounds: an empty tool name is rejected.
+        assert!(RuntimeConfig {
+            approvals: ApprovalSettings {
+                rules: vec![ApprovalRule {
+                    tools: vec!["  ".into()],
+                    pattern: String::new(),
+                    action: ApprovalAction::Allow,
+                }],
+                on_unattended: UnattendedApproval::Deny,
+            },
             ..RuntimeConfig::default()
         }
         .validate()

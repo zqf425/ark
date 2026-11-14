@@ -277,7 +277,10 @@ const INSTALL_ALLOWLIST: &[&str] = &["npm", "pnpm", "yarn", "brew", "cargo"];
 
 fn validate_command(command: &str, install: bool) -> ark_common::Result<()> {
     let bare = !command.is_empty()
-        && command.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && command
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric())
         && command
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));

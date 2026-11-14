@@ -237,10 +237,7 @@ mod tests {
     async fn export_zip_wraps_the_snapshot_deterministically() {
         let dir = TempDir::new();
         let (app, store) = app(&dir);
-        let created = store
-            .create_thread("zip-me")
-            .await
-            .expect("create thread");
+        let created = store.create_thread("zip-me").await.expect("create thread");
         let uri = format!("/v1/threads/{}/export?format=zip", created.thread_id);
 
         let first = get_json(&app, &uri).await;

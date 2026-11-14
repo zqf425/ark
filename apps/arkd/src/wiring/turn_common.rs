@@ -308,7 +308,10 @@ pub(crate) const CHILD_ROLE_LINE: &str =
 /// voice (requirements/project-instructions.md). This is a dynamic-tail
 /// message, never part of the static prefix: the text varies per workspace and
 /// must not poison the byte-stable prompt-cache window.
-pub(crate) fn push_project_instructions(workspace: &std::path::Path, messages: &mut Vec<ModelMessage>) {
+pub(crate) fn push_project_instructions(
+    workspace: &std::path::Path,
+    messages: &mut Vec<ModelMessage>,
+) {
     if let Some(text) = crate::instructions::seed_for_workspace(workspace) {
         messages.push(ModelMessage::system(text));
     }

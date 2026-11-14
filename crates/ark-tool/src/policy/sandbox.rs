@@ -10,6 +10,7 @@ use ark_ports::{SandboxDecision, SandboxPolicy, ToolArgs};
 use ark_common::Autonomy;
 
 use crate::domain::meta::meta_of;
+use crate::policy::approvals;
 
 /// Policy implementation injected into the reactor.
 #[derive(Debug, Clone, Copy, Default)]
@@ -24,6 +25,35 @@ impl BuiltinSandboxPolicy {
 
     pub fn autonomy(&self) -> Autonomy {
         self.autonomy
+    }
+}
+
+/// Sandbox policy wrapped by the approval rule table
+/// (requirements/approval-rules.md). The baseline decision still comes from
+/// the inner policy; the table may relax a `NeedsApproval` verdict or deny the
+/// call outright, nothing else. Rules are a **Hot** config: the composition
+/// root builds one policy per turn from the live snapshot.
+#[derive(Debug, Clone)]
+pub struct ApprovalPolicy {
+    inner: BuiltinSandboxPolicy,
+    settings: ark_contract::ApprovalSettings,
+}
+
+impl ApprovalPolicy {
+    pub fn new(inner: BuiltinSandboxPolicy, settings: ark_contract::ApprovalSettings) -> Self {
+        Self { inner, settings }
+    }
+
+    pub fn autonomy(&self) -> Autonomy {
+        self.inner.autonomy()
+    }
+}
+
+impl SandboxPolicy for ApprovalPolicy {
+    fn decide(&self, tool: &str, args: &ToolArgs) -> SandboxDecision {
+        let baseline = self.inner.decide(tool, args);
+        let verdict = approvals::decide(&self.settings, tool, args);
+        approvals::apply(verdict, baseline)
     }
 }
 

@@ -13,8 +13,8 @@ pub mod tool_runner;
 
 pub use events::TurnEvents;
 pub use gate::{
-    AllowAllGates, ApprovalReply, ApprovalRequest, DenyAllGates, GateBroker, GateFuture,
-    UserInputRequest,
+    AllowAllGates, ApprovalReply, ApprovalRequest, AutoDenyGates, DenyAllGates, GateBroker,
+    GateFuture, UserInputRequest,
 };
 pub use journal::{EventSinkWriter, MemoryWriter, SessionWriter};
 pub use tool_runner::{MapToolRunner, ToolRunner};

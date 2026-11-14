@@ -237,8 +237,14 @@ impl TurnRunner for AgentTurnRunner {
                 thread.runtime.model.as_deref(),
             )
             .await?;
-        let policy: Arc<dyn SandboxPolicy> = Arc::new(BuiltinSandboxPolicy::new(
-            autonomy_from_override_or_default(thread.runtime.autonomy.as_deref(), &snapshot)?,
+        // The rule table is a Hot config: each turn snapshots its own policy so
+        // a saved patch applies to the next turn without a restart.
+        let policy: Arc<dyn SandboxPolicy> = Arc::new(ApprovalPolicy::new(
+            BuiltinSandboxPolicy::new(autonomy_from_override_or_default(
+                thread.runtime.autonomy.as_deref(),
+                &snapshot,
+            )?),
+            snapshot.approvals.clone(),
         ));
         // Plugin decide first, then the shell `pre_tool_use` hook, then
         // dispatch (requirements/plugin-hook-bus.md, pinned order).

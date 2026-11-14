@@ -68,8 +68,8 @@ impl ProvidersDocument {
         if model.is_empty() {
             return None;
         }
-        let known =
-            model == entry.model.trim() || entry.models.iter().flatten().any(|item| item.id == model);
+        let known = model == entry.model.trim()
+            || entry.models.iter().flatten().any(|item| item.id == model);
         known.then(|| model.to_string())
     }
 

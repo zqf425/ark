@@ -285,12 +285,15 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
         // workspace, permission envelope and model unless it deliberately asks
         // to narrow or replace them.
         // One snapshot per turn, same rule as the parent path: autonomy and
-        // limits must come from the same config state.
+        // limits must come from the same config state. The rule table wraps the
+        // child's (already capped) autonomy the same way it wraps the parent's.
         let snapshot = self.config.snapshot();
         let settings = self.inherited_settings(&ctx, &snapshot).await?;
         let workspace = settings.workspace;
-        let sandbox: Arc<dyn SandboxPolicy> =
-            Arc::new(ark_tool::BuiltinSandboxPolicy::new(settings.autonomy));
+        let sandbox: Arc<dyn SandboxPolicy> = Arc::new(ark_tool::ApprovalPolicy::new(
+            ark_tool::BuiltinSandboxPolicy::new(settings.autonomy),
+            snapshot.approvals.clone(),
+        ));
         // Plugin decide first, then the shell `pre_tool_use` hook, then
         // dispatch — the same pinned order the parent path uses.
         let tools: Arc<dyn ark_agent::ToolRunner> = Arc::new(HookToolRunner::new(
