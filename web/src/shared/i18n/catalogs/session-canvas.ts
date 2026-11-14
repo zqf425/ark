@@ -37,6 +37,7 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.header.reviewFailed': ['发起评审失败', 'Failed to start review'],
 
   'canvas.author.you': ['你', 'You'],
+  'canvas.author.youInitial': ['你', 'You'],
   'canvas.attachments.title': ['附件', 'Attachments'],
   'canvas.attachments.image': ['图片', 'Image'],
   'canvas.attachments.previewText': ['文本预览', 'Text preview'],

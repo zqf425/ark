@@ -16,6 +16,40 @@ function statusClass(item: ThreadItem, tool: ToolPayload): string {
 }
 
 /**
+ * Tool-family glyph class, resolved from the tool name: mainstream agent
+ * activity rows give every entry a recognizable icon so a long turn scans by
+ * shape. Unknown names fall back to the wrench disc.
+ */
+function toolIconClass(tool: string): string {
+  const name = tool.toLowerCase()
+  if (/(^|_)(read|view|open|list|show|fetch|get|download)(_|$)/.test(name)) return 'ark-tool__icon--read'
+  if (/(^|_)(write|edit|patch|apply|create|save|upload|move|rename)(_|$)/.test(name)) return 'ark-tool__icon--write'
+  if (/(^|_)(bash|exec|run|command|shell|terminal|cmd|powershell)(_|$)/.test(name)) return 'ark-tool__icon--exec'
+  if (/(^|_)(search|grep|find|glob|query|scan|web_search)(_|$)/.test(name)) return 'ark-tool__icon--search'
+  return 'ark-tool__icon--generic'
+}
+
+/**
+ * One-line argument digest for the collapsed header (e.g. `path=web/src`, or
+ * `cmd=npm test`). The full JSON stays behind the fold; the digest only reads
+ * already-formatted text, so no second serializer exists. Returns '' when the
+ * arguments are not a plain object.
+ */
+function argsDigest(formatted: string): string {
+  if (!formatted.startsWith('{')) return ''
+  try {
+    const parsed = JSON.parse(formatted) as Record<string, unknown>
+    const first = Object.entries(parsed)[0]
+    if (!first) return ''
+    const [key, value] = first
+    const text = typeof value === 'string' ? value : JSON.stringify(value)
+    return `${key}=${text}`
+  } catch {
+    return ''
+  }
+}
+
+/**
  * Foldable tool card. The `tool` payload is the runtime's structured facet, so
  * nothing here infers the tool name from text.
  *
@@ -37,6 +71,7 @@ export const ToolCard = memo(function ToolCard({ item }: { item: ThreadItem }): 
   }
 
   const args = formatToolArguments(tool.arguments)
+  const digest = argsDigest(args)
   const hasBody = Boolean(args || tool.output || item.detail)
 
   return (
@@ -45,7 +80,9 @@ export const ToolCard = memo(function ToolCard({ item }: { item: ThreadItem }): 
         <span className="ark-tool__chevron" aria-hidden="true">
           {open ? '▾' : '▸'}
         </span>
+        <span className={`ark-tool__icon ${toolIconClass(tool.tool)}`} aria-hidden="true" />
         <span className="ark-tool__name">{tool.tool}</span>
+        {digest ? <span className="ark-tool__digest">{digest}</span> : null}
         <span className={`ark-chip ${statusClass(item, tool)}`}>{t(statusKey(item, tool))}</span>
         {typeof tool.duration_ms === 'number' ? (
           <span className="ark-tool__meta">{tool.duration_ms} ms</span>

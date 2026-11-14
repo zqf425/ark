@@ -1,7 +1,7 @@
 /**
- * Message bubbles and reasoning rows, ported from the smart-ark timeline:
- * the user speaks in a whale-blue bubble hugging the right edge, ark answers
- * in prose floating directly on the canvas.
+ * Message rows, ported from mainstream agent canvases: the user speaks in a
+ * whale-tinted card hugging the right edge; ark answers in prose on the canvas
+ * with a small identity avatar on the meta row.
  *
  * Part of the Code screen stylesheet; split to stay under the 1000-line
  * per-file limit (design §7.10.2). Code-session.css is the entry. Colors come
@@ -16,6 +16,44 @@
   gap: 4px;
   max-width: 100%;
   min-width: 0;
+}
+
+/* Meta row: one quiet identity line per message, shared by both roles. */
+.ark-msg__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 22px;
+  font-size: 11px;
+  color: var(--ark-text-faint);
+}
+
+/* Small round identity glyph: "you" is a solid accent disc, "ark" is a
+   hairline-ringed disc with the wordmark inside — no bitmaps, pure CSS. */
+.ark-msg__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.ark-msg__avatar--you {
+  background: var(--ark-accent-soft);
+  color: var(--ark-accent);
+}
+
+.ark-msg__avatar--assistant {
+  background: var(--ark-bg-inset);
+  border: 1px solid var(--ark-border-muted);
+  color: var(--ark-text-dim);
+  font-size: 7.5px;
 }
 
 /* User bubble: right-aligned, asymmetric radius with the "direction" corner,
@@ -63,16 +101,16 @@
   padding: 2px 0;
 }
 
-.ark-msg--assistant.is-failed .ark-msg__body--prose {
-  color: var(--ark-error-strong);
+.ark-msg--assistant .ark-msg__body--prose {
+  padding-left: 25px;
 }
 
-.ark-msg__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--ark-text-faint);
+.ark-msg--assistant .ark-msg__head {
+  padding-left: 0;
+}
+
+.ark-msg--assistant.is-failed .ark-msg__body--prose {
+  color: var(--ark-error-strong);
 }
 
 /* Copy lives in the meta row and only surfaces on hover/keyboard focus, like
@@ -130,6 +168,14 @@
   margin: 0;
   color: var(--ark-text-faint);
   font-size: 12px;
+}
+
+/* Failed/aborted states: the identity glyph and status chip carry the signal,
+   the prose body keeps its normal color except for hard failures. */
+.ark-msg--assistant.is-failed .ark-msg__avatar--assistant {
+  color: var(--ark-error-strong);
+  border-color: var(--ark-error-wash);
+  background: var(--ark-error-wash);
 }
 
 /* ---------- checkpoint: collapsed compaction handoff ---------- */
