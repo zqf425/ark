@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ThreadItem, TurnAttachmentOutcome } from '../../../shared/contracts'
 import { installBrowserStubs, mountWithProviders } from '../../../shared/testing/react-harness'
-import { UserBubble, AssistantBubble } from './MessageBubble'
+import { UserBubble, AssistantBubble, FinalReplyCard } from './MessageBubble'
 
 installBrowserStubs()
 
@@ -153,6 +153,61 @@ describe('气泡一键复制', () => {
       })
     )
     expect(written).toEqual(['# 标题\n\n正文'])
+    await harness.unmount()
+  })
+})
+
+describe('最终回复卡', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'clipboard')
+  })
+
+  function stubClipboardInCard(written: string[]): void {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: (text: string) => Promise.resolve(written.push(text)) },
+      configurable: true,
+      writable: true
+    })
+  }
+
+  const replyItem = (status: ThreadItem['status'], text = '结论如下'): ThreadItem => ({
+    item_id: '00000000-0000-0000-0000-0000000000f1',
+    turn_id: TURN,
+    kind: 'assistant_message',
+    status,
+    created_at: '2026-11-13T12:00:00Z',
+    text
+  })
+
+  it('带"最终回复"标题行与复制按钮', async () => {
+    const written: string[] = []
+    stubClipboardInCard(written)
+    const harness = await mountWithProviders(<FinalReplyCard item={replyItem('completed')} />)
+    expect(harness.text()).toContain('最终回复')
+    const button = harness.host.querySelector('.ark-reply__copy')
+    expect(button?.getAttribute('aria-label')).toBe('复制消息')
+    await import('react').then(({ act }) =>
+      act(async () => {
+        button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+    )
+    expect(written).toEqual(['结论如下'])
+    await harness.unmount()
+  })
+
+  it('流式时不渲染复制按钮,正文仍跟随流式文本', async () => {
+    const harness = await mountWithProviders(<FinalReplyCard item={replyItem('streaming')} />)
+    expect(harness.host.querySelector('.ark-reply__copy')).toBeNull()
+    expect(harness.host.querySelector('.ark-caret')).not.toBeNull()
+    expect(harness.text()).toContain('结论如下')
+    await harness.unmount()
+  })
+
+  it('失败状态以错误色标记并展示失败 chip', async () => {
+    const harness = await mountWithProviders(<FinalReplyCard item={replyItem('failed')} />)
+    expect(harness.host.querySelector('.ark-reply.is-failed')).not.toBeNull()
+    expect(harness.host.querySelector('.ark-chip--error')).not.toBeNull()
     await harness.unmount()
   })
 })

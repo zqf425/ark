@@ -180,6 +180,51 @@ export const AssistantBubble = memo(function AssistantBubble({ item }: { item: T
   )
 })
 
+/**
+ * The turn's settled final reply, framed like smart-ark's answer card: a
+ * check-marked "final reply" title row above a hairline rule, the prose below.
+ *
+ * Kept visually separate from the inline narration bubbles so the turn reads
+ * as "process → answer". `AssistantBubble` stays for rows inside the process
+ * card, where a card-in-card would double the chrome.
+ */
+export const FinalReplyCard = memo(function FinalReplyCard({ item }: { item: ThreadItem }): JSX.Element {
+  const { t } = useI18n()
+  const streaming = item.status === 'streaming' || item.status === 'pending'
+  const failed = item.status === 'failed'
+  const aborted = item.status === 'aborted'
+  const text = item.text ?? ''
+
+  return (
+    <article className={`ark-reply${failed ? ' is-failed' : ''}`}>
+      <header className="ark-reply__head">
+        <span className="ark-reply__glyph" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="15" height="15" focusable="false">
+            <circle cx="12" cy="12" r="9.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <path d="m8.2 12.4 2.6 2.6 5-5.4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+        <span className="ark-reply__title">{t('canvas.reply.title')}</span>
+        {aborted ? <span className="ark-chip ark-chip--muted">{t('canvas.aborted')}</span> : null}
+        {failed ? <span className="ark-chip ark-chip--error">{t('canvas.failed')}</span> : null}
+        {!streaming && text ? (
+          <CopyButton
+            text={text}
+            label={t('canvas.copy.message')}
+            copiedLabel={t('canvas.copy.copied')}
+            className="ark-msg__copy ark-reply__copy"
+          />
+        ) : null}
+      </header>
+      <div className="ark-reply__body">
+        <Markdown text={text} />
+        {streaming ? <span className="ark-caret" aria-label={t('canvas.generating')} /> : null}
+      </div>
+      {item.detail ? <p className="ark-msg__detail">{item.detail}</p> : null}
+    </article>
+  )
+})
+
 /** Reasoning is collapsed by default and visually subordinate. */
 export const ReasoningBlock = memo(function ReasoningBlock({ item }: { item: ThreadItem }): JSX.Element {
   const { t, locale } = useI18n()
