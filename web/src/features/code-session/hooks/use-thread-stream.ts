@@ -9,7 +9,7 @@
 import { useEffect } from 'react'
 import { describeError } from '../../../shared/api/error-describe'
 import { translateNow } from '../../../shared/i18n/current'
-import type { ThreadId } from '../../../shared/contracts'
+import type { RuntimeEvent, ThreadId } from '../../../shared/contracts'
 import { useToast } from '../../../shared/ui'
 import { subscribeThreadEvents } from '../api/events-api'
 import { getThread, getThreadUsage } from '../api/threads-api'
@@ -19,6 +19,25 @@ import { useCodeSessionStore } from '../state/store'
 function describe(error: unknown): string {
   return describeError(error, translateNow)
 }
+
+/**
+ * Event kinds that advance the rail's activity key (and therefore re-sort the
+ * thread list): the user posting a message (`turn_started`, `turn_steered`)
+ * and the turn's terminal events.
+ *
+ * Every other durable kind — deltas, item upserts, tool calls, gates, usage —
+ * only moves the watermark. The rail is seeded from the list endpoint, whose
+ * rows reflect each thread's own last boundary event, so letting in-flight
+ * events advance the key would keep the *subscribed* (i.e. clicked) thread
+ * pinned to the top while several sessions run in parallel.
+ */
+const RAIL_ACTIVITY_EVENT_KINDS: ReadonlySet<RuntimeEvent['kind']> = new Set([
+  'turn_started',
+  'turn_steered',
+  'turn_completed',
+  'turn_failed',
+  'turn_aborted'
+])
 
 export function useThreadStream(threadId: ThreadId | null): void {
   const seedItems = useCodeSessionStore((s) => s.seedItems)
@@ -64,9 +83,17 @@ export function useThreadStream(threadId: ThreadId | null): void {
         // The detail watermark is authoritative; pull the rail row up to it in
         // case the list was loaded before the newest events landed.
         noteThreadSeq(threadId, watermark)
-        // Same for the busy marker and the activity key: the detail snapshot
-        // is fresher than any list page the rail may have been seeded from.
-        if (detail.summary.last_event_at) noteThreadActivity(threadId, detail.summary.last_event_at)
+        // Deliberately NOT folding `detail.summary.last_event_at` into the
+        // activity key: this load is triggered by selecting the thread, and a
+        // running thread's detail key is fresher than the rail row (it moves
+        // with every in-flight event server-side). Syncing it here would lift
+        // whichever thread was merely clicked above the others. The row's key
+        // is advanced only by the turn-boundary events below and by the
+        // authoritative list refresh.
+        // Same for the busy marker: the detail snapshot is fresher than any
+        // list page the rail may have been seeded from, but the busy flag is
+        // projected from `runtime_snapshot.active_turn` via the live turn
+        // reducer, not from the activity key.
 
         // Usage history is event-folded server-side, not part of the item
         // stream; seed it once per load. Best effort: an unavailable counter
@@ -93,14 +120,11 @@ export function useThreadStream(threadId: ThreadId | null): void {
             // Event classes (mirrors the server-side projector in smart-ark's
             // runtime-event-reducer: transport/synthetic frames mutate no
             // projection field):
-            // - deltas stream once per token; they are the strongest "the
-            //   model is replying" signal and bump the activity key only;
-            // - milestone kinds advance the rail's watermark and activity;
-            // - synthetic/transport frames (heartbeat, sse_idle_timeout,
-            //   transient_retry) carry no thread activity: a subscribe's
-            //   opening heartbeat is stamped `Utc::now()` by the server, so
-            //   counting it re-ordered the rail to put the thread that was
-            //   merely *clicked* on top.
+            // - transport frames (heartbeat, sse_idle_timeout,
+            //   transient_retry) carry no thread activity at all: a
+            //   subscribe's opening heartbeat is stamped `Utc::now()` by the
+            //   server, so counting it re-ordered the rail to put the thread
+            //   that was merely *clicked* on top.
             if (
               event.kind === 'heartbeat' ||
               event.kind === 'sse_idle_timeout' ||
@@ -108,20 +132,22 @@ export function useThreadStream(threadId: ThreadId | null): void {
             ) {
               return
             }
-            if (
-              event.thread_id === threadId &&
-              event.kind !== 'assistant_text_delta' &&
-              event.kind !== 'assistant_reasoning_delta'
-            ) {
-              noteThreadSeq(threadId, event.seq)
-              noteThreadActivity(threadId, event.timestamp)
-            }
-            // A delta is the strongest "the model is replying" signal: it
-            // moves the row to the rail top right away. Throttled by the same
-            // monotonic guard as the seq note (older timestamps are dropped),
-            // so a burst of tokens costs one sort per event at worst.
-            else if (event.thread_id === threadId) {
-              noteThreadActivity(threadId, event.timestamp)
+            if (event.thread_id === threadId) {
+              // Non-delta kinds keep the rail's watermark current (display
+              // and monotonic guard only — no reordering).
+              if (
+                event.kind !== 'assistant_text_delta' &&
+                event.kind !== 'assistant_reasoning_delta'
+              ) {
+                noteThreadSeq(threadId, event.seq)
+              }
+              // The activity key — and with it the rail order — advances only
+              // on turn boundaries: the user posted a message or the turn
+              // ended. Deltas, tools and gates streaming in between must not
+              // keep lifting the subscribed thread over its peers.
+              if (RAIL_ACTIVITY_EVENT_KINDS.has(event.kind)) {
+                noteThreadActivity(threadId, event.timestamp)
+              }
             }
             // A background rename (manual PATCH or the auto title generator)
             // lands on the rail immediately; the list endpoint stays

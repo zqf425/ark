@@ -278,4 +278,81 @@ describe('useThreadStream rail activity', () => {
     expect(row?.last_event_at).toBe('2026-11-20T00:00:00Z')
     expect(row?.last_seq).toBe(8)
   })
+
+  it('a user-posted turn boundary (turn_started) advances the rail activity key', async () => {
+    seedRail(THREAD_A)
+    getThreadMock.mockResolvedValue(detail(THREAD_A, 7, []))
+    harness = await mountWithProviders(<Probe threadId={THREAD_A} />)
+    await settle()
+
+    onEvent?.({
+      kind: 'turn_started',
+      seq: 8,
+      thread_id: THREAD_A,
+      turn_id: TURN_A,
+      timestamp: '2026-11-20T00:00:00Z',
+      auto_continuation: false,
+      attachment_ids: [],
+      attachment_outcomes: []
+    } as never)
+
+    const row = useCodeSessionStore.getState().threads.find((t) => t.thread_id === THREAD_A)
+    expect(row?.last_event_at).toBe('2026-11-20T00:00:00Z')
+    expect(row?.last_seq).toBe(8)
+  })
+
+  it('in-flight events (delta, tool call) advance the seq but never the activity key or order', async () => {
+    seedRail(THREAD_A)
+    getThreadMock.mockResolvedValue(detail(THREAD_A, 7, []))
+    harness = await mountWithProviders(<Probe threadId={THREAD_A} />)
+    await settle()
+    const before = useCodeSessionStore.getState().threads
+
+    onEvent?.({
+      kind: 'assistant_text_delta',
+      seq: 8,
+      thread_id: THREAD_A,
+      turn_id: TURN_A,
+      item_id: '00000000-0000-0000-0000-0000000000i1',
+      timestamp: '2026-11-20T00:00:00Z',
+      delta: 'hello'
+    } as never)
+    onEvent?.({
+      kind: 'tool_call_started',
+      seq: 9,
+      thread_id: THREAD_A,
+      turn_id: TURN_A,
+      timestamp: '2026-11-21T00:00:00Z',
+      call_id: 'call-1',
+      tool: 'bash',
+      arguments: {}
+    } as never)
+
+    const row = useCodeSessionStore.getState().threads.find((t) => t.thread_id === THREAD_A)
+    // The watermark advanced; the activity key did not, so the row keeps its
+    // position (its key is older than B's in a real multi-thread rail).
+    expect(row?.last_seq).toBe(9)
+    expect(row?.last_event_at).toBe('2026-10-29T00:00:00Z')
+    // Same order, same key: only the watermark moved.
+    expect(useCodeSessionStore.getState().threads.map((t) => t.thread_id)).toEqual(before.map((t) => t.thread_id))
+  })
+
+  it('selecting a thread (detail seed with a fresher last_event_at) does not lift its rail row', async () => {
+    // Rail row seeded from a list snapshot taken before the thread's latest
+    // in-flight events; the detail is therefore "fresher" than the row.
+    seedRail(THREAD_A)
+    const detailRow = {
+      ...detail(THREAD_A, 41, []).summary,
+      last_event_at: '2026-11-25T00:00:00Z'
+    }
+    getThreadMock.mockResolvedValue({ ...detail(THREAD_A, 41, []), summary: detailRow })
+    harness = await mountWithProviders(<Probe threadId={THREAD_A} />)
+    await settle()
+
+    // The row keeps the snapshot's key: clicking a running thread must not
+    // reorder the rail. Only turn-boundary events or a list refresh may.
+    const row = useCodeSessionStore.getState().threads.find((t) => t.thread_id === THREAD_A)
+    expect(row?.last_event_at).toBe('2026-10-29T00:00:00Z')
+    expect(row?.last_seq).toBe(41)
+  })
 })
