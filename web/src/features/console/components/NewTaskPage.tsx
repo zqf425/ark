@@ -120,10 +120,6 @@ export function NewTaskPage({ meta }: { meta: ConsoleMeta }): JSX.Element {
               </span>
             ) : null}
             <span className="console-chip">
-              <span className="console-chip__icon"><Icon name="spark" size={13} /></span>
-              <span className="console-chip__path">{meta.modelLabel ?? t('console.top.model')}</span>
-            </span>
-            <span className="console-chip">
               <span className="console-chip__icon"><Icon name="shield" size={13} /></span>
               <span className="console-chip__path">{t('console.new.standard')}</span>
             </span>
