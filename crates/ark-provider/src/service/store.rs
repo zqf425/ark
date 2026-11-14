@@ -106,11 +106,12 @@ impl ProviderStore {
     ///
     /// `compaction_threshold_tokens` reports the threshold the runtime derives
     /// for the effective provider: 80% of that provider's context window minus
-    /// its reserved output. A provider that declares no window derives from
-    /// the 256K default window (`ark_llm::DEFAULT_CONTEXT_WINDOW_TOKENS`), the
-    /// same fallback the settings inventory applies. `None` only when no
-    /// provider resolves at all — the renderer then hides the context meter
-    /// instead of guessing a denominator.
+    /// its reserved output. `context_window_tokens` reports the window the
+    /// threshold divides — the declared window or the 256K default
+    /// (`ark_llm::DEFAULT_CONTEXT_WINDOW_TOKENS`), the same fallback the
+    /// settings inventory applies. `None` only when no provider resolves at
+    /// all — the renderer then hides the context meter instead of guessing a
+    /// denominator.
     pub fn list(&self) -> ProviderListResponse {
         let document = self.lock();
         let providers = document.views();
@@ -126,6 +127,9 @@ impl ProviderStore {
         let threshold = resolved
             .as_ref()
             .and_then(ProviderConfig::compaction_threshold);
+        let window = resolved
+            .as_ref()
+            .map(|config| config.effective_context_window());
         drop(document);
         ProviderListResponse {
             providers,
@@ -133,6 +137,7 @@ impl ProviderStore {
             default_model,
             active_provider_id,
             compaction_threshold_tokens: threshold,
+            context_window_tokens: window,
         }
     }
 
@@ -502,6 +507,9 @@ impl ProviderStore {
                 compaction_threshold_tokens: resolved
                     .as_ref()
                     .and_then(ProviderConfig::compaction_threshold),
+                context_window_tokens: resolved
+                    .as_ref()
+                    .map(|config| config.effective_context_window()),
             }
         };
         Ok(list)
@@ -746,6 +754,35 @@ mod tests {
         assert_eq!(list.providers[0].api_key_hint.as_deref(), Some("sk-1***ef"));
         let json = serde_json::to_string(&list).unwrap();
         assert!(!json.contains("567890"), "{json}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_reports_the_window_and_the_threshold_it_derives() {
+        // The renderer divides its meter by the window and draws the threshold
+        // inside it, so both numbers must describe the same resolved provider.
+        let dir = temp_dir("window");
+        let store = store(&dir);
+        // A resolved provider needs a key: config_from_entry drops keyless
+        // entries, so `list()` would report `None` for both numbers.
+        let mut sized = entry("p", Some("sk-window-1234567890"));
+        sized.context_window_tokens = Some(200_000);
+        sized.max_tokens = Some(20_000);
+        store.upsert(sized, true).unwrap();
+
+        let list = store.list();
+        assert_eq!(list.context_window_tokens, Some(200_000));
+        // 80% of the usable window (200K minus the 20K output reserve).
+        assert_eq!(list.compaction_threshold_tokens, Some(144_000));
+
+        // A provider that publishes no window still compacts against the
+        // default, and the meter divides by that same fallback.
+        let mut unwindowed = entry("q", Some("sk-window-0987654321"));
+        unwindowed.max_tokens = Some(20_000);
+        store.upsert(unwindowed, true).unwrap();
+        let list = store.list();
+        assert_eq!(list.context_window_tokens, Some(256_000));
+        assert_eq!(list.compaction_threshold_tokens, Some(188_800));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

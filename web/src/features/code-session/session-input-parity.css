@@ -29,8 +29,25 @@
   font-variant-numeric: tabular-nums;
 }
 
-.ark-stats-bar--pending {
-  color: var(--ark-text-faint);
+/* Merged stream-health segments (formerly .ark-streamfooter). */
+.ark-stats-bar__item.is-mono {
+  font-family: var(--ark-mono);
+}
+
+.ark-stats-bar__item.is-live {
+  color: var(--ark-accent);
+}
+
+.ark-stats-bar__item.is-warning {
+  color: var(--ark-warn);
+}
+
+.ark-stats-bar__item.is-error {
+  color: var(--ark-error);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 42ch;
 }
 
 /* ---------- workspace project menu ---------- */
@@ -121,10 +138,26 @@
 
 .ark-context-popover__bar {
   display: flex;
+  position: relative;
   height: 8px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--ark-bg-inset);
+}
+
+/* The compaction tick inside the structure bar: a 1px line standing at
+   `threshold / window`, so the raw-window bar still shows where the fold
+   happens. */
+.ark-context-popover__mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-1px);
+  background: var(--ark-text);
+  opacity: 0.9;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .ark-context-popover__seg {

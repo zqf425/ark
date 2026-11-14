@@ -203,6 +203,8 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.context.overLimit': ['已达到上下文压缩阈值', 'Context compaction threshold reached'],
   'canvas.context.hasRoom': ['当前上下文仍有余量', 'Context capacity available'],
   'canvas.context.threshold': ['压缩阈值 {tokens}', 'Compaction threshold {tokens}'],
+  'canvas.context.window': ['上下文窗口 {tokens}', 'Context window {tokens}'],
+  'canvas.context.thresholdNote': ['（压缩阈值 {tokens}，超过后自动折叠历史）', ' (compaction threshold {tokens}; history folds past it)'],
   'canvas.context.estimateHint': ['总量来自最近一次权威 usage 事件；结构占比按已渲染行数与字符数计算，不是 token 估算。', 'The total comes from the latest authoritative usage event; the structure shows rendered rows and characters, not a token estimate.'],
 
   'canvas.workspace.projects': ['已有项目', 'Existing projects'],

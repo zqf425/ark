@@ -17,7 +17,7 @@ export function ConsoleStatusBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
   const runtimeVersion = useCodeSessionStore((s) => s.runtimeVersion)
   const healthVersion = useCodeSessionStore((s) => s.healthVersion)
   const setCommandOpen = useViewStore((s) => s.setCommandOpen)
-  const contextLimit = useContextLimit()
+  const reading = useContextLimit()
 
   const onlineLabelText = online === 'online'
     ? t('console.status.connected')
@@ -31,7 +31,7 @@ export function ConsoleStatusBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
       : ''
 
   const lastPrompt = usage?.lastPromptTokens ?? null
-  const percent = lastPrompt && contextLimit ? Math.min(100, Math.round((lastPrompt / contextLimit) * 100)) : null
+  const percent = lastPrompt && reading.window ? Math.min(100, Math.round((lastPrompt / reading.window) * 100)) : null
   const version = runtimeVersion ?? healthVersion
 
   return (
@@ -63,7 +63,7 @@ export function ConsoleStatusBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
       <span className="console-status__grow" />
 
       {percent !== null ? (
-        <span className="console-status__item" title={`${lastPrompt ?? 0} / ${contextLimit ?? 0}`}>
+        <span className="console-status__item" title={`${lastPrompt ?? 0} / ${reading.window ?? 0}`}>
           {t('console.status.context')}
           <span className="console-meter"><i style={{ width: `${percent}%` }} /></span>
           <b>{percent}%</b>

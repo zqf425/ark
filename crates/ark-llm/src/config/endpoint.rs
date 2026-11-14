@@ -137,12 +137,23 @@ impl ProviderConfig {
     /// instead — compaction must never be disabled just because the window is
     /// unknown, or the prompt would grow unbounded.
     pub fn compaction_threshold(&self) -> Option<u64> {
-        let window = self
-            .context_window_tokens
-            .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS);
-        let output_reserve = self.max_tokens.map(u64::from).unwrap_or(0);
-        let usable = window.saturating_sub(output_reserve).max(1);
+        let usable = self
+            .effective_context_window()
+            .saturating_sub(self.max_tokens.map(u64::from).unwrap_or(0))
+            .max(1);
         Some((usable as f64 * COMPACTION_TRIGGER_RATIO) as u64)
+    }
+
+    /// The context window this provider compacts against.
+    ///
+    /// The declared window, or [`DEFAULT_CONTEXT_WINDOW_TOKENS`] when the
+    /// provider (or its catalog) published none — the same fallback
+    /// [`Self::compaction_threshold`] and the settings inventory apply, so a
+    /// renderer that shows the raw window divides by the number the runtime
+    /// actually uses.
+    pub fn effective_context_window(&self) -> u64 {
+        self.context_window_tokens
+            .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS)
     }
 
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
@@ -198,6 +209,14 @@ impl ProviderConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effective_context_window_falls_back_to_the_default() {
+        let mut config = ProviderConfig::new("p", "m");
+        assert_eq!(config.effective_context_window(), DEFAULT_CONTEXT_WINDOW_TOKENS);
+        config.context_window_tokens = Some(500_000);
+        assert_eq!(config.effective_context_window(), 500_000);
+    }
 
     #[test]
     fn compaction_threshold_is_80_percent_with_output_reserved() {

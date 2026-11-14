@@ -22,4 +22,11 @@ active_provider_id?: string,
  * derives from the 256K default window; `None` only when no provider
  * resolves at all — the renderer then hides the context meter.
  */
-compaction_threshold_tokens?: number, };
+compaction_threshold_tokens?: number, 
+/**
+ * Context window the *effective* provider compacts against: the declared
+ * window, or the 256K default when none was published. Shown as the
+ * meter's denominator next to [`Self::compaction_threshold_tokens`], so
+ * the UI can present the raw window and the compaction line separately.
+ */
+context_window_tokens?: number, };

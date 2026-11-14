@@ -359,6 +359,13 @@ pub struct ProviderListResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(as = "Option<f64>")]
     pub compaction_threshold_tokens: Option<u64>,
+    /// Context window the *effective* provider compacts against: the declared
+    /// window, or the 256K default when none was published. Shown as the
+    /// meter's denominator next to [`Self::compaction_threshold_tokens`], so
+    /// the UI can present the raw window and the compaction line separately.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub context_window_tokens: Option<u64>,
 }
 
 /// `POST /v1/runtime/model-providers/test`.

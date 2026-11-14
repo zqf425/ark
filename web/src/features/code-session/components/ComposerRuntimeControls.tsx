@@ -403,8 +403,6 @@ const RING_SIZE = 26
 const RING_RADIUS = 10.5
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
 const RING_STROKE = 2.5
-/** Past this fraction of the configured window the ring turns the warning tone. */
-const RING_WARN_RATIO = 0.8
 
 /** Stable empty view for the closed-popover memo. */
 const CLOSED_ITEM_VIEW: { itemOrder: string[]; itemsById: Record<string, never> } = {
@@ -434,7 +432,7 @@ export function ContextRing({ threadId }: { threadId: string | null }): JSX.Elem
   const usage = useCodeSessionStore((s) => s.usage)
   const itemOrder = useCodeSessionStore((s) => s.itemOrder)
   const itemsById = useCodeSessionStore((s) => s.itemsById)
-  const contextLimit = useContextLimit()
+  const reading = useContextLimit()
   const [open, setOpen] = useState(false)
   const [skills, setSkills] = useState<SkillSummary[]>([])
   const [compacting, setCompacting] = useState(false)
@@ -461,11 +459,15 @@ export function ContextRing({ threadId }: { threadId: string | null }): JSX.Elem
 
   if (!threadId) return null
 
-  const limit = contextLimit && contextLimit > 0 ? contextLimit : null
+  // The ring fills against the model's real context window; the compaction
+  // threshold rides inside it as the warning line (`threshold / window`).
+  const limit = reading.window && reading.window > 0 ? reading.window : null
   const used = usage?.lastPromptTokens ?? null
   const ratio = limit && used != null ? Math.min(1, Math.max(0, used / limit)) : null
   const percent = ratio == null ? null : Math.round(ratio * 100)
-  const warn = ratio != null && ratio >= RING_WARN_RATIO
+  const thresholdRatio =
+    limit && reading.threshold != null ? Math.min(1, Math.max(0, reading.threshold / limit)) : null
+  const warn = ratio != null && thresholdRatio != null && ratio >= thresholdRatio
   const free = limit && used != null ? Math.max(0, limit - used) : null
   const freeRatio = limit && free != null ? free / limit : null
   const compact = async (): Promise<void> => {
@@ -481,9 +483,9 @@ export function ContextRing({ threadId }: { threadId: string | null }): JSX.Elem
     }
   }
 
-  const statusKey = ratio != null && ratio >= 1
+  const statusKey = ratio != null && thresholdRatio != null && ratio >= 1
     ? 'canvas.context.overLimit'
-    : ratio != null && ratio >= RING_WARN_RATIO
+    : ratio != null && thresholdRatio != null && ratio >= thresholdRatio
       ? 'canvas.context.nearLimit'
       : 'canvas.context.hasRoom'
 
@@ -532,9 +534,23 @@ export function ContextRing({ threadId }: { threadId: string | null }): JSX.Elem
                 style={{ width: `${segment.ratio * 100}%` }}
               />
             ))}
+            {thresholdRatio != null ? (
+              <span
+                className="ark-context-popover__mark"
+                style={{ left: `${thresholdRatio * 100}%` }}
+                title={t('canvas.context.threshold', { tokens: formatTokens(reading.threshold ?? 0) })}
+              />
+            ) : null}
           </div>
           <p className={`ark-context-popover__status${warn ? ' is-warn' : ''}`}>{t(statusKey)}</p>
-          {limit ? <p className="ark-context-popover__note">{t('canvas.context.threshold', { tokens: formatTokens(limit) })}</p> : null}
+          {limit ? (
+            <p className="ark-context-popover__note">
+              {t('canvas.context.window', { tokens: formatTokens(limit) })}
+              {reading.threshold != null
+                ? t('canvas.context.thresholdNote', { tokens: formatTokens(reading.threshold) })
+                : ''}
+            </p>
+          ) : null}
           <div className="ark-context-popover__rows">
             {CONTEXT_CATEGORY_ORDER.map((key) => {
               const segment = structure.segments.find((entry) => entry.key === key)
