@@ -7,6 +7,11 @@
  * explicit edit read; the list view itself stays redacted. The label field is
  * gone from the UI but an existing label is kept in the draft so saving does
  * not silently drop it.
+ *
+ * Saving never promotes the entry to the default provider (aligned with
+ * smart-ark): a default switch silently re-routes every session that follows
+ * the default, so it stays a deliberate action on the list row or in
+ * Settings -> 通用, never a side effect of adding a provider.
  */
 import { useState } from 'react'
 import { Button } from '../../../shared/ui'
@@ -135,7 +140,7 @@ export type ProviderFormProps = {
   /** True only while the model-catalog query runs; never locks the form. */
   catalogBusy: boolean
   onCancel: () => void
-  onSubmit: (entry: ProviderEntry, makeDefault: boolean) => Promise<void>
+  onSubmit: (entry: ProviderEntry) => Promise<void>
   onTest: (entry: ProviderEntry) => Promise<void>
   onDiscover: (request: ProviderModelCatalogRequest) => Promise<ProviderModelCatalogResponse>
 }
@@ -144,7 +149,6 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
   const { t } = useI18n()
   const [draft, setDraft] = useState<ProviderDraft>(initial)
   const [advanced, setAdvanced] = useState(false)
-  const [makeDefault, setMakeDefault] = useState(!editing)
   const [error, setError] = useState<string | null>(null)
   const [catalog, setCatalog] = useState<ProviderModelSummary[]>([])
   const [catalogError, setCatalogError] = useState<string | null>(null)
@@ -290,14 +294,6 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
           disabled={busy}
           onChange={(value) => patch('enabled', value)}
         />
-        {!editing ? (
-          <CheckField
-            label={t('settings.providerForm.makeDefaultLabel')}
-            checked={makeDefault}
-            disabled={busy}
-            onChange={setMakeDefault}
-          />
-        ) : null}
         <button type="button" className="ark-linkbtn" onClick={() => setAdvanced((value) => !value)}>
           {advanced ? t('settings.providerForm.advancedHide') : t('settings.providerForm.advancedShow')}
         </button>
@@ -368,7 +364,7 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
           disabled={busy}
           onClick={() => {
             const entry = resolve()
-            if (entry) void onSubmit(entry, makeDefault)
+            if (entry) void onSubmit(entry)
           }}
         >
           {busy ? t('common.saving') : t('common.save')}
