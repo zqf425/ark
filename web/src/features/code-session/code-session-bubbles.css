@@ -1,7 +1,8 @@
 /**
  * Message rows, ported from mainstream agent canvases: the user speaks in a
  * whale-tinted card hugging the right edge; ark answers in prose on the canvas
- * with a small identity avatar on the meta row.
+ * with a small identity avatar on the meta row. The turn's settled final reply
+ * is framed as its own answer card (`ark-reply`, the smart-ark style).
  *
  * Part of the Code screen stylesheet; split to stay under the 1000-line
  * per-file limit (design §7.10.2). Code-session.css is the entry. Colors come
@@ -176,6 +177,85 @@
   color: var(--ark-error-strong);
   border-color: var(--ark-error-wash);
   background: var(--ark-error-wash);
+}
+
+/* ---------- final reply: the turn's settled answer card (smart-ark style) ---------- */
+
+/*
+ * Only the promoted final reply gets this frame: white card, hairline border,
+ * a check-marked title row above a full-width rule. Inline narration inside
+ * the process card keeps the plain assistant bubble, so "process → answer"
+ * reads as two distinct shapes. Colors come from the shared tokens only.
+ */
+.ark-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius-lg);
+  background: var(--ark-card-soft);
+  box-shadow: var(--ark-shadow-ctl);
+  padding: 10px 16px 14px;
+  transition: border-color 120ms ease;
+}
+
+.ark-reply:hover {
+  border-color: var(--ark-border);
+}
+
+.ark-reply__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  border-bottom: 1px solid var(--ark-border-muted);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ark-text);
+}
+
+.ark-reply__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--ark-ok);
+}
+
+.ark-reply.is-failed .ark-reply__glyph {
+  color: var(--ark-error);
+}
+
+.ark-reply__title {
+  letter-spacing: 0.01em;
+}
+
+.ark-reply__copy {
+  /* Own hover rule (card hover ≠ message hover) — same quiet default. */
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.ark-reply:hover .ark-reply__copy,
+.ark-reply__copy:focus-visible,
+.ark-reply__copy.is-copied {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .ark-reply__copy {
+    opacity: 0.72;
+  }
+}
+
+.ark-reply__body {
+  padding-top: 6px;
+  line-height: 1.66;
+  font-size: 15px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ---------- checkpoint: collapsed compaction handoff ---------- */

@@ -1,11 +1,11 @@
 /**
  * One turn block: the user's message, then the turn's work process in a single
- * collapsible card, then the final reply.
+ * collapsible card, then the final reply framed as its own answer card.
  *
  * Rows inside the process card keep the real event order (see `splitTurnSections`):
  * intermediate narration, reasoning and tool calls interleave exactly as they
  * happened, and only the last textful assistant message is promoted to the
- * reply bubble — the same rule smart-ark applies.
+ * final-reply card — the same rule smart-ark applies.
  *
  * `group` keeps its identity while the turn's rows and state do (see
  * `groupByTurn`), so a token streaming into the newest turn leaves every
@@ -19,7 +19,7 @@ import { useI18n } from '../../../shared/i18n'
 import type { TurnGroup } from '../state/selectors'
 import { Button, ErrorBoundary, useToast } from '../../../shared/ui'
 import { splitTurnSections } from './turn-sections'
-import { UserBubble, AssistantBubble, ReasoningBlock } from './MessageBubble'
+import { UserBubble, AssistantBubble, FinalReplyCard, ReasoningBlock } from './MessageBubble'
 import { ToolCard } from './ToolCard'
 import { ErrorRow, NoticeRow, ToolResultRow } from './ErrorRow'
 import { describeError } from '../../../shared/api/error-describe'
@@ -152,7 +152,8 @@ export const TurnBlock = memo(function TurnBlock({
   const { t } = useI18n()
   const live = group.state === 'running'
   // While the turn runs nothing is final: every row stays in the process card
-  // in event order. Once settled, the last textful reply is promoted out.
+  // in event order. Once settled, the last textful reply is promoted out into
+  // its own answer card.
   const { user, process, reply } = splitTurnSections(group.items, live ? 'running' : 'settled')
 
   // `null` = follow the live state; a user toggle pins the card either way.
@@ -199,7 +200,7 @@ export const TurnBlock = memo(function TurnBlock({
       ) : null}
       {reply.map((item) => (
         <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
-          <StreamRow item={item} threadId={threadId} />
+          <FinalReplyCard item={item} />
         </ErrorBoundary>
       ))}
       <ErrorBoundary label={t('thread.canvas.boundaryRewind')}>
