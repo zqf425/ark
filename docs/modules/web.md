@@ -11,7 +11,7 @@
   `src/shared/contracts/web-only.ts`。
 - 运行时请求集中在 feature API/client 层；组件不直接裸 `fetch('/v1/...')`。
 - SSE 消费保存最后 `seq`，断线后使用 `since_seq` 恢复；页面必须能处理压缩产生的显式空洞。
-  会话列表对 `thread_updated`（手动改名与后台自动标题共用同一事件）做行内折叠
+  会话列表对 `thread_updated`（手动改名与首轮启动时的自动命名共用同一事件）做行内折叠
   （`threads-slice.renameThreadRow`）：只改该行标题、保持行序，列表接口在下次刷新时仍是权威。
   每条成功建立的连接（含重连）都要重新上报 `open`，因为 composer 以 `streamStatus === 'open'`
   为发送闸门，重连后停留在 `reconnecting` 会让线程在刷新页面前无法再发消息。指数退避只在连接

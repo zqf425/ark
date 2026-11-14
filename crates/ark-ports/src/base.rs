@@ -184,21 +184,6 @@ pub trait FolderDialogService: Send + Sync {
     fn pick_folder(&self) -> Option<PathBuf>;
 }
 
-/// One-shot model call for background jobs (design §7.9).
-///
-/// The turn-time model choice stays inside the composition root's turn runner;
-/// this port exists so `ark-server` can run *small auxiliary* model calls
-/// (thread-title generation) without learning which provider is live. Like
-/// [`TurnRunner`](crate::exec), it is a seam the composition root fills in; a
-/// build without it simply never names titles. Implementations own provider
-/// resolution, metering, hooks and the timeout budget.
-#[async_trait]
-pub trait TitleModel: Send + Sync {
-    /// Generate one short title from the conversation excerpt. Returns `None`
-    /// when no usable model is configured; an error means the call failed.
-    async fn generate_title(&self, excerpt: &str) -> Result<Option<String>>;
-}
-
 /// The platform services, as one injectable bundle.
 ///
 /// A field is `Option` so a minimal build (or a test) can serve only some of
@@ -222,9 +207,6 @@ pub struct BaseServices {
     /// `POST /v1/workspace/pick` report `runtime_unavailable` rather than
     /// opening a dialog where nobody can click it.
     pub folder_dialog: Option<Arc<dyn FolderDialogService>>,
-    /// One-shot background model calls (thread titles). Absent in builds
-    /// without a live provider; titles then simply stay on their placeholder.
-    pub title_model: Option<Arc<dyn TitleModel>>,
 }
 
 impl BaseServices {
@@ -269,11 +251,6 @@ impl BaseServices {
 
     pub fn with_folder_dialog(mut self, service: Arc<dyn FolderDialogService>) -> Self {
         self.folder_dialog = Some(service);
-        self
-    }
-
-    pub fn with_title_model(mut self, service: Arc<dyn TitleModel>) -> Self {
-        self.title_model = Some(service);
         self
     }
 }

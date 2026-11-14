@@ -23,7 +23,7 @@ use ark_contract::{
 };
 use ark_ports::{
     FolderDialogService, McpServerService, MemoryService, ModelEndpoint, ProviderService,
-    SkillService, TitleModel, Tool, WorkspaceService,
+    SkillService, Tool, WorkspaceService,
 };
 use ark_tool::ToolRegistry;
 
@@ -125,81 +125,6 @@ impl ProviderService for ProviderAdapter {
             temperature: config.temperature,
             reasoning_effort: config.reasoning_effort,
         })
-    }
-}
-
-// ---------------------------------------------------------------------------
-// One-shot background model calls (thread titles)
-// ---------------------------------------------------------------------------
-
-/// Resolves the default provider per call and streams one short completion.
-///
-/// Per call resolution (not a captured client) follows the parent-turn rule:
-/// the provider table is `Hot`, so an edit applies to the next naming step
-/// without a restart. `None` means no usable provider is configured — the
-/// caller then keeps the placeholder title.
-pub struct TitleModelAdapter {
-    providers: Arc<ark_provider::ProviderStore>,
-    usage: Arc<ark_obs::UsageRecorder>,
-}
-
-impl TitleModelAdapter {
-    pub fn new(
-        providers: Arc<ark_provider::ProviderStore>,
-        usage: Arc<ark_obs::UsageRecorder>,
-    ) -> Self {
-        Self { providers, usage }
-    }
-
-    /// The client for one naming call, with the same metering wrapper the turn
-    /// runner applies so every provider-reported sample reaches `/v1/usage`.
-    fn client(&self) -> Option<Arc<dyn ark_ports::ModelClient>> {
-        let provider = self.providers.resolve(None)?;
-        let (client, _) = crate::model::select_from_config(provider, Arc::clone(&self.usage));
-        Some(client)
-    }
-}
-
-/// No tools: a naming call must not be able to act, only to answer.
-/// `max_tokens` budgets the *whole* response including reasoning: a reasoning
-/// model spends the budget on invisible `reasoning` deltas before any visible
-/// text. 64 was consumed entirely by thinking (`finish_reason: length`, empty
-/// content), so the budget must cover thinking plus a short answer.
-const TITLE_MAX_TOKENS: u32 = 512;
-
-#[async_trait::async_trait]
-impl TitleModel for TitleModelAdapter {
-    async fn generate_title(&self, excerpt: &str) -> Result<Option<String>> {
-        let Some(client) = self.client() else {
-            return Ok(None);
-        };
-        let request = ark_ports::ModelRequest {
-            messages: vec![ark_ports::ModelMessage::user(excerpt.to_string())],
-            tools: Vec::new(),
-            temperature: Some(0.2),
-            max_tokens: Some(TITLE_MAX_TOKENS),
-            ..Default::default()
-        };
-        let (sink, mut drain) = tokio::sync::mpsc::channel(16);
-        // An undrained sink would stall the client once the buffer fills; the
-        // deltas are irrelevant, only the settled response carries the title.
-        tokio::spawn(async move { while drain.recv().await.is_some() {} });
-        let response = client.stream(request, sink).await?;
-        let title = response
-            .text
-            .trim()
-            .trim_matches(|ch| ch == '"' || ch == '\'');
-        if title.is_empty() {
-            // An empty answer must stay diagnosable: with a reasoning model it
-            // usually means the token budget was consumed by thinking, which
-            // otherwise looks exactly like "the feature silently did nothing".
-            tracing::warn!(
-                model = %client.model(),
-                "title model returned no visible text (reasoning model budget exhausted?); keeping the placeholder title"
-            );
-            return Ok(None);
-        }
-        Ok(Some(title.to_string()))
     }
 }
 
