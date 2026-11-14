@@ -129,6 +129,8 @@
 - 改名走 `SessionStore::rename_thread` 加 `PATCH /v1/threads/{id}` 同一款 `ThreadUpdated` 事件，只有
   一条写路径；客户端因此对自动改名与手动改名一视同仁。命名任务在 supervisor 内刻意 detach：慢
   provider 不能占住回合收尾；失败、超时或空标题一律保留原标题并记 warn，命名永不影响已完成的回合。
+  空标题与超时两条静默路径也各有一条 warn：reasoning 模型的预算耗尽（content 为空）与慢 provider
+  超时在日志里必须与「功能运行且成功」可区分。
 - web 侧 `renameThreadRow` 把流上的 `thread_updated` 折叠进列表行（与手动改名共用），列表接口在下次
   刷新时仍是权威。
 

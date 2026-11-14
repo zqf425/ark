@@ -112,14 +112,28 @@ async fn generate_title(state: &AppState, excerpt: &str) -> Result<Option<String
     let call = model.generate_title(&prompt);
     match tokio::time::timeout(std::time::Duration::from_secs(TITLE_TIMEOUT_SECS), call).await {
         Ok(outcome) => outcome.map(|generated| generated.map(|title| clamp_title(&title))),
-        // A timeout is just a failed call: the title stays as it is.
-        Err(_) => Ok(None),
+        // A timeout is just a failed call: the title stays as it is. It must
+        // not share the silent `Ok(None)` of "no model wired" — a provider
+        // that never answers within the budget would otherwise be invisible.
+        Err(_) => {
+            tracing::warn!(
+                budget_secs = TITLE_TIMEOUT_SECS,
+                "auto thread title generation timed out; keeping the current title"
+            );
+            Ok(None)
+        }
     }
 }
 
 /// Store the generated title with the manual-rename event shape.
 async fn apply_title(state: &AppState, thread_id: ThreadId, title: &str) -> Result<()> {
     if title.is_empty() {
+        // Silence here made a reasoning model's budget-exhausted empty answer
+        // indistinguishable from "the feature ran and succeeded". Name it.
+        tracing::warn!(
+            thread = %thread_id,
+            "auto thread title produced an empty title; keeping the placeholder"
+        );
         return Ok(());
     }
     let meta = state.store.rename_thread(thread_id, title).await?;
