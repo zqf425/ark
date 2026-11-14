@@ -48,8 +48,8 @@
 
 一期目录覆盖全部已落地路由族：
 
-- 线程族：list/create/get/update/delete/fork/rewind/compact/export/review/events(SSE)/usage/
-  skills/skills_refresh/goal/todos 读写；
+- 线程族：list/create/get/update/delete/delete_by_workspace/fork/rewind/compact/export/review/
+  events(SSE)/usage/skills/skills_refresh/goal/todos 读写；
 - 回合族：start/get/steer/interrupt，以及审批 `approval_resolve`、用户输入 `user_input_resolve`；
 - workbench：plan/changes/files/terminal/goal/todos 读写；
 - 定时任务：list/create/update/delete/run；

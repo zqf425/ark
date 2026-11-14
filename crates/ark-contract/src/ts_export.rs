@@ -25,24 +25,24 @@ use crate::item::{ItemKind, ToolPayload};
 use crate::{
     ApplyResult, AttachmentAssociationRequest, AttachmentAssociationResponse,
     AttachmentDiagnostics, AttachmentEntry, AttachmentUploadRequest, AttachmentUploadResponse,
-    CapabilitiesResponse, ChildCompletionNotice, ChildRunActionResult, ChildRunAggregates,
-    ChildRunEventsResponse, ChildRunListResponse, ChildRunSummary, ConfigPatch,
-    CreateImChannelRequest, CreateMemoryRequest, CreateScheduleRequest, CreateThreadRequest,
-    EventKind, FeishuDomain, FieldPath, FilePreview, FolderPickResponse, GoalRequest,
-    HealthResponse, HookAuditView, ImBinding, ImBindingListResponse, ImChannel, ImChannelId,
-    ImChannelKind, ImChannelListItem, ImChannelListResponse, ImChannelPolicy, ImChannelRuntime,
-    ImChannelState, ImChannelView, ImCredentials, ImCredentialsView, ImSettings, ImVerifyResponse,
-    ImWeixinLoginStartResponse, ImWeixinLoginStatus, ImWeixinLoginWaitResponse, ItemStatus,
-    LlmRound, LlmRoundError, LlmRoundsResponse, McpServerEntry, McpServerListResponse,
-    McpServerTestResponse, McpServerView, McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry,
-    MemoryListResponse, PanelEntry, PendingApprovalView, PendingUserInputView, PlanView,
-    PluginDiagnosticView, PluginEnableRequest, PluginEntry, PluginHostReport, PluginProvisionView,
-    ProviderEntry, ProviderListResponse, ProviderModelCatalogConnection,
-    ProviderModelCatalogRequest, ProviderModelCatalogResponse, ProviderModelInventoryItem,
-    ProviderModelSummary, ProviderTestRequest, ProviderTestResponse, ProviderView,
-    ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest, ReviewRequest,
-    RewindRequest, RewindResponse, RunStatus, RuntimeConfigView, RuntimeEvent, RuntimeInfo,
-    ScheduleKind, ScheduledRunRecord, ScheduledTask, ScheduledTaskListResponse,
+    BulkDeleteSkipped, BulkDeleteThreadsResponse, CapabilitiesResponse, ChildCompletionNotice,
+    ChildRunActionResult, ChildRunAggregates, ChildRunEventsResponse, ChildRunListResponse,
+    ChildRunSummary, ConfigPatch, CreateImChannelRequest, CreateMemoryRequest,
+    CreateScheduleRequest, CreateThreadRequest, EventKind, FeishuDomain, FieldPath, FilePreview,
+    FolderPickResponse, GoalRequest, HealthResponse, HookAuditView, ImBinding,
+    ImBindingListResponse, ImChannel, ImChannelId, ImChannelKind, ImChannelListItem,
+    ImChannelListResponse, ImChannelPolicy, ImChannelRuntime, ImChannelState, ImChannelView,
+    ImCredentials, ImCredentialsView, ImSettings, ImVerifyResponse, ImWeixinLoginStartResponse,
+    ImWeixinLoginStatus, ImWeixinLoginWaitResponse, ItemStatus, LlmRound, LlmRoundError,
+    LlmRoundsResponse, McpServerEntry, McpServerListResponse, McpServerTestResponse, McpServerView,
+    McpTransportKind, MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, PanelEntry,
+    PendingApprovalView, PendingUserInputView, PlanView, PluginDiagnosticView, PluginEnableRequest,
+    PluginEntry, PluginHostReport, PluginProvisionView, ProviderEntry, ProviderListResponse,
+    ProviderModelCatalogConnection, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
+    ProviderModelInventoryItem, ProviderModelSummary, ProviderTestRequest, ProviderTestResponse,
+    ProviderView, ResolveApprovalRequest, ResolveUserInputRequest, ResumeChildRequest,
+    ReviewRequest, RewindRequest, RewindResponse, RunStatus, RuntimeConfigView, RuntimeEvent,
+    RuntimeInfo, ScheduleKind, ScheduledRunRecord, ScheduledTask, ScheduledTaskListResponse,
     SessionResumeResponse, SkillDiagnostics, SkillLoadWarning, SkillSource, SkillSummary,
     SkillsSettings, SteerChildRequest, SubagentSettings, SwitchWorkspaceRequest, TaskSchedule,
     TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadExport, ThreadItem,
@@ -83,6 +83,8 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     ThreadSummary::export_all_to(dir)?;
     ThreadListQuery::export_all_to(dir)?;
     CreateThreadRequest::export_all_to(dir)?;
+    BulkDeleteThreadsResponse::export_all_to(dir)?;
+    BulkDeleteSkipped::export_all_to(dir)?;
     UpdateThreadRequest::export_all_to(dir)?;
     ThreadDetail::export_all_to(dir)?;
     ThreadRuntimeSnapshot::export_all_to(dir)?;
@@ -280,6 +282,8 @@ const ROOT_NAMES: &[&str] = &[
     "ReviewRequest",
     "ThreadExport",
     "CreateThreadRequest",
+    "BulkDeleteThreadsResponse",
+    "BulkDeleteSkipped",
     "UpdateThreadRequest",
     "ThreadDetail",
     "ThreadRuntimeSnapshot",

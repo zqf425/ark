@@ -11,9 +11,9 @@ use chrono::Utc;
 
 use ark_common::ThreadId;
 use ark_contract::{
-    ChildCompletionNotice, CreateThreadRequest, PendingApprovalView, PendingUserInputView,
-    RuntimeEvent, ThreadDetail, ThreadListQuery, ThreadRuntimeSnapshot, ThreadSummary,
-    UpdateThreadRequest, THREAD_PAGE_MAX_LIMIT,
+    BulkDeleteThreadsResponse, ChildCompletionNotice, CreateThreadRequest, PendingApprovalView,
+    PendingUserInputView, RuntimeEvent, ThreadDetail, ThreadListQuery, ThreadRuntimeSnapshot,
+    ThreadSummary, UpdateThreadRequest, THREAD_PAGE_MAX_LIMIT,
 };
 use std::collections::HashSet;
 
@@ -25,56 +25,25 @@ use crate::state::AppState;
 pub const DEFAULT_TITLE: &str = "New thread";
 const MAX_CHILD_COMPLETION_NOTICES: usize = 50;
 
+/// `DELETE /v1/threads` query parameters (bulk per-project delete).
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct ThreadWorkspaceQuery {
+    /// Project workspace path; required, matched against each thread's
+    /// effective workspace override.
+    #[serde(default)]
+    pub workspace: Option<String>,
+}
+
 /// Resolve each listed thread's durable "turn in flight" verdict.
 ///
-/// The turn registry is process-local truth: a restart drops it, and turns
-/// started by another process (IM channel, scheduled run in a separate
-/// renderer) never register here. Mirrors the smart-ark busy rule — a thread
-/// reads busy when its newest durable turn-lifecycle event has not reached a
-/// terminal state (`turn_completed` / `turn_failed` / `turn_aborted`) — so the
-/// marker survives restarts. Only threads outside the registry's active set
-/// are probed: an active registry entry is already authoritative and the log
-/// fold stays off the hot path.
+/// Delegates to the shared fold in the service layer; the handler only maps
+/// the result onto list rows.
 async fn durable_running_ids(
     state: &AppState,
     registry_active: &HashSet<ThreadId>,
     candidates: impl IntoIterator<Item = ThreadId>,
 ) -> HashSet<ThreadId> {
-    let mut running = HashSet::new();
-    for thread_id in candidates {
-        if registry_active.contains(&thread_id) {
-            running.insert(thread_id);
-            continue;
-        }
-        // `interaction_events` is the bounded turn/gate vocabulary, so this
-        // fold is cheap even for long logs. A probe failure must not break
-        // the list: the registry verdict (idle) stands.
-        let events = match state.store.replay_interaction_events(thread_id).await {
-            Ok(events) => events,
-            Err(_) => continue,
-        };
-        // The *newest* turn-lifecycle event decides, the same fold
-        // `interrupted_user_lifecycle` uses: gate records are skipped, and
-        // `any()` would be wrong because an older `turn_started` behind a
-        // newer terminal record must not resurrect a settled turn.
-        let verdict = events
-            .iter()
-            .rev()
-            .find(|event| {
-                matches!(
-                    event,
-                    RuntimeEvent::TurnStarted { .. }
-                        | RuntimeEvent::TurnCompleted { .. }
-                        | RuntimeEvent::TurnFailed { .. }
-                        | RuntimeEvent::TurnAborted { .. }
-                )
-            })
-            .is_some_and(|event| matches!(event, RuntimeEvent::TurnStarted { .. }));
-        if verdict {
-            running.insert(thread_id);
-        }
-    }
-    running
+    crate::service::threads::durable_running_ids(state, registry_active, candidates).await
 }
 
 /// `GET /v1/threads`.
@@ -140,16 +109,41 @@ pub async fn list(
 }
 
 /// `POST /v1/threads`.
+///
+/// An explicit `workspace` is validated through `WorkspaceService::validate`
+/// before any store write (the same rule as the composer's pick), so the rail's
+/// per-project "new session" action can never seed a dead override; the
+/// validated path is normalized by the workspace service itself.
 pub async fn create(
     State(state): State<AppState>,
     body: Option<Json<CreateThreadRequest>>,
 ) -> Result<(StatusCode, Json<ThreadSummary>), ApiError> {
-    let title = body
-        .and_then(|Json(request)| request.title)
+    let request = body.map(|Json(request)| request).unwrap_or_default();
+    let title = request
+        .title
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| DEFAULT_TITLE.to_string());
-    let summary = crate::service::threads::create_thread(&state, &title).await?;
+    let workspace = match request.workspace.as_deref().map(str::trim) {
+        Some(path) if !path.is_empty() => {
+            let service = state.base.workspace.as_ref().ok_or_else(|| {
+                ApiError::new(
+                    ark_common::ArkErrorCode::RuntimeUnavailable,
+                    "workspace service is not available in this build",
+                )
+            })?;
+            Some(
+                service
+                    .validate(path)
+                    .map_err(ApiError::from)?
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        }
+        _ => None,
+    };
+    let summary =
+        crate::service::threads::create_thread(&state, &title, workspace.as_deref()).await?;
     Ok((StatusCode::CREATED, Json(summary)))
 }
 
@@ -374,6 +368,31 @@ pub async fn fork(
     let mut summary = summary_of(&forked);
     summary.last_seq = Some(watermark);
     Ok((StatusCode::CREATED, Json(summary)))
+}
+
+/// `DELETE /v1/threads?workspace=…` — bulk delete for one project group.
+///
+/// The rail's per-project delete action removes every **settled** session of
+/// that project in one call; threads with a running turn are reported as
+/// skipped (`conflict`) and stay, matching the single-thread route's refusal.
+/// `workspace` is required: an empty value would silently mean "the default
+/// group", which this verb deliberately does not serve.
+pub async fn remove_by_workspace(
+    State(state): State<AppState>,
+    Query(query): Query<ThreadWorkspaceQuery>,
+) -> Result<Json<BulkDeleteThreadsResponse>, ApiError> {
+    let path = query.workspace.as_deref().map(str::trim).unwrap_or("");
+    if path.is_empty() {
+        return Err(ApiError::new(
+            ark_common::ArkErrorCode::ValidationError,
+            "workspace query parameter is required",
+        ));
+    }
+    // Serializes against turn registration and single deletes, the same lock
+    // the single-thread delete takes: a thread cannot be registered mid-sweep.
+    let _workspace_guard = state.workspace_gate.lock().await;
+    let response = crate::service::threads::delete_settled_by_workspace(&state, path).await?;
+    Ok(Json(response))
 }
 
 /// Parse a thread id, reporting a validation error instead of a 500.

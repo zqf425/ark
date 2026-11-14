@@ -3,4 +3,11 @@
 /**
  * `POST /v1/threads`.
  */
-export type CreateThreadRequest = { title?: string, };
+export type CreateThreadRequest = { title?: string, 
+/**
+ * Per-thread workspace the new session starts in. The server validates it
+ * through `WorkspaceService::validate` (the same rule as the composer's
+ * pick), so an invalid path is rejected instead of seeded as a dead
+ * override; absent keeps the default-workspace seeding.
+ */
+workspace?: string, };

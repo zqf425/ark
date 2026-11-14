@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, EmptyState, ErrorBoundary } from '../../../shared/ui'
+import { Button, EmptyState, ErrorBoundary, useToast } from '../../../shared/ui'
 import type { ThreadSummary } from '../../../shared/contracts'
 import { formatRelative } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
@@ -10,7 +10,7 @@ import { activityKeyOf } from '../state/threads-slice'
 import { exportThread } from '../api/threads-api'
 import { getWorkspaceView } from '../../settings/api/workspace-api'
 import { filterThreadsWithWorkspace, type ThreadListScope } from './thread-list-filter'
-import { groupThreadsByProject, type ThreadProject } from './thread-projects'
+import { groupThreadsByProject, workspaceBasename, type ThreadProject } from './thread-projects'
 import { ScheduleCreateDialog } from './ScheduleCreateDialog'
 
 function ThreadRow({
@@ -232,11 +232,12 @@ function ThreadRow({
 /** Left column: thread list plus the only "new thread" action. */
 export function ThreadListPanel(): JSX.Element {
   const { t } = useI18n()
+  const toast = useToast()
   const threads = useCodeSessionStore((s) => s.threads)
   const activeThreadId = useCodeSessionStore((s) => s.activeThreadId)
   const listStatus = useCodeSessionStore((s) => s.listStatus)
   const listError = useCodeSessionStore((s) => s.listError)
-  const { create, select, refresh, rename, archive, restore, remove, fork, busy } = useThreadList()
+  const { create, deleteProject, select, refresh, rename, archive, restore, remove, fork, busy } = useThreadList()
   // Busy markers: the active thread from the live turn reducer, the rest from
   // a slow list poll (see the hook's docs).
   useThreadRunning(activeThreadId)
@@ -292,6 +293,31 @@ export function ThreadListPanel(): JSX.Element {
       else next.add(path)
       return next
     })
+  }
+
+  /** Create a session whose workspace override starts at this project. */
+  const handleProjectCreate = async (path: string): Promise<void> => {
+    const created = await create(path)
+    if (created) toast.push('success', t('thread.list.groupCreateDone', { title: workspaceBasename(path) }))
+  }
+
+  /**
+   * Sweep one project's settled sessions. The server owns the "settled"
+   * verdict and reports skipped (running) ids; the confirm counts only the
+   * rows currently visible in this group, the toast states the real outcome.
+   */
+  const handleProjectDelete = async (group: ThreadProject): Promise<void> => {
+    const path = group.path.trim()
+    if (!path || group.threads.length === 0) return
+    const title = group.label || t('thread.list.defaultProject')
+    if (!window.confirm(t('thread.list.groupDeleteConfirm', { title, count: group.threads.length }))) return
+    const response = await deleteProject(path)
+    if (!response) return
+    if (response.skipped.length > 0) {
+      toast.push('info', t('thread.list.groupDeleteSkipped', { deleted: response.deleted.length, skipped: response.skipped.length }))
+    } else if (response.deleted.length > 0) {
+      toast.push('success', t('thread.list.groupDeleteDone', { count: response.deleted.length }))
+    }
   }
 
   return (
@@ -376,42 +402,85 @@ export function ThreadListPanel(): JSX.Element {
               const isCollapsed = collapsed.has(group.path)
               return (
                 <section key={group.path || '__default__'} className="ark-projectgroup">
-                  <button
-                    type="button"
-                    className="ark-projectgroup__head"
-                    aria-expanded={!isCollapsed}
-                    aria-label={t('thread.list.groupToggle', { title: group.label })}
-                    onClick={() => toggleProject(group.path)}
-                  >
-                    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
-                      <path
-                        d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h9A1.5 1.5 0 0 1 21 10v7.5A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-10Z"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                    <span className="ark-projectgroup__label" title={group.path || undefined}>
-                      {group.label}
-                    </span>
-                    {group.parent ? <span className="ark-projectgroup__parent">{group.parent}</span> : null}
-                    <span className="ark-projectgroup__meta">
-                      {group.path ? (
-                        <span
-                          className="ark-projectgroup__hint"
-                          title={group.path}
-                        >
-                          {group.path}
-                        </span>
-                      ) : (
-                        <span title={t('thread.list.defaultProjectHint')} />
-                      )}
-                      <span className="ark-projectgroup__count">
-                        {t('thread.list.groupCount', { count: group.threads.length })}
+                  <div className="ark-projectgroup__row">
+                    <button
+                      type="button"
+                      className="ark-projectgroup__head"
+                      aria-expanded={!isCollapsed}
+                      aria-label={t('thread.list.groupToggle', { title: group.label })}
+                      onClick={() => toggleProject(group.path)}
+                    >
+                      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                        <path
+                          d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h9A1.5 1.5 0 0 1 21 10v7.5A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-10Z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      <span className="ark-projectgroup__label" title={group.path || undefined}>
+                        {group.label}
                       </span>
-                    </span>
-                  </button>
+                      {group.parent ? <span className="ark-projectgroup__parent">{group.parent}</span> : null}
+                      <span className="ark-projectgroup__meta">
+                        {group.path ? (
+                          <span
+                            className="ark-projectgroup__hint"
+                            title={group.path}
+                          >
+                            {group.path}
+                          </span>
+                        ) : (
+                          <span title={t('thread.list.defaultProjectHint')} />
+                        )}
+                        <span className="ark-projectgroup__count">
+                          {t('thread.list.groupCount', { count: group.threads.length })}
+                        </span>
+                      </span>
+                    </button>
+                    {group.path ? (
+                      <span className="ark-projectgroup__actions">
+                        <button
+                          type="button"
+                          className="ark-projectgroup__action"
+                          title={t('thread.list.groupCreate', { title: group.label })}
+                          aria-label={t('thread.list.groupCreate', { title: group.label })}
+                          disabled={busy}
+                          onClick={() => void handleProjectCreate(group.path)}
+                        >
+                          <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false">
+                            <path
+                              d="M12 5v14M5 12h14"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className="ark-projectgroup__action is-danger"
+                          title={t('thread.list.groupDelete', { title: group.label })}
+                          aria-label={t('thread.list.groupDelete', { title: group.label })}
+                          disabled={busy || group.threads.length === 0}
+                          onClick={() => void handleProjectDelete(group)}
+                        >
+                          <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false">
+                            <path
+                              d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m3 0-.8 12.05A2 2 0 0 1 15.2 21H8.8a2 2 0 0 1-2-1.95L6 7m4 4v6m4-6v6"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.7"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </button>
+                      </span>
+                    ) : null}
+                  </div>
                   {!isCollapsed ? (
                     <div className="ark-projectgroup__threads">
                       {group.threads.map((thread) => (

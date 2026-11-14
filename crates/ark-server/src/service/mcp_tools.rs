@@ -99,7 +99,8 @@ fn threads_lifecycle(tools: &mut Vec<McpToolDoc>) {
             "POST",
             "/v1/threads",
             json!({
-                "title": { "type": "string", "description": "Optional; a placeholder is used when absent." }
+                "title": { "type": "string", "description": "Optional; a placeholder is used when absent." },
+                "workspace": { "type": "string", "description": "Optional workspace path for the new thread; validated against the filesystem when present." }
             }),
             &[],
         ),
@@ -127,11 +128,22 @@ fn threads_lifecycle(tools: &mut Vec<McpToolDoc>) {
 
         tool(
             "thread_delete",
-            "Delete the thread directory and its whole event log. Answers 409 while a turn is running; interrupt first.",
+            "Delete the thread directory and its whole event log. Answers 409 while a turn is running; interrupt first. Use `thread_delete_by_workspace` to sweep one project's settled sessions.",
             "DELETE",
             "/v1/threads/{id}",
             json!({ "id": thread_id() }),
             &["id"],
+        ),
+
+        tool(
+            "thread_delete_by_workspace",
+            "Bulk delete every settled thread whose workspace matches the query parameter; threads with a running turn are skipped and reported with code `conflict`.",
+            "DELETE",
+            "/v1/threads",
+            json!({
+                "workspace": { "type": "string", "description": "Required project workspace path; matched against each thread's workspace override." }
+            }),
+            &[],
         ),
 
         tool(

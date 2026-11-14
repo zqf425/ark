@@ -293,11 +293,20 @@
   gap: 1px;
 }
 
+/* The header row wraps the toggle button and the per-project actions so the
+   buttons can sit at the trailing edge without nesting buttons (invalid HTML). */
+.ark-projectgroup__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .ark-projectgroup__head {
   display: flex;
   align-items: center;
   gap: 7px;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   border: 0;
   background: none;
   padding: 6px 9px;
@@ -307,6 +316,55 @@
   font-size: 12.5px;
   text-align: left;
   cursor: pointer;
+}
+
+/* Per-project actions: invisible until the row is hovered or focused so the
+   rail stays quiet, but always reachable by keyboard focus. */
+.ark-projectgroup__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.ark-projectgroup__row:hover .ark-projectgroup__actions,
+.ark-projectgroup__row:focus-within .ark-projectgroup__actions {
+  opacity: 1;
+}
+
+.ark-projectgroup__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ark-radius-sm);
+  background: none;
+  color: var(--ark-text-faint);
+  cursor: pointer;
+}
+
+.ark-projectgroup__action:hover {
+  background: var(--ark-sidebar-row-hover);
+  color: var(--ark-text);
+}
+
+.ark-projectgroup__action:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: 1px;
+}
+
+.ark-projectgroup__action.is-danger:hover {
+  color: var(--ark-error);
+}
+
+.ark-projectgroup__action:disabled {
+  cursor: default;
+  opacity: 0.4;
 }
 
 .ark-projectgroup__head:hover {

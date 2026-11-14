@@ -116,6 +116,12 @@ pub struct ThreadListQuery {
 pub struct CreateThreadRequest {
     #[serde(default)]
     pub title: Option<String>,
+    /// Per-thread workspace the new session starts in. The server validates it
+    /// through `WorkspaceService::validate` (the same rule as the composer's
+    /// pick), so an invalid path is rejected instead of seeded as a dead
+    /// override; absent keeps the default-workspace seeding.
+    #[serde(default)]
+    pub workspace: Option<String>,
 }
 
 /// `PATCH /v1/threads/{id}`.
@@ -137,6 +143,32 @@ pub struct UpdateThreadRequest {
     /// Per-thread overrides to merge into the stored ones; absent keeps them all.
     #[serde(default)]
     pub runtime: Option<ThreadRuntimeSettings>,
+}
+
+/// `DELETE /v1/threads?workspace=` — bulk delete of every settled thread in
+/// one project. Skipped ids are threads the server refused (a still-running
+/// turn answers 409 on the single route); the caller sees them to keep the
+/// rows instead of guessing why a thread survived.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct BulkDeleteThreadsResponse {
+    /// Thread ids whose durable state was deleted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deleted: Vec<ThreadId>,
+    /// Thread ids that were skipped, each with the structured error code that
+    /// refused it (e.g. `conflict` for a running turn).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<BulkDeleteSkipped>,
+}
+
+/// One thread the bulk delete did not touch, with the reason.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct BulkDeleteSkipped {
+    pub thread_id: ThreadId,
+    /// Structured refusal reason; the wire value is the `ArkErrorCode`
+    /// snake_case name (e.g. `conflict` for a still-running turn).
+    pub code: ark_common::ArkErrorCode,
 }
 
 /// Reasoning-effort vocabulary accepted for the thread runtime override.

@@ -30,6 +30,8 @@ export type {
   AttachmentAssociationResponse,
   AttachmentUploadRequest,
   AttachmentUploadResponse,
+  BulkDeleteSkipped,
+  BulkDeleteThreadsResponse,
   ChildId,
   ChildCompletionNotice,
   ChildRunActionResult,

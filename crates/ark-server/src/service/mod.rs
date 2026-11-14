@@ -24,5 +24,5 @@ pub use im::ImService;
 pub use scheduler::{SchedulerService, TICK_INTERVAL as SCHEDULE_TICK_INTERVAL};
 pub use serve::{bind, AppHandle};
 pub use thread_titles::schedule_title_generation;
-pub use threads::{create_thread, summary_of};
+pub use threads::{create_thread, delete_settled_by_workspace, summary_of};
 pub use turns::{spawn_turn, start_turn, start_turn_as};

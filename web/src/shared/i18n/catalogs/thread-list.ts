@@ -9,6 +9,15 @@ export const THREAD_LIST_MESSAGES = {
   'thread.list.create': ['新会话', 'New thread'],
   'thread.list.defaultTitle': ['新会话', 'New thread'],
   'thread.list.creating': ['创建中…', 'Creating…'],
+  'thread.list.groupCreate': ['在项目 {title} 下新建会话', 'New session in project {title}'],
+  'thread.list.groupCreateDone': ['已在“{title}”下新建会话', 'New session created in "{title}"'],
+  'thread.list.groupDelete': ['删除项目 {title} 下已结束的会话', "Delete project {title}'s finished sessions"],
+  'thread.list.groupDeleteConfirm': [
+    '删除项目“{title}”下所有已结束的会话（{count} 条）？正在运行的会话会保留。此操作不可恢复。',
+    "Delete all {count} finished session(s) of project \"{title}\"? Running sessions are kept. This cannot be undone."
+  ],
+  'thread.list.groupDeleteDone': ['已删除 {count} 条会话', 'Deleted {count} session(s)'],
+  'thread.list.groupDeleteSkipped': ['已删除 {deleted} 条，{skipped} 条正在运行已保留', 'Deleted {deleted}; kept {skipped} running'],
   'thread.list.schedule': ['定时任务', 'Scheduled task'],
   'thread.list.scheduleHint': ['新建一个按节奏自动执行的定时任务', 'Create a task that runs a prompt on a cadence'],
   'thread.list.search': ['搜索已加载会话', 'Search loaded threads'],
