@@ -30,6 +30,7 @@ import { canEditComposer, canSendToThread } from './composer-availability'
 import { filterSkills, mentionTokenAt, type MentionToken } from './skill-mention'
 import { AutonomyPicker, WorkspacePicker, ContextRing, ModelPicker } from './ComposerRuntimeControls'
 import { SkillPalette } from './SkillPalette'
+import { DraftHighlight } from './DraftHighlight'
 import { CopyButton } from '../../../shared/ui/copy'
 const MAX_ROWS = 8
 /** Base64 of a file is ~4/3 of its bytes; keep uploads inside the runtime cap. */
@@ -541,7 +542,13 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
           </div>
         ) : null}
 
-        <textarea
+        <div className="ark-composer__editor">
+          {/* Mention highlight under the textarea: the same text painted twice,
+              the mirror recognizing complete mentions and the in-progress token.
+              The textarea's own text stays opaque; this layer is only visible
+              behind it, so selection/IME/copy behavior is untouched. */}
+          <DraftHighlight text={draftText} skills={skills} token={token} />
+          <textarea
           ref={inputRef}
           className="ark-composer__input"
           rows={1}
@@ -590,7 +597,8 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
               void submit()
             }
           }}
-        />
+          />
+        </div>
 
         {/* Draft copy: only with text in it, so an empty composer stays clean. */}
         {draftText.trim() ? (

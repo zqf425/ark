@@ -123,7 +123,31 @@
 }
 
 /* Textarea metrics follow smart-ark: 15px / 1.45 line box, 40px minimum. */
+
+/* The editor stack: the mention-highlight mirror sits under the textarea.
+   Both layers share `.ark-composer__editor-font` so glyphs land pixel-identical
+   and the chip wash aligns with the real text. */
+.ark-composer__editor {
+  position: relative;
+  min-height: 40px;
+}
+
+.ark-composer__editor-font {
+  font-size: 15px;
+  line-height: 1.45;
+  font-family: inherit;
+  letter-spacing: normal;
+  /* Identical text metrics: textarea uses border-box padding 10px 4px and the
+     chevron reserve on the right; the mirror must match to stay aligned. */
+  padding: 10px 4px;
+  padding-right: 34px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
 .ark-composer__input {
+  position: relative;
+  z-index: 1;
   width: 100%;
   resize: none;
   border: 0;
@@ -139,6 +163,19 @@
   padding: 10px 4px;
   /* The chevron floats over the top-right corner; keep the first line clear. */
   padding-right: 34px;
+}
+
+/* The mirror paints the same draft behind the textarea text. It must not
+   intercept input (pointer-events off) and must clip its height to the box so
+   a long draft scrolls with the textarea instead of spilling. */
+.ark-composer__highlight {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  color: transparent;
+  pointer-events: none;
+  overflow: hidden;
+  max-height: 180px;
 }
 
 .ark-composer__input::placeholder {
