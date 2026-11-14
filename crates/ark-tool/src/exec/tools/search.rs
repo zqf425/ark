@@ -3,21 +3,28 @@
 //! Content search without a regex engine dependency: the default is a plain
 //! substring scan (case-sensitive unless `ignore_case`), which is what the
 //! agent actually needs and what keeps the crate free of C-toolchain build
-//! steps. `literal: false` still means literal here, and the output says so.
+//! steps. A pattern carrying regex metacharacters is refused with a clear
+//! error instead of being silently matched literally — session 936001de lost
+//! 686 s to `0\.8|80%|…` returning a false "no matches".
 
 use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{args, glob, schema};
-use crate::exec::common::{as_output, workspace_path};
+use crate::exec::common::{
+    as_output, is_ignored_dir_name, workspace_path, BlockingScan, ScanDeadline,
+};
 use crate::policy::{cap_all, DEFAULT_LIMITS};
 
 /// Default matching lines returned.
 pub const DEFAULT_GREP_LIMIT: usize = 200;
 /// Files larger than this are skipped rather than scanned.
 pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
-
+/// Longest emitted line. A minified bundle is one 254k-character line and the
+/// line-count cap cannot see it; this bound is what actually protects the
+/// model context (session 936001de pulled a whole `web/dist` chunk in).
+const MAX_LINE_CHARS: usize = 400;
 /// `grep`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GrepTool;
@@ -33,7 +40,7 @@ impl Tool for GrepTool {
     }
 
     async fn execute(&self, ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
-        Ok(as_output(run(ctx, raw)))
+        Ok(as_output(run(ctx, raw).await))
     }
 }
 
@@ -55,11 +62,31 @@ impl Query {
     }
 }
 
-fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
+/// Regex metacharacters that would silently change meaning if matched
+/// literally. ERE syntax, which is what `grep -E` and most models mean.
+const REGEX_METACHARS: [char; 14] = [
+    '.', '*', '+', '?', '(', ')', '[', ']', '{', '}', '|', '^', '$', '\\',
+];
+
+/// Refuse regex-looking patterns: a literal scan of `a|b` searches for the
+/// two-character sequence and reports "no matches", which reads as a fact
+/// about the codebase rather than about the pattern.
+fn looks_like_regex(pattern: &str) -> bool {
+    pattern.chars().any(|c| REGEX_METACHARS.contains(&c))
+}
+
+async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
     let parsed: args::GrepArgs = args::parse("grep", &raw)?;
     let needle = parsed.pattern.clone().unwrap_or_default();
     if needle.is_empty() {
         return Ok(ToolOutput::err("grep requires a non-empty pattern"));
+    }
+    if looks_like_regex(&needle) {
+        return Ok(ToolOutput::err(
+            "grep matches plain text only; the pattern contains regex metacharacters \
+             (. * + ? ( ) [ ] { } | ^ $ \\). Use `bash` with `grep -E`/`-F`, or pass \
+             a literal substring without metacharacters.",
+        ));
     }
     let query = Query {
         needle,
@@ -69,17 +96,33 @@ fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
         context: parsed.context.unwrap_or(0),
     };
     let target = workspace_path(ctx, parsed.path.as_deref())?;
-    let mut hits: Vec<String> = Vec::new();
-    if target.is_file() {
-        scan_file(&target, &target, &query, &mut hits);
-    } else {
-        let mut visited = HashSet::new();
-        walk(&target, &target, &query, 0, &mut hits, &mut visited);
-    }
+    let scan = BlockingScan::start();
+    let line_cap = query.line_cap();
+    let empty_notice = query.needle.clone();
+    let hits = scan
+        .run(move |deadline| {
+            let mut hits: Vec<String> = Vec::new();
+            if target.is_file() {
+                scan_file(&target, &target, &query, deadline, &mut hits);
+            } else {
+                let mut visited = HashSet::new();
+                walk(
+                    &target,
+                    &target,
+                    &query,
+                    0,
+                    deadline,
+                    &mut hits,
+                    &mut visited,
+                );
+            }
+            Ok(hits)
+        })
+        .await?;
     if hits.is_empty() {
-        return Ok(ToolOutput::ok(format!("no matches for `{}`", query.needle)));
+        return Ok(ToolOutput::ok(format!("no matches for `{empty_notice}`")));
     }
-    let body = cap_all(&hits.join("\n"), &DEFAULT_LIMITS, Some(query.line_cap()));
+    let body = cap_all(&hits.join("\n"), &DEFAULT_LIMITS, Some(line_cap));
     Ok(ToolOutput::ok(body))
 }
 
@@ -88,10 +131,11 @@ fn walk(
     dir: &Path,
     query: &Query,
     depth: usize,
+    deadline: &ScanDeadline,
     out: &mut Vec<String>,
     visited: &mut HashSet<PathBuf>,
 ) {
-    if depth > 32 || out.len() >= query.line_cap() {
+    if depth > 32 || out.len() >= query.line_cap() || deadline.is_expired() {
         return;
     }
     // Canonicalize once per directory and never revisit it: a symlink cycle
@@ -109,7 +153,7 @@ fn walk(
         return;
     };
     for entry in entries.flatten() {
-        if out.len() >= query.line_cap() {
+        if out.len() >= query.line_cap() || deadline.is_expired() {
             return;
         }
         let Ok(kind) = entry.file_type() else {
@@ -120,6 +164,13 @@ fn walk(
         if kind.is_symlink() {
             continue;
         }
+        // Build outputs and dependency caches are both noise (a bundle hit
+        // flooded the context once) and volume (they made one grep walk
+        // ~380k files). The name check is on every level below the search
+        // root, so pointing `path` at one of these directories still works.
+        if kind.is_dir() && is_ignored_dir_name(entry.file_name().to_string_lossy().as_ref()) {
+            continue;
+        }
         let path = entry.path();
         let Ok(real_path) = std::fs::canonicalize(&path) else {
             continue;
@@ -128,15 +179,21 @@ fn walk(
             continue;
         }
         if kind.is_dir() {
-            walk(root, &path, query, depth + 1, out, visited);
+            walk(root, &path, query, depth + 1, deadline, out, visited);
         } else {
-            scan_file(root, &path, query, out);
+            scan_file(root, &path, query, deadline, out);
         }
     }
 }
 
-fn scan_file(root: &Path, file: &Path, query: &Query, out: &mut Vec<String>) {
-    if out.len() >= query.line_cap() {
+fn scan_file(
+    root: &Path,
+    file: &Path,
+    query: &Query,
+    deadline: &ScanDeadline,
+    out: &mut Vec<String>,
+) {
+    if out.len() >= query.line_cap() || deadline.is_expired() {
         return;
     }
     let relative = file
@@ -181,17 +238,22 @@ fn scan_file(root: &Path, file: &Path, query: &Query, out: &mut Vec<String>) {
     // context. Adjacent context windows overlap, so a single marker vector
     // deduplicates them while keeping the match marker authoritative. `limit`
     // counts matches, not output rows (T-07); all arithmetic is saturating so
-    // a model-supplied `usize::MAX` cannot panic (T-09).
+    // a model-supplied `usize::MAX` cannot panic (T-09). The char offset of
+    // each match is kept alongside so a truncated long line can be cut
+    // around its match instead of a fixed prefix.
     let mut emit: Vec<Option<char>> = vec![None; lines.len()];
+    let mut hit_at: Vec<usize> = vec![0; lines.len()];
+    let needle_chars = query.needle.chars().count();
     let mut matched = 0usize;
     for (index, line) in haystack_lines.iter().enumerate() {
         if matched >= query.limit {
             break;
         }
-        if !line.contains(&haystack_needle) {
+        let Some(byte_at) = line.find(&haystack_needle) else {
             continue;
-        }
+        };
         matched += 1;
+        hit_at[index] = line[..byte_at].chars().count();
         let start = index.saturating_sub(query.context);
         let end = index
             .saturating_add(query.context)
@@ -210,14 +272,51 @@ fn scan_file(root: &Path, file: &Path, query: &Query, out: &mut Vec<String>) {
             break;
         }
         if let Some(m) = marker {
+            // Bound each emitted line around its match: minified bundles are
+            // single-line files, and a fixed prefix would cut the match out
+            // of anything past the first 400 columns.
+            let line = cut_line(lines[index], hit_at[index], needle_chars);
             out.push(format!(
                 "{relative}{m}{}{m}{line}",
                 index + 1,
                 m = m,
-                line = lines[index]
+                line = line
             ));
         }
     }
+}
+
+/// Trim one output line to at most [`MAX_LINE_CHARS`] chars, keeping the
+/// window that contains `hit_char` (the match position in chars) visible.
+/// Centering on the match matters: a fixed prefix would cut the needle out of
+/// every minified line past column 400, hiding what matched.
+fn cut_line(line: &str, hit_char: usize, needle_chars: usize) -> String {
+    let total = line.chars().count();
+    if total <= MAX_LINE_CHARS {
+        return line.to_string();
+    }
+    let lead = MAX_LINE_CHARS.saturating_sub(needle_chars) / 2;
+    let start = hit_char.saturating_sub(lead);
+    let end = (start + MAX_LINE_CHARS).min(total);
+    let start_byte = char_to_byte(line, start);
+    let end_byte = char_to_byte(line, end);
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.push_str(&line[start_byte..end_byte]);
+    if end < total {
+        out.push('…');
+    }
+    out
+}
+
+/// Byte offset of the `index`-th char; `line.len()` past the end.
+fn char_to_byte(line: &str, index: usize) -> usize {
+    line.char_indices()
+        .nth(index)
+        .map(|(byte, _)| byte)
+        .unwrap_or(line.len())
 }
 
 #[cfg(test)]
@@ -293,6 +392,113 @@ mod tests {
             .await
             .unwrap();
         assert!(!out.ok);
+    }
+
+    #[tokio::test]
+    async fn regex_looking_patterns_are_refused_not_matched_literally() {
+        let dir = temp_workspace("grep-regex-refused");
+        // The literal sequence `a.c` does not occur; a literal scan would
+        // return "no matches", which once read as a fact about the code.
+        std::fs::write(dir.join("a.txt"), "abc\na.c\n").unwrap();
+        let out = GrepTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "a.c" })),
+            )
+            .await
+            .unwrap();
+        assert!(!out.ok, "got {}", out.content);
+        assert!(
+            out.content.contains("metacharacters"),
+            "got {}",
+            out.content
+        );
+    }
+
+    #[tokio::test]
+    async fn alternation_patterns_are_refused() {
+        let dir = temp_workspace("grep-regex-alt");
+        std::fs::write(dir.join("a.txt"), "threshold\n").unwrap();
+        let out = GrepTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({
+                    "pattern": "0\\.8|80%|threshold.*0\\.8"
+                })),
+            )
+            .await
+            .unwrap();
+        assert!(!out.ok, "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn build_and_cache_directories_are_skipped() {
+        let dir = temp_workspace("grep-ignore-dirs");
+        for name in [
+            "target",
+            "node_modules",
+            "dist",
+            ".git",
+            ".tmp",
+            ".worktrees",
+        ] {
+            let sub = dir.join(name);
+            std::fs::create_dir_all(&sub).unwrap();
+            std::fs::write(sub.join("gen.js"), "needle-in-generated\n").unwrap();
+        }
+        std::fs::write(dir.join("src.txt"), "needle-in-source\n").unwrap();
+        let out = GrepTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "needle" })),
+            )
+            .await
+            .unwrap();
+        assert!(out.content.contains("src.txt"), "got {}", out.content);
+        assert!(
+            !out.content.contains("needle-in-generated"),
+            "generated output must not be scanned: {}",
+            out.content
+        );
+    }
+
+    #[tokio::test]
+    async fn an_ignored_directory_can_still_be_searched_explicitly() {
+        let dir = temp_workspace("grep-ignore-explicit");
+        std::fs::create_dir_all(dir.join("target")).unwrap();
+        std::fs::write(dir.join("target/gen.js"), "needle\n").unwrap();
+        let out = GrepTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "needle", "path": "target" })),
+            )
+            .await
+            .unwrap();
+        // The relative prefix is relative to the explicit search root, so the
+        // file shows as `gen.js`; the point is that the ignored directory was
+        // still searched instead of silently yielding nothing.
+        assert_eq!(out.content, "gen.js:1:needle\n");
+    }
+
+    #[tokio::test]
+    async fn a_minified_single_line_match_is_cut_to_a_bounded_prefix() {
+        let dir = temp_workspace("grep-line-cut");
+        let bundle = format!("{}needle{}", "x".repeat(100_000), "y".repeat(100_000));
+        std::fs::write(dir.join("bundle.js"), bundle).unwrap();
+        let out = GrepTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "needle" })),
+            )
+            .await
+            .unwrap();
+        assert!(out.ok);
+        assert!(
+            out.content.len() < 2_000,
+            "one match line must stay bounded, got {} chars",
+            out.content.len()
+        );
+        assert!(out.content.contains("needle"));
     }
 
     #[tokio::test]

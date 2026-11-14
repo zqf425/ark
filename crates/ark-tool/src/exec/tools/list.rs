@@ -2,14 +2,18 @@
 //!
 //! Both are read-only directory walkers. `ls` reads one level, `find` recurses
 //! with a glob filter; both stop at the configured limits and say so, so a huge
-//! tree cannot blow up the model context.
+//! tree cannot blow up the model context. The recursion skips build/dependency
+//! directories and runs on the blocking pool under the shared scan deadline,
+//! mirroring `grep`.
 
 use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{args, glob, schema};
-use crate::exec::common::{as_output, with_detail, workspace_path};
+use crate::exec::common::{
+    as_output, is_ignored_dir_name, with_detail, workspace_path, BlockingScan, ScanDeadline,
+};
 use crate::policy::{cap_all, DEFAULT_LIMITS};
 
 /// Default entries returned by `ls`.
@@ -87,35 +91,42 @@ impl Tool for FindTool {
     }
 
     async fn execute(&self, ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
-        Ok(as_output(run_find(ctx, raw)))
+        Ok(as_output(run_find(ctx, raw).await))
     }
 }
 
-fn run_find(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
+async fn run_find(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
     let parsed: args::FindArgs = args::parse("find", &raw)?;
     let pattern = parsed.pattern.clone().unwrap_or_else(|| "*".to_string());
     let root = workspace_path(ctx, parsed.path.as_deref())?;
     let limit = parsed.limit.unwrap_or(DEFAULT_FIND_LIMIT).max(1);
     let name_only = glob::is_name_pattern(&pattern);
-    let mut found = Vec::new();
-    let mut visited = HashSet::new();
-    walk(
-        &root,
-        &root,
-        &pattern,
-        name_only,
-        limit,
-        0,
-        &mut found,
-        &mut visited,
-    );
+    let scan = BlockingScan::start();
+    let mut found = scan
+        .run(move |deadline| {
+            let mut found = Vec::new();
+            let mut visited = HashSet::new();
+            walk(
+                &root,
+                &root,
+                &pattern,
+                name_only,
+                limit,
+                0,
+                deadline,
+                &mut found,
+                &mut visited,
+            );
+            Ok(found)
+        })
+        .await?;
     found.sort();
     let body = cap_all(&found.join("\n"), &DEFAULT_LIMITS, Some(limit));
     Ok(ToolOutput::ok(body))
 }
 
 /// Pre-existing lint gate blocker on master: the recursive walker legitimately
-/// carries eight parameters; regrouping them would touch every recursive call
+/// carries nine parameters; regrouping them would touch every recursive call
 /// site for zero behavior change, so the established `state.rs` precedent
 /// (`#[allow(clippy::too_many_arguments)]`) applies.
 #[allow(clippy::too_many_arguments)]
@@ -126,10 +137,11 @@ fn walk(
     name_only: bool,
     limit: usize,
     depth: usize,
+    deadline: &ScanDeadline,
     out: &mut Vec<String>,
     visited: &mut HashSet<PathBuf>,
 ) {
-    if depth > MAX_DEPTH || out.len() >= limit {
+    if depth > MAX_DEPTH || out.len() >= limit || deadline.is_expired() {
         return;
     }
     // Canonicalize once per directory and never revisit it: a symlink cycle
@@ -147,7 +159,7 @@ fn walk(
         return;
     };
     for entry in entries.flatten() {
-        if out.len() >= limit {
+        if out.len() >= limit || deadline.is_expired() {
             return;
         }
         let Ok(kind) = entry.file_type() else {
@@ -156,6 +168,12 @@ fn walk(
         // Never follow a symlink: a link out of the workspace would leak
         // external names, and a self-referencing link would spin the walk.
         if kind.is_symlink() {
+            continue;
+        }
+        // Same skip list as `grep`: build outputs and caches are both volume
+        // and noise. The name check is on every level below the search root,
+        // so pointing `path` at one of these directories still works.
+        if kind.is_dir() && is_ignored_dir_name(entry.file_name().to_string_lossy().as_ref()) {
             continue;
         }
         let path = entry.path();
@@ -187,6 +205,7 @@ fn walk(
                 name_only,
                 limit,
                 depth + 1,
+                deadline,
                 out,
                 visited,
             );
@@ -245,6 +264,47 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.content.lines().count(), 2);
+    }
+
+    #[tokio::test]
+    async fn find_skips_build_and_cache_directories() {
+        let dir = temp_workspace("find-ignore-dirs");
+        for name in ["target", "node_modules", ".tmp", ".worktrees"] {
+            let sub = dir.join(name);
+            std::fs::create_dir_all(&sub).unwrap();
+            std::fs::write(sub.join("generated.rs"), "x").unwrap();
+        }
+        std::fs::write(dir.join("real.rs"), "x").unwrap();
+        let out = FindTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "**/*.rs" })),
+            )
+            .await
+            .unwrap();
+        assert!(out.content.contains("real.rs"), "got {}", out.content);
+        assert!(
+            !out.content.contains("generated.rs"),
+            "build/cache directories must not be walked: {}",
+            out.content
+        );
+    }
+
+    #[tokio::test]
+    async fn an_ignored_directory_can_still_be_searched_explicitly() {
+        let dir = temp_workspace("find-ignore-explicit");
+        std::fs::create_dir_all(dir.join("target")).unwrap();
+        std::fs::write(dir.join("target/generated.rs"), "x").unwrap();
+        let out = FindTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "**/*.rs", "path": "target" })),
+            )
+            .await
+            .unwrap();
+        // Paths are relative to the explicit search root; the point is the
+        // ignored directory was searched instead of silently yielding nothing.
+        assert_eq!(out.content, "generated.rs\n");
     }
 
     #[tokio::test]
