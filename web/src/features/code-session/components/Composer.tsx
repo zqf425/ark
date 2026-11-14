@@ -24,12 +24,12 @@ import { translateNow } from '../../../shared/i18n/current'
 import { describeError } from '../../../shared/api/error-describe'
 import { useCodeSessionStore } from '../state/store'
 import { useTurn } from '../hooks/use-turn'
+import { useRuntimeSkills, useThreadSkills } from '../hooks/use-thread-skills'
 import { associateAttachment, uploadAttachment } from '../api/attachments-api'
-import { listSkills, listThreadSkills, refreshThreadSkills } from '../api/skills-api'
 import { canEditComposer, canSendToThread } from './composer-availability'
 import { AutonomyPicker, WorkspacePicker, ContextRing, ModelPicker } from './ComposerRuntimeControls'
+import { SkillPalette } from './SkillPalette'
 import { CopyButton } from '../../../shared/ui/copy'
-import type { SkillSummary } from '../../../shared/contracts'
 
 const MAX_ROWS = 8
 /** Base64 of a file is ~4/3 of its bytes; keep uploads inside the runtime cap. */
@@ -231,9 +231,13 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const [deliveryMode, setDeliveryMode] = useState<RunningDeliveryMode>('steer')
   const [attachments, setAttachments] = useState<PickedAttachment[]>([])
   const [uploading, setUploading] = useState(false)
-  const [skills, setSkills] = useState<SkillSummary[] | null>(null)
+  // The loaded skill set is shared with the message canvas (mention chips read
+  // the same cache), so the palette and the bubbles never disagree.
+  const threadSkillView = useThreadSkills(threadId)
+  const runtimeSkills = useRuntimeSkills()
+  const skills = threadId ? threadSkillView.skills : runtimeSkills
+  const skillWarnings = threadId ? threadSkillView.warnings : 0
   const [skillsOpen, setSkillsOpen] = useState(false)
-  const [skillWarnings, setSkillWarnings] = useState(0)
   /** The round + button opens a small insert menu (attachment / skills). */
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -257,6 +261,8 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const inputDisabled = !canEditComposer(threadId, draft)
   const sendDisabled = !canSendToThread(threadId, draft, streamStatus)
   const live = canInterrupt
+  // Known skill count for the insert-menu badge; loading state hides it.
+  const skillCount = skills?.length ?? 0
   // The steer/queue chooser only exists while the user actually has a draft:
   // an empty running composer is pure stop, matching the smart-ark composer.
   const showDeliveryChooser = live && !sendDisabled && draftText.trim().length > 0
@@ -384,35 +390,14 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   }
 
   // Skills are what THIS thread loaded (base + extra roots, with load
-  // warnings); without a thread the runtime-wide diagnostics are the fallback.
+  // warnings), cached module-level in `useThreadSkills`; `reload` forces the
+  // rescan endpoint so the palette can refresh on demand.
   const toggleSkills = async (): Promise<void> => {
-    const next = !skillsOpen
-    setSkillsOpen(next)
-    if (next && skills === null) {
-      try {
-        if (threadId) {
-          const view = await listThreadSkills(threadId)
-          setSkills([...view.base_skills, ...view.extra_skills])
-          setSkillWarnings(view.warnings.length)
-        } else {
-          const diagnostics = await listSkills()
-          setSkills(diagnostics.skills)
-        }
-      } catch {
-        setSkills([])
-      }
-    }
+    setSkillsOpen((current) => !current)
   }
 
-  const reloadSkills = async (): Promise<void> => {
-    if (!threadId) return
-    try {
-      const view = await refreshThreadSkills(threadId)
-      setSkills([...view.base_skills, ...view.extra_skills])
-      setSkillWarnings(view.warnings.length)
-    } catch {
-      // Keep the current list: a failed rescan must not blank the panel.
-    }
+  const reloadSkills = (): void => {
+    threadSkillView.reload()
   }
 
   const mentionSkill = (id: string): void => {
@@ -420,6 +405,32 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     if (threadId) setDraft(threadId, next)
     inputRef.current?.focus()
     setSkillsOpen(false)
+  }
+
+  /** Insert at the caret (or append) when picking from the palette. */
+  const insertSkillAtCaret = (id: string): void => {
+    const node = inputRef.current
+    const mention = `/${id} `
+    if (!node || !threadId) {
+      mentionSkill(id)
+      return
+    }
+    const start = node.selectionStart ?? draftText.length
+    const end = node.selectionEnd ?? draftText.length
+    const before = draftText.slice(0, start)
+    const after = draftText.slice(end)
+    // A mention is a word: keep one space before it when gluing onto text.
+    const lead = before && !/\s$/.test(before) ? ' ' : ''
+    const next = `${before}${lead}${mention}${after}`
+    setDraft(threadId, next)
+    const caret = before.length + lead.length + mention.length
+    // The value lands through the store → prop cycle, so the caret restore
+    // waits one frame; without it the cursor jumps to the end of the draft.
+    requestAnimationFrame(() => {
+      const fresh = inputRef.current
+      if (fresh) fresh.setSelectionRange(caret, caret)
+    })
+    node.focus()
   }
 
   const placeholder = threadId
@@ -526,38 +537,13 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
         ) : null}
 
         {skillsOpen ? (
-          <div className="ark-composer__skills" role="listbox" aria-label={t('canvas.composer.skillsAria')}>
-            {skills === null ? (
-              <span className="ark-composer__status">{t('canvas.composer.skillsLoading')}</span>
-            ) : skills.length === 0 ? (
-              <span className="ark-composer__status">{t('canvas.composer.skillsEmpty')}</span>
-            ) : (
-              skills.map((skill) => (
-                <button
-                  key={skill.id}
-                  type="button"
-                  className="ark-composer__skill"
-                  role="option"
-                  aria-selected={false}
-                  onClick={() => mentionSkill(skill.id)}
-                >
-                  /{skill.id}
-                  <span className="ark-composer__skill-name">{skill.name}</span>
-                </button>
-              ))
-            )}
-            <div className="ark-composer__skillfoot">
-              {skillWarnings > 0 ? (
-                <span className="ark-composer__status is-warn">{t('canvas.composer.skillWarnings', { count: skillWarnings })}</span>
-              ) : null}
-              {threadId ? (
-                <button type="button" className="ark-linkbtn" onClick={() => void reloadSkills()}>
-                  {t('canvas.composer.skillsRefresh')}
-                </button>
-              ) : null}
-            </div>
-            <p className="ark-composer__status">{t('canvas.composer.skillsHint')}</p>
-          </div>
+          <SkillPalette
+            skills={skills}
+            warnings={skillWarnings}
+            canRefresh={Boolean(threadId)}
+            onPick={insertSkillAtCaret}
+            onRefresh={() => void reloadSkills()}
+          />
         ) : null}
 
         <div className="ark-composer__actions">
@@ -621,7 +607,10 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
                       void toggleSkills()
                     }}
                   >
-                    {t('canvas.composer.skills')}
+                    <span className="ark-composer__option-row">
+                      {t('canvas.composer.skills')}
+                      {skillCount > 0 ? <span className="ark-composer__option-badge">{skillCount}</span> : null}
+                    </span>
                   </button>
                 </div>
               ) : null}

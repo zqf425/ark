@@ -9,6 +9,8 @@ import { formatClock } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
 import { Markdown } from '../../../shared/ui/Markdown'
 import { CopyButton } from '../../../shared/ui/copy'
+import { useThreadSkills } from '../hooks/use-thread-skills'
+import { splitSkillMentions } from './skill-mention'
 
 /*
  * Rows are memoized on their `item` object. The reducer keeps the identity of
@@ -61,6 +63,48 @@ export function AttachmentChips({ outcomes }: { outcomes: TurnAttachmentOutcome[
   )
 }
 
+/**
+ * Message body with skill mentions rendered as chips.
+ *
+ * The mention syntax is what the composer's palette inserts (`/id `), and the
+ * runtime activates on the same token (`ark-skills::activation`). Rendering the
+ * token as a chip makes the invocation visible without changing the text —
+ * the copy button still copies the verbatim draft.
+ */
+function MentionBody({ text }: { text: string }): JSX.Element {
+  const { t } = useI18n()
+  const { skills } = useThreadSkills(null)
+  if (!skills || skills.length === 0) return <>{text}</>
+  return (
+    <>
+      {splitSkillMentions(text, skills).map((segment, index) =>
+        segment.kind === 'mention' ? (
+          <span
+            key={`${index}-${segment.value}`}
+            className="ark-mention"
+            title={segment.skill.description ?? t('canvas.composer.skillsAria')}
+          >
+            <span className="ark-mention__glyph" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="11" height="11" focusable="false">
+                <path
+                  d="M13 2.5 4.5 13.5H11L9.8 21.5 19.5 9.5H13l1.4-7Z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            {segment.value}
+          </span>
+        ) : (
+          <span key={`text-${index}`}>{segment.value}</span>
+        )
+      )}
+    </>
+  )
+}
+
 /** User message bubble. Text is the runtime's accumulated `text`, verbatim. */
 export const UserBubble = memo(function UserBubble({ item }: { item: ThreadItem }): JSX.Element {
   const { t, locale } = useI18n()
@@ -80,7 +124,9 @@ export const UserBubble = memo(function UserBubble({ item }: { item: ThreadItem 
           className="ark-msg__copy"
         />
       </header>
-      <div className="ark-msg__body">{text}</div>
+      <div className="ark-msg__body">
+        <MentionBody text={text} />
+      </div>
       {item.attachments && item.attachments.length > 0 ? (
         <AttachmentChips outcomes={item.attachments} />
       ) : null}
