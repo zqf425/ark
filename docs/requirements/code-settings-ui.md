@@ -201,3 +201,17 @@ UI 重构混入本需求。
 阈值经 `GET /v1/runtime/providers` 的 `compaction_threshold_tokens` 发布（仅当完全无有效 provider 时
 字段缺省），会话上下文环、footer 水位与控制台状态条以它为分母；字段缺省时隐藏水位。设置页移除该
 输入项，模型清单行的「上下文窗口」成为压缩行为的唯一入口；界面文案明确「模型窗口的 80%」语义。
+
+## 阶段 I：新增供应商不隐式切换全局默认
+
+> 状态：**当前实现**。
+
+设置页供应商表单的保存（新增或编辑）只登记条目：请求恒以 `make_default: false` 提交，表单不再提供
+「保存后设为默认」勾选（对齐 smart-ark 的 `commitProviderDraft`：只新增供应商，不改写默认；默认值只在
+专门入口手动修改）。此前新增供应商时该勾选默认勾上，保存即把 `default_provider_id` 指向新条目——所有
+未显式设置会话覆盖的线程都跟随默认通道解析模型，表现为"新增供应商后正在执行的会话模型被静默切走"。
+
+默认供应商的切换保持显式动作：列表行的「设为默认」按钮（`POST /v1/runtime/providers/{id}/default`）与
+「设置 → 通用」的默认模型选择器；后端 `upsert(make_default)` 契约不变，MCP 等其他客户端不受影响。
+回归测试 `ProvidersSection.test.tsx` 钉住三条：新增保存携带 `make_default: false`、表单无该勾选、
+行内「设为默认」仍到达 default 端点。

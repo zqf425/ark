@@ -4,6 +4,11 @@
  * The list only ever renders the redacted `has_api_key` / `api_key_hint`.
  * Opening an edit form explicitly reads the full entry, including the stored
  * api key, so the field is prefilled instead of looking like it was lost.
+ *
+ * Saving never flips the global default: the default decides which provider
+ * every default-following session resolves to, so it can only be changed
+ * deliberately (row action or Settings -> 通用), never as a side effect of
+ * adding a provider.
  */
 import { useState } from 'react'
 import { Button, EmptyState, useToast } from '../../../shared/ui'
@@ -134,14 +139,13 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
     setEditing(false)
   }
 
-  const submit = async (entry: ProviderEntry, makeDefault: boolean): Promise<void> => {
-    const outcome = await api.upsert({ ...entry, make_default: makeDefault })
+  const submit = async (entry: ProviderEntry): Promise<void> => {
+    // 对齐 smart-ark：保存（新增或编辑）只登记条目，绝不隐式切换全局默认。
+    // 默认供应商决定所有未显式覆盖的会话实际用哪个模型，只能在列表行或
+    // 「设置 → 通用」里手动切换。
+    const outcome = await api.upsert({ ...entry, make_default: false })
     if (outcome.ok) {
-      toast.push(
-        'success',
-        t('settings.providers.saved', { id: entry.id }),
-        makeDefault ? t('settings.providers.savedAsDefault') : undefined
-      )
+      toast.push('success', t('settings.providers.saved', { id: entry.id }))
       close()
       return
     }
