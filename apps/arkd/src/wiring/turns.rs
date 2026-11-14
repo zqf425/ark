@@ -203,6 +203,13 @@ pub(super) async fn finish_parent_turn(
 impl TurnRunner for AgentTurnRunner {
     async fn run_turn(&self, job: TurnJob) -> Result<TurnEnd> {
         let is_auto = matches!(&job.source, TurnSource::AutoContinuation);
+        // A recovery re-runs the failed request through a fresh reactor; the
+        // request text rides `TurnSource::AutoRecovery` and the attempt number
+        // lands on the durable `turn_started` (and the transcript note below).
+        let recovery = match &job.source {
+            TurnSource::AutoRecovery { attempt, .. } => Some(*attempt),
+            _ => None,
+        };
         let inbox = if is_auto {
             auto_continuation_inbox(self.store.as_ref(), job.thread_id).await?
         } else {
@@ -235,6 +242,7 @@ impl TurnRunner for AgentTurnRunner {
                 &job,
                 thread.runtime.provider_id.as_deref(),
                 thread.runtime.model.as_deref(),
+                recovery,
             )
             .await?;
         // The rule table is a Hot config: each turn snapshots its own policy so
@@ -299,6 +307,13 @@ impl TurnRunner for AgentTurnRunner {
         if let Some(text) = user_text {
             reactor.push_user_message(user_message_with_attachments(text, &attachments));
         }
+        // A recovery turn announces itself in the transcript: the durable log
+        // already shows the failed predecessor, but the live transcript needs
+        // the row explaining why a new turn started without user input.
+        if let Some(attempt) = recovery {
+            let reason = self.last_model_failure(job.thread_id).await;
+            reactor.note_auto_recovery(attempt, &reason).await;
+        }
         let outcome = reactor.run().await?;
         let end = finish_parent_turn(
             outcome,
@@ -314,6 +329,26 @@ impl TurnRunner for AgentTurnRunner {
 }
 
 impl AgentTurnRunner {
+    /// The previous turn's failure message, for the recovery note.
+    ///
+    /// Reads the durable log so the note quotes the failure the user just
+    /// saw, not a paraphrase. Falls back to a stable wording when the log
+    /// cannot be read: the note is best-effort context, never turn-critical.
+    async fn last_model_failure(&self, thread_id: ThreadId) -> String {
+        let failed = self
+            .store
+            .replay_interaction_events(thread_id)
+            .await
+            .ok()
+            .and_then(|events| {
+                events.iter().rev().find_map(|event| match event {
+                    ark_contract::RuntimeEvent::TurnFailed { message, .. } => Some(message.clone()),
+                    _ => None,
+                })
+            });
+        failed.unwrap_or_else(|| "previous model request failed".to_string())
+    }
+
     /// Resolve the turn's attachments and the durable `turn_started` event.
     ///
     /// Attachment phase two: the ids the route already authorized become seed
@@ -328,6 +363,7 @@ impl AgentTurnRunner {
         job: &TurnJob,
         provider_id: Option<&str>,
         model: Option<&str>,
+        recovery: Option<u32>,
     ) -> Result<(
         crate::attachment_seed::AttachmentSeed,
         TurnEvents,
@@ -359,6 +395,8 @@ impl AgentTurnRunner {
         );
         let events = if is_auto {
             TurnEvents::auto_continuation(job.thread_id, job.turn_id)
+        } else if let Some(attempt) = recovery {
+            TurnEvents::new(job.thread_id, job.turn_id).with_auto_recovery(attempt)
         } else {
             TurnEvents::new(job.thread_id, job.turn_id)
         }
@@ -409,11 +447,13 @@ impl AgentTurnRunner {
 
 /// Split the turn source into the skill-resolution text and the user message
 /// text (an auto-continuation has neither; an IM message behaves like explicit
-/// user input — requirements/im-channels.md).
+/// user input — requirements/im-channels.md). A recovery re-persists the
+/// failed request's text, so it behaves like explicit user input.
 fn turn_source_texts(source: &TurnSource) -> (String, Option<String>) {
     match source {
         TurnSource::User(text) => (text.clone(), Some(text.clone())),
         TurnSource::Im { text, .. } => (text.clone(), Some(text.clone())),
+        TurnSource::AutoRecovery { text, .. } => (text.clone(), Some(text.clone())),
         TurnSource::AutoContinuation => (String::new(), None),
     }
 }

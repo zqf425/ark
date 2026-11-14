@@ -35,7 +35,7 @@ impl Reactor {
             .append(self.events.tool_call_started(
                 &synthetic.call_id,
                 &synthetic.tool,
-                serde_json::Value::Null,
+                synthetic.arguments.clone(),
             ))
             .await?;
         if let Some(count) = synthetic.storm_count {
@@ -64,7 +64,7 @@ impl Reactor {
         let call = ToolCallRequest::new(
             synthetic.call_id.clone(),
             synthetic.tool.clone(),
-            serde_json::Value::Null,
+            synthetic.arguments.clone(),
         );
         self.append_tool_history(&call, &execution);
         out.push(execution);

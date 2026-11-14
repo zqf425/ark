@@ -656,6 +656,7 @@ async fn startup_aborts_a_parent_turn_left_open_by_a_previous_process() {
         .append_event(
             thread,
             RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
                 seq: 0,
                 thread_id: thread,
                 turn_id: turn,

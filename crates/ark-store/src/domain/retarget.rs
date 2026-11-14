@@ -38,6 +38,7 @@ mod tests {
         let turn = TurnId::new();
         let now = Utc::now();
         let event = RuntimeEvent::TurnStarted {
+            auto_recovery: 0,
             seq: 7,
             thread_id: original_thread,
             turn_id: turn,

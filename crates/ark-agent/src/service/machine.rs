@@ -123,10 +123,14 @@ impl TurnMachine {
     }
 
     /// Record that these calls ran, so the storm breaker can count repeats.
+    ///
+    /// Counted by storm key (bash commands normalized), matching what
+    /// `repeats_for` reads back — a byte-exact key here would make the
+    /// breaker blind to sleep-prefixed retries.
     pub fn record_calls(&mut self, calls: &[ToolCallRequest]) {
         for call in calls {
             self.repeats
-                .entry(call.signature())
+                .entry(call.storm_key())
                 .or_default()
                 .push(self.progress.rounds);
         }
@@ -143,7 +147,7 @@ impl TurnMachine {
             .iter()
             .map(|call| {
                 self.repeats
-                    .get(&call.signature())
+                    .get(&call.storm_key())
                     .map(|rounds| {
                         rounds
                             .iter()

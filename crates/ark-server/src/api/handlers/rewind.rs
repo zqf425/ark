@@ -223,6 +223,7 @@ mod tests {
         let discarded_turn = TurnId::new();
         for event in [
             RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
                 seq: 0,
                 thread_id: thread,
                 turn_id: retained_turn,
@@ -247,6 +248,7 @@ mod tests {
                 timestamp: Utc::now(),
             },
             RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
                 seq: 0,
                 thread_id: thread,
                 turn_id: discarded_turn,

@@ -765,6 +765,7 @@ mod tests {
         let now = Utc::now();
         let events = vec![
             RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
                 seq: 1,
                 thread_id: thread,
                 turn_id: turn,
@@ -797,6 +798,7 @@ mod tests {
         let now = Utc::now();
         let events = vec![
             RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
                 seq: 1,
                 thread_id: thread,
                 turn_id: turn,

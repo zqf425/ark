@@ -41,6 +41,11 @@ gated 在 `Notice` kind 上）。取消原因词表与自治权词表不在本 c
 该 id 已关联到**本线程**，本阶段只记录本回合引用了哪些附件，不向模型传字节。`TurnStarted` 的
 `attachment_ids` 同样带 serde default，使旧日志可读。
 
+`TurnStarted.auto_recovery: u32`（serde default `0`，序列化时省略零值）标记 harness 自动恢复
+回合及其尝试序号：前一个回合因瞬态模型请求失败（`model_request_failed = true`）终结后，恢复调度器
+以同一请求文本重开回合并把 1-based 尝试号写进该字段；普通用户/IM/自动续跑回合保持 `0` 且不出现在
+JSON 里。消费方据此区分"用户发的消息"与"harness 重放的上一条消息"，并审计一个请求消耗了几次自动恢复。
+
 `SubagentSettings.auto_continue` 是显式 opt-in 的 wire 配置，serde default 为 `false`，保证旧配置不会
 产生额外模型调用；Rust 生成的 TypeScript 使用同名 snake_case 字段。
 `SubagentSettings.default_background` 的 serde default 为 `true`：缺省旧配置保持"委派不阻塞主会话"

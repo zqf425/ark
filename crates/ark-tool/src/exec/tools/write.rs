@@ -32,14 +32,44 @@ impl Tool for WriteTool {
 fn write(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
     let parsed: args::WriteArgs = args::parse("write", &raw)?;
     let path = workspace_path(ctx, Some(&parsed.path))?;
+    // Read the previous content *before* overwriting: the delta is the model's
+    // only cheap signal that this write undid a previous one (observed: an
+    // hour-long loop rewriting the same 595 bytes with no visible progress).
+    let before = std::fs::read_to_string(&path).ok();
     // UTF-8, never a BOM (design §6.1). The helper also creates parents and
     // strips a BOM the model may have echoed into `content`.
     write_text(&path, &parsed.content)?;
-    Ok(ToolOutput::ok(format!(
+    let delta = before
+        .filter(|before| before.as_str() != parsed.content)
+        .map(|before| diff_summary(&before, &parsed.content));
+    let mut receipt = format!(
         "wrote {} bytes to {}",
         ark_common::utf8_bytes_no_bom(&parsed.content).len(),
         path.display()
-    )))
+    );
+    if let Some(delta) = delta {
+        receipt.push_str(&format!("; {delta}"));
+    }
+    Ok(ToolOutput::ok(receipt))
+}
+
+/// One-line line-count delta between the previous and the new file content.
+///
+/// Line counts (not bytes) because edits move whole lines; the exact content
+/// is already in the model's context. Returns a short "+a/-r" summary, or
+/// `""` when the file did not exist before.
+fn diff_summary(before: &str, after: &str) -> String {
+    let before_lines = before.lines().count();
+    let after_lines = after.lines().count();
+    match after_lines.cmp(&before_lines) {
+        std::cmp::Ordering::Equal => "line count unchanged".to_string(),
+        std::cmp::Ordering::Greater => {
+            format!("+{} lines", after_lines - before_lines)
+        }
+        std::cmp::Ordering::Less => {
+            format!("-{} lines", before_lines - after_lines)
+        }
+    }
 }
 
 /// `edit`.
@@ -88,10 +118,15 @@ fn edit(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
         original.replacen(&parsed.old_string, &parsed.new_string, 1)
     };
     std::fs::write(&path, updated.as_bytes())?;
-    Ok(ToolOutput::ok(format!(
-        "replaced {occurrences} occurrence(s) in {}",
-        path.display()
-    )))
+    // A bare "replaced N occurrence(s)" gave the model no signal about *what
+    // changed*, so an edit that undid its own previous edit looked identical
+    // to progress. The delta summary makes oscillation visible in the receipt.
+    let delta = diff_summary(&original, &updated);
+    let mut receipt = format!("replaced {occurrences} occurrence(s) in {}", path.display());
+    if !delta.is_empty() {
+        receipt.push_str(&format!("; {delta}"));
+    }
+    Ok(ToolOutput::ok(receipt))
 }
 
 #[cfg(test)]
@@ -109,6 +144,37 @@ mod tests {
             std::fs::read_to_string(dir.join("nested/a.txt")).unwrap(),
             "hi"
         );
+    }
+
+    #[tokio::test]
+    async fn write_receipt_reports_the_line_delta_on_overwrite() {
+        let dir = temp_workspace("write-delta");
+        std::fs::write(dir.join("a.txt"), "one\ntwo\n").unwrap();
+        let raw = ToolArgs(serde_json::json!({ "path": "a.txt", "content": "one\n" }));
+        let out = WriteTool.execute(&ctx(&dir), raw).await.unwrap();
+        assert!(out.ok, "{}", out.content);
+        // The delta is the model's only cheap signal that this write undid a
+        // previous one; it must be in the receipt, not just the byte count.
+        assert!(out.content.contains("-1 lines"), "{}", out.content);
+    }
+
+    #[tokio::test]
+    async fn edit_receipt_reports_the_line_delta() {
+        let dir = temp_workspace("edit-delta");
+        std::fs::write(dir.join("a.txt"), "a\nb\nc\n").unwrap();
+        let raw = ToolArgs(serde_json::json!({
+            "path": "a.txt",
+            "old_string": "b\nc",
+            "new_string": "x"
+        }));
+        let out = EditTool.execute(&ctx(&dir), raw).await.unwrap();
+        assert!(out.ok, "{}", out.content);
+        assert!(
+            out.content.contains("replaced 1 occurrence(s)"),
+            "{}",
+            out.content
+        );
+        assert!(out.content.contains("-1 lines"), "{}", out.content);
     }
 
     #[tokio::test]

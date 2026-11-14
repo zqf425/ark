@@ -24,6 +24,10 @@
 - 工具并发由 `ark-agent` 的 `ParallelPolicy` 统一规划（设计刻意保守）：任何变更类调用独占一个批次，
   即使不同路径也不并行；只有**不同资源**的只读调用可共享批次，同资源的只读调用按资源串行。
   未知工具名一律按变更类处理。所有输出走统一 UTF-8 安全截断。
+- `write`/`edit` 的成功回执在字节数之外附一行级变更摘要（相对写入/替换前内容的行数差，
+  `+N lines`/`-N lines`/`line count unchanged`，fresh write 无摘要）：模型上下文里已有全文，
+  回执唯一能补充的信号是"这次操作改动了什么形状"——缺失时模型对自己刚撤销上一步毫无感知
+  （实测同一 import 块改→撤销→再改→再撤销翻转 4 次）。
 - `delegate_task` 只消费 `SubagentRunner` 端口，子任务工具集不含它。派发模式按优先级决定：模型显式
   `background` 参数优先；缺省时读取注入的 `SubagentPolicySource` 的 `default_background`（Hot，
   对应 `subagents.default_background`，默认开启=后台派发）；未注入策略源时保持前台默认。

@@ -38,8 +38,9 @@ pub mod service;
 
 pub use ark_ports::{CancelToken, SteerQueue};
 pub use context::{
-    auto_delivery_attempts, consecutive_auto_model_request_failures, CompletionInbox,
-    ContextCheckpoint, HistoryHygiene, HygieneReport, TokenEstimator, MAX_AUTO_DELIVERY_ATTEMPTS,
+    auto_delivery_attempts, consecutive_auto_model_request_failures,
+    consecutive_model_request_failures, CompletionInbox, ContextCheckpoint, HistoryHygiene,
+    HygieneReport, TokenEstimator, MAX_AUTO_DELIVERY_ATTEMPTS, RECOVERY_MODEL_FAILURE_STREAK_LIMIT,
 };
 pub use domain::{
     Action, ApprovalAsk, DispatchPlan, InputKind, Progress, StormNote, SyntheticResult,

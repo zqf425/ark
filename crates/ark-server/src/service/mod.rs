@@ -7,6 +7,7 @@ pub mod im;
 pub mod im_inbound;
 pub mod mcp_info;
 pub mod mcp_tools;
+pub mod recovery;
 pub mod scheduler;
 pub mod serve;
 pub mod thread_titles;
@@ -21,6 +22,7 @@ pub use attachment_auth::{
 pub use compaction::{ensure_checkpoint, CompactionOutcome};
 pub use continuation::{schedule_auto_continuation, sync_auto_continue_policy};
 pub use im::ImService;
+pub use recovery::schedule_recovery;
 pub use scheduler::{SchedulerService, TICK_INTERVAL as SCHEDULE_TICK_INTERVAL};
 pub use serve::{bind, AppHandle};
 pub use thread_titles::name_thread_on_first_turn;

@@ -375,6 +375,7 @@ async fn list_falls_back_to_the_durable_log_for_running_after_a_registry_loss() 
         .append_event(
             open,
             RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
                 seq: 0,
                 thread_id: open,
                 turn_id: turn,
@@ -392,6 +393,7 @@ async fn list_falls_back_to_the_durable_log_for_running_after_a_registry_loss() 
         .append_event(
             settled,
             RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
                 seq: 0,
                 thread_id: settled,
                 turn_id: done,
@@ -463,6 +465,7 @@ async fn list_orders_by_last_event_time_not_metadata_updates() {
         .append_event(
             older,
             RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
                 seq: 0,
                 thread_id: older,
                 turn_id: turn,
@@ -1207,6 +1210,7 @@ async fn bulk_delete_respects_the_durable_running_verdict() {
         .append_event(
             busy,
             RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
                 seq: 0,
                 thread_id: busy,
                 turn_id: TurnId::new(),

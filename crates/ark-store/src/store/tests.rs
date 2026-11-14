@@ -39,6 +39,7 @@ pub(crate) fn event_at(thread: ThreadId, seq: u64) -> RuntimeEvent {
 /// A `TurnStarted` event, useful when ordering matters.
 pub(crate) fn turn_started(thread: ThreadId, turn: TurnId, seq: u64) -> RuntimeEvent {
     RuntimeEvent::TurnStarted {
+        auto_recovery: 0,
         seq,
         thread_id: thread,
         turn_id: turn,

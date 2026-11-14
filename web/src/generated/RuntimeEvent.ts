@@ -26,6 +26,14 @@ export type RuntimeEvent = { "kind": "thread_created", seq: number, thread_id: T
  */
 auto_continuation: boolean, 
 /**
+ * `true` when the turn is the harness retrying a previous turn that
+ * died on a transient model-request failure (gateway outage, broken
+ * stream). Carries the retry attempt number so the log records how
+ * many recoveries one user request already consumed. Additive with a
+ * serde default so pre-existing logs stay readable.
+ */
+auto_recovery: number, 
+/**
  * Attachments this turn referenced, already authorized against the
  * thread by `attachment_associated` events.
  *

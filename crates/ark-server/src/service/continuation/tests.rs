@@ -451,6 +451,7 @@ impl Harness {
             .append_event(
                 thread,
                 RuntimeEvent::TurnStarted {
+                    auto_recovery: 0,
                     seq: 0,
                     thread_id: thread,
                     turn_id: TurnId::new(),
@@ -469,6 +470,7 @@ impl Harness {
             .append_event(
                 thread,
                 RuntimeEvent::TurnStarted {
+                    auto_recovery: 0,
                     seq: 0,
                     thread_id: thread,
                     turn_id: TurnId::new(),
@@ -774,6 +776,7 @@ async fn failed_continuations_keep_a_complete_lifecycle_until_the_breaker_holds(
         .iter()
         .filter_map(|event| match event {
             RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
                 turn_id,
                 auto_continuation: true,
                 ..
