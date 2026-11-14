@@ -82,8 +82,12 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.composer.steerAria': ['向运行中的回合补充指令', 'Add instructions to the running turn'],
   'canvas.composer.sendAria': ['发送消息', 'Send a message'],
   'canvas.composer.interrupt': ['中断', 'Interrupt'],
-  'canvas.composer.steer': ['Steer', 'Steer'],
+  'canvas.composer.steer': ['追加', 'Steer'],
   'canvas.composer.send': ['发送', 'Send'],
+  'canvas.composer.queueSend': ['排队', 'Queue'],
+  'canvas.composer.deliveryAria': ['选择发送方式', 'Choose the delivery method'],
+  'canvas.composer.steerDesc': ['注入当前回合，立即生效', 'Inject into the current turn now'],
+  'canvas.composer.queueSendDesc': ['回合结束后作为下一轮发送', 'Send as the next turn after this one ends'],
 
   'canvas.footer.connecting': ['连接中', 'Connecting'],
   'canvas.footer.open': ['已连接', 'Connected'],
@@ -153,7 +157,6 @@ export const SESSION_CANVAS_MESSAGES = {
     'Images reach the model only when it declares vision (placeholder otherwise). Declare it under Settings → Provider → Advanced.'
   ],
   'canvas.composer.attachLiveHint': ['回合进行中不支持添加附件；请排队消息，结束后再附。', 'Attachments cannot be added mid-turn; queue a message instead.'],
-  'canvas.composer.queue': ['排队', 'Queue'],
   'canvas.composer.queuedChip': ['#{index} 排队', '#{index} queued'],
   'canvas.composer.queuedRemove': ['移除排队消息 #{index}', 'Remove queued message #{index}'],
   'canvas.composer.queuedAria': ['排队中的消息，回合结束后按顺序发送', 'Queued messages; sent in order when the turn ends'],

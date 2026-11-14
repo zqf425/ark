@@ -263,6 +263,111 @@
   outline-offset: 2px;
 }
 
+/* ---------- running-state delivery chooser (steer / queue) ---------- */
+
+/* Anchor for the popover, itself a quiet pill like the toolbar pickers. */
+.ark-composer__delivery {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.ark-composer__delivery-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: 999px;
+  background: var(--ark-card-strong);
+  color: var(--ark-text-dim);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.ark-composer__delivery-trigger:hover {
+  background: var(--ark-bg-hover);
+  border-color: var(--ark-border);
+  color: var(--ark-text);
+}
+
+.ark-composer__delivery-trigger:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: 1px;
+}
+
+.ark-composer__delivery-menu {
+  left: auto;
+  right: 0;
+  min-width: 230px;
+  gap: 2px;
+}
+
+/* Two-line radio rows, mirroring smart-ark's running-action menu. */
+.ark-composer__delivery-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  border-radius: var(--ark-radius);
+  background: transparent;
+  color: var(--ark-text);
+  text-align: left;
+  padding: 7px 8px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.ark-composer__delivery-option:hover {
+  background: var(--ark-bg-hover);
+}
+
+.ark-composer__delivery-option > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--ark-text-dim);
+}
+
+.ark-composer__delivery-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ark-composer__delivery-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ark-composer__delivery-desc {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--ark-text-faint);
+}
+
+.ark-composer__delivery-check {
+  flex: none;
+  margin-left: auto;
+  margin-top: 2px;
+  color: var(--ark-accent);
+  font-size: 12px;
+}
+
+/* The in-flight send glyph: a spinning arc, not a text ellipsis. */
+.ark-composer__spinner svg {
+  animation: ark-composer-spin 0.9s linear infinite;
+}
+
+@keyframes ark-composer-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ark-composer__box,
   .ark-composer__round,

@@ -6,6 +6,7 @@
  * tests pin the complement — a sent draft is pruned, and queued text never
  * leaks into another thread's input.
  */
+import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installBrowserStubs, mountWithProviders, settle, type ReactHarness } from '../../../shared/testing/react-harness'
 import { useCodeSessionStore } from '../state/store'
@@ -73,6 +74,14 @@ async function pressEnter(node: HTMLTextAreaElement): Promise<void> {
   await settle()
 }
 
+/** Click with the state fan wrapped in act() so React does not warn. */
+async function click(node: HTMLElement): Promise<void> {
+  await act(async () => {
+    node.click()
+    await Promise.resolve()
+  })
+}
+
 describe('Composer per-thread draft persistence', () => {
   let harness: ReactHarness | null = null
 
@@ -131,16 +140,54 @@ describe('Composer per-thread draft persistence', () => {
     const node = input(harness.host)
     await type(node, '排队中的消息')
 
-    const queueButton = [...harness.host.querySelectorAll<HTMLButtonElement>('.ark-btn')].find(
-      (button) => button.textContent === '排队'
-    )
-    expect(queueButton).toBeDefined()
-    queueButton!.click()
+    // Typing during a live turn swaps the interrupt button for the delivery
+    // chooser; switching the mode to queue turns Enter into a queue action.
+    expect(harness.host.querySelector('.ark-composer__round--stop')).toBeNull()
+    const trigger = harness.host.querySelector<HTMLButtonElement>('.ark-composer__delivery-trigger')
+    expect(trigger).toBeDefined()
+    await click(trigger!)
     await settle()
+    const queueOption = [...harness.host.querySelectorAll<HTMLButtonElement>('.ark-composer__delivery-option')].find(
+      (option) => option.textContent?.includes('排队')
+    )
+    expect(queueOption).toBeDefined()
+    await click(queueOption!)
+    await settle()
+    await pressEnter(node)
 
     // The text moved into the local queue chip; nothing stays in the draft.
     expect(node.value).toBe('')
     expect(useCodeSessionStore.getState().drafts[THREAD_A]).toBeUndefined()
     expect(harness.text()).toContain('#1 排队')
+  })
+
+  it('an empty running composer shows the interrupt button instead of the chooser', async () => {
+    useCodeSessionStore.setState({ activeTurnId: '00000000-0000-0000-0000-0000000000t1' })
+    harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+
+    // No draft: the rightmost control is the stop button; the chooser and the
+    // send button are both gone.
+    expect(harness.host.querySelector('.ark-composer__round--stop')).toBeDefined()
+    expect(harness.host.querySelector('.ark-composer__delivery')).toBeNull()
+    expect(harness.host.querySelector('.ark-composer__sendbtn')).toBeNull()
+  })
+
+  it('enter steers during a live turn by default and keeps the send button for idle', async () => {
+    useCodeSessionStore.setState({ activeTurnId: '00000000-0000-0000-0000-0000000000t1' })
+    harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+    const node = input(harness.host)
+    await type(node, '运行中的补充指令')
+
+    // The chooser defaults to steer; Enter routes to steer(), not send().
+    await pressEnter(node)
+    await settle()
+    expect(useCodeSessionStore.getState().drafts[THREAD_A]).toBeUndefined()
+    expect(harness.host.querySelector('.ark-composer__sendbtn')).toBeNull()
+
+    // The turn ends: the send button is back and the stop button is gone.
+    useCodeSessionStore.setState({ activeTurnId: null })
+    await settle()
+    expect(harness.host.querySelector('.ark-composer__sendbtn')).toBeDefined()
+    expect(harness.host.querySelector('.ark-composer__round--stop')).toBeNull()
   })
 })

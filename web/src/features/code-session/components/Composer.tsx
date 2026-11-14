@@ -3,21 +3,22 @@
  *
  * Layout follows the smart-ark Code composer: a 24px frosted shell whose first
  * row is the auto-growing textarea, a hairline-separated toolbar underneath
- * (round attach button, quiet runtime pickers on the left; queue/interrupt and
- * the circular gradient send button on the right). Workspace projects, context
- * structure, manual compaction and the two-level model menu are all toolbar
- * pills; there is no unfolded details panel.
+ * (round attach button, quiet runtime pickers on the left; the delivery
+ * chooser and the circular gradient send button on the right). Workspace
+ * projects, context structure, manual compaction and the two-level model menu
+ * are all toolbar pills; there is no unfolded details panel.
  *
- * Enter sends, Shift+Enter inserts a newline. During a live turn the send
- * button becomes a steering action (追加) and a second action queues the draft
- * locally; queued drafts flush automatically when the turn ends, in order.
- * Message state is local: the runtime owns conversation state, and the user's
- * own message returns as a `ThreadItem`. The unsent draft itself lives in the
- * session store keyed by thread id, so switching threads (which remounts this
- * component) keeps each thread's draft instead of dropping it.
+ * Enter sends, Shift+Enter inserts a newline. While a turn is live the primary
+ * control is the interrupt button — until the user starts a draft, at which
+ * point it is replaced by the smart-ark running-action pair: a steer/queue
+ * delivery picker plus a submit button for the chosen mode. Queued drafts
+ * flush automatically when the turn ends, in order. Message state is local:
+ * the runtime owns conversation state, and the user's own message returns as
+ * a `ThreadItem`. The unsent draft itself lives in the session store keyed by
+ * thread id, so switching threads (which remounts this component) keeps each
+ * thread's draft instead of dropping it.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Button } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import { translateNow } from '../../../shared/i18n/current'
 import { describeError } from '../../../shared/api/error-describe'
@@ -34,6 +35,9 @@ const MAX_ROWS = 8
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
 type PickedAttachment = { id: string; name: string }
+
+/** Where a draft goes while a turn is live: steer the current turn or hold it. */
+type RunningDeliveryMode = 'steer' | 'queue'
 
 function toBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -67,6 +71,139 @@ function StopGlyph(): JSX.Element {
   )
 }
 
+/** Delivery-mode glyphs for the running-action picker (fork = steer). */
+function SteerGlyph(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false">
+      <circle cx="6" cy="5.5" r="2.1" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="6" cy="18.5" r="2.1" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="18" cy="5.5" r="2.1" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M6 7.6v8.8M18 7.6v2.2c0 1.6-1.2 2.4-2.8 2.4H8.8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/** Delivery-mode glyphs for the running-action picker (list = queue). */
+function QueueGlyph(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false">
+      <path d="M9 6.5h11M9 12h11M9 17.5h11" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+      <circle cx="4.4" cy="6.5" r="1.4" fill="currentColor" />
+      <circle cx="4.4" cy="12" r="1.4" fill="currentColor" />
+      <circle cx="4.4" cy="17.5" r="1.4" fill="currentColor" />
+    </svg>
+  )
+}
+
+function CaretGlyph(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true" focusable="false">
+      <path d="m6 9.5 6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/** A thin arc that spins; the busy-state stand-in for the send glyph. */
+function SpinnerGlyph(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false" className="ark-composer__spinner">
+      <path d="M12 3.5a8.5 8.5 0 1 1-8.5 8.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/**
+ * The steer/queue chooser shown next to the send button while a turn is live
+ * and the user has a draft. Its label doubles as the submit button's label, so
+ * the two always name the same delivery channel. Owns only the open state;
+ * the mode itself lives in the Composer so Enter submits through it too.
+ */
+function DeliveryChooser({
+  mode,
+  onModeChange
+}: {
+  mode: RunningDeliveryMode
+  onModeChange: (mode: RunningDeliveryMode) => void
+}): JSX.Element {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (event: MouseEvent): void => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const label = mode === 'steer' ? t('canvas.composer.steer') : t('canvas.composer.queueSend')
+
+  return (
+    <div className="ark-composer__delivery" ref={rootRef}>
+      <button
+        type="button"
+        className="ark-composer__delivery-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={t('canvas.composer.deliveryAria')}
+        title={t('canvas.composer.deliveryAria')}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {mode === 'steer' ? <SteerGlyph /> : <QueueGlyph />}
+        <span className="ark-composer__delivery-label">{label}</span>
+        <CaretGlyph />
+      </button>
+      {open ? (
+        <div className="ark-composer__popover ark-composer__delivery-menu" role="menu">
+          <button
+            type="button"
+            className="ark-composer__delivery-option"
+            role="menuitemradio"
+            aria-checked={mode === 'steer'}
+            onClick={() => {
+              onModeChange('steer')
+              setOpen(false)
+            }}
+          >
+            <SteerGlyph />
+            <span className="ark-composer__delivery-text">
+              <span className="ark-composer__delivery-title">{t('canvas.composer.steer')}</span>
+              <span className="ark-composer__delivery-desc">{t('canvas.composer.steerDesc')}</span>
+            </span>
+            {mode === 'steer' ? <span className="ark-composer__delivery-check">✓</span> : null}
+          </button>
+          <button
+            type="button"
+            className="ark-composer__delivery-option"
+            role="menuitemradio"
+            aria-checked={mode === 'queue'}
+            onClick={() => {
+              onModeChange('queue')
+              setOpen(false)
+            }}
+          >
+            <QueueGlyph />
+            <span className="ark-composer__delivery-text">
+              <span className="ark-composer__delivery-title">{t('canvas.composer.queueSend')}</span>
+              <span className="ark-composer__delivery-desc">{t('canvas.composer.queueSendDesc')}</span>
+            </span>
+            {mode === 'queue' ? <span className="ark-composer__delivery-check">✓</span> : null}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export function Composer({ threadId }: { threadId: string | null }): JSX.Element {
   const { t } = useI18n()
   // The unsent draft lives in the store keyed by thread, so switching sessions
@@ -87,6 +224,10 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   // Locally queued drafts: filled by 「排队」 during a live turn, flushed in
   // order when the turn ends (the effect below watches the live transition).
   const [queued, setQueued] = useState<string[]>([])
+  // Running-action delivery mode, like the smart-ark composer: choosing a mode
+  // never submits the draft; it is applied on Enter or the send button. Reset
+  // to steer when the draft empties so a fresh draft starts as a steer.
+  const [deliveryMode, setDeliveryMode] = useState<RunningDeliveryMode>('steer')
   const [attachments, setAttachments] = useState<PickedAttachment[]>([])
   const [uploading, setUploading] = useState(false)
   const [skills, setSkills] = useState<SkillSummary[] | null>(null)
@@ -115,6 +256,9 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const inputDisabled = !canEditComposer(threadId, draft)
   const sendDisabled = !canSendToThread(threadId, draft, streamStatus)
   const live = canInterrupt
+  // The steer/queue chooser only exists while the user actually has a draft:
+  // an empty running composer is pure stop, matching the smart-ark composer.
+  const showDeliveryChooser = live && !sendDisabled && draftText.trim().length > 0
 
   // Store-backed textarea: writes keep the per-thread draft in sync, and the
   // height follows the stored content so a restored long draft is not clamped
@@ -151,14 +295,35 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     wasLive.current = live
   }, [live, queued, send])
 
+  // The delivery chooser is bound to the running state: a fresh turn defaults
+  // back to steer, like the smart-ark composer's reset.
+  useEffect(() => {
+    if (!live) setDeliveryMode('steer')
+  }, [live])
+
+  // Draft emptied (sent, queued or cleared) → next draft defaults to steer.
+  useEffect(() => {
+    if (!draftText.trim()) setDeliveryMode('steer')
+  }, [draftText])
+
   const resetInput = (): void => {
     if (threadId) clearDraft(threadId)
   }
 
+  /**
+   * The primary action, shared by Enter and the send button. During a live
+   * turn the delivery picker decides the channel (smart-ark's running-action
+   * pair): steer injects into the current turn, queue holds the draft for the
+   * automatic end-of-turn drain.
+   */
   const submit = async (): Promise<void> => {
     if (!canSendToThread(threadId, draft, streamStatus)) return
     const text = draftText
     if (!text.trim()) return
+    if (live && deliveryMode === 'queue') {
+      queueDraft()
+      return
+    }
     const ids = attachments.map((picked) => picked.id)
     // The runtime rejects turn starts that carry unassociated attachment ids,
     // so every picked id is linked to the thread right before the turn.
@@ -261,6 +426,14 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
       ? t('canvas.composer.steerPlaceholder')
       : t('canvas.composer.sendPlaceholder')
     : t('canvas.composer.noThreadPlaceholder')
+
+  // Primary-action label follows the delivery mode during a live turn, like
+  // smart-ark: the button and Enter both submit through the chosen channel.
+  const primaryActionLabel = live
+    ? deliveryMode === 'steer'
+      ? t('canvas.composer.steer')
+      : t('canvas.composer.queueSend')
+    : t('canvas.composer.send')
 
   return (
     <div className="ark-composer">
@@ -442,12 +615,11 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
             <WorkspacePicker threadId={threadId} />
             <ContextRing threadId={threadId} />
             <ModelPicker threadId={threadId} />
-            {live ? (
-              <Button variant="default" size="sm" disabled={inputDisabled} onClick={queueDraft}>
-                {t('canvas.composer.queue')}
-              </Button>
-            ) : null}
-            {live ? (
+            {/* Running state, mirroring the smart-ark composer: the rightmost
+                control has one job at a time — interrupt while the draft is
+                empty, submit (with a steer/queue chooser) once the user types. */}
+            {showDeliveryChooser ? <DeliveryChooser mode={deliveryMode} onModeChange={setDeliveryMode} /> : null}
+            {live && !showDeliveryChooser ? (
               <button
                 type="button"
                 className="ark-composer__round ark-composer__round--stop"
@@ -457,17 +629,20 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
               >
                 <StopGlyph />
               </button>
-            ) : null}
-            <button
-              type="button"
-              className="ark-composer__sendbtn"
-              disabled={sendDisabled}
-              aria-label={live ? t('canvas.composer.steer') : t('canvas.composer.send')}
-              title={live ? t('canvas.composer.steer') : t('canvas.composer.send')}
-              onClick={() => void submit()}
-            >
-              {draft ? <span className="ark-composer__round-text">…</span> : <SendGlyph />}
-            </button>
+            ) : (
+              <button
+                type="button"
+                className="ark-composer__sendbtn"
+                disabled={sendDisabled}
+                aria-label={primaryActionLabel}
+                title={primaryActionLabel}
+                onClick={() => void submit()}
+              >
+                {/* Spinner only for the in-flight request; the streaming turn
+                    itself is signalled by the interrupt button above. */}
+                {draft ? <SpinnerGlyph /> : <SendGlyph />}
+              </button>
+            )}
           </div>
         </div>
       </div>
