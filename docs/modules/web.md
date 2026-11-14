@@ -105,7 +105,10 @@
   传输层与诊断类事件（`transient_retry` 等）不产生渲染行，只留事件日志。
 - 输入框「技能」面板消费线程级技能视图（`GET /v1/threads/{id}/skills`，合并 base/extra 并展示加载
   警告数，「重新扫描」调用 refresh 路由）；未选择线程时回落全局 `GET /v1/skills`。显式 `/id` 提及
-  仍是唯一激活方式，不新增技能运行时字段。
+  仍是唯一激活方式，不新增技能运行时字段。面板本体是浮动 palette（`SkillPalette`）：搜索过滤 +
+  技能行（mono `/id`、名称、一行描述、来源/legacy 标签）+ 键盘上下/回车插入，样式见
+  `.ark-skill-palette`；线程技能集缓存在 `use-thread-skills.ts`（30s TTL，模块级共享），
+  Composer palette 与消息画布的提及芯片共用同一份缓存。
 - 已知未接入的路由：`attachments/diagnostics`（诊断）、
   `child-runs/{id}/thread|events|cleanup`（子代理完整转录查看器需要独立的轮询/订阅设计，见子代理
   监督约束）、`sessions/{id}/resume-thread`（定时任务结果已直接携带 thread_id 跳转）。
@@ -202,7 +205,9 @@
   `degraded`/`skipped`/`unavailable` 用警示色并以 `detail` 作 title 提示。字段由后端持久化，
   历史回放与 live 流渲染一致；运行时未发附件字段的旧 item 保持原样。
 - 「技能」面板的消费面见上方"输入框「技能」面板"条目：线程级视图 + 全局回落，显式 `/id` 提及即激活
-  是 arkd 的技能指定方式；不新增技能运行时字段。
+  是 arkd 的技能指定方式；不新增技能运行时字段。用户消息正文里的 `/id` 提及在渲染层识别
+  （`skill-mention.ts`，仅当 token 与已加载技能 id 精确匹配时）并渲染成 `.ark-mention` 芯片，
+  未知斜杠词（路径、URL）保持纯文本；识别只影响展示，复制按钮仍复制逐字原文。
 - 用户可见文本通过 `web/src/shared/i18n/` 的消息键与中英文资源提供；新增 UI 不得硬编码文案。
   该目录已按域拆分为 `catalogs/*`（`common`、`errors`、`session`、`thread-list`、`workbench`、
   `session-canvas`、`settings-*`）：每个 catalog 输出一张

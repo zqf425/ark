@@ -306,3 +306,33 @@
     opacity: 1;
   }
 }
+
+/* ---------- skill mention chips (user message body) ---------- */
+
+/*
+ * `/skill-id` tokens recognized against the thread's loaded skill set render
+ * as violet chips inline with the text. The chip is display-only: the bubble's
+ * copy button still copies the verbatim draft, so nothing the user typed is
+ * rewritten. Colors come from the skill token pair, both themes.
+ */
+.ark-mention {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--ark-skill-soft);
+  color: var(--ark-skill);
+  font-family: var(--ark-mono);
+  font-size: 0.86em;
+  font-weight: 550;
+  line-height: 1.55;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+.ark-mention__glyph {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}

@@ -9,6 +9,7 @@
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import hljs from 'highlight.js/lib/common'
+import markedCjkFriendly from 'marked-cjk-friendly'
 
 /** Largest source that still gets highlight.js; beyond this, escape and bail. */
 const MAX_HIGHLIGHT_CHARS = 100_000
@@ -34,6 +35,10 @@ const renderer = {
 }
 
 marked.use({ gfm: true, breaks: false, async: false, renderer })
+// CJK emphasis fix: CommonMark leaves `**中文**` as literal asterisks when the
+// flanking characters are CJK (commonmark/commonmark-spec#650). This extension
+// applies the upstream CJK-friendly spec; Latin text is untouched.
+marked.use(markedCjkFriendly())
 
 function highlight(text: string, language: string | undefined): string {
   try {

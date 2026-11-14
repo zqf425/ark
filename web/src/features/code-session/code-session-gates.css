@@ -436,55 +436,9 @@
   white-space: nowrap;
 }
 
-.ark-composer__skills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  margin: 2px 6px 6px;
-  padding: 8px;
-  border: 1px solid var(--ark-border-muted);
-  border-radius: var(--ark-radius);
-  background: var(--ark-bg-inset);
-}
-
-/* Skill mentions carry the violet skill intent, like smart-ark skill chips. */
-.ark-composer__skill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: var(--ark-skill-soft);
-  color: var(--ark-skill);
-  cursor: pointer;
-  padding: 2px 10px;
-  font-family: var(--ark-mono);
-  font-size: 12px;
-}
-
-.ark-composer__skill:hover {
-  background: var(--ark-accent-soft);
-  color: var(--ark-accent);
-}
-
-.ark-composer__skill-name {
-  font-family: var(--ark-font);
-  font-size: 11px;
-  color: var(--ark-text-faint);
-}
-
-.ark-composer__skills .ark-composer__status,
 .ark-composer__attachments .ark-composer__status {
   flex-basis: 100%;
   margin: 0;
-}
-
-.ark-composer__skillfoot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-basis: 100%;
 }
 
 /* ---------- child runs ---------- */
