@@ -15,6 +15,7 @@ pub mod list;
 pub mod read;
 pub mod request_user_input;
 pub mod search;
+pub mod shell_session;
 pub mod web_fetch;
 pub mod write;
 
@@ -24,6 +25,7 @@ pub use list::{FindTool, LsTool};
 pub use read::ReadTool;
 pub use request_user_input::RequestUserInputTool;
 pub use search::GrepTool;
+pub use shell_session::{BashKillTool, BashOutputTool, BashSessionTool, ShellSessionManager};
 pub use web_fetch::WebFetchTool;
 pub use write::{EditTool, WriteTool};
 
@@ -47,6 +49,24 @@ pub fn builtins() -> Vec<Box<dyn Tool>> {
         Box::new(RequestUserInputTool),
         Box::new(WriteTool),
     ]
+}
+
+/// Builtins plus the persistent shell session tools, sharing one manager.
+///
+/// `bash_session`/`bash_output`/`bash_kill` need a shared manager instance so
+/// a background task started in one call stays pollable and killable from
+/// later calls (requirements/shell-sessions.md). Runtimes that build the
+/// plain [`builtins`] set keep today's behaviour; this constructor is what the
+/// composition root uses when it wants session continuity.
+pub fn builtins_with_shell_session() -> Vec<Box<dyn Tool>> {
+    let session = Arc::new(ShellSessionManager::new());
+    let mut tools: Vec<Box<dyn Tool>> = vec![
+        Box::new(BashSessionTool::new(Arc::clone(&session))),
+        Box::new(BashOutputTool::new(Arc::clone(&session))),
+        Box::new(BashKillTool::new(session)),
+    ];
+    tools.extend(builtins());
+    tools
 }
 
 /// The delegation tool, for a runtime that has a sub-agent runner.

@@ -26,8 +26,8 @@ pub mod service;
 
 pub use domain::{schema, ToolMeta, TOOL_METAS};
 pub use exec::tools::{
-    builtins, delegation_tools, web_tools, BashTool, DelegateTaskTool, EditTool, FindTool,
-    GrepTool, LsTool, ReadTool, RequestUserInputTool, WebFetchTool, WriteTool,
+    builtins, builtins_with_shell_session, delegation_tools, web_tools, BashTool, DelegateTaskTool,
+    EditTool, FindTool, GrepTool, LsTool, ReadTool, RequestUserInputTool, WebFetchTool, WriteTool,
 };
 pub use policy::{
     apply_approval_verdict, cap_bytes, cap_lines, decide_approval, is_self_service,

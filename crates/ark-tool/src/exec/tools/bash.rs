@@ -106,7 +106,7 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
 }
 
 /// Platform-appropriate shell invocation.
-fn shell(command: &str) -> tokio::process::Command {
+pub(super) fn shell(command: &str) -> tokio::process::Command {
     #[cfg(windows)]
     {
         let mut cmd = tokio::process::Command::new("cmd");
@@ -126,7 +126,7 @@ fn shell(command: &str) -> tokio::process::Command {
 /// Values come from the host process (never from the model), and are only
 /// forwarded when present. On Windows `SystemRoot`/`USERPROFILE` keep `cmd`
 /// and the standard utilities usable.
-fn default_shell_env() -> Vec<(&'static str, String)> {
+pub(super) fn default_shell_env() -> Vec<(&'static str, String)> {
     const KEYS: &[&str] = &[
         "PATH",
         "HOME",

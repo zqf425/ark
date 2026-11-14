@@ -35,7 +35,11 @@ pub(super) fn build_child_tools(
     http: Arc<dyn ark_ports::HttpCapability>,
 ) -> Result<ToolRegistry> {
     let registry = ToolRegistry::new();
-    registry.register_all(ark_tool::builtins())?;
+    // The persistent shell session tools ride both sets (requirements/
+    // shell-sessions.md): a child legitimately runs long commands and polls
+    // them too. Each registry gets its own manager instance, so parent and
+    // child tasks never share state.
+    registry.register_all(ark_tool::builtins_with_shell_session())?;
     registry.register_all(ark_tool::web_tools(http))?;
     registry.register(Arc::new(LoadSkillTool::new(skills)))?;
     Ok(registry)

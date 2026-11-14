@@ -135,6 +135,35 @@ fn bash_schema() -> serde_json::Value {
     )
 }
 
+fn bash_session_schema() -> serde_json::Value {
+    object(
+        serde_json::json!({
+            "command": { "type": "string", "description": "Shell command to run in the persistent session; a leading `cd <dir>` advances the session working directory for later calls (environment variables are NOT persisted across calls)" },
+            "timeout_ms": { "type": "integer", "minimum": 1, "description": "Hard timeout in milliseconds; ignored when run_in_background is true" },
+            "run_in_background": { "type": "boolean", "description": "Start the command detached and return a task id immediately; poll output with bash_output" },
+        }),
+        &["command"],
+    )
+}
+
+fn bash_output_schema() -> serde_json::Value {
+    object(
+        serde_json::json!({
+            "task_id": { "type": "string", "description": "Task id previously returned by bash_session with run_in_background" },
+        }),
+        &["task_id"],
+    )
+}
+
+fn bash_kill_schema() -> serde_json::Value {
+    object(
+        serde_json::json!({
+            "task_id": { "type": "string", "description": "Task id to terminate; killing an already-finished task is a no-op" },
+        }),
+        &["task_id"],
+    )
+}
+
 fn delegate_task_schema() -> serde_json::Value {
     object(
         serde_json::json!({
@@ -184,6 +213,9 @@ static_schema!(ls, ls_schema);
 static_schema!(find, find_schema);
 static_schema!(grep, grep_schema);
 static_schema!(bash, bash_schema);
+static_schema!(bash_session, bash_session_schema);
+static_schema!(bash_output, bash_output_schema);
+static_schema!(bash_kill, bash_kill_schema);
 static_schema!(delegate_task, delegate_task_schema);
 static_schema!(request_user_input, request_user_input_schema);
 static_schema!(web_fetch, web_fetch_schema);
