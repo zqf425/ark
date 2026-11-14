@@ -1,18 +1,24 @@
 /**
  * Skill mention palette, floating above the composer toolbar like the mainstream
- * agent canvases' slash menu: a search field, one row per skill (mono `/id`,
- * display name, one-line description) and a footer with the rescan action and
- * the load-warning count. Keyboard: ArrowUp/ArrowDown move the highlight,
- * Enter inserts the highlighted skill, Escape closes (owned by the parent).
+ * agent canvases' slash menu: one row per skill (mono `/id`, display name,
+ * one-line description) and a footer with the rescan action and the load-warning
+ * count. Keyboard: ArrowUp/ArrowDown move the highlight, Enter inserts the
+ * highlighted skill, Escape closes (owned by the parent).
+ *
+ * Two modes:
+ * - `menu`: opened from the `+` menu. Carries its own search field.
+ * - `token`: summoned by typing `/` in the draft. The typed text *is* the
+ *   filter, so the search field is hidden; the parent owns query and highlight.
  *
  * Kept as a leaf component so the Composer only owns open/close state and the
- * insertion; the palette owns filter text and highlight index, which reset on
- * remount (the palette only exists while open).
+ * insertion; the palette owns nothing durable, which resets on remount (the
+ * palette only exists while open).
  */
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useI18n } from '../../../shared/i18n'
 import type { MessageKey } from '../../../shared/i18n/messages'
 import type { SkillSummary } from '../../../shared/contracts'
+import { filterSkills } from './skill-mention'
 
 /** Row glyphs: a small bolt so a skill reads as "capability", not "file". */
 function SkillGlyph(): JSX.Element {
@@ -79,36 +85,48 @@ function SkillRow({
   )
 }
 
+export type SkillPaletteMode = 'menu' | 'token'
+
 /**
  * The skill list panel itself. `skills` is already the thread's loaded set
  * (base + extra); `null` means still loading, `[]` means nothing loaded.
+ *
+ * `token` mode is fully controlled: the parent passes `query` (the text after
+ * the slash), `activeIndex` and the keyboard handlers, because the draft
+ * textarea stays the input. `menu` mode is self-contained.
  */
 export function SkillPalette({
   skills,
   warnings,
   canRefresh,
+  mode,
+  query = '',
+  activeIndex = 0,
+  onActiveIndexChange,
   onPick,
   onRefresh
 }: {
   skills: SkillSummary[] | null
   warnings: number
   canRefresh: boolean
+  mode: SkillPaletteMode
+  /** token mode: the text typed after the slash (already lowercased or not). */
+  query?: string
+  /** token mode: the parent-owned highlight index. */
+  activeIndex?: number
+  onActiveIndexChange?: (index: number) => void
   onPick: (id: string) => void
   onRefresh: () => void
 }): JSX.Element {
   const { t } = useI18n()
-  const [query, setQuery] = useState('')
-  const [active, setActive] = useState(0)
-  const inputRef = useRef<HTMLInputElement | null>(null)
+  const [menuQuery, setMenuQuery] = useState('')
+  const [menuActive, setMenuActive] = useState(0)
+  const isToken = mode === 'token'
+  const effectiveQuery = isToken ? query : menuQuery
+  const setActive = isToken ? (onActiveIndexChange ?? (() => {})) : setMenuActive
+  const active = isToken ? activeIndex : menuActive
 
-  const filtered = useMemo(() => {
-    if (skills === null) return null
-    const needle = query.trim().toLowerCase()
-    if (!needle) return skills
-    return skills.filter((skill) =>
-      [skill.id, skill.name, skill.description ?? ''].some((field) => field.toLowerCase().includes(needle))
-    )
-  }, [skills, query])
+  const filtered = useMemo(() => (skills === null ? null : filterSkills(skills, effectiveQuery)), [skills, effectiveQuery])
 
   const list = filtered ?? []
   const clamped = list.length === 0 ? -1 : Math.min(active, list.length - 1)
@@ -117,10 +135,10 @@ export function SkillPalette({
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      if (list.length > 0) setActive((current) => (current + 1) % list.length)
+      if (list.length > 0) setActive((clamped + 1) % list.length)
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
-      if (list.length > 0) setActive((current) => (current - 1 + list.length) % list.length)
+      if (list.length > 0) setActive((clamped - 1 + list.length) % list.length)
     } else if (event.key === 'Enter') {
       event.preventDefault()
       const skill = list[clamped]
@@ -130,28 +148,29 @@ export function SkillPalette({
 
   return (
     <div className="ark-skill-palette" role="listbox" aria-label={t('canvas.composer.skillsAria')}>
-      <div className="ark-skill-palette__search">
-        <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false">
-          <circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" strokeWidth="1.8" />
-          <path d="m15.2 15.2 4.8 4.8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        </svg>
-        <input
-          ref={inputRef}
-          className="ark-skill-palette__filter"
-          type="text"
-          value={query}
-          placeholder={t('canvas.composer.skillsFilter')}
-          aria-label={t('canvas.composer.skillsFilter')}
-          // Autofocus so typing filters immediately; the parent keeps the
-          // textarea's draft untouched while the palette is open.
-          autoFocus
-          onChange={(event) => {
-            setQuery(event.currentTarget.value)
-            setActive(0)
-          }}
-          onKeyDown={onKeyDown}
-        />
-      </div>
+      {!isToken ? (
+        <div className="ark-skill-palette__search">
+          <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false">
+            <circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            <path d="m15.2 15.2 4.8 4.8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+          <input
+            className="ark-skill-palette__filter"
+            type="text"
+            value={menuQuery}
+            placeholder={t('canvas.composer.skillsFilter')}
+            aria-label={t('canvas.composer.skillsFilter')}
+            // Autofocus so typing filters immediately; the parent keeps the
+            // textarea's draft untouched while the palette is open.
+            autoFocus
+            onChange={(event) => {
+              setMenuQuery(event.currentTarget.value)
+              setMenuActive(0)
+            }}
+            onKeyDown={onKeyDown}
+          />
+        </div>
+      ) : null}
       <div className="ark-skill-palette__list">
         {skills === null ? (
           <span className="ark-skill-palette__empty">{t('canvas.composer.skillsLoading')}</span>
