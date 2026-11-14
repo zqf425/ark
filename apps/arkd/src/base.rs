@@ -159,18 +159,24 @@ impl TitleModelAdapter {
     }
 }
 
+/// No tools: a naming call must not be able to act, only to answer.
+/// `max_tokens` budgets the *whole* response including reasoning: a reasoning
+/// model spends the budget on invisible `reasoning` deltas before any visible
+/// text. 64 was consumed entirely by thinking (`finish_reason: length`, empty
+/// content), so the budget must cover thinking plus a short answer.
+const TITLE_MAX_TOKENS: u32 = 512;
+
 #[async_trait::async_trait]
 impl TitleModel for TitleModelAdapter {
     async fn generate_title(&self, excerpt: &str) -> Result<Option<String>> {
         let Some(client) = self.client() else {
             return Ok(None);
         };
-        // No tools: a naming call must not be able to act, only to answer.
         let request = ark_ports::ModelRequest {
             messages: vec![ark_ports::ModelMessage::user(excerpt.to_string())],
             tools: Vec::new(),
             temperature: Some(0.2),
-            max_tokens: Some(64),
+            max_tokens: Some(TITLE_MAX_TOKENS),
             ..Default::default()
         };
         let (sink, mut drain) = tokio::sync::mpsc::channel(16);
@@ -182,6 +188,16 @@ impl TitleModel for TitleModelAdapter {
             .text
             .trim()
             .trim_matches(|ch| ch == '"' || ch == '\'');
+        if title.is_empty() {
+            // An empty answer must stay diagnosable: with a reasoning model it
+            // usually means the token budget was consumed by thinking, which
+            // otherwise looks exactly like "the feature silently did nothing".
+            tracing::warn!(
+                model = %client.model(),
+                "title model returned no visible text (reasoning model budget exhausted?); keeping the placeholder title"
+            );
+            return Ok(None);
+        }
         Ok(Some(title.to_string()))
     }
 }

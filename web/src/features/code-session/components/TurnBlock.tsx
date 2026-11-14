@@ -1,7 +1,11 @@
 /**
- * One turn block: the user's message, the turn's work process in a single
- * collapsible card (smart-ark's signature structure), then the assistant's
- * reply rows.
+ * One turn block: the user's message, then the turn's work process in a single
+ * collapsible card, then the final reply.
+ *
+ * Rows inside the process card keep the real event order (see `splitTurnSections`):
+ * intermediate narration, reasoning and tool calls interleave exactly as they
+ * happened, and only the last textful assistant message is promoted to the
+ * reply bubble — the same rule smart-ark applies.
  *
  * `group` keeps its identity while the turn's rows and state do (see
  * `groupByTurn`), so a token streaming into the newest turn leaves every
@@ -14,6 +18,7 @@ import type { ThreadItem } from '../../../shared/contracts'
 import { useI18n } from '../../../shared/i18n'
 import type { TurnGroup } from '../state/selectors'
 import { ErrorBoundary } from '../../../shared/ui'
+import { splitTurnSections } from './turn-sections'
 import { UserBubble, AssistantBubble, ReasoningBlock } from './MessageBubble'
 import { ToolCard } from './ToolCard'
 import { ErrorRow, NoticeRow, ToolResultRow } from './ErrorRow'
@@ -52,11 +57,6 @@ export const StreamRow = memo(function StreamRow({ item }: { item: ThreadItem })
   }
 })
 
-/** The work-process card covers reasoning and tool traffic; speech stays out. */
-function isProcessItem(item: ThreadItem): boolean {
-  return item.kind === 'reasoning' || item.kind === 'tool_call' || item.kind === 'tool_result'
-}
-
 export const TurnBlock = memo(function TurnBlock({
   threadId,
   group,
@@ -67,16 +67,11 @@ export const TurnBlock = memo(function TurnBlock({
   availability: RewindAvailability
 }): JSX.Element {
   const { t } = useI18n()
-  const user: ThreadItem[] = []
-  const process: ThreadItem[] = []
-  const rest: ThreadItem[] = []
-  for (const item of group.items) {
-    if (item.kind === 'user_message') user.push(item)
-    else if (isProcessItem(item)) process.push(item)
-    else rest.push(item)
-  }
-
   const live = group.state === 'running'
+  // While the turn runs nothing is final: every row stays in the process card
+  // in event order. Once settled, the last textful reply is promoted out.
+  const { user, process, reply } = splitTurnSections(group.items, live ? 'running' : 'settled')
+
   // `null` = follow the live state; a user toggle pins the card either way.
   const [pinned, setPinned] = useState<boolean | null>(null)
   const open = pinned ?? live
@@ -108,7 +103,7 @@ export const TurnBlock = memo(function TurnBlock({
           </div>
         </details>
       ) : null}
-      {rest.map((item) => (
+      {reply.map((item) => (
         <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
           <StreamRow item={item} />
         </ErrorBoundary>

@@ -91,7 +91,9 @@ per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启
 
 会话标题自动生成经 `TitleModelAdapter`（`base.rs`）注入 `BaseServices::title_model`：它复用
 `resolve(None)` 的存活 provider 与 `select_from_config` 的同一计量 client，构造无工具、低温度、
-`max_tokens=64` 的小请求。组合根只装配端口，占位判定、提示词与超时归 `ark-server`
+`max_tokens=512` 的小请求。预算按整段响应计算：reasoning 模型会先消耗不可见的思考 delta，
+64 的旧预算被思考耗尽后 content 恒为空（`finish_reason: length`），因此预算必须覆盖思考加短答案；
+适配器对空回答记 warn，保证该路径可诊断。组合根只装配端口，占位判定、提示词与超时归 `ark-server`
 （[ark-server](ark-server.md)）；未配置 provider 时适配器返回 `None`，标题保持占位。
 
 工作区由组合根持有 canonical-root/generation 状态。父回合在 runner 入口捕获 lease，动态 prompt 和所有
