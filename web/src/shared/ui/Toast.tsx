@@ -24,6 +24,23 @@ const ToastContext = createContext<ToastApi | null>(null)
 const DISMISS_AFTER_MS = 6_000
 const MAX_VISIBLE = 4
 
+/**
+ * Bridge for toast pushes from outside React (SSE callbacks, poll intervals,
+ * module-level helpers). `ToastProvider` registers its `push` on mount; a
+ * fire-and-forget call before the provider mounts is dropped, which matches
+ * the pre-provider reality where there is no surface to render onto.
+ */
+let externalPush: ((tone: ToastTone, message: string, detail?: string) => void) | null = null
+
+/**
+ * Push a toast from non-component code. Prefer `useToast().push` inside
+ * components; this exists so shared runtime-side helpers (turn-end notifier)
+ * can notify without a context.
+ */
+export function pushToastProgrammatic(tone: ToastTone, message: string, detail?: string): void {
+  externalPush?.(tone, message, detail)
+}
+
 export function ToastProvider({ children }: { children: ReactNode }): JSX.Element {
   const { t } = useI18n()
   const [toasts, setToasts] = useState<Toast[]>([])
@@ -64,6 +81,13 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
   }, [])
 
   const api = useMemo<ToastApi>(() => ({ push, dismiss }), [dismiss, push])
+
+  useEffect(() => {
+    externalPush = push
+    return () => {
+      externalPush = null
+    }
+  }, [push])
 
   return (
     <ToastContext.Provider value={api}>

@@ -15,6 +15,7 @@ import { getThread, getThreadUsage } from '../api/threads-api'
 import { subscribeThreadEvents } from '../api/events-api'
 import { useCodeSessionStore } from '../state/store'
 import { useThreadStream } from './use-thread-stream'
+import { resetTurnEndNotifications } from './turn-end-toast'
 
 vi.mock('../api/threads-api', () => ({ getThread: vi.fn(), getThreadUsage: vi.fn() }))
 vi.mock('../api/events-api', () => ({ subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined)) }))
@@ -62,6 +63,22 @@ function detail(threadId: string, lastSeq: number, items: ThreadItem[], approval
 function Probe({ threadId }: { threadId: string | null }): null {
   useThreadStream(threadId)
   return null
+}
+
+/** Seed one settled rail row so terminal toasts have a title to name. */
+function seedRail(threadId: string): void {
+  useCodeSessionStore.setState({
+    threads: [{
+      thread_id: threadId,
+      title: 'rail',
+      created_at: '2026-10-28T00:00:00Z',
+      updated_at: '2026-10-28T00:00:00Z',
+      archived: false,
+      running: false,
+      last_event_at: '2026-10-29T00:00:00Z'
+    }],
+    activeThreadId: threadId
+  })
 }
 
 describe('useThreadStream thread ownership', () => {
@@ -210,20 +227,26 @@ describe('useThreadStream thread ownership', () => {
   })
 })
 
+/** Wire the mocked subscription's onEvent sink into a module-level variable. */
+let onEvent: ((event: RuntimeEvent) => void) | null = null
+
+function armEventSink(): void {
+  onEvent = null
+  subscribeMock.mockImplementation((_options) => {
+    onEvent = _options.onEvent
+    return new Promise<void>(() => undefined)
+  })
+}
+
 describe('useThreadStream rail activity', () => {
   let harness: ReactHarness | null = null
-  let onEvent: ((event: RuntimeEvent) => void) | null = null
 
   beforeEach(() => {
     installBrowserStubs()
     getThreadMock.mockReset()
     getThreadUsageMock.mockReset()
     getThreadUsageMock.mockReturnValue(new Promise<never>(() => undefined))
-    onEvent = null
-    subscribeMock.mockImplementation((_options) => {
-      onEvent = _options.onEvent
-      return new Promise<void>(() => undefined)
-    })
+    armEventSink()
     useCodeSessionStore.getState().resetItems()
   })
 
@@ -231,21 +254,6 @@ describe('useThreadStream rail activity', () => {
     await harness?.unmount()
     harness = null
   })
-
-  function seedRail(threadId: string): void {
-    useCodeSessionStore.setState({
-      threads: [{
-        thread_id: threadId,
-        title: 'rail',
-        created_at: '2026-10-28T00:00:00Z',
-        updated_at: '2026-10-28T00:00:00Z',
-        archived: false,
-        running: false,
-        last_event_at: '2026-10-29T00:00:00Z'
-      }],
-      activeThreadId: threadId
-    })
-  }
 
   it('a synthetic heartbeat frame does not reorder the rail', async () => {
     seedRail(THREAD_A)
@@ -354,5 +362,87 @@ describe('useThreadStream rail activity', () => {
     const row = useCodeSessionStore.getState().threads.find((t) => t.thread_id === THREAD_A)
     expect(row?.last_event_at).toBe('2026-10-29T00:00:00Z')
     expect(row?.last_seq).toBe(41)
+  })
+})
+
+describe('useThreadStream turn-end notifications', () => {
+  let harness: ReactHarness | null = null
+
+  beforeEach(() => {
+    installBrowserStubs()
+    getThreadMock.mockReset()
+    getThreadUsageMock.mockReset()
+    getThreadUsageMock.mockReturnValue(new Promise<never>(() => undefined))
+    armEventSink()
+    useCodeSessionStore.getState().resetItems()
+    // The toast dedupe is a module-level map that outlives one test; the
+    // rail-activity describe above fires the same terminal frame.
+    resetTurnEndNotifications()
+  })
+
+  afterEach(async () => {
+    await harness?.unmount()
+    harness = null
+  })
+
+  it('a turn_completed frame toasts once with the thread title', async () => {
+    seedRail(THREAD_A)
+    getThreadMock.mockResolvedValue(detail(THREAD_A, 7, []))
+    harness = await mountWithProviders(<Probe threadId={THREAD_A} />)
+    await settle()
+
+    onEvent?.({
+      kind: 'turn_completed',
+      seq: 8,
+      thread_id: THREAD_A,
+      turn_id: TURN_A,
+      timestamp: '2026-11-20T00:00:00Z'
+    } as never)
+    await settle()
+
+    expect(document.body.textContent).toContain('会话「rail」已完成回复')
+
+    // A reconnect replays the same terminal frame: still one toast.
+    onEvent?.({
+      kind: 'turn_completed',
+      seq: 8,
+      thread_id: THREAD_A,
+      turn_id: TURN_A,
+      timestamp: '2026-11-20T00:00:00Z'
+    } as never)
+    await settle()
+
+    expect(document.body.querySelectorAll('.ark-toast').length).toBe(1)
+  })
+
+  it('turn_failed toasts with the failure wording; other threads stay silent', async () => {
+    seedRail(THREAD_A)
+    getThreadMock.mockResolvedValue(detail(THREAD_A, 7, []))
+    harness = await mountWithProviders(<Probe threadId={THREAD_A} />)
+    await settle()
+
+    onEvent?.({
+      kind: 'turn_failed',
+      seq: 8,
+      thread_id: THREAD_B,
+      turn_id: TURN_A,
+      timestamp: '2026-11-20T00:00:00Z',
+      message: 'boom',
+      model_request_failed: false
+    } as never)
+    await settle()
+    expect(document.body.querySelector('.ark-toast')).toBeNull()
+
+    onEvent?.({
+      kind: 'turn_failed',
+      seq: 9,
+      thread_id: THREAD_A,
+      turn_id: TURN_A,
+      timestamp: '2026-11-20T00:00:00Z',
+      message: 'boom',
+      model_request_failed: false
+    } as never)
+    await settle()
+    expect(document.body.textContent).toContain('会话「rail」回合失败')
   })
 })

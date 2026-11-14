@@ -64,6 +64,9 @@
   用单个委托点击处理器服务整条消息的所有代码块——流式整块替换 DOM，逐块监听会泄漏或失效。助手
   气泡流式期间不提供复制（文本仍在增长），完成后才出现；气泡复制按钮默认隐藏，hover/键盘聚焦时
   浮现。所有复制 UI 文案走 i18n 键（`canvas.copy.*`）。
+- Toast 是 `shared/ui/Toast` 独占的表面：组件内用 `useToast().push`；SSE 回调、轮询间隔等非 React
+  调用方（回合终态通知）用 `pushToastProgrammatic`——`ToastProvider` 挂载时注册推送句柄，卸载时注销，
+  provider 未挂载期间的推送静默丢弃（无表面可渲染），不排队。不得在 feature 内自建浮层通知。
 - 消息行带身份标识（对齐主流 agent 画布）：元信息行前置 18px 圆形头像盘——用户为强调色浅底、
   助手为 hairline 圆环内嵌 "ark" 字标，均为纯 CSS 无位图（`ark-msg__avatar`）；助手正文
   `padding-left: 25px` 与头像后的作者名对齐，形成稳定的纵向导轨。头像进入 i18n 的只有
@@ -125,8 +128,13 @@
   归档切换只过滤已加载的 `ThreadSummary`，不新增搜索 API；会话列表按服务器权威顺序渲染
   （archived 优先级靠后、`last_event_at ?? updated_at` 降序），行内时间显示同一活动键；活跃会话的
   忙碌标记来自实时事件流（`turn_started`/终态事件驱动 `activeTurnId`），其余已加载行由 5 秒轮询
-  `GET /v1/threads` 的 `running` 标记驱动，轮询帧在回合边界不得覆盖实时判定（见
-  `use-thread-running.ts`）。客户端只在**回合边界**推进活动键并随之重排：用户发消息
+  `GET /v1/threads` 的 `running` 标记驱动；`applyRunningFlags` 保持纯语义（集合成员=忙碌、缺席=
+  空闲），活跃回合在途时由 `use-thread-running.ts` 的 poll 把活跃 id 重新加入集合来防在途旧帧闪灭
+  ——slice 内不得再放"缺席保留"分支，否则后台行永远无法靠服务端 idle 清除，转圈只能靠点开详情停。
+  回合终态（`turn_completed`/`turn_failed`/`turn_aborted`）弹出一次 toast 通知（`turn-end-toast.ts`，
+  文案带会话标题）：被订阅线程由 SSE 终态事件即时触发，后台线程与其它窗口的回合由列表轮询的
+  busy→idle 边沿触发；两侧用终态事件的 durable `timestamp`（即行上的 `last_event_at`）做同一键去重，
+  同一回合最多提示一次，之后重放/再轮询不再提示。客户端只在**回合边界**推进活动键并随之重排：用户发消息
   （`turn_started`/`turn_steered`）与回合终态（`turn_completed`/`turn_failed`/`turn_aborted`）；
   delta、工具调用、gate 等回合内事件只推进行内 `last_seq` 水位，detail 播种（点击会话触发的
   `GET /v1/threads/{id}` 重载）也不同步行内活动键——否则被订阅（即被点开）的运行中会话会持续

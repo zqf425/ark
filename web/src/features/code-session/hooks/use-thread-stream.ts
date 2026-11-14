@@ -15,7 +15,7 @@ import { subscribeThreadEvents } from '../api/events-api'
 import { getThread, getThreadUsage } from '../api/threads-api'
 import { childCompletionStatusKey } from '../child-completion-status'
 import { useCodeSessionStore } from '../state/store'
-
+import { notifyTurnEnded } from './turn-end-toast'
 function describe(error: unknown): string {
   return describeError(error, translateNow)
 }
@@ -147,6 +147,22 @@ export function useThreadStream(threadId: ThreadId | null): void {
               // keep lifting the subscribed thread over its peers.
               if (RAIL_ACTIVITY_EVENT_KINDS.has(event.kind)) {
                 noteThreadActivity(threadId, event.timestamp)
+              }
+              // Instant terminal-state toast. The durable timestamp is the
+              // shared dedupe key with the list poll (see `turn-end-toast`):
+              // whichever surface sees the end first toasts, the other stays
+              // silent, and a later replay of the same terminal frame never
+              // toasts again.
+              if (
+                event.kind === 'turn_completed' ||
+                event.kind === 'turn_failed' ||
+                event.kind === 'turn_aborted'
+              ) {
+                const outcome =
+                  event.kind === 'turn_completed' ? 'completed'
+                  : event.kind === 'turn_failed' ? 'failed'
+                  : 'aborted'
+                notifyTurnEnded({ threadId, outcome, endTime: event.timestamp })
               }
             }
             // A background rename (manual PATCH or the auto title generator)

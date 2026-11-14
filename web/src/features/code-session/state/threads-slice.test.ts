@@ -89,7 +89,7 @@ describe('threads slice activity ordering', () => {
     expect(threads.find((t) => t.thread_id === B)?.running).toBe(true)
   })
 
-  it('applyRunningFlags 清除活跃会话的忙碌标记不受后台行保留策略影响', () => {
+  it('applyRunningFlags 成员即忙碌、缺席即空闲（活跃行由 hook 的 push 分支保护）', () => {
     useCodeSessionStore.setState({ threads: [row({ thread_id: A, running: true })], activeThreadId: A })
 
     useCodeSessionStore.getState().applyRunningFlags([])
@@ -97,8 +97,10 @@ describe('threads slice activity ordering', () => {
     expect(useCodeSessionStore.getState().threads.find((t) => t.thread_id === A)?.running).toBe(false)
   })
 
-  it('后台会话的忙碌标记在轮询缺席时保留（在途旧帧不得清掉刚切走的转圈）', () => {
-    // A was active and busy; the user switched away, so A is now background.
+  it('后台会话完成（服务端明确 idle）后忙碌标记清除——转圈不依赖点开详情', () => {
+    // A was active and busy; the user switched away and the turn finished.
+    // The next poll reports A absent from the running set: the flag must
+    // clear (this is exactly the "spinner until I click the row" bug).
     useCodeSessionStore.setState({
       threads: [row({ thread_id: A, running: true }), row({ thread_id: B, title: 'b' })],
       activeThreadId: B
@@ -106,9 +108,8 @@ describe('threads slice activity ordering', () => {
 
     useCodeSessionStore.getState().applyRunningFlags([])
 
-    expect(useCodeSessionStore.getState().threads.find((t) => t.thread_id === A)?.running).toBe(true)
+    expect(useCodeSessionStore.getState().threads.find((t) => t.thread_id === A)?.running).toBe(false)
   })
-
   it('后台会话的忙碌标记被集合成员关系正常置起', () => {
     useCodeSessionStore.setState({
       threads: [row({ thread_id: A, running: false }), row({ thread_id: B, title: 'b' })],
