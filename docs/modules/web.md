@@ -225,7 +225,11 @@
   `clearDraft`）：Composer 因 `key={threadId}` 在切换会话时重挂载，textarea 不持草稿，挂载时从
   store 恢复本线程草稿，输入即写回（受控 textarea）。发送成功仅清除与已发送文本一致的草稿条目，
   发送失败或被闸门拦截（`sending`、SSE 非 `open`）时草稿原样保留；排队动作把文本移入组件本地
-  队列并清掉对应 store 草稿。草稿只存内存、不进 wire、不持久化到磁盘，刷新页面即清空。
+  队列并清掉对应 store 草稿。草稿只存内存、不进 wire；`state/draft-storage.ts` 把同一映射镜像到
+  localStorage（键 `ark.composer.drafts`，≤100 条、单条 ≤100k 字符，读写失败静默降级），`main.tsx`
+  渲染前 `hydrateDrafts()` 恢复——渲染器整页重载（arkd 重启拖垮连接后外壳重开窗口、HMR、崩溃）
+  对用户即"某个会话完成后其它输入框全被清空"，因此草稿必须跨页面存活；store 仍是运行期唯一真源，
+  镜像只服务水合。清空以"删除条目"表示，不会在下次水合时复活旧内容。
 - 附件经 `POST /v1/attachments`（Base64 JSON）上传后以 id 列表随 `TurnRequest.attachment_ids` 提交；
   上传失败走命令错误提示，已传 id 可在发送前移除（服务端无删除路由，孤儿附件由运行时清理策略负责）。
 - 消息画布用 `ThreadItem.attachments`（serde default，可为空）渲染用户消息下的附件 chips：
