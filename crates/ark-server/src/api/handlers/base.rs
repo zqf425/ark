@@ -5,6 +5,8 @@
 //! a build did not wire a service, the route answers a structured `unavailable`
 //! instead of pretending the feature exists.
 
+use std::collections::HashMap;
+
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::Deserialize;
@@ -17,6 +19,7 @@ use ark_contract::{
     SwitchWorkspaceRequest, ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus,
     WorkspaceValidateResponse, WorkspaceView,
 };
+use chrono::Utc;
 
 use crate::api::error::ApiError;
 use crate::state::AppState;
@@ -185,6 +188,49 @@ pub async fn thread_skills_refresh(
 // Workspace
 // ---------------------------------------------------------------------------
 
+/// Project candidates from the thread index: every distinct thread workspace
+/// with its newest activity. The index is derived, in-memory state, so one
+/// `list_threads` per workspace read is cheap; it is what the session rail
+/// already reads its rows from.
+async fn project_candidates(
+    state: &AppState,
+) -> Vec<crate::service::workspace_projects::ProjectCandidate> {
+    match state.store.list_threads().await {
+        Ok(metas) => {
+            let mut newest: HashMap<String, chrono::DateTime<Utc>> = HashMap::new();
+            for meta in metas {
+                let Some(workspace) = meta.runtime.workspace.as_deref().map(str::trim) else {
+                    continue;
+                };
+                if workspace.is_empty() {
+                    continue;
+                }
+                let at = meta.last_event_at.unwrap_or(meta.updated_at);
+                newest
+                    .entry(workspace.to_string())
+                    .and_modify(|slot| *slot = (*slot).max(at))
+                    .or_insert(at);
+            }
+            newest
+                .into_iter()
+                .map(|(path, last_event_at)| {
+                    crate::service::workspace_projects::ProjectCandidate {
+                        path,
+                        active: false,
+                        last_event_at: Some(last_event_at),
+                    }
+                })
+                .collect()
+        }
+        // The project menu is display-only derived data; an index hiccup must
+        // not hide the active/recent roots the `WorkspaceRoots` view owns.
+        Err(error) => {
+            tracing::warn!(error = %error, "could not read thread workspaces for the project view");
+            Vec::new()
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct WorkspaceQuery {
     #[serde(default)]
@@ -262,6 +308,11 @@ pub async fn workspace_pick(
 }
 
 /// `GET /v1/workspace`.
+///
+/// The returned `recent` list is the merged project menu: the process recent
+/// history plus every distinct thread workspace from the index, so a session
+/// that was only ever switched at the thread level (the composer's pick) is
+/// still offered here. `active` stays the host's canonical root.
 pub async fn workspace_view(
     State(state): State<AppState>,
 ) -> Result<Json<WorkspaceView>, ApiError> {
@@ -270,7 +321,11 @@ pub async fn workspace_view(
         .workspace
         .as_ref()
         .ok_or_else(|| missing("workspace"))?;
-    Ok(Json(service.view()))
+    let candidates = project_candidates(&state).await;
+    Ok(Json(crate::service::workspace_projects::merge_workspace_projects(
+        service.view(),
+        candidates,
+    )))
 }
 
 /// `POST /v1/workspace/switch`.
@@ -302,7 +357,12 @@ pub async fn workspace_switch(
             format!("workspace switch task failed: {error}"),
         )
     })??;
-    Ok(Json(view))
+    // Same merged projection as `workspace_view`: a switch response is also a
+    // project-menu refresh for the settings surface.
+    let candidates = project_candidates(&state).await;
+    Ok(Json(
+        crate::service::workspace_projects::merge_workspace_projects(view, candidates),
+    ))
 }
 
 /// `GET /v1/workspace/diff` for the active canonical root only.
@@ -478,7 +538,14 @@ mod tests {
         }
 
         fn view(&self) -> ark_contract::WorkspaceView {
-            unreachable!("not used by this test")
+            ark_contract::WorkspaceView {
+                active: Some(ark_contract::WorkspaceDescriptor {
+                    path: "/w/active".to_string(),
+                    generation: self.generation.load(Ordering::Relaxed),
+                }),
+                recent: Vec::new(),
+                generation: self.generation.load(Ordering::Relaxed),
+            }
         }
 
         fn switch(
@@ -628,6 +695,71 @@ mod tests {
             .expect("idle switch");
             assert_eq!(response.0.generation, expected);
         }
+    }
+
+    #[tokio::test]
+    async fn workspace_view_lists_thread_bound_projects_without_a_global_switch() {
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
+        let state = state(&data_dir);
+        // A session whose workspace was set only at the thread level (the
+        // composer pick writes exactly this) must surface in `GET /v1/workspace`
+        // even though the global switch history never saw the path.
+        let thread = state.store.create_thread("ark").await.expect("thread");
+        let mut runtime = thread.runtime.clone();
+        runtime.workspace = Some("/code/ark".to_string());
+        state
+            .store
+            .set_thread_runtime(thread.thread_id, runtime)
+            .await
+            .expect("bind workspace");
+
+        let view = workspace_view(State(state)).await.expect("view");
+        let paths: Vec<&str> = view.recent.iter().map(|d| d.path.as_str()).collect();
+        assert!(
+            paths.contains(&"/code/ark"),
+            "thread-bound workspace must be offered in the project menu: {paths:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_view_orders_thread_projects_by_recency() {
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
+        let state = state(&data_dir);
+        for (title, workspace) in [("old", "/w/old"), ("new", "/w/new")] {
+            let thread = state.store.create_thread(title).await.expect("thread");
+            let mut runtime = thread.runtime.clone();
+            runtime.workspace = Some(workspace.to_string());
+            state
+                .store
+                .set_thread_runtime(thread.thread_id, runtime)
+                .await
+                .expect("bind workspace");
+        }
+        // Make "new" the most recently updated thread; the merged list must
+        // surface its project first so the menu mirrors the rail's ordering.
+        state
+            .store
+            .rename_thread(
+                state.store.list_threads().await.expect("rows")
+                    .iter()
+                    .find(|meta| meta.title == "new")
+                    .expect("new row")
+                    .thread_id,
+                "new-renamed",
+            )
+            .await
+            .expect("touch new thread");
+
+        let view = workspace_view(State(state)).await.expect("view");
+        let paths: Vec<&str> = view.recent.iter().map(|d| d.path.as_str()).collect();
+        let new_index = paths.iter().position(|p| *p == "/w/new").expect("new project");
+        let old_index = paths.iter().position(|p| *p == "/w/old").expect("old project");
+        assert!(
+            new_index < old_index,
+            "most recently active project first: {paths:?}"
+        );
     }
 
     #[tokio::test]
