@@ -116,7 +116,7 @@ describe('ChildRunsPanel expansion and steer', () => {
     await settle()
     expect(harness.text()).toContain('research task')
 
-    const button = harness.host.querySelector<HTMLButtonElement>('.ark-childruns__summary')
+    const button = harness.host.querySelector<HTMLButtonElement>('.ark-childcard__head')
     expect(button).not.toBeNull()
     await harness.render(<ChildRunsPanel threadId={THREAD_A} />)
     button!.click()
@@ -136,16 +136,16 @@ describe('ChildRunsPanel expansion and steer', () => {
 
     harness = await mountWithProviders(<ChildRunsPanel threadId={THREAD_A} />)
     await settle()
-    const button = harness.host.querySelector<HTMLButtonElement>('.ark-childruns__summary')!
+    const button = harness.host.querySelector<HTMLButtonElement>('.ark-childcard__head')!
     button.click()
     await settle()
 
-    const textarea = harness.host.querySelector<HTMLTextAreaElement>('.ark-childruns__steerInput')
+    const textarea = harness.host.querySelector<HTMLTextAreaElement>('.ark-childcard__steerInput')
     expect(textarea).not.toBeNull()
     typeInto(textarea!, '先跑测试再总结')
     await settle()
 
-    const send = [...harness.host.querySelectorAll<HTMLButtonElement>('.ark-childruns__steer .ark-childruns__actions button')][0]
+    const send = [...harness.host.querySelectorAll<HTMLButtonElement>('.ark-childcard__steer .ark-childruns__actions button')][0]
     expect(send).toBeDefined()
     send!.click()
     await settle()
@@ -164,11 +164,11 @@ describe('ChildRunsPanel expansion and steer', () => {
 
     harness = await mountWithProviders(<ChildRunsPanel threadId={THREAD_A} />)
     await settle()
-    const button = harness.host.querySelector<HTMLButtonElement>('.ark-childruns__summary')!
+    const button = harness.host.querySelector<HTMLButtonElement>('.ark-childcard__head')!
     button.click()
     await settle()
 
-    const buttons = [...harness.host.querySelectorAll<HTMLButtonElement>('.ark-childruns__steer button')]
+    const buttons = [...harness.host.querySelectorAll<HTMLButtonElement>('.ark-childcard__steer .ark-childruns__actions button')]
     const abort = buttons.find((node) => node.textContent === '终止')
     expect(abort).toBeDefined()
     abort!.click()
