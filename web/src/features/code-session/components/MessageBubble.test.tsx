@@ -186,6 +186,9 @@ describe('最终回复卡', () => {
     expect(harness.text()).toContain('最终回复')
     const button = harness.host.querySelector('.ark-reply__copy')
     expect(button?.getAttribute('aria-label')).toBe('复制消息')
+    // 复制动作位于卡底 footer 行，不在标题行右上角。
+    expect(button?.closest('.ark-reply__foot')).not.toBeNull()
+    expect(harness.host.querySelector('.ark-reply__head .ark-reply__copy')).toBeNull()
     await import('react').then(({ act }) =>
       act(async () => {
         button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
