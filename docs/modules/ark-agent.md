@@ -52,7 +52,10 @@ HTTP 侧批准一条策略表明确拒绝的调用。
   事件——journal 不能声称一条模型尚未见到的更正。steer 落在最后一个模型轮内时（无工具调用的 settle 直接
   终结回合，队列不再有 drain 机会），reactor 在 `Finish(Completed)` 前把待投递更正补 drain 并转入一个
   零批次 dispatch，驱动下一个轮次消费该文本；该补投以「未取消且预算仍 Allow」为前提，取消或预算不可
-  负担时不补投、不写账，终态沿用本次 Finish（journal 不声称模型未收到的更正）。
+  负担时不补投、不写账，终态沿用本次 Finish（journal 不声称模型未收到的更正）。队列条目是
+  `SteerEntry { text, attachment_ids }`：steer 可引用附件（路由已按线程授权），reactor 在构建请求时经
+  组合根注入的同步 resolver 把 id 解析为图片部分、经 outcome recorder 把投递结果记在补写的
+  `UserMessage` item 上；取消一轮时整条目 restore，附件与文本不拆散。agent 自身不接触文件系统。
 - 子代理完成 inbox 从父线程权威事件投影为带标记的 system source，而非用户消息；按稳定通知 ID 去重，
   跳过已确认项，并且每个父回合最多交付 8 条、每条最多 1,200 UTF-8 字节，避免完成风暴突破上下文
   预算。同一条通知最多自动投递 2 次（`MAX_AUTO_DELIVERY_ATTEMPTS`），超限后只在用户显式回合投递；

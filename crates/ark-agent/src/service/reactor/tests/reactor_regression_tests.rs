@@ -115,6 +115,8 @@ fn regression_reactor(
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        steer_image_resolver: None,
+        steer_outcome_recorder: None,
     });
     (reactor, writer)
 }
@@ -280,6 +282,8 @@ async fn a_cancelled_batch_finishes_every_started_call() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        steer_image_resolver: None,
+        steer_outcome_recorder: None,
     });
     let batch = vec![
         ToolCallRequest::new("c1", "read", serde_json::json!({ "path": "a" })),
@@ -382,6 +386,8 @@ async fn an_append_failure_still_writes_one_terminal_and_run_is_idempotent() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        steer_image_resolver: None,
+        steer_outcome_recorder: None,
     });
     reactor.push_user("hi");
 
@@ -458,6 +464,8 @@ async fn a_cancelled_round_keeps_its_steering_instead_of_false_journaling() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        steer_image_resolver: None,
+        steer_outcome_recorder: None,
     })
     .with_steering(Arc::clone(&queue));
 
@@ -481,7 +489,9 @@ async fn a_cancelled_round_keeps_its_steering_instead_of_false_journaling() {
         !queue.is_empty(),
         "a 202-accepted correction must stay queued for a retry"
     );
-    assert_eq!(queue.drain(), vec!["correction the model never saw"]);
+    let restored = queue.drain();
+    assert_eq!(restored.len(), 1);
+    assert_eq!(restored[0].text, "correction the model never saw");
 }
 
 /// Gate whose future never resolves: only the cancel branch of `select!` can
@@ -526,6 +536,8 @@ async fn a_cancel_during_a_gate_pairs_every_declared_call() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        steer_image_resolver: None,
+        steer_outcome_recorder: None,
     });
     let calls = vec![
         ToolCallRequest::new("plain", "read", serde_json::json!({ "path": "a" })),
@@ -634,6 +646,8 @@ async fn the_opening_user_item_carries_the_attachment_outcomes() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        steer_image_resolver: None,
+        steer_outcome_recorder: None,
     });
     reactor.push_user_message(ark_ports::ModelMessage::user("look at this"));
 
@@ -704,6 +718,8 @@ async fn a_steering_item_does_not_inherit_attachment_outcomes() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        steer_image_resolver: None,
+        steer_outcome_recorder: None,
     })
     .with_steering(Arc::new({
         let queue = SteerQueue::new();

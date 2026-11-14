@@ -94,6 +94,17 @@
 3. 决策：不做第三期 wire 演进；如后续确有需求，先立项"PDF 文本提取"（零契约改动），仅在
    明确支持 `document` block 的 provider 生态出现后再评估原生传递。
 
+**运行中 steer 附件（已实施）**：`TurnRequest` 同一信封驱动 steer 路由——
+`POST /v1/threads/{id}/turns/{turnId}/steer` 的 `attachment_ids` 在入队前经
+`authorize_turn_attachments` 按**本线程**关联事件授权（未关联统一 404，与回合起点同一裁决）。
+`ark-ports::SteerQueue` 的队列条目为 `{text, attachment_ids}`（`SteerEntry`），文本与附件同条目
+drain/restore，取消一轮不会把附件与文本拆散（AG-02 同一不变量）。reactor 在轮次边界 drain 后，
+由组合根注入的同步 resolver（`steer_image_resolver`，与回合种子同一 vision 门与每回合 20 MiB
+图片预算）在构建请求时把授权 id 解析为图片部分；投递结果（image/preview_text/degraded/…）经
+`steer_outcome_recorder` 记录在补写的 `UserMessage` item 上，回放渲染的 chips 与 live 流一致。
+子代理 steer 保持纯文本（子代理无附件关联面）。web 端输入框在活跃回合保留附件入口（+ 按钮、
+粘贴、拖拽），steer/发送共用同一「先关联后投递」流程；「排队」仅排文本、保留附件待下一次投递。
+
 ## PTY
 
 PTY 不是 bash 工具的输入框。应新增受 sandbox/approval 约束的 `PtySupervisor` port、session id、输入/resize/

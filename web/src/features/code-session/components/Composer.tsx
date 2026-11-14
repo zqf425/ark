@@ -231,6 +231,8 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const [deliveryMode, setDeliveryMode] = useState<RunningDeliveryMode>('steer')
   const [attachments, setAttachments] = useState<PickedAttachment[]>([])
   const [uploading, setUploading] = useState(false)
+  /** Visual drop-target state while a file drag hovers over the composer. */
+  const [dragOver, setDragOver] = useState(false)
   // The loaded skill set is shared with the message canvas (mention chips read
   // the same cache), so the palette and the bubbles never disagree.
   const threadSkillView = useThreadSkills(threadId)
@@ -346,7 +348,8 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
    * The primary action, shared by Enter and the send button. During a live
    * turn the delivery picker decides the channel (smart-ark's running-action
    * pair): steer injects into the current turn, queue holds the draft for the
-   * automatic end-of-turn drain.
+   * automatic end-of-turn drain. Both channels can carry attachments; queueing
+   * only takes the text, so attachments stay for the next steer/send.
    */
   const submit = async (): Promise<void> => {
     if (!canSendToThread(threadId, draft, streamStatus)) return
@@ -357,9 +360,10 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
       return
     }
     const ids = attachments.map((picked) => picked.id)
-    // The runtime rejects turn starts that carry unassociated attachment ids,
-    // so every picked id is linked to the thread right before the turn.
-    if (!live && ids.length > 0 && threadId) {
+    // The runtime rejects turn starts and steers that carry unassociated
+    // attachment ids, so every picked id is linked to the thread right before
+    // the delivery — same flow for a fresh turn and a live steer.
+    if (ids.length > 0 && threadId) {
       try {
         for (const id of ids) await associateAttachment(threadId, id)
       } catch (error) {
@@ -367,12 +371,12 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
         return
       }
     }
-    const ok = live ? await steer(text) : await send(text, ids)
+    const ok = live ? await steer(text, ids) : await send(text, ids)
     if (ok) {
       // Clear only the text that was actually sent; anything typed during the
       // request stays in the draft and a failure keeps everything.
       if (threadId && useCodeSessionStore.getState().drafts[threadId] === text) clearDraft(threadId)
-      if (!live) setAttachments([])
+      setAttachments([])
       setCommandError(null)
       set(false)
     }
@@ -412,6 +416,28 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
     }
+  }
+
+  /**
+   * Paste (or drag-drop) delivery: images and files land as attachments, text
+   * keeps the browser's default insert. Only the file part of a mixed paste is
+   * extracted — the runtime re-reads bytes from the uploaded attachment, so a
+   * clipboard image never needs to inline into the draft.
+   */
+  const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    const files = event.clipboardData?.files
+    if (!files || files.length === 0) return
+    event.preventDefault()
+    void pickFiles(files)
+  }
+
+  /** Drag-drop mirrors paste; dragover only enables the drop target. */
+  const onDrop = (event: React.DragEvent<HTMLTextAreaElement>): void => {
+    const files = event.dataTransfer?.files
+    setDragOver(false)
+    if (!files || files.length === 0) return
+    event.preventDefault()
+    void pickFiles(files)
   }
 
   // Skills are what THIS thread loaded (base + extra roots, with load
@@ -519,7 +545,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
         </div>
       ) : null}
 
-      <div className="ark-composer__box">
+      <div className={dragOver ? 'ark-composer__box is-dragover' : 'ark-composer__box'}>
         {attachments.length > 0 ? (
           <div className="ark-composer__attachments" role="list" aria-label={t('canvas.composer.attachmentsAria')}>
             {attachments.map((picked) => (
@@ -549,6 +575,16 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
           placeholder={placeholder}
           aria-label={live ? t('canvas.composer.steerAria') : t('canvas.composer.sendAria')}
           disabled={inputDisabled}
+          onPaste={onPaste}
+          onDragOver={(event) => {
+            // Files (and only files) turn the composer into a drop target.
+            if (Array.from(event.dataTransfer?.types ?? []).includes('Files')) {
+              event.preventDefault()
+              setDragOver(true)
+            }
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
           onChange={(event) => {
             const node = event.currentTarget
             resize(node)
@@ -640,12 +676,14 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
               onChange={(event) => void pickFiles(event.target.files)}
             />
             {/* Round + trigger with a small insert menu, like the smart-ark
-                composer menu: attachment and skills live behind one button. */}
+                composer menu: attachment and skills live behind one button.
+                Attachments stay available during a live turn: a steer can
+                carry them, so only `sending` (an in-flight command) blocks. */}
             <div className="ark-composer__pick" ref={menuRef}>
               <button
                 type="button"
                 className="ark-composer__round"
-                disabled={inputDisabled || live}
+                disabled={inputDisabled}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
                 aria-label={t('canvas.composer.menuAria')}
@@ -673,7 +711,6 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
                     className="ark-composer__option"
                     role="menuitem"
                     disabled={uploading}
-                    title={live ? t('canvas.composer.attachLiveHint') : undefined}
                     onClick={() => {
                       setMenuOpen(false)
                       fileRef.current?.click()

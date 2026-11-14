@@ -669,10 +669,12 @@ mod tests {
             .expect("a running turn owns a steering queue");
 
         registry
-            .enqueue_steering(thread, turn, "focus on the failing test")
+            .enqueue_steering(thread, turn, "focus on the failing test", Vec::new())
             .expect("an active turn accepts steering");
 
-        assert_eq!(queue.drain(), vec!["focus on the failing test"]);
+        let drained = queue.drain();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].text, "focus on the failing test");
     }
 
     #[test]
@@ -695,7 +697,7 @@ mod tests {
         // exists, while the interrupt and activity paths report nothing to do.
         assert_eq!(
             registry
-                .enqueue_steering(thread, turn, "too late")
+                .enqueue_steering(thread, turn, "too late", Vec::new())
                 .unwrap_err(),
             SteerError::Finished
         );
@@ -724,7 +726,7 @@ mod tests {
         assert!(registry.get(first).is_none());
         assert_eq!(
             registry
-                .enqueue_steering(thread, first, "too late")
+                .enqueue_steering(thread, first, "too late", Vec::new())
                 .unwrap_err(),
             SteerError::NotFound
         );

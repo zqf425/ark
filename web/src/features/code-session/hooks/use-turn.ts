@@ -17,7 +17,7 @@ function describe(error: unknown): string {
 
 export type TurnApi = {
   send: (text: string, attachmentIds?: string[]) => Promise<boolean>
-  steer: (text: string) => Promise<boolean>
+  steer: (text: string, attachmentIds?: string[]) => Promise<boolean>
   interrupt: () => Promise<void>
   canSend: boolean
   canInterrupt: boolean
@@ -65,21 +65,24 @@ export function useTurn(threadId: string | null): TurnApi {
     }
   }, [activeTurnId, interrupting, setCommandError, setInterrupting, threadId])
 
-  const steer = useCallback(async (text: string): Promise<boolean> => {
-    const trimmed = text.trim()
-    if (!threadId || !activeTurnId || !trimmed || sending) return false
-    setSending(true)
-    setCommandError(null)
-    try {
-      await steerTurn(threadId, activeTurnId, trimmed)
-      return true
-    } catch (error) {
-      setCommandError(describe(error))
-      return false
-    } finally {
-      setSending(false)
-    }
-  }, [activeTurnId, sending, setCommandError, setSending, threadId])
+  const steer = useCallback(
+    async (text: string, attachmentIds: string[] = []): Promise<boolean> => {
+      const trimmed = text.trim()
+      if (!threadId || !activeTurnId || !trimmed || sending) return false
+      setSending(true)
+      setCommandError(null)
+      try {
+        await steerTurn(threadId, activeTurnId, { text: trimmed, attachment_ids: attachmentIds })
+        return true
+      } catch (error) {
+        setCommandError(describe(error))
+        return false
+      } finally {
+        setSending(false)
+      }
+    },
+    [activeTurnId, sending, setCommandError, setSending, threadId]
+  )
 
   return {
     send,

@@ -6,6 +6,8 @@
 //! reads the filesystem — it only receives message parts (design
 //! requirements/advanced-local-capabilities.md, 附件生命周期 v2 第二期).
 
+use std::sync::Arc;
+
 use ark_common::AttachmentId;
 use ark_contract::{AttachmentEntry, TurnAttachmentDelivery, TurnAttachmentOutcome};
 use ark_ports::{AttachmentStore, ModelImage};
@@ -143,6 +145,37 @@ fn preview_line(entry: &AttachmentEntry) -> String {
             entry.original_filename
         ),
     }
+}
+
+/// Build the reactor's steer-image resolver on top of the seed rules.
+///
+/// A steered correction can reference attachments the same way a turn start
+/// does, so it must obey the same delivery rules: only catalog-declared vision
+/// passes images, degraded/skipped/unavailable ids simply produce no image part
+/// (the steer's text still reaches the model). The resolver reads the
+/// attachment store synchronously — the same port the turn-start seed uses —
+/// which keeps the reactor free of the filesystem.
+pub fn steer_image_resolver(
+    store: Arc<dyn AttachmentStore>,
+    vision: bool,
+    budget_bytes: u64,
+) -> ark_agent::SteerImageResolver {
+    Arc::new(move |ids: &[ark_common::AttachmentId]| {
+        resolve_attachments(store.as_ref(), ids, vision, budget_bytes).images
+    })
+}
+
+/// Build the reactor's steer-outcome recorder on top of the same seed rules:
+/// the committed `UserMessage` item shows exactly the chips a turn start with
+/// the same ids would have shown.
+pub fn steer_outcome_recorder(
+    store: Arc<dyn AttachmentStore>,
+    vision: bool,
+    budget_bytes: u64,
+) -> ark_agent::SteerOutcomeRecorder {
+    Arc::new(move |ids: &[ark_common::AttachmentId]| {
+        resolve_attachments(store.as_ref(), ids, vision, budget_bytes).outcomes
+    })
 }
 
 #[cfg(test)]

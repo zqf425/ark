@@ -265,6 +265,10 @@ pub struct PendingUserInputView {
 /// id was already associated with *this* thread before the turn starts; the
 /// first phase records which attachments the turn referenced and does not send
 /// bytes to the model (multimodal delivery is a separate phase).
+///
+/// The same body also drives `POST /v1/threads/{id}/turns/{turnId}/steer`:
+/// there the ids must likewise be associated with the thread and ride the
+/// queued correction into the next model round.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct TurnRequest {

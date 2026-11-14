@@ -658,7 +658,11 @@ impl ChildTurnExecutor for SteerAware {
         for _ in 0..100 {
             if !ctx.steer.is_empty() {
                 let queued = ctx.steer.drain();
-                self.delivered.lock().unwrap().extend(queued);
+                let texts = queued
+                    .into_iter()
+                    .map(|entry| entry.text)
+                    .collect::<Vec<_>>();
+                self.delivered.lock().unwrap().extend(texts);
                 return Ok(ChildTurnReport::completed("steered"));
             }
             tokio::time::sleep(Duration::from_millis(5)).await;

@@ -230,7 +230,7 @@ impl TurnRunner for AgentTurnRunner {
             "thread",
         )?;
         let snapshot = self.config.snapshot();
-        let (attachments, events, writer) = self
+        let (attachments, events, writer, steer_image_resolver, steer_outcome_recorder) = self
             .parent_delivery(
                 &job,
                 thread.runtime.provider_id.as_deref(),
@@ -293,6 +293,8 @@ impl TurnRunner for AgentTurnRunner {
             )),
             chunk_buffer: super::turn_common::chunk_buffer_for_turn(&snapshot),
             steering: job.steering,
+            steer_image_resolver: Some(steer_image_resolver),
+            steer_outcome_recorder: Some(steer_outcome_recorder),
         });
         if let Some(text) = user_text {
             reactor.push_user_message(user_message_with_attachments(text, &attachments));
@@ -330,6 +332,8 @@ impl AgentTurnRunner {
         crate::attachment_seed::AttachmentSeed,
         TurnEvents,
         Arc<EventSinkWriter>,
+        ark_agent::SteerImageResolver,
+        ark_agent::SteerOutcomeRecorder,
     )> {
         let is_auto = matches!(&job.source, TurnSource::AutoContinuation);
         // Vision follows the effective model: a thread override reads the
@@ -341,6 +345,18 @@ impl AgentTurnRunner {
             vision == Some(true),
             crate::attachment_seed::IMAGE_BUDGET_BYTES,
         );
+        // Steers can reference attachments too: same vision gate and per-turn
+        // image budget as a turn start, resolved from the same store.
+        let steer_image_resolver = crate::attachment_seed::steer_image_resolver(
+            Arc::clone(&self.attachments),
+            vision == Some(true),
+            crate::attachment_seed::IMAGE_BUDGET_BYTES,
+        );
+        let steer_outcome_recorder = crate::attachment_seed::steer_outcome_recorder(
+            Arc::clone(&self.attachments),
+            vision == Some(true),
+            crate::attachment_seed::IMAGE_BUDGET_BYTES,
+        );
         let events = if is_auto {
             TurnEvents::auto_continuation(job.thread_id, job.turn_id)
         } else {
@@ -349,7 +365,13 @@ impl AgentTurnRunner {
         .with_attachments(job.attachment_ids.clone())
         .with_attachment_outcomes(attachments.outcomes.clone());
         let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events.clone()));
-        Ok((attachments, events, writer))
+        Ok((
+            attachments,
+            events,
+            writer,
+            steer_image_resolver,
+            steer_outcome_recorder,
+        ))
     }
 
     /// Assemble the parent turn's seed: static prefix, replayed history, then
