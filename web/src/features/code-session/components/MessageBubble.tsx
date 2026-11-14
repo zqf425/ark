@@ -68,6 +68,9 @@ export const UserBubble = memo(function UserBubble({ item }: { item: ThreadItem 
   return (
     <article className="ark-msg ark-msg--user">
       <header className="ark-msg__head">
+        <span className="ark-msg__avatar ark-msg__avatar--you" aria-hidden="true">
+          {t('canvas.author.youInitial')}
+        </span>
         <span className="ark-msg__author">{t('canvas.author.you')}</span>
         <time className="ark-msg__time">{formatClock(item.created_at, locale)}</time>
         <CopyButton
@@ -101,6 +104,9 @@ export const AssistantBubble = memo(function AssistantBubble({ item }: { item: T
   return (
     <article className={`ark-msg ark-msg--assistant${failed ? ' is-failed' : ''}`}>
       <header className="ark-msg__head">
+        <span className="ark-msg__avatar ark-msg__avatar--assistant" aria-hidden="true">
+          ark
+        </span>
         <span className="ark-msg__author">ark</span>
         <time className="ark-msg__time">{formatClock(item.created_at, locale)}</time>
         {aborted ? <span className="ark-chip ark-chip--muted">{t('canvas.aborted')}</span> : null}
