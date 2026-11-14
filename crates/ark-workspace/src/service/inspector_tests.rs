@@ -419,3 +419,152 @@ fn quoted_path_with_escapes_is_unescaped_to_the_raw_name() {
     assert_eq!(segments[0].path, "quote\"name.txt");
     assert!(segments[0].text.ends_with("+new\n"), "content preserved");
 }
+
+// ---------------------------------------------------------------------------
+// read_file (requirements/workspace-file-preview.md)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn read_file_reads_a_relative_file_inside_the_root() {
+    let temp = TempDir::new("ws-preview-relative");
+    std::fs::write(temp.path.join("doc.md"), "# hello").unwrap();
+    let preview = WorkspaceInspector::with_base(temp.path.clone())
+        .read_file(temp.path(), "doc.md")
+        .unwrap();
+    assert_eq!(preview.content, "# hello");
+    assert_eq!(preview.path, "doc.md");
+    assert!(!preview.truncated);
+    assert!(!preview.binary);
+    assert_eq!(preview.size_bytes, 7);
+}
+
+#[test]
+fn read_file_reads_an_absolute_path_inside_the_root() {
+    let temp = TempDir::new("ws-preview-absolute");
+    std::fs::write(temp.path.join("a.md"), "body").unwrap();
+    let absolute = temp.path().join("a.md");
+    let preview = WorkspaceInspector::new()
+        .read_file(temp.path(), &absolute.to_string_lossy())
+        .unwrap();
+    assert_eq!(preview.content, "body");
+}
+
+#[test]
+fn read_file_rejects_a_dotdot_escape() {
+    let temp = TempDir::new("ws-preview-escape");
+    let outside = TempDir::new("ws-preview-outside");
+    std::fs::write(outside.path.join("secret.txt"), "s").unwrap();
+    let err = WorkspaceInspector::new()
+        .read_file(temp.path(), "../ws-preview-outside/secret.txt")
+        .expect_err("an escape must be rejected");
+    assert!(
+        err.message.contains("escapes the workspace root"),
+        "{}",
+        err.message
+    );
+}
+
+#[test]
+fn read_file_rejects_an_absolute_path_outside_the_root() {
+    let temp = TempDir::new("ws-preview-abs-escape");
+    let outside = TempDir::new("ws-preview-abs-outside");
+    std::fs::write(outside.path.join("secret.txt"), "s").unwrap();
+    let err = WorkspaceInspector::new()
+        .read_file(
+            temp.path(),
+            &outside.path().join("secret.txt").to_string_lossy(),
+        )
+        .expect_err("an outside absolute path must be rejected");
+    assert!(
+        err.message.contains("escapes the workspace root"),
+        "{}",
+        err.message
+    );
+}
+
+#[test]
+fn read_file_rejects_tilde_paths() {
+    let temp = TempDir::new("ws-preview-tilde");
+    let err = WorkspaceInspector::new()
+        .read_file(temp.path(), "~/etc/passwd")
+        .expect_err("`~` must not expand in the preview boundary");
+    assert!(err.message.contains("workspace"), "{}", err.message);
+}
+
+#[test]
+fn read_file_rejects_a_symlink_pointing_outside_the_root() {
+    #[cfg(unix)]
+    {
+        let temp = TempDir::new("ws-preview-symlink");
+        let outside = TempDir::new("ws-preview-symlink-out");
+        std::fs::write(outside.path.join("target.txt"), "s").unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("target.txt"),
+            temp.path().join("link.txt"),
+        )
+        .unwrap();
+        let err = WorkspaceInspector::new()
+            .read_file(temp.path(), "link.txt")
+            .expect_err("a symlink to outside must be rejected");
+        assert!(err.message.contains("escapes"), "{}", err.message);
+    }
+}
+
+#[test]
+fn read_file_rejects_missing_file_and_directory() {
+    let temp = TempDir::new("ws-preview-missing");
+    let inspector = WorkspaceInspector::new();
+    let err = inspector
+        .read_file(temp.path(), "nope.md")
+        .expect_err("a missing file must be rejected");
+    assert!(err.message.contains("does not exist"), "{}", err.message);
+    std::fs::create_dir(temp.path.join("adir")).unwrap();
+    let err = inspector
+        .read_file(temp.path(), "adir")
+        .expect_err("a directory must be rejected");
+    assert!(err.message.contains("directory"), "{}", err.message);
+}
+
+#[test]
+fn read_file_marks_lossy_content_as_binary() {
+    let temp = TempDir::new("ws-preview-binary");
+    std::fs::write(temp.path.join("img.dat"), [0xFF, 0xFE, 0x00, 0x01]).unwrap();
+    let preview = WorkspaceInspector::new()
+        .read_file(temp.path(), "img.dat")
+        .unwrap();
+    assert!(preview.binary);
+    assert!(!preview.truncated);
+}
+
+#[test]
+fn read_file_truncates_beyond_the_text_budget() {
+    let temp = TempDir::new("ws-preview-truncate");
+    let big = "x".repeat(PREVIEW_CONTENT_BUDGET + 100);
+    std::fs::write(temp.path.join("big.md"), &big).unwrap();
+    let preview = WorkspaceInspector::new()
+        .read_file(temp.path(), "big.md")
+        .unwrap();
+    assert!(preview.truncated);
+    assert_eq!(preview.content.len(), PREVIEW_CONTENT_BUDGET);
+    assert_eq!(preview.size_bytes as usize, PREVIEW_CONTENT_BUDGET + 100);
+}
+
+#[test]
+fn read_file_rejects_an_oversized_file() {
+    let temp = TempDir::new("ws-preview-oversize");
+    let big = vec![b'x'; (MAX_PREVIEW_FILE_BYTES as usize) + 1];
+    std::fs::write(temp.path.join("huge.bin"), &big).unwrap();
+    let err = WorkspaceInspector::new()
+        .read_file(temp.path(), "huge.bin")
+        .expect_err("an oversized file must be rejected");
+    assert!(err.message.contains("too large"), "{}", err.message);
+}
+
+#[test]
+fn read_file_rejects_an_empty_path() {
+    let temp = TempDir::new("ws-preview-empty");
+    let err = WorkspaceInspector::new()
+        .read_file(temp.path(), "   ")
+        .expect_err("an empty path must be rejected");
+    assert!(err.message.contains("empty"), "{}", err.message);
+}

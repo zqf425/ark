@@ -42,6 +42,7 @@ export type { WorkspaceChangesResponse } from "./WorkspaceChangesResponse";
 export type { WorkspaceChange } from "./WorkspaceChange";
 export type { WorkspaceDescriptor } from "./WorkspaceDescriptor";
 export type { WorkspaceView } from "./WorkspaceView";
+export type { WorkspaceFilePreview } from "./WorkspaceFilePreview";
 export type { SwitchWorkspaceRequest } from "./SwitchWorkspaceRequest";
 export type { WorkspaceDiffFile } from "./WorkspaceDiffFile";
 export type { WorkspaceDiff } from "./WorkspaceDiff";

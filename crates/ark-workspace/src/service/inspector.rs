@@ -11,12 +11,44 @@
 //!   directory and an unusable git all degrade into contract fields.
 
 use crate::domain::{
-    base_status, clean_branch, clean_sha, count_status_lines, empty_status, resolve_candidate,
+    base_status, clean_branch, clean_sha, count_status_lines, empty_status, expand_home,
+    resolve_candidate,
 };
 use crate::service::git_runner::run_git;
 use ark_common::{ArkError, Result};
-use ark_contract::{WorkspaceDiff, WorkspaceDiffFile, WorkspaceStatus};
+use ark_contract::{WorkspaceDiff, WorkspaceDiffFile, WorkspaceFilePreview, WorkspaceStatus};
 use std::path::{Path, PathBuf};
+
+/// Largest file the preview endpoint will read at all. Mirrors the read tool's
+/// legacy-decode bound: bigger files are build artifacts or media, and reading
+/// them serves nobody.
+pub const MAX_PREVIEW_FILE_BYTES: u64 = 8 * 1024 * 1024;
+/// Text budget kept from a read: enough for any real document, small enough
+/// that one file cannot eat the renderer or the HTTP response.
+pub const PREVIEW_CONTENT_BUDGET: usize = 256 * 1024;
+
+/// Canonicalized directory or a validation error naming it. On Windows the
+/// `\\?\` verbatim prefix is stripped so prefix comparisons against a
+/// user-visible root still work.
+fn canonical_dir(path: &Path) -> Result<PathBuf> {
+    let canonical = path.canonicalize().map_err(|_| {
+        ArkError::validation(format!("cannot canonicalize path: {}", path.display()))
+    })?;
+    Ok(PathBuf::from(strip_verbatim_prefix(
+        &canonical.to_string_lossy(),
+    )))
+}
+
+/// Remove the Windows verbatim prefix (`\\?\C:\...`) so `starts_with` compares
+/// user-visible spellings. No-op elsewhere.
+fn strip_verbatim_prefix(text: &str) -> String {
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    text.strip_prefix(r"\\?\")
+        .map(str::to_string)
+        .unwrap_or_else(|| text.to_string())
+}
 
 /// Stateless-ish inspector. `base` is the anchor for relative candidates and is
 /// captured once so a status call cannot drift when the process changes its
@@ -98,6 +130,86 @@ impl WorkspaceInspector {
             return status;
         }
         self.repository_status(path, &resolved)
+    }
+
+    /// Read a bounded, read-only preview of one file under `root`
+    /// (requirements/workspace-file-preview.md).
+    ///
+    /// Containment is enforced in three layers, matching the `ark-tool` read
+    /// tool's semantics without depending on that crate: lexical normalization,
+    /// canonicalization, and a real-path check that resolves symlinks. A
+    /// symlink pointing outside the root is therefore rejected even though the
+    /// link itself lives inside. `~` is deliberately NOT expanded: the preview
+    /// boundary is the workspace root, and the home directory is not inside it.
+    pub fn read_file(&self, root: &Path, raw: &str) -> Result<WorkspaceFilePreview> {
+        let path = raw.trim();
+        if path.is_empty() {
+            return Err(ArkError::validation("file path must not be empty"));
+        }
+        if expand_home(path) != *path {
+            return Err(ArkError::validation(
+                "file path must stay inside the workspace (`~` is not allowed)",
+            ));
+        }
+        let canonical_root = canonical_dir(root)?;
+        // Absolute candidates are accepted only if they already sit inside the
+        // root; relative ones resolve against it directly.
+        let candidate = {
+            let expanded = PathBuf::from(path);
+            if expanded.is_absolute() {
+                expanded
+            } else {
+                canonical_root.join(expanded)
+            }
+        };
+        // Fast lexical filter (no `..` may escape) before touching the disk.
+        if candidate.components().any(|c| c.as_os_str() == "..") {
+            return Err(ArkError::validation(format!(
+                "file path escapes the workspace root: {path}"
+            )));
+        }
+        if !candidate.exists() {
+            return Err(ArkError::validation(format!("file does not exist: {path}")));
+        }
+        if candidate.is_dir() {
+            return Err(ArkError::validation(format!(
+                "file path is a directory: {path}"
+            )));
+        }
+        // Real-path containment: symlinks must resolve inside the root too.
+        let real = canonical_dir(&candidate)?;
+        if !real.starts_with(&canonical_root) {
+            return Err(ArkError::validation(format!(
+                "file path escapes the workspace root: {path}"
+            )));
+        }
+        let metadata = std::fs::metadata(&real)
+            .map_err(|err| ArkError::validation(format!("cannot stat file {path}: {err}")))?;
+        let size_bytes = metadata.len();
+        if size_bytes > MAX_PREVIEW_FILE_BYTES {
+            return Err(ArkError::validation(format!(
+                "file is too large to preview ({size_bytes} bytes); limit is {MAX_PREVIEW_FILE_BYTES}"
+            )));
+        }
+        let bytes = std::fs::read(&real)
+            .map_err(|err| ArkError::validation(format!("cannot read file {path}: {err}")))?;
+        let truncated = bytes.len() > PREVIEW_CONTENT_BUDGET;
+        let content_bytes = if truncated {
+            &bytes[..PREVIEW_CONTENT_BUDGET]
+        } else {
+            &bytes[..]
+        };
+        // Lossy decode keeps the preview usable for mixed encodings while the
+        // replacement-char count tells the renderer to treat it as binary.
+        let content = String::from_utf8_lossy(content_bytes);
+        let binary = content.contains('\u{FFFD}');
+        Ok(WorkspaceFilePreview {
+            path: path.to_string(),
+            content: content.into_owned(),
+            truncated,
+            binary,
+            size_bytes,
+        })
     }
 
     /// Read a bounded, side-effect-free Git diff for an already validated root.

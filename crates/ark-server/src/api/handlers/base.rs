@@ -16,7 +16,8 @@ use ark_contract::{
     PluginEnableRequest, PluginHostReport, PluginProvisionView, ProviderEntry,
     ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SwitchWorkspaceRequest,
-    ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
+    ThreadSkillsResponse, WorkspaceDiff, WorkspaceFilePreview, WorkspaceStatus,
+    WorkspaceValidateResponse, WorkspaceView,
 };
 use chrono::Utc;
 
@@ -377,6 +378,47 @@ pub async fn workspace_diff(
     Ok(Json(diff))
 }
 
+/// Query parameters of `GET /v1/workspace/file?path=...`.
+#[derive(Debug, Deserialize)]
+pub struct WorkspaceFileQuery {
+    pub path: String,
+}
+
+/// `GET /v1/workspace/file?path=...` — a bounded, read-only preview of one
+/// file under the active workspace root (requirements/workspace-file-preview.md).
+///
+/// The read is disk I/O with canonicalization, so it runs in `spawn_blocking`
+/// (the `workspace/pick` precedent). The root is captured from the current
+/// view before the blocking call: a concurrent switch changes only the *next*
+/// preview, matching the snapshot semantics the renderer already applies to
+/// diff generations. No active workspace is a structured 404, not a guess.
+pub async fn workspace_file(
+    State(state): State<AppState>,
+    Query(query): Query<WorkspaceFileQuery>,
+) -> Result<Json<WorkspaceFilePreview>, ApiError> {
+    let service = state
+        .base
+        .workspace
+        .as_ref()
+        .ok_or_else(|| missing("workspace"))?
+        .clone();
+    let root = service
+        .view()
+        .active
+        .map(|active| std::path::PathBuf::from(active.path))
+        .ok_or_else(|| missing("active workspace"))?;
+    tokio::task::spawn_blocking(move || service.read_file(&root, &query.path))
+        .await
+        .map_err(|error| {
+            ApiError::new(
+                ark_common::ArkErrorCode::InternalError,
+                format!("workspace file preview task failed: {error}"),
+            )
+        })?
+        .map_err(ApiError)
+        .map(Json)
+}
+
 // ---------------------------------------------------------------------------
 // MCP servers
 // ---------------------------------------------------------------------------
@@ -532,6 +574,14 @@ mod tests {
         }
 
         fn status(&self, _path: &str) -> ark_contract::WorkspaceStatus {
+            unreachable!("not used by this test")
+        }
+
+        fn read_file(
+            &self,
+            _root: &std::path::Path,
+            _path: &str,
+        ) -> ark_common::Result<ark_contract::WorkspaceFilePreview> {
             unreachable!("not used by this test")
         }
 

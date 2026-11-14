@@ -15,10 +15,10 @@ use ark_contract::{
     PluginHostReport, PluginProvisionView, ProviderEntry, ProviderListResponse,
     ProviderModelCatalogRequest, ProviderModelCatalogResponse, ProviderTestRequest,
     ProviderTestResponse, SkillDiagnostics, SkillTurnResolution, ThreadSkillsResponse,
-    UpdateMemoryRequest, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
+    UpdateMemoryRequest, WorkspaceDiff, WorkspaceFilePreview, WorkspaceStatus, WorkspaceView,
 };
 use async_trait::async_trait;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::bus::UiCapability;
@@ -95,6 +95,11 @@ pub trait WorkspaceService: Send + Sync {
     fn validate(&self, raw: &str) -> Result<PathBuf>;
 
     fn status(&self, path: &str) -> WorkspaceStatus;
+
+    /// Bounded read-only preview of one file under `root`
+    /// (requirements/workspace-file-preview.md). Containment against `root` is
+    /// the implementor's duty.
+    fn read_file(&self, root: &Path, path: &str) -> Result<WorkspaceFilePreview>;
 
     /// Snapshot of the process-owned active workspace.
     fn view(&self) -> WorkspaceView;

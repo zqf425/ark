@@ -1062,6 +1062,14 @@ impl ark_ports::WorkspaceService for FixedWorkspace {
         unreachable!("not used by this test")
     }
 
+    fn read_file(
+        &self,
+        _root: &std::path::Path,
+        _path: &str,
+    ) -> ark_common::Result<ark_contract::WorkspaceFilePreview> {
+        unreachable!("not used by this test")
+    }
+
     fn view(&self) -> ark_contract::WorkspaceView {
         ark_contract::WorkspaceView {
             active: self

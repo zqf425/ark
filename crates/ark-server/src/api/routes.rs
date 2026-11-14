@@ -217,6 +217,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::api::handlers::base::workspace_diff),
         )
         .route(
+            "/v1/workspace/file",
+            get(crate::api::handlers::base::workspace_file),
+        )
+        .route(
             "/v1/workspace/validate",
             post(crate::api::handlers::base::workspace_validate),
         )

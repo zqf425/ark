@@ -402,6 +402,23 @@ pub struct WorkspaceView {
     pub generation: u64,
 }
 
+/// `GET /v1/workspace/file?path=...` — a bounded read-only preview of one file
+/// under the active workspace root (requirements/workspace-file-preview.md).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct WorkspaceFilePreview {
+    /// The normalized input path, echoed for display.
+    pub path: String,
+    /// UTF-8 text (lossy for non-UTF-8 bytes), capped at the preview budget.
+    pub content: String,
+    /// The budget cut the content; the tail is not included.
+    pub truncated: bool,
+    /// Lossy decoding replaced bytes: treat as binary, do not render as text.
+    pub binary: bool,
+    #[ts(as = "f64")]
+    pub size_bytes: u64,
+}
+
 /// `POST /v1/workspace/switch`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
