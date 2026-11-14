@@ -169,6 +169,13 @@ facts extracted` 与 `: truncated` 两个变体）。判定 gated 在 `Notice` k
 按 UTF-8 字符数限 4096，超限整条丢弃最新条目并追加 truncated 尾注）。读取或解析失败只记 warn 并跳过注入，
 空 store 不注入，均不影响回合结果。
 
+项目指令文件（[需求设计](../requirements/project-instructions.md)）由
+`apps/arkd/src/instructions.rs`（唯一发现与截断宿主）在回合生效工作区根按
+`AGENTS.md` → `CLAUDE.md` → `README.md` 优先级取第一个命中文件，读为**动态尾部的一条
+`[project instructions]` system 消息**（父路径在 skills 之后、memory 之前；子路径在角色行之后、
+skill tail 之前）。不进入静态前缀（工作区相关文本会破坏 prompt-cache 字节稳定不变量）；
+读取失败、非 UTF-8、空文件按未命中处理并记 warn；UTF-8 字节数限 32 KiB，按字符边界截断。
+
 持久计划（goal + todos）同样走动态尾部：`run_turn` 每回合从线程事件流重投影 `PlanView`
 （`ark_server::service::workbench::plan`），经 `history::plan_seed_message` 以
 `[thread plan - current objective and progress]` system 消息注入 seed 末尾（最贴近新用户消息）。

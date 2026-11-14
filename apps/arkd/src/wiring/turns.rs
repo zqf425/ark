@@ -347,7 +347,8 @@ impl AgentTurnRunner {
     }
 
     /// Assemble the parent turn's seed: static prefix, replayed history, then
-    /// the dynamic tail (skills, memory, completion inbox, thread plan).
+    /// the dynamic tail (skills, project instructions, memory, completion
+    /// inbox, thread plan).
     ///
     /// Only the static prefix may enter the prompt cache; everything after it
     /// changes between turns, so it must stay out of the prefix. The plan is
@@ -364,6 +365,7 @@ impl AgentTurnRunner {
         let mut seed_messages = super::turn_common::seed_prefix(workspace);
         seed_messages.extend(history);
         seed_messages.extend(super::turn_common::skill_tail(&resolution, true));
+        super::turn_common::push_project_instructions(workspace, &mut seed_messages);
         if let Some(message) = crate::memory_seed::seed_for_turn(self.memory.as_ref()) {
             seed_messages.push(message);
         }
