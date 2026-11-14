@@ -120,8 +120,13 @@
   线程技能集缓存在 `use-thread-skills.ts`（30s TTL，模块级共享），Composer palette 与消息画布的
   提及芯片共用同一份缓存。
 - 已知未接入的路由：`attachments/diagnostics`（诊断）、
-  `child-runs/{id}/thread|events|cleanup`（子代理完整转录查看器需要独立的轮询/订阅设计，见子代理
-  监督约束）、`sessions/{id}/resume-thread`（定时任务结果已直接携带 thread_id 跳转）。
+  `child-runs/{id}/cleanup`、`sessions/{id}/resume-thread`（定时任务结果已直接携带 thread_id 跳转）。
+  `child-runs/{id}/thread|events` 已接入子代理执行过程查看器：展开行先以 `/thread` 快照播种，
+  再以 `/events` 按 `since_seq` 增量轮询（活动子代理 1.5s 一跳，终态后停止），行复用父画布的
+  StreamRow 组件；该状态是展开行组件的本地状态，不进全局 store，也不随父流 token 重渲染。
+- 子代理面板（`ChildRunsPanel`）每行可展开：执行过程查看器（快照+增量轮询）+ 活动子代理的
+  行内补充指令输入框（Enter 发送、Shift+Enter 换行）与终止按钮；终态行提供恢复按钮。列表仍由
+  `child_activity`/`child_completed` 驱动的 `childRunRevision` 刷新。
 - Code 使用 ARK Console shell（方案 A）：46px 全局顶栏 + 52px 活动栏 + 26px 状态栏，主舞台在
   `code` 场景下是"线程列表 / 会话画布 / 常驻检查器"三列；顶栏承载工作区、Git head、运行态、模型、
   主题切换与 ⌘K 入口（设置入口只在活动栏底部，顶栏不重复放置），状态栏承载连接、工作区、变更数与

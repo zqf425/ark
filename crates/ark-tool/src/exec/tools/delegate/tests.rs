@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex};
 
 use ark_common::{ArkError, ArkErrorCode, ChildId, ThreadId, TurnId, Usage};
 use ark_ports::{
-    SandboxDecision, SubagentOutcome, SubagentRequest, SubagentRunner, Tool, ToolArgs, ToolContext,
+    SandboxDecision, SubagentOutcome, SubagentPolicy, SubagentPolicySource, SubagentRequest,
+    SubagentRunner, Tool, ToolArgs, ToolContext,
 };
 
 use super::*;
@@ -113,6 +114,22 @@ impl SubagentRunner for FakeRunner {
     }
 }
 
+/// Policy source stub: only `default_background` varies across tests.
+struct FixedPolicy {
+    default_background: bool,
+}
+
+impl SubagentPolicySource for FixedPolicy {
+    fn policy(&self) -> SubagentPolicy {
+        SubagentPolicy {
+            enabled: true,
+            max_concurrency: 2,
+            max_queued: 20,
+            default_background: self.default_background,
+        }
+    }
+}
+
 fn ctx() -> ToolContext {
     ToolContext {
         thread_id: ThreadId::new(),
@@ -165,6 +182,65 @@ async fn a_prompt_alone_is_enough_to_spawn_a_child() {
         Some(context.workspace.display().to_string().as_str())
     );
     assert!(requests[0].resume_child_id.is_none());
+    assert_eq!(runner.foreground_calls(), 1);
+    assert_eq!(runner.background_calls(), 0);
+}
+
+#[tokio::test]
+async fn the_policy_default_background_dispatches_without_an_explicit_flag() {
+    let outcome = completed("queued answer");
+    let child = outcome.child_id;
+    let runner = FakeRunner::new(true, outcome);
+    let tool = DelegateTaskTool::new(runner.clone()).with_policy(Arc::new(FixedPolicy {
+        default_background: true,
+    }));
+
+    let out = tool
+        .execute(&ctx(), ToolArgs(serde_json::json!({ "prompt": "scan" })))
+        .await
+        .unwrap();
+
+    assert!(out.ok);
+    assert!(out.content.contains(&child.to_string()), "{}", out.content);
+    assert_eq!(runner.background_calls(), 1);
+    assert_eq!(runner.foreground_calls(), 0);
+}
+
+#[tokio::test]
+async fn an_explicit_background_false_overrides_the_policy_default() {
+    let runner = FakeRunner::new(true, completed("foreground answer"));
+    let tool = DelegateTaskTool::new(runner.clone()).with_policy(Arc::new(FixedPolicy {
+        default_background: true,
+    }));
+
+    let out = tool
+        .execute(
+            &ctx(),
+            ToolArgs(serde_json::json!({ "prompt": "scan", "background": false })),
+        )
+        .await
+        .unwrap();
+
+    assert!(out.ok);
+    assert_eq!(out.content, "foreground answer");
+    assert_eq!(runner.foreground_calls(), 1);
+    assert_eq!(runner.background_calls(), 0);
+}
+
+#[tokio::test]
+async fn a_false_policy_default_keeps_the_foreground_contract() {
+    let runner = FakeRunner::new(true, completed("foreground answer"));
+    let tool = DelegateTaskTool::new(runner.clone()).with_policy(Arc::new(FixedPolicy {
+        default_background: false,
+    }));
+
+    let out = tool
+        .execute(&ctx(), ToolArgs(serde_json::json!({ "prompt": "scan" })))
+        .await
+        .unwrap();
+
+    assert!(out.ok);
+    assert_eq!(out.content, "foreground answer");
     assert_eq!(runner.foreground_calls(), 1);
     assert_eq!(runner.background_calls(), 0);
 }

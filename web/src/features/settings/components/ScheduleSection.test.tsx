@@ -55,7 +55,7 @@ function config(enabled = true): RuntimeConfigView {
     data_dir: '/tmp/ark',
     log_level: 'info',
     default_autonomy: 'workspace_write',
-    subagents: { enabled: true, max_concurrency: 2, auto_continue: false },
+    subagents: { enabled: true, max_concurrency: 2, auto_continue: false, default_background: true },
     skills: { enabled: true, extra_dirs: [] },
     schedules: { enabled },
     im: { enabled: false },

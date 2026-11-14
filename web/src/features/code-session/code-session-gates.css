@@ -544,3 +544,128 @@
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+
+/* ---------- child run expansion (execution viewer) ---------- */
+
+.ark-childruns__row {
+  flex-wrap: wrap;
+}
+
+.ark-childruns__summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-height: 20px;
+}
+
+.ark-childruns__summary:hover strong {
+  color: var(--ark-accent);
+}
+
+.ark-childruns__summary strong {
+  margin-left: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-childruns__caret {
+  color: var(--ark-text-faint);
+  font-size: 10px;
+  transition: transform 120ms ease;
+  flex: none;
+}
+
+.ark-childruns__caret.is-open {
+  transform: rotate(90deg);
+}
+
+.ark-childruns__meta {
+  color: var(--ark-text-dim);
+  font-family: var(--ark-mono);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-childruns__outcome {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  color: var(--ark-text-faint);
+  overflow-wrap: anywhere;
+}
+
+/* The expanded viewer reads as an inset process card inside the panel row. */
+.ark-childruns__viewer {
+  flex-basis: 100%;
+  margin-top: 8px;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius-md);
+  background: var(--ark-bg-raised);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.ark-childruns__viewerBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ark-childruns__viewHint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ark-text-faint);
+}
+
+.ark-childruns__viewError {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ark-error);
+  overflow-wrap: anywhere;
+}
+
+.ark-childruns__steer {
+  border-top: 1px solid var(--ark-border-muted);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ark-childruns__steerInput {
+  width: 100%;
+  resize: vertical;
+  min-height: 44px;
+  padding: 7px 9px;
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius-md);
+  background: var(--ark-bg);
+  color: var(--ark-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ark-childruns__steerInput:focus {
+  outline: none;
+  border-color: var(--ark-accent-dim);
+}
+
+.ark-childruns__steer .ark-childruns__actions {
+  justify-content: flex-end;
+}

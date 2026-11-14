@@ -452,6 +452,7 @@ impl ark_ports::SubagentPolicySource for ConfigSubagentPolicy {
             enabled: settings.subagents.enabled,
             max_concurrency: settings.subagents.max_concurrency.max(1),
             max_queued: DEFAULT_MAX_QUEUED,
+            default_background: settings.subagents.default_background,
         }
     }
 }
@@ -492,6 +493,7 @@ mod tests {
                 enabled,
                 max_concurrency,
                 auto_continue: false,
+                default_background: true,
             },
             ..RuntimeConfig::default()
         };

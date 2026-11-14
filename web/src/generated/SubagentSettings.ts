@@ -12,4 +12,12 @@ export type SubagentSettings = { enabled: boolean, max_concurrency: number,
  * Start a parent continuation after background child completions.
  * Disabled by default because enabling it permits additional model calls.
  */
-auto_continue: boolean, };
+auto_continue: boolean, 
+/**
+ * Dispatch `delegate_task` in the background unless the model explicitly
+ * passes `background: false` (requirements/background-subagent-completion).
+ * Default on: a delegated sub-task must not block the parent turn for its
+ * whole runtime; completion reaches the parent through the notification
+ * inbox instead.
+ */
+default_background: boolean, };

@@ -31,7 +31,12 @@ pub const CONFIG_KEYS: &[&str] = &[
 ];
 
 /// Keys nested under `subagents`.
-pub const SUBAGENT_KEYS: &[&str] = &["enabled", "max_concurrency", "auto_continue"];
+pub const SUBAGENT_KEYS: &[&str] = &[
+    "enabled",
+    "max_concurrency",
+    "auto_continue",
+    "default_background",
+];
 
 /// Keys nested under `skills`.
 pub const SKILLS_KEYS: &[&str] = &["enabled", "extra_dirs"];

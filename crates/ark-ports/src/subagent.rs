@@ -138,6 +138,12 @@ pub struct SubagentPolicy {
     /// Children allowed to *wait* for a slot. Beyond this a spawn fails fast, so
     /// a parent turn can never hang on delegation.
     pub max_queued: u32,
+    /// Whether `delegate_task` dispatches in the background when the model does
+    /// not pass an explicit `background` flag. Default on: the parent turn must
+    /// not block for minutes on a child run; completion reaches the parent via
+    /// the durable notification/inbox path instead. An explicit `background:
+    /// false` in the tool args still forces the foreground contract.
+    pub default_background: bool,
 }
 
 impl Default for SubagentPolicy {
@@ -146,6 +152,7 @@ impl Default for SubagentPolicy {
             enabled: false,
             max_concurrency: 2,
             max_queued: 20,
+            default_background: true,
         }
     }
 }

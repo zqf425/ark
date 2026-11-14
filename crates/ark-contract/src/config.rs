@@ -187,6 +187,19 @@ pub struct SubagentSettings {
     /// Disabled by default because enabling it permits additional model calls.
     #[serde(default)]
     pub auto_continue: bool,
+    /// Dispatch `delegate_task` in the background unless the model explicitly
+    /// passes `background: false` (requirements/background-subagent-completion).
+    /// Default on: a delegated sub-task must not block the parent turn for its
+    /// whole runtime; completion reaches the parent through the notification
+    /// inbox instead.
+    #[serde(default = "default_true")]
+    pub default_background: bool,
+}
+
+/// serde default for `default_background`: absent legacy values keep the
+/// non-blocking behaviour instead of falling back to a blocking parent turn.
+fn default_true() -> bool {
+    true
 }
 
 /// Hard bounds on `max_concurrency`. Above 8 the local model budget and the
@@ -233,6 +246,7 @@ impl Default for SubagentSettings {
             enabled: true,
             max_concurrency: 2,
             auto_continue: false,
+            default_background: true,
         }
     }
 }
@@ -245,6 +259,7 @@ impl SubagentSettings {
                 .max_concurrency
                 .clamp(SUBAGENT_CONCURRENCY_MIN, SUBAGENT_CONCURRENCY_MAX),
             auto_continue: self.auto_continue,
+            default_background: self.default_background,
         }
     }
 }

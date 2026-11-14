@@ -25,6 +25,7 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
   const { config, saving, save } = settings
   const [enabled, setEnabled] = useState(false)
   const [autoContinue, setAutoContinue] = useState(false)
+  const [defaultBackground, setDefaultBackground] = useState(true)
   const [concurrency, setConcurrency] = useState('2')
   const [rejection, setRejection] = useState<{ reason: string; restartRequired: string[] } | null>(null)
 
@@ -34,6 +35,7 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
     if (!config) return
     setEnabled(config.subagents.enabled)
     setAutoContinue(config.subagents.auto_continue)
+    setDefaultBackground(config.subagents.default_background)
     setConcurrency(String(config.subagents.max_concurrency))
   }, [config])
 
@@ -51,6 +53,7 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
   const dirty =
     enabled !== config.subagents.enabled ||
     autoContinue !== config.subagents.auto_continue ||
+    defaultBackground !== config.subagents.default_background ||
     parsed !== config.subagents.max_concurrency ||
     invalid
 
@@ -83,6 +86,7 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
         enabled: next,
         max_concurrency: clampConcurrency(Number(concurrency)),
         auto_continue: autoContinue,
+        default_background: defaultBackground,
       },
       next ? t('settings.subagents.startLabel') : t('settings.subagents.stopLabel'),
     )
@@ -95,8 +99,24 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
         enabled,
         max_concurrency: clampConcurrency(Number(concurrency)),
         auto_continue: next,
+        default_background: defaultBackground,
       },
       next ? t('settings.subagents.autoContinue.enabled') : t('settings.subagents.autoContinue.disabled'),
+    )
+  }
+
+  const toggleDefaultBackground = async (next: boolean): Promise<void> => {
+    setDefaultBackground(next)
+    await persist(
+      {
+        enabled,
+        max_concurrency: clampConcurrency(Number(concurrency)),
+        auto_continue: autoContinue,
+        default_background: next,
+      },
+      next
+        ? t('settings.subagents.defaultBackground.enabled')
+        : t('settings.subagents.defaultBackground.disabled'),
     )
   }
 
@@ -120,6 +140,16 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
           onChange={(next) => void toggleAutoContinue(next)}
         />
         <span className="ark-settings__hint">{t('settings.subagents.autoContinue.hint')}</span>
+      </div>
+
+      <div className="ark-card__foot">
+        <CheckField
+          label={t('settings.subagents.defaultBackground.label')}
+          checked={defaultBackground}
+          disabled={busy || !enabled}
+          onChange={(next) => void toggleDefaultBackground(next)}
+        />
+        <span className="ark-settings__hint">{t('settings.subagents.defaultBackground.hint')}</span>
       </div>
 
       <Field
@@ -152,6 +182,7 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
                   enabled,
                   max_concurrency: clampConcurrency(parsed),
                   auto_continue: autoContinue,
+                  default_background: defaultBackground,
                 },
                 t('settings.subagents.saveConcurrency'),
               )

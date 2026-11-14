@@ -35,6 +35,7 @@ export type {
   ChildId,
   ChildCompletionNotice,
   ChildRunActionResult,
+  ChildRunEventsResponse,
   ChildRunListResponse,
   ChildRunSummary,
   ConfigPatch,

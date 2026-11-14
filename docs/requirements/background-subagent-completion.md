@@ -1,6 +1,9 @@
 # 后台子代理完成通知设计
 
 > 状态：**当前实现，待真实交互验收**。通知、completion inbox 与显式 opt-in 的自动续跑三个阶段均已实现；真实浏览器和模型调用路径的最终验收由 [发布收尾与真实环境验收](release-readiness.md) 承接。
+> 派发默认已改为**不阻塞主会话**：`subagents.default_background`（Hot，默认 `true`）使 `delegate_task`
+> 在模型未显式传 `background` 时立即返回 queued（见 modules/ark-tool.md 与 modules/ark-delegation.md），
+> 本需求的完成通知路径即该模式的唯一结果回传通道。
 
 ## 目标
 

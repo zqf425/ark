@@ -1,16 +1,119 @@
 import { useEffect, useRef, useState } from 'react'
 import { describeError } from '../../../shared/api/error-describe'
 import { translateNow } from '../../../shared/i18n/current'
-import type { ChildRunListResponse } from '../../../shared/contracts'
+import type { ChildRunListResponse, ChildRunSummary } from '../../../shared/contracts'
 import { Button, useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import { abortChildRun, listChildRuns, resumeChildRun, steerChildRun } from '../api/child-runs-api'
 import { childCompletionStatusKey } from '../child-completion-status'
 import { useCodeSessionStore } from '../state/store'
 import { childRunMeta } from './child-run-meta'
+import { ChildRunViewer } from './ChildRunViewer'
 
 function describe(error: unknown): string {
   return describeError(error, translateNow)
+}
+
+/**
+ * One expanded row owns its steer draft and its transcript. Local component
+ * state (not the canvas store): the draft dies with the row, a thread switch
+ * unmounts it, and the parent stream must not re-render on a keystroke here.
+ */
+function ChildRunRow({
+  threadId,
+  child,
+  onChanged
+}: {
+  threadId: string
+  child: ChildRunSummary
+  /** Re-read the list after a successful action (abort/resume/steer mutate it). */
+  onChanged: () => void
+}): JSX.Element {
+  const { t } = useI18n()
+  const toast = useToast()
+  const [expanded, setExpanded] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [steerDraft, setSteerDraft] = useState('')
+
+  const active = child.status === 'queued' || child.status === 'running'
+  const resumable = child.status === 'failed' || child.status === 'aborted'
+  const meta = childRunMeta(child)
+
+  const run = async (key: string, action: () => Promise<unknown>): Promise<void> => {
+    setBusy(key)
+    try {
+      await action()
+      setSteerDraft('')
+      onChanged()
+    } catch (error) {
+      toast.push('error', t('canvas.childRuns.actionFailed'), describe(error))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const sendSteer = (): void => {
+    const text = steerDraft.trim()
+    if (!text || busy) return
+    void run(`steer:${child.id}`, () => steerChildRun(threadId, child.id, text))
+  }
+
+  return (
+    <div className={`ark-childruns__row${expanded ? ' is-open' : ''}`}>
+      <button type="button" className="ark-childruns__summary" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}>
+        <span className={`ark-childruns__caret${expanded ? ' is-open' : ''}`} aria-hidden="true">▸</span>
+        <span className={`ark-chip ${active ? 'ark-chip--live' : child.status === 'completed' ? 'ark-chip--ok' : 'ark-chip--error'}`}>
+          {t(childCompletionStatusKey(child.status))}
+        </span>
+        <strong>{child.label}</strong>
+        {meta.length > 0 ? <span className="ark-childruns__meta">{meta.map((part) => t(part.key, part.params)).join(' · ')}</span> : null}
+      </button>
+      {child.summary || child.error ? <p className="ark-childruns__outcome">{child.summary ?? child.error}</p> : null}
+      {expanded ? (
+        <div className="ark-childruns__viewer">
+          <ChildRunViewer threadId={threadId} childId={child.id} active={active} />
+          {active ? (
+            <div className="ark-childruns__steer">
+              <textarea
+                className="ark-childruns__steerInput"
+                rows={2}
+                value={steerDraft}
+                placeholder={t('canvas.childRuns.steerPlaceholder')}
+                aria-label={t('canvas.childRuns.steerAria')}
+                onChange={(event) => setSteerDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault()
+                    sendSteer()
+                  }
+                }}
+              />
+              <div className="ark-childruns__actions">
+                <Button size="sm" disabled={!steerDraft.trim() || busy !== null} onClick={sendSteer}>
+                  {t('canvas.childRuns.steerSend')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={busy !== null}
+                  onClick={() => void run(`abort:${child.id}`, () => abortChildRun(threadId, child.id))}
+                >
+                  {busy === `abort:${child.id}` ? t('canvas.childRuns.aborting') : t('canvas.childRuns.abort')}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          {resumable ? (
+            <div className="ark-childruns__actions">
+              <Button size="sm" disabled={busy !== null} onClick={() => void run(`resume:${child.id}`, () => resumeChildRun(threadId, child.id))}>
+                {t('canvas.childRuns.resume')}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 export function ChildRunsPanel({ threadId }: { threadId: string }): JSX.Element | null {
@@ -18,7 +121,6 @@ export function ChildRunsPanel({ threadId }: { threadId: string }): JSX.Element 
   const childRunRevision = useCodeSessionStore((state) => state.childRunRevision)
   const toast = useToast()
   const [data, setData] = useState<ChildRunListResponse | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
   /**
    * Which thread the rows and the newest list request belong to. Bookkeeping,
    * never render input: the panel stays mounted across thread switches while its
@@ -33,7 +135,6 @@ export function ChildRunsPanel({ threadId }: { threadId: string }): JSX.Element 
   if (rowsFor !== threadId) {
     setRowsFor(threadId)
     setData(null)
-    setBusy(null)
     latestLoad.current = { threadId, ticket: latestLoad.current.ticket + 1 }
   }
 
@@ -68,14 +169,5 @@ export function ChildRunsPanel({ threadId }: { threadId: string }): JSX.Element 
   }, [threadId, childRunRevision])
 
   if (!data || data.child_runs.length === 0) return null
-  const run = async (key: string, action: () => Promise<unknown>): Promise<void> => {
-    setBusy(key)
-    try { await action(); refresh() } catch (error) { toast.push('error', t('canvas.childRuns.actionFailed'), describe(error)) } finally { setBusy(null) }
-  }
-  return <section className="ark-childruns"><header><strong>{t('canvas.childRuns.title')}</strong><span>{t('canvas.childRuns.active', { count: data.active })}</span></header>{data.child_runs.map((child) => {
-    const active = child.status === 'queued' || child.status === 'running'
-    const resumable = child.status === 'failed' || child.status === 'aborted'
-    const meta = childRunMeta(child)
-    return <div className="ark-childruns__row" key={child.id}><div><span className={`ark-chip ${active ? 'ark-chip--live' : child.status === 'completed' ? 'ark-chip--ok' : 'ark-chip--error'}`}>{t(childCompletionStatusKey(child.status))}</span><strong>{child.label}</strong>{meta.length > 0 ? <p className="ark-childruns__meta">{meta.map((part) => t(part.key, part.params)).join(' · ')}</p> : null}{child.summary ? <p>{child.summary}</p> : child.error ? <p>{child.error}</p> : null}</div><div className="ark-childruns__actions">{active ? <Button size="sm" variant="danger" disabled={busy !== null} onClick={() => void run(`abort:${child.id}`, () => abortChildRun(threadId, child.id))}>{busy === `abort:${child.id}` ? t('canvas.childRuns.aborting') : t('canvas.childRuns.abort')}</Button> : null}{resumable ? <Button size="sm" disabled={busy !== null} onClick={() => void run(`resume:${child.id}`, () => resumeChildRun(threadId, child.id))}>{t('canvas.childRuns.resume')}</Button> : null}<Button size="sm" disabled={!active || busy !== null} onClick={() => { const text = window.prompt(t('canvas.childRuns.steerPrompt')); if (text?.trim()) void run(`steer:${child.id}`, () => steerChildRun(threadId, child.id, text.trim())) }}>{t('canvas.childRuns.steer')}</Button></div></div>
-  })}</section>
+  return <section className="ark-childruns"><header><strong>{t('canvas.childRuns.title')}</strong><span>{t('canvas.childRuns.active', { count: data.active })}</span></header>{data.child_runs.map((child) => <ChildRunRow key={child.id} threadId={threadId} child={child} onChanged={refresh} />)}</section>
 }

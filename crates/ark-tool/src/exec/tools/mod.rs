@@ -31,7 +31,7 @@ pub use write::{EditTool, WriteTool};
 
 use std::sync::Arc;
 
-use ark_ports::{HttpCapability, SubagentRunner, Tool};
+use ark_ports::{HttpCapability, SubagentPolicySource, SubagentRunner, Tool};
 
 /// Every builtin, in canonical (alphabetical) order.
 ///
@@ -72,9 +72,19 @@ pub fn builtins_with_shell_session() -> Vec<Box<dyn Tool>> {
 /// The delegation tool, for a runtime that has a sub-agent runner.
 ///
 /// A child's tool set is built from [`builtins`] only, which is what enforces
-/// `max_depth = 1`: a child has no `delegate_task` to call.
-pub fn delegation_tools(runner: Arc<dyn SubagentRunner>) -> Vec<Box<dyn Tool>> {
-    vec![Box::new(DelegateTaskTool::new(runner))]
+/// `max_depth = 1`: a child has no `delegate_task` to call. When the runtime
+/// also supplies a [`SubagentPolicySource`] the tool applies the live
+/// `default_background` decision; pass `None` to keep the foreground default.
+pub fn delegation_tools(
+    runner: Arc<dyn SubagentRunner>,
+    policy: Option<Arc<dyn SubagentPolicySource>>,
+) -> Vec<Box<dyn Tool>> {
+    let tool = DelegateTaskTool::new(runner);
+    let tool = match policy {
+        Some(policy) => tool.with_policy(policy),
+        None => tool,
+    };
+    vec![Box::new(tool)]
 }
 
 /// The web fetch tool, for a runtime that has the governed egress.

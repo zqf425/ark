@@ -34,6 +34,7 @@ impl SubagentPolicySource for LivePolicy {
             enabled: self.enabled,
             max_concurrency: self.max_concurrency,
             max_queued: self.max_queued,
+            default_background: true,
         }
     }
 }
@@ -608,6 +609,7 @@ async fn the_policy_is_read_per_spawn_so_a_settings_change_applies() {
                 enabled: self.enabled.load(Ordering::SeqCst) == 1,
                 max_concurrency: 1,
                 max_queued: 0,
+                default_background: true,
             }
         }
     }
