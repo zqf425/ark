@@ -136,8 +136,6 @@
   --console-scrim: rgba(24, 30, 36, 0.28);
   --console-warn-line: rgba(166, 106, 8, 0.4);
   --console-warn-wash: rgba(214, 146, 32, 0.1);
-  --console-avatar-a: #3a4a5c;
-  --console-avatar-b: #6c7f93;
 
   /* syntax tokens (diff / code surfaces) */
   --tk-kw: #1b57c0;

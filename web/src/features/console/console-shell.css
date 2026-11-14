@@ -237,20 +237,6 @@ button.console-chip:hover {
   flex: none;
 }
 
-.console-avatar {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  background: linear-gradient(140deg, var(--console-avatar-a), var(--console-avatar-b));
-  color: var(--ark-bg-canvas);
-  display: grid;
-  place-items: center;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  flex: none;
-}
-
 /* ---------- activity rail ---------- */
 
 .console-body {

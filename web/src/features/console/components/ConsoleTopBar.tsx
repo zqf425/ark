@@ -3,8 +3,11 @@
  *
  * One row of orientation facts the old chromeless workbench hid inside the
  * sidebar footer or the settings page: workspace, Git head, runtime state,
- * model, theme and the ⌘K entry point. Data comes from `useConsoleMeta`
+ * theme and the ⌘K entry point. Data comes from `useConsoleMeta`
  * (workspace/diff/providers) and the session store; nothing is invented here.
+ * The model chip is deliberately absent: the loop's model is only ever
+ * displayed where it is selectable (composer pill / settings), and the top bar
+ * shows the runtime's default-provider model, which invites misreads.
  */
 import { useI18n } from '../../../shared/i18n'
 import { Icon } from '../../../shared/ui'
@@ -79,11 +82,6 @@ export function ConsoleTopBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
           {running ? t('console.top.running') : t('console.top.idle')}
         </span>
 
-        <span className="console-chip" title={meta.modelLabel ?? t('console.top.model')}>
-          <span className="console-chip__icon"><Icon name="spark" size={13} /></span>
-          <span className="console-chip__path">{meta.modelLabel ?? t('console.top.model')}</span>
-        </span>
-
         <span className="console-divider" aria-hidden="true" />
 
         <button
@@ -95,8 +93,6 @@ export function ConsoleTopBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
         >
           <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
         </button>
-
-        <span className="console-avatar" aria-hidden="true">YA</span>
       </div>
     </header>
   )

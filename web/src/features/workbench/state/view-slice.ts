@@ -20,7 +20,7 @@ export const APP_VIEW_LABEL_KEYS: Record<AppView, MessageKey> = {
   code: 'workbench.view.code',
   settings: 'workbench.view.settings',
   review: 'console.review.title',
-  new: 'console.rail.new'
+  new: 'console.new.title'
 }
 
 export type ViewSlice = {

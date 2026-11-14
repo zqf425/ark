@@ -13,21 +13,13 @@ export const CONSOLE_MESSAGES = {
   'console.top.search': ['搜索会话、文件、运行命令…', 'Search threads, files, commands…'],
   'console.top.running': ['运行中', 'Running'],
   'console.top.idle': ['就绪', 'Ready'],
-  'console.top.model': ['模型', 'Model'],
   'console.top.theme': ['切换主题', 'Toggle theme'],
   'console.top.notifications': ['通知', 'Notifications'],
   'console.top.openCommand': ['打开命令面板', 'Open command palette'],
   'console.top.refresh': ['重新检查运行时', 'Recheck runtime'],
 
   /* activity rail */
-  'console.rail.workbench': ['工作台', 'Workbench'],
-  'console.rail.review': ['变更审查', 'Review changes'],
-  'console.rail.new': ['新任务', 'New task'],
-  'console.rail.terminal': ['终端', 'Terminal'],
-  'console.rail.plan': ['计划', 'Plan'],
-  'console.rail.archive': ['归档', 'Archived'],
   'console.rail.settings': ['设置', 'Settings'],
-  'console.rail.help': ['帮助', 'Help'],
   'console.rail.aria': ['主导航', 'Primary navigation'],
 
   /* status bar */
