@@ -18,7 +18,7 @@
  * thread id, so switching threads (which remounts this component) keeps each
  * thread's draft instead of dropping it.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../../../shared/i18n'
 import { translateNow } from '../../../shared/i18n/current'
 import { describeError } from '../../../shared/api/error-describe'
@@ -27,10 +27,10 @@ import { useTurn } from '../hooks/use-turn'
 import { useRuntimeSkills, useThreadSkills } from '../hooks/use-thread-skills'
 import { associateAttachment, uploadAttachment } from '../api/attachments-api'
 import { canEditComposer, canSendToThread } from './composer-availability'
+import { filterSkills, mentionTokenAt, type MentionToken } from './skill-mention'
 import { AutonomyPicker, WorkspacePicker, ContextRing, ModelPicker } from './ComposerRuntimeControls'
 import { SkillPalette } from './SkillPalette'
 import { CopyButton } from '../../../shared/ui/copy'
-
 const MAX_ROWS = 8
 /** Base64 of a file is ~4/3 of its bytes; keep uploads inside the runtime cap. */
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
@@ -238,6 +238,13 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const skills = threadId ? threadSkillView.skills : runtimeSkills
   const skillWarnings = threadId ? threadSkillView.warnings : 0
   const [skillsOpen, setSkillsOpen] = useState(false)
+  /**
+   * Slash invocation: the mention token under the caret (`/kun-new…` with the
+   * caret inside it). Non-null summons the palette in token mode; the draft
+   * textarea stays the input, so the palette renders without its own filter.
+   */
+  const [token, setToken] = useState<MentionToken | null>(null)
+  const [tokenActive, setTokenActive] = useState(0)
   /** The round + button opens a small insert menu (attachment / skills). */
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -263,6 +270,13 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const live = canInterrupt
   // Known skill count for the insert-menu badge; loading state hides it.
   const skillCount = skills?.length ?? 0
+  // The slash-invocation shortlist: the loaded set filtered by the typed token.
+  // An empty result keeps the palette visible with the "no match" row, like the
+  // mainstream canvases' slash menu.
+  const tokenList = useMemo(
+    () => (token && skills ? filterSkills(skills, token.query) : []),
+    [token, skills]
+  )
   // The steer/queue chooser only exists while the user actually has a draft:
   // an empty running composer is pure stop, matching the smart-ark composer.
   const showDeliveryChooser = live && !sendDisabled && draftText.trim().length > 0
@@ -312,6 +326,17 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   useEffect(() => {
     if (!draftText.trim()) setDeliveryMode('steer')
   }, [draftText])
+
+  // The slash-invocation palette is caret-bound: a draft that no longer holds
+  // the token (sent, cleared, thread switch) must drop it, and the highlight
+  // resets so a freshly typed `/` highlights the first row again.
+  useEffect(() => {
+    if (!draftText.trim()) setToken(null)
+  }, [draftText])
+  useEffect(() => {
+    setToken(null)
+    setTokenActive(0)
+  }, [threadId])
 
   const resetInput = (): void => {
     if (threadId) clearDraft(threadId)
@@ -393,6 +418,9 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   // warnings), cached module-level in `useThreadSkills`; `reload` forces the
   // rescan endpoint so the palette can refresh on demand.
   const toggleSkills = async (): Promise<void> => {
+    // The two palette modes are mutually exclusive: opening the menu palette
+    // closes the slash invocation and vice versa (the menu row checks below).
+    setToken(null)
     setSkillsOpen((current) => !current)
   }
 
@@ -407,16 +435,24 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     setSkillsOpen(false)
   }
 
-  /** Insert at the caret (or append) when picking from the palette. */
-  const insertSkillAtCaret = (id: string): void => {
+  /**
+   * Replace the in-progress token under the caret with the full mention, or
+   * insert at the caret when there is no token (menu mode). One landing spot
+   * for both palette modes, so the caret/lead-space rules stay in one place.
+   */
+  const applySkill = (id: string): void => {
     const node = inputRef.current
-    const mention = `/${id} `
+    // Closing the palette is part of the pick: the token below is about to be
+    // replaced, and a stale one would keep the palette open after re-render.
+    setToken(null)
+    setSkillsOpen(false)
     if (!node || !threadId) {
       mentionSkill(id)
       return
     }
-    const start = node.selectionStart ?? draftText.length
-    const end = node.selectionEnd ?? draftText.length
+    const mention = `/${id} `
+    const start = token ? token.start : (node.selectionStart ?? draftText.length)
+    const end = token ? token.end : (node.selectionEnd ?? draftText.length)
     const before = draftText.slice(0, start)
     const after = draftText.slice(end)
     // A mention is a word: keep one space before it when gluing onto text.
@@ -517,8 +553,38 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
             const node = event.currentTarget
             resize(node)
             if (threadId) setDraft(threadId, node.value)
+            // Track the mention token under the caret: typing `/` opens the
+            // palette, whitespace/word-boundary changes close it again.
+            const nextToken = mentionTokenAt(node.value, node.selectionStart ?? node.value.length)
+            setToken(nextToken)
+            setTokenActive(0)
           }}
           onKeyDown={(event) => {
+            // Token mode: the palette rides the draft, so navigation keys act
+            // on it first. Only intercept while the palette has rows.
+            if (token && tokenList.length > 0) {
+              if (event.key === 'ArrowDown' && !event.shiftKey) {
+                event.preventDefault()
+                setTokenActive((current) => (current + 1) % tokenList.length)
+                return
+              }
+              if (event.key === 'ArrowUp' && !event.shiftKey) {
+                event.preventDefault()
+                setTokenActive((current) => (current - 1 + tokenList.length) % tokenList.length)
+                return
+              }
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                const picked = tokenList[Math.min(tokenActive, tokenList.length - 1)]
+                if (picked) applySkill(picked.id)
+                return
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                setToken(null)
+                return
+              }
+            }
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault()
               void submit()
@@ -536,13 +602,30 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
           />
         ) : null}
 
-        {skillsOpen ? (
+        {/* Menu mode: opened from the + menu, carries its own filter. */}
+        {skillsOpen && !token ? (
           <SkillPalette
             skills={skills}
             warnings={skillWarnings}
             canRefresh={Boolean(threadId)}
-            onPick={insertSkillAtCaret}
-            onRefresh={() => void reloadSkills()}
+            mode="menu"
+            onPick={applySkill}
+            onRefresh={reloadSkills}
+          />
+        ) : null}
+
+        {/* Token mode: summoned by typing `/`; the draft is the query. */}
+        {!skillsOpen && token ? (
+          <SkillPalette
+            skills={skills}
+            warnings={skillWarnings}
+            canRefresh={false}
+            mode="token"
+            query={token.query}
+            activeIndex={tokenActive}
+            onActiveIndexChange={setTokenActive}
+            onPick={applySkill}
+            onRefresh={reloadSkills}
           />
         ) : null}
 

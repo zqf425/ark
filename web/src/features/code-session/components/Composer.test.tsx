@@ -43,7 +43,37 @@ vi.mock('../api/attachments-api', () => ({
 
 vi.mock('../api/skills-api', () => ({
   listSkills: vi.fn(async () => ({ skills: [] })),
-  listThreadSkills: vi.fn(),
+  listThreadSkills: vi.fn(async () => ({
+    enabled: true,
+    base_roots: [],
+    extra_roots: [],
+    loaded_extra_roots: [],
+    base_skills: [
+      {
+        id: 'kun-new-session',
+        name: 'kun 新会话',
+        version: '0.1.0',
+        root: '/skills/kun-new-session',
+        entry_path: '/skills/kun-new-session/SKILL.md',
+        priority: 0,
+        source: 'base',
+        legacy: false
+      },
+      {
+        id: 'pdf',
+        name: 'PDF 工具',
+        version: '0.1.0',
+        root: '/skills/pdf',
+        entry_path: '/skills/pdf/SKILL.md',
+        priority: 0,
+        source: 'base',
+        legacy: false
+      }
+    ],
+    extra_skills: [],
+    warnings: [],
+    base_validation_errors: []
+  })),
   refreshThreadSkills: vi.fn()
 }))
 
@@ -189,5 +219,40 @@ describe('Composer per-thread draft persistence', () => {
     await settle()
     expect(harness.host.querySelector('.ark-composer__sendbtn')).toBeDefined()
     expect(harness.host.querySelector('.ark-composer__round--stop')).toBeNull()
+  })
+
+  it('typing / summons the skill palette and Enter completes the mention', async () => {
+    harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+    const node = input(harness.host)
+    await type(node, '/')
+    await settle()
+
+    // The palette opens in token mode (no search field) with the loaded set.
+    expect(harness.host.querySelector('.ark-skill-palette')).toBeDefined()
+    expect(harness.host.querySelector('.ark-skill-palette__search')).toBeNull()
+    expect(harness.text()).toContain('/kun-new-session')
+
+    // Enter replaces the bare slash with the highlighted skill's full mention.
+    await pressEnter(node)
+    await settle()
+    expect(useCodeSessionStore.getState().drafts[THREAD_A]).toBe('/kun-new-session ')
+    // The palette closes once the token is gone.
+    expect(harness.host.querySelector('.ark-skill-palette')).toBeNull()
+  })
+
+  it('the slash palette filters as the query grows and paths never summon it', async () => {
+    harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+    const node = input(harness.host)
+    await type(node, '/pd')
+    await settle()
+    expect(harness.host.querySelector('.ark-skill-palette')).toBeDefined()
+    expect(harness.text()).toContain('/pdf')
+    expect(harness.text()).not.toContain('/kun-new-session')
+
+    // `foo/bar` is a path: the caret sits in a token whose `/` follows a word
+    // character, so no palette. Typing on keeps the draft untouched.
+    await type(node, 'foo/bar')
+    await settle()
+    expect(harness.host.querySelector('.ark-skill-palette')).toBeNull()
   })
 })
