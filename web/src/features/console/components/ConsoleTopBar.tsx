@@ -3,7 +3,7 @@
  *
  * One row of orientation facts the old chromeless workbench hid inside the
  * sidebar footer or the settings page: workspace, Git head, runtime state,
- * theme and the ⌘K entry point. Data comes from `useConsoleMeta`
+ * theme, settings and the ⌘K entry point. Data comes from `useConsoleMeta`
  * (workspace/diff/providers) and the session store; nothing is invented here.
  * The model chip is deliberately absent: the loop's model is only ever
  * displayed where it is selectable (composer pill / settings), and the top bar
@@ -92,6 +92,16 @@ export function ConsoleTopBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
           title={nextThemeLabel}
         >
           <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
+        </button>
+
+        <button
+          type="button"
+          className="console-iconbtn"
+          onClick={() => setView('settings')}
+          aria-label={t('console.top.settings')}
+          title={t('console.top.settings')}
+        >
+          <Icon name="settings" size={15} />
         </button>
       </div>
     </header>

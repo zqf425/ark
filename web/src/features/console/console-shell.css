@@ -237,11 +237,11 @@ button.console-chip:hover {
   flex: none;
 }
 
-/* ---------- activity rail ---------- */
+/* ---------- stage ---------- */
 
 .console-body {
   display: grid;
-  grid-template-columns: var(--console-rail) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 }
@@ -251,66 +251,6 @@ button.console-chip:hover {
   height: 100%;
   min-height: 0;
   position: relative;
-}
-
-.console-rail {
-  border-right: 1px solid var(--console-line);
-  background: var(--ark-bg-canvas);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 10px 0 8px;
-  gap: 3px;
-  min-height: 0;
-}
-
-.console-rail .console-mark {
-  margin-bottom: 10px;
-}
-
-.console-rail__btn {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: var(--ark-radius);
-  background: transparent;
-  color: var(--ark-text-faint);
-  cursor: pointer;
-  position: relative;
-}
-
-.console-rail__btn:hover {
-  background: var(--ark-bg-hover);
-  color: var(--ark-text);
-}
-
-.console-rail__btn.is-active {
-  background: var(--ark-accent-soft);
-  color: var(--ark-accent);
-}
-
-.console-rail__btn.is-active::before {
-  content: '';
-  position: absolute;
-  left: -9px;
-  top: 9px;
-  width: 2px;
-  height: 16px;
-  border-radius: 2px;
-  background: var(--ark-primary);
-}
-
-.console-rail__grow {
-  flex: 1;
-}
-
-.console-rail__sep {
-  width: 20px;
-  height: 1px;
-  background: var(--console-line);
-  margin: 6px 0;
 }
 
 /* ---------- workbench columns ---------- */

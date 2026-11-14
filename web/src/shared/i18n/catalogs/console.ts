@@ -16,11 +16,10 @@ export const CONSOLE_MESSAGES = {
   'console.top.theme': ['切换主题', 'Toggle theme'],
   'console.top.notifications': ['通知', 'Notifications'],
   'console.top.openCommand': ['打开命令面板', 'Open command palette'],
+  'console.top.settings': ['设置', 'Settings'],
   'console.top.refresh': ['重新检查运行时', 'Recheck runtime'],
 
   /* activity rail */
-  'console.rail.settings': ['设置', 'Settings'],
-  'console.rail.aria': ['主导航', 'Primary navigation'],
 
   /* status bar */
   'console.status.connected': ['arkd 已连接', 'arkd connected'],

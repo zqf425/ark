@@ -1,15 +1,16 @@
 /**
  * Console shell frame (approved proposal A).
  *
- * Owns the three global chrome regions — top bar, activity rail and status
- * bar — plus the ⌘K palette. The stage is a slot: App decides which scene
- * (workbench, review, new task, settings) renders inside it, so the chrome
- * never re-mounts when the scene changes.
+ * Owns the two global chrome regions — top bar and status bar — plus the ⌘K
+ * palette. The stage is a slot: App decides which scene (workbench, review,
+ * new task, settings) renders inside it, so the chrome never re-mounts when
+ * the scene changes. The old activity rail is gone: its scene switches were
+ * all reachable from context-local affordances and its only unique entry
+ * (settings) moved to the top bar's right cluster.
  */
 import { useEffect, type ReactNode } from 'react'
 import { useViewStore } from '../workbench/state/view-slice'
 import type { ConsoleMeta } from './hooks/use-console-meta'
-import { ActivityRail } from './components/ActivityRail'
 import { CommandPalette } from './components/CommandPalette'
 import { ConsoleStatusBar } from './components/ConsoleStatusBar'
 import { ConsoleTopBar } from './components/ConsoleTopBar'
@@ -36,7 +37,6 @@ export function ConsoleShell({ meta, children }: { meta: ConsoleMeta; children: 
     <div className="console-shell">
       <ConsoleTopBar meta={meta} />
       <div className="console-body">
-        <ActivityRail />
         <div className="console-stage">
           <div className="console-stage__view">{children}</div>
         </div>
