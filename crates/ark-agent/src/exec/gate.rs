@@ -6,6 +6,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use ark_common::Result;
 
@@ -135,12 +136,69 @@ impl GateBroker for DenyAllGates {
     }
 }
 
+/// Decorator that auto-denies approval gates for unattended runs
+/// (requirements/approval-rules.md §4).
+///
+/// A turn with nobody present can never resolve an approval: waiting parks the
+/// turn on a gate until the runtime dies. With the `deny` disposition (the
+/// default) this broker answers immediately with a durable, structured refusal
+/// and never registers a gate; with `allow` it forwards to the inner broker,
+/// preserving today's `AllowAllGates` semantics. User-input gates always
+/// forward: they are a different surface from approvals.
+pub struct AutoDenyGates {
+    inner: Arc<dyn GateBroker>,
+    forwards: bool,
+}
+
+impl AutoDenyGates {
+    /// Wrap `inner` with the configured unattended disposition.
+    pub fn new(inner: Arc<dyn GateBroker>, forwards: bool) -> Self {
+        Self { inner, forwards }
+    }
+}
+
+impl GateBroker for AutoDenyGates {
+    fn prepare_approval(&self, request: ApprovalRequest) -> Result<GateFuture<ApprovalReply>> {
+        if self.forwards {
+            return self.inner.prepare_approval(request);
+        }
+        let _ = request; // no registration, so nothing to clean up on drop
+        Ok(Box::pin(async {
+            Ok(ApprovalReply::denied(
+                "auto-denied: unattended run with approvals.on_unattended=deny",
+            ))
+        }))
+    }
+
+    fn prepare_user_input(&self, request: UserInputRequest) -> Result<GateFuture<String>> {
+        self.inner.prepare_user_input(request)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn call() -> ToolCallRequest {
         ToolCallRequest::new("c1", "bash", serde_json::json!({ "command": "ls" }))
+    }
+
+    /// Counting broker: proves whether the inner broker was consulted.
+    #[derive(Default)]
+    struct CountingGates {
+        approvals: AtomicUsize,
+    }
+
+    impl GateBroker for CountingGates {
+        fn prepare_approval(&self, _request: ApprovalRequest) -> Result<GateFuture<ApprovalReply>> {
+            self.approvals.fetch_add(1, Ordering::Relaxed);
+            Ok(Box::pin(async move { Ok(ApprovalReply::Approved) }))
+        }
+
+        fn prepare_user_input(&self, request: UserInputRequest) -> Result<GateFuture<String>> {
+            Ok(Box::pin(async move { Ok(request.prompt) }))
+        }
     }
 
     #[tokio::test]
@@ -162,15 +220,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn allow_all_gates_answers_user_input() {
-        let gates = AllowAllGates;
-        let request = UserInputRequest {
-            request_id: "r1".into(),
-            call: call(),
-            prompt: "which branch?".into(),
-        };
-        let answer = gates.prepare_user_input(request).unwrap().await.unwrap();
-        assert!(answer.contains("r1"));
+    async fn auto_deny_answers_immediately_without_registering() {
+        let inner = Arc::new(CountingGates::default());
+        let gates = AutoDenyGates::new(Arc::clone(&inner) as Arc<dyn GateBroker>, false);
+        let reply = gates
+            .prepare_approval(ApprovalRequest::new("a1", call(), "run ls"))
+            .unwrap()
+            .await
+            .unwrap();
+        assert!(!reply.approved());
+        assert!(reply.reason().contains("auto-denied"));
+        assert_eq!(inner.approvals.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn auto_deny_forward_mode_consults_the_inner_broker() {
+        let inner = Arc::new(CountingGates::default());
+        let gates = AutoDenyGates::new(Arc::clone(&inner) as Arc<dyn GateBroker>, true);
+        let reply = gates
+            .prepare_approval(ApprovalRequest::new("a1", call(), "run ls"))
+            .unwrap()
+            .await
+            .unwrap();
+        assert!(reply.approved());
+        assert_eq!(inner.approvals.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn auto_deny_always_forwards_user_inputs() {
+        let inner = Arc::new(CountingGates::default());
+        let gates = AutoDenyGates::new(Arc::clone(&inner) as Arc<dyn GateBroker>, false);
+        let answer = gates
+            .prepare_user_input(UserInputRequest {
+                request_id: "r1".into(),
+                call: call(),
+                prompt: "which branch?".into(),
+            })
+            .unwrap()
+            .await
+            .unwrap();
+        assert_eq!(answer, "which branch?");
     }
 
     #[test]

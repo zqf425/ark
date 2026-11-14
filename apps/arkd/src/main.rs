@@ -13,6 +13,7 @@ mod child;
 mod cli;
 mod headless;
 mod hooks;
+mod instructions;
 mod load_skill;
 mod memory_seed;
 mod model;

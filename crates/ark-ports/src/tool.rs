@@ -70,6 +70,9 @@ pub enum SandboxDecision {
     NeedsApproval,
     /// Allows this invocation to access paths outside the workspace.
     Unrestricted,
+    /// Rejected by an approval rule (requirements/approval-rules.md) or an
+    /// equivalent policy; the executor must not run it.
+    Deny,
 }
 
 /// Policy that turns a request into a `SandboxDecision`. One implementation,

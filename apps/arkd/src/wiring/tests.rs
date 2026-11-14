@@ -205,6 +205,41 @@ fn plan_seed_restates_goal_and_todo_status() {
     );
 }
 
+#[test]
+fn project_instructions_ride_both_seed_paths_dynamic_tail() {
+    let dir = std::env::temp_dir().join(format!("ark-wiring-instructions-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("fixture dir");
+    std::fs::write(dir.join("AGENTS.md"), "always run cargo clippy first").expect("writable");
+
+    // Shared helper: the same call site shape both paths use.
+    let mut parent_like = super::turn_common::seed_prefix(&dir);
+    super::turn_common::push_project_instructions(&dir, &mut parent_like);
+    assert!(parent_like
+        .iter()
+        .any(|message| message.content.contains("always run cargo clippy first")));
+
+    // The instruction message is a dynamic-tail system message, never part of
+    // the static prefix: a workspace-specific text inside the prefix would
+    // break the byte-stable prompt-cache invariant.
+    let bare_prefix = super::turn_common::seed_prefix(&dir);
+    assert_eq!(bare_prefix.len(), 2);
+    assert!(bare_prefix
+        .iter()
+        .all(|message| !message.content.contains("cargo clippy")));
+
+    // A workspace without instruction files adds no message at all.
+    let empty =
+        std::env::temp_dir().join(format!("ark-wiring-no-instructions-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&empty);
+    std::fs::create_dir_all(&empty).expect("fixture dir");
+    let mut no_instructions = Vec::new();
+    super::turn_common::push_project_instructions(&empty, &mut no_instructions);
+    assert!(no_instructions.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&empty);
+}
+
 /// A folded tool item as the store projects it: one `ToolCall` entry whose
 /// payload embeds the result (see `apply_tool_finished`).
 fn tool_item(

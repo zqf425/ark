@@ -101,6 +101,28 @@ pub struct BashArgs {
     pub cwd: Option<String>,
 }
 
+/// `bash_session` — one command in the persistent session.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BashSessionArgs {
+    pub command: String,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub run_in_background: bool,
+}
+
+/// `bash_output` — incremental output of one background task.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BashOutputArgs {
+    pub task_id: String,
+}
+
+/// `bash_kill` — terminate one background task.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BashKillArgs {
+    pub task_id: String,
+}
+
 /// `delegate_task` — hand one bounded sub-task to a child run.
 ///
 /// No `max_depth` or budget field exists on purpose: those are runtime policy,

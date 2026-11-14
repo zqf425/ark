@@ -213,7 +213,10 @@ mod tests {
     #[test]
     fn effective_context_window_falls_back_to_the_default() {
         let mut config = ProviderConfig::new("p", "m");
-        assert_eq!(config.effective_context_window(), DEFAULT_CONTEXT_WINDOW_TOKENS);
+        assert_eq!(
+            config.effective_context_window(),
+            DEFAULT_CONTEXT_WINDOW_TOKENS
+        );
         config.context_window_tokens = Some(500_000);
         assert_eq!(config.effective_context_window(), 500_000);
     }

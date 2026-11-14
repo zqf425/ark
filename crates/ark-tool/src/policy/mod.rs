@@ -4,9 +4,13 @@
 //! the truncation policy are data, so they are tested without a process or a
 //! filesystem.
 
+pub mod approvals;
 pub mod sandbox;
 pub mod truncate;
 
+pub use approvals::{
+    apply as apply_approval_verdict, decide as decide_approval, unattended_forwards, Verdict,
+};
 pub use ark_common::Autonomy;
-pub use sandbox::{is_self_service, BuiltinSandboxPolicy};
+pub use sandbox::{is_self_service, ApprovalPolicy, BuiltinSandboxPolicy};
 pub use truncate::{cap_all, cap_bytes, cap_lines, TruncationLimits, DEFAULT_LIMITS};

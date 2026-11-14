@@ -27,6 +27,12 @@ export const SESSION_MESSAGES = {
   'session.rewind.failed': ['回退失败', 'Rewind failed'],
   'session.rewind.done': ['已回退，会话已恢复到所选回合之前。', 'Rewound; the session now ends before the selected turn.'],
 
+  'session.editResend.entry': ['编辑重发', 'Edit & resend'],
+  'session.editResend.entryHint': ['移除此回合及其后的内容，并把这条消息放回输入框供编辑后重新发送。', 'Removes this turn and everything after it, then puts the message back into the composer for editing and resending.'],
+  'session.editResend.preparing': ['准备中…', 'Preparing…'],
+  'session.editResend.failed': ['编辑重发失败', 'Edit & resend failed'],
+  'session.editResend.done': ['已移除该回合，消息已放回输入框，编辑后发送即可重新开始。', 'Turn removed and the message is back in the composer; edit and send to start over.'],
+
   'session.runtime.reasoning': ['推理强度', 'Reasoning effort'],
   'session.runtime.reasoning.unset': ['未设置', 'Unset'],
   'session.runtime.reasoning.off': ['关闭', 'Off'],

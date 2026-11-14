@@ -29,7 +29,7 @@ use ark_ports::{
     ToolCallRef, ToolOutput, ToolRegistryPort,
 };
 use ark_store::{AttachmentStore, FileSessionStore, StoreConfig, DEFAULT_MAX_ATTACHMENT_BYTES};
-use ark_tool::{Autonomy, BuiltinSandboxPolicy, RegistryToolRunner, ToolRegistry};
+use ark_tool::{ApprovalPolicy, Autonomy, BuiltinSandboxPolicy, RegistryToolRunner, ToolRegistry};
 
 use ark_server::{AppState, TurnEnd, TurnJob, TurnRunner, TurnSource};
 
@@ -322,9 +322,17 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
 
     // The HTTP gate handlers and every parent reactor receive this exact same
     // rendezvous. A request waits until the Code UI resolves it; `AllowAllGates`
-    // would make approval cards cosmetic.
-    let gates = Arc::new(ark_server::InteractiveGates::new());
-    let gate_broker: Arc<dyn GateBroker> = gates.clone();
+    // would make approval cards cosmetic. The reactor's copy is wrapped in an
+    // auto-deny decorator (read from the live config): an unattended turn fails
+    // fast with a durable refusal instead of parking on a gate nobody can
+    // answer (requirements/approval-rules.md §4). AppState keeps the bare
+    // rendezvous because its HTTP handlers resolve by id and never wait.
+    let interactive = Arc::new(ark_server::InteractiveGates::new());
+    let reactor_gates = Arc::new(ark_agent::AutoDenyGates::new(
+        interactive.clone(),
+        ark_tool::unattended_forwards(&config.snapshot().approvals),
+    ));
+    let gate_broker: Arc<dyn GateBroker> = reactor_gates;
 
     let runner = Arc::new(AgentTurnRunner {
         providers: Arc::clone(&providers),
@@ -389,7 +397,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         Arc::clone(&delegation) as Arc<dyn ark_ports::SubagentRunner>,
         Arc::clone(&delegation) as Arc<dyn ark_ports::SubagentRegistry>,
     )
-    .with_gates(gates)
+    .with_gates(interactive)
     .with_schedules(Arc::clone(&schedules))
     .with_im(Arc::clone(&im))
     .with_auth_token(args.auth_token.clone())

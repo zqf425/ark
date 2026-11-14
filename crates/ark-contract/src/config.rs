@@ -67,6 +67,10 @@ pub struct ConfigPatch {
     /// reads the new snapshot.
     #[serde(default)]
     pub hooks: Option<HookSettings>,
+    /// Approval rule table and the unattended disposition
+    /// (requirements/approval-rules.md). Hot: the next turn snapshot.
+    #[serde(default)]
+    pub approvals: Option<ApprovalSettings>,
     /// Scheduled-task master switch (requirements/scheduled-tasks.md).
     #[serde(default)]
     pub schedules: Option<ScheduleSettings>,
@@ -271,6 +275,72 @@ pub struct HookSettings {
     /// Run after a tool completes; stdout is appended to the tool output.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub post_tool_use: Vec<HookRule>,
+}
+
+/// One approval rule: the first matching rule decides (requirements/
+/// approval-rules.md). Trusted configuration, never model input.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ApprovalRule {
+    /// Restrict the rule to these tool names; empty matches every tool.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
+    /// Argument matcher. Empty matches any arguments; a trailing `*` is a
+    /// prefix match, everything else is exact equality. For `bash` the matcher
+    /// sees the `command` string; other tools see their normalized JSON.
+    #[serde(default)]
+    pub pattern: String,
+    /// `allow` relaxes only a `NeedsApproval` decision to runnable; `deny`
+    /// rejects the call outright.
+    pub action: ApprovalAction,
+}
+
+/// What a matching rule does to the sandbox decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalAction {
+    Allow,
+    Deny,
+}
+
+impl ApprovalAction {
+    /// Wire vocabulary and error text, shared with the config validation.
+    pub const VALUES: [&'static str; 2] = ["allow", "deny"];
+}
+
+/// How an unattended (nobody present) run disposes of a call that still needs
+/// approval after the rule table. `deny` is the default: fail fast with a
+/// durable reason instead of parking the turn on a gate no one can resolve.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct ApprovalSettings {
+    /// Ordered rule table; the first matching rule wins.
+    #[serde(default)]
+    pub rules: Vec<ApprovalRule>,
+    /// Disposition for unattended runs: `allow` forwards to the inner gate
+    /// broker, `deny` auto-denies without registering a gate.
+    #[serde(default)]
+    pub on_unattended: UnattendedApproval,
+}
+
+/// Disposition vocabulary for unattended approval gates.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+pub enum UnattendedApproval {
+    /// Auto-deny: the reply is a durable, structured refusal.
+    #[default]
+    Deny,
+    /// Forward to the inner broker (wait for a human or its own semantics).
+    Allow,
+}
+
+impl Default for ApprovalSettings {
+    fn default() -> Self {
+        Self {
+            rules: Vec::new(),
+            on_unattended: UnattendedApproval::Deny,
+        }
+    }
 }
 
 /// `GET /v1/runtime/config` — what the settings screen renders.

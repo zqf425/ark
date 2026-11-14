@@ -71,7 +71,9 @@ pub fn merge_workspace_projects(
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut merged: Vec<ProjectCandidate> = Vec::new();
 
-    let push = |candidate: ProjectCandidate, seen: &mut HashMap<String, usize>, merged: &mut Vec<ProjectCandidate>| {
+    let push = |candidate: ProjectCandidate,
+                seen: &mut HashMap<String, usize>,
+                merged: &mut Vec<ProjectCandidate>| {
         let key = identity_key(&candidate.path);
         if key.is_empty() {
             return;
@@ -178,7 +180,10 @@ mod tests {
         );
 
         let paths: Vec<&str> = view.recent.iter().map(|d| d.path.as_str()).collect();
-        assert!(paths.contains(&"/code/ark"), "thread-bound root must be offered: {paths:?}");
+        assert!(
+            paths.contains(&"/code/ark"),
+            "thread-bound root must be offered: {paths:?}"
+        );
     }
 
     #[test]
@@ -192,8 +197,14 @@ mod tests {
             [thread("/w/old", Some(chrono::Utc::now()))],
         );
 
-        assert_eq!(view.active.as_ref().map(|d| d.path.as_str()), Some("/w/active"));
-        assert_eq!(view.recent[0].path, "/w/old", "the other root follows by recency");
+        assert_eq!(
+            view.active.as_ref().map(|d| d.path.as_str()),
+            Some("/w/active")
+        );
+        assert_eq!(
+            view.recent[0].path, "/w/old",
+            "the other root follows by recency"
+        );
     }
 
     #[test]
@@ -208,7 +219,10 @@ mod tests {
         );
 
         assert_eq!(view.recent.len(), 1);
-        assert_eq!(view.recent[0].path, "/code/ark", "the thread/index form wins");
+        assert_eq!(
+            view.recent[0].path, "/code/ark",
+            "the thread/index form wins"
+        );
     }
 
     #[test]
@@ -230,18 +244,14 @@ mod tests {
 
     #[test]
     fn empty_paths_are_dropped() {
-        let view = merge_workspace_projects(
-            WorkspaceView::default(),
-            [thread("   ", None)],
-        );
+        let view = merge_workspace_projects(WorkspaceView::default(), [thread("   ", None)]);
         assert!(view.recent.is_empty());
     }
 
     #[test]
     fn merge_is_bounded() {
-        let threads = (0..(MAX_WORKSPACE_PROJECTS + 10)).map(|index| {
-            thread(&format!("/w/project-{index}"), None)
-        });
+        let threads = (0..(MAX_WORKSPACE_PROJECTS + 10))
+            .map(|index| thread(&format!("/w/project-{index}"), None));
         let view = merge_workspace_projects(WorkspaceView::default(), threads);
         assert_eq!(view.recent.len(), MAX_WORKSPACE_PROJECTS);
     }

@@ -26,11 +26,12 @@ pub mod service;
 
 pub use domain::{schema, ToolMeta, TOOL_METAS};
 pub use exec::tools::{
-    builtins, delegation_tools, web_tools, BashTool, DelegateTaskTool, EditTool, FindTool,
-    GrepTool, LsTool, ReadTool, RequestUserInputTool, WebFetchTool, WriteTool,
+    builtins, builtins_with_shell_session, delegation_tools, web_tools, BashTool, DelegateTaskTool,
+    EditTool, FindTool, GrepTool, LsTool, ReadTool, RequestUserInputTool, WebFetchTool, WriteTool,
 };
 pub use policy::{
-    cap_bytes, cap_lines, is_self_service, Autonomy, BuiltinSandboxPolicy, TruncationLimits,
+    apply_approval_verdict, cap_bytes, cap_lines, decide_approval, is_self_service,
+    unattended_forwards, ApprovalPolicy, Autonomy, BuiltinSandboxPolicy, TruncationLimits, Verdict,
     DEFAULT_LIMITS,
 };
 pub use service::{RegistryToolRunner, ToolRegistry};

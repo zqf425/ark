@@ -107,10 +107,16 @@ impl RegistryToolRunner {
         sandbox: SandboxDecision,
     ) -> Result<ToolOutput> {
         let args = ToolArgs(arguments);
-        if sandbox == SandboxDecision::NeedsApproval {
-            return Ok(ToolOutput::err(format!(
-                "tool `{tool}` requires approval and was not dispatched"
-            )));
+        if matches!(
+            sandbox,
+            SandboxDecision::NeedsApproval | SandboxDecision::Deny
+        ) {
+            return Ok(ToolOutput::err(match sandbox {
+                SandboxDecision::Deny => {
+                    format!("tool `{tool}` was denied by the approval rules and was not dispatched")
+                }
+                _ => format!("tool `{tool}` requires approval and was not dispatched"),
+            }));
         }
         let ctx = ToolContext {
             thread_id,

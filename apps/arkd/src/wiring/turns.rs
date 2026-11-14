@@ -237,8 +237,14 @@ impl TurnRunner for AgentTurnRunner {
                 thread.runtime.model.as_deref(),
             )
             .await?;
-        let policy: Arc<dyn SandboxPolicy> = Arc::new(BuiltinSandboxPolicy::new(
-            autonomy_from_override_or_default(thread.runtime.autonomy.as_deref(), &snapshot)?,
+        // The rule table is a Hot config: each turn snapshots its own policy so
+        // a saved patch applies to the next turn without a restart.
+        let policy: Arc<dyn SandboxPolicy> = Arc::new(ApprovalPolicy::new(
+            BuiltinSandboxPolicy::new(autonomy_from_override_or_default(
+                thread.runtime.autonomy.as_deref(),
+                &snapshot,
+            )?),
+            snapshot.approvals.clone(),
         ));
         // Plugin decide first, then the shell `pre_tool_use` hook, then
         // dispatch (requirements/plugin-hook-bus.md, pinned order).
@@ -347,7 +353,8 @@ impl AgentTurnRunner {
     }
 
     /// Assemble the parent turn's seed: static prefix, replayed history, then
-    /// the dynamic tail (skills, memory, completion inbox, thread plan).
+    /// the dynamic tail (skills, project instructions, memory, completion
+    /// inbox, thread plan).
     ///
     /// Only the static prefix may enter the prompt cache; everything after it
     /// changes between turns, so it must stay out of the prefix. The plan is
@@ -364,6 +371,7 @@ impl AgentTurnRunner {
         let mut seed_messages = super::turn_common::seed_prefix(workspace);
         seed_messages.extend(history);
         seed_messages.extend(super::turn_common::skill_tail(&resolution, true));
+        super::turn_common::push_project_instructions(workspace, &mut seed_messages);
         if let Some(message) = crate::memory_seed::seed_for_turn(self.memory.as_ref()) {
             seed_messages.push(message);
         }

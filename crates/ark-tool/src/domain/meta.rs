@@ -26,10 +26,25 @@ pub struct ToolMeta {
 /// [`crate::exec::tools::builtins`], because the sandbox policy and
 /// `GET /v1/runtime/tools` read this table: an unlisted tool would silently be
 /// treated as "unknown, so needs approval" and delegation would always ask.
-pub const TOOL_METAS: [ToolMeta; 10] = [
+pub const TOOL_METAS: [ToolMeta; 13] = [
     ToolMeta {
         name: "bash",
         description: "Run one shell command inside the workspace with a hard timeout",
+        baseline: SandboxDecision::NeedsApproval,
+    },
+    ToolMeta {
+        name: "bash_kill",
+        description: "Terminate one background shell task started with bash_session; idempotent",
+        baseline: SandboxDecision::NeedsApproval,
+    },
+    ToolMeta {
+        name: "bash_output",
+        description: "Read new output of one background shell task and its running/finished state",
+        baseline: SandboxDecision::ReadOnly,
+    },
+    ToolMeta {
+        name: "bash_session",
+        description: "Run one shell command in the persistent session; a leading cd advances the session directory, and run_in_background detaches the command into a pollable task",
         baseline: SandboxDecision::NeedsApproval,
     },
     ToolMeta {

@@ -164,10 +164,23 @@ assistant 行），后接一条截断到 16 KiB UTF-8 字节的 `ModelRole::Tool
 facts extracted` 与 `: truncated` 两个变体）。判定 gated 在 `Notice` kind 上：用户消息可以打出任意
 前缀，永远不算检查点；也不得改回裸前缀匹配，改渲染格式同样会让历史识别静默失效。
 
+审批规则（[需求设计](../requirements/approval-rules.md)）在回合入口接线：父路径与子路径都用
+`ark_tool::ApprovalPolicy` 包装既有 autonomy 策略（每回合用配置快照构造，规则属 Hot）；reactor 侧
+gate 注入 `AutoDenyGates` 包装 `InteractiveGates`——`approvals.on_unattended=deny`（默认）时无人
+值守回合的审批请求立即被结构化拒绝，不再挂死到 `sse_idle_timeout`；`AppState` 仍持裸
+`InteractiveGates`（HTTP handler 按 id resolve，从不等待）。
+
 用户长期 memory 也走动态尾部：`run_turn` 在 skills 目录之后、completion inbox 之前，每回合重新读取
 `<root>/data/memory.json` 并追加**至多一条** `[user memory]` system 消息（按 `created_at` 升序，拼接后
 按 UTF-8 字符数限 4096，超限整条丢弃最新条目并追加 truncated 尾注）。读取或解析失败只记 warn 并跳过注入，
 空 store 不注入，均不影响回合结果。
+
+项目指令文件（[需求设计](../requirements/project-instructions.md)）由
+`apps/arkd/src/instructions.rs`（唯一发现与截断宿主）在回合生效工作区根按
+`AGENTS.md` → `CLAUDE.md` → `README.md` 优先级取第一个命中文件，读为**动态尾部的一条
+`[project instructions]` system 消息**（父路径在 skills 之后、memory 之前；子路径在角色行之后、
+skill tail 之前）。不进入静态前缀（工作区相关文本会破坏 prompt-cache 字节稳定不变量）；
+读取失败、非 UTF-8、空文件按未命中处理并记 warn；UTF-8 字节数限 32 KiB，按字符边界截断。
 
 持久计划（goal + todos）同样走动态尾部：`run_turn` 每回合从线程事件流重投影 `PlanView`
 （`ark_server::service::workbench::plan`），经 `history::plan_seed_message` 以

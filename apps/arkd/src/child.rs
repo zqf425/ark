@@ -30,8 +30,9 @@ use ark_tool::{RegistryToolRunner, ToolRegistry};
 
 use crate::model;
 use crate::wiring::turn_common::{
-    build_reactor, chunk_buffer_for_turn, limits_for_turn, resolve_workspace, seed_prefix,
-    skill_tail, HookToolRunner, HookedToolRunner, ReactorSpec, CHILD_ROLE_LINE,
+    build_reactor, chunk_buffer_for_turn, limits_for_turn, push_project_instructions,
+    resolve_workspace, seed_prefix, skill_tail, HookToolRunner, HookedToolRunner, ReactorSpec,
+    CHILD_ROLE_LINE,
 };
 use crate::workspace::WorkspaceRoots;
 
@@ -204,8 +205,9 @@ impl ChildTurnExecutorImpl {
     /// Assemble the child seed: the same static prefix as a parent turn (the
     /// shared builder guarantees byte-identical bytes, which is what lets the
     /// provider cache the prefix across parent and child), the child role line,
-    /// then skill instructions. The catalog line does not ride a child seed: a
-    /// child cannot load skills itself.
+    /// the workspace's project instructions, then skill instructions. The
+    /// catalog line does not ride a child seed: a child cannot load skills
+    /// itself.
     fn child_seed(
         &self,
         workspace: &std::path::Path,
@@ -214,6 +216,7 @@ impl ChildTurnExecutorImpl {
         let mut seed_messages = seed_prefix(workspace);
         // A child is told what it is: it must answer, not converse.
         seed_messages.push(ark_ports::ModelMessage::system(CHILD_ROLE_LINE));
+        push_project_instructions(workspace, &mut seed_messages);
         let resolution = self.skills.resolve_for_turn(prompt);
         seed_messages.extend(skill_tail(&resolution, false));
         seed_messages
@@ -282,12 +285,15 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
         // workspace, permission envelope and model unless it deliberately asks
         // to narrow or replace them.
         // One snapshot per turn, same rule as the parent path: autonomy and
-        // limits must come from the same config state.
+        // limits must come from the same config state. The rule table wraps the
+        // child's (already capped) autonomy the same way it wraps the parent's.
         let snapshot = self.config.snapshot();
         let settings = self.inherited_settings(&ctx, &snapshot).await?;
         let workspace = settings.workspace;
-        let sandbox: Arc<dyn SandboxPolicy> =
-            Arc::new(ark_tool::BuiltinSandboxPolicy::new(settings.autonomy));
+        let sandbox: Arc<dyn SandboxPolicy> = Arc::new(ark_tool::ApprovalPolicy::new(
+            ark_tool::BuiltinSandboxPolicy::new(settings.autonomy),
+            snapshot.approvals.clone(),
+        ));
         // Plugin decide first, then the shell `pre_tool_use` hook, then
         // dispatch — the same pinned order the parent path uses.
         let tools: Arc<dyn ark_agent::ToolRunner> = Arc::new(HookToolRunner::new(

@@ -311,7 +311,9 @@ impl ProvisionFlow {
         })?;
 
         // 1) Presence check.
-        let detect = self.run_blocking(&spec.section.detect, DETECT_TIMEOUT).await;
+        let detect = self
+            .run_blocking(&spec.section.detect, DETECT_TIMEOUT)
+            .await;
         if detect.success {
             return self.register(spec).await;
         }
@@ -340,7 +342,9 @@ impl ProvisionFlow {
         }
 
         // 4) Re-detect after installation.
-        let detect = self.run_blocking(&spec.section.detect, DETECT_TIMEOUT).await;
+        let detect = self
+            .run_blocking(&spec.section.detect, DETECT_TIMEOUT)
+            .await;
         if !detect.success {
             let state = StoredState {
                 state: ProvisionState::Failed,
@@ -487,7 +491,9 @@ mod tests {
     #[async_trait]
     impl McpServerService for FakeMcp {
         fn list(&self) -> McpServerListResponse {
-            McpServerListResponse { servers: Vec::new() }
+            McpServerListResponse {
+                servers: Vec::new(),
+            }
         }
 
         async fn upsert(&self, entry: McpServerEntry) -> Result<McpServerListResponse> {
@@ -495,11 +501,15 @@ mod tests {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(entry);
-            Ok(McpServerListResponse { servers: Vec::new() })
+            Ok(McpServerListResponse {
+                servers: Vec::new(),
+            })
         }
 
         async fn delete(&self, _id: &str) -> Result<McpServerListResponse> {
-            Ok(McpServerListResponse { servers: Vec::new() })
+            Ok(McpServerListResponse {
+                servers: Vec::new(),
+            })
         }
 
         async fn test(&self, _id: &str) -> McpServerTestResponse {
@@ -538,7 +548,12 @@ mod tests {
         }
     }
 
-    fn flow(dir: &Path, detect_results: Vec<bool>, install_ok: bool, mcp: Arc<FakeMcp>) -> ProvisionFlow {
+    fn flow(
+        dir: &Path,
+        detect_results: Vec<bool>,
+        install_ok: bool,
+        mcp: Arc<FakeMcp>,
+    ) -> ProvisionFlow {
         let flow = ProvisionFlow::load(
             vec![spec(dir)],
             Arc::new(FakeRunner {
@@ -553,7 +568,9 @@ mod tests {
     #[tokio::test]
     async fn detect_ok_registers_mcp_without_install() {
         let dir = tempfile::tempdir().unwrap();
-        let mcp = Arc::new(FakeMcp { upserts: Mutex::new(Vec::new()) });
+        let mcp = Arc::new(FakeMcp {
+            upserts: Mutex::new(Vec::new()),
+        });
         let flow = flow(dir.path(), vec![true], false, Arc::clone(&mcp));
 
         let view = flow
@@ -573,7 +590,9 @@ mod tests {
     #[tokio::test]
     async fn detect_fail_without_consent_stays_unusable() {
         let dir = tempfile::tempdir().unwrap();
-        let mcp = Arc::new(FakeMcp { upserts: Mutex::new(Vec::new()) });
+        let mcp = Arc::new(FakeMcp {
+            upserts: Mutex::new(Vec::new()),
+        });
         let flow = flow(dir.path(), vec![false], false, Arc::clone(&mcp));
 
         let view = flow
@@ -582,14 +601,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(view.state, "needs_install");
-        assert!(view.install_command.contains("npm install -g agent-desktop"));
+        assert!(view
+            .install_command
+            .contains("npm install -g agent-desktop"));
         assert!(mcp.upserts.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn consent_installs_then_enables() {
         let dir = tempfile::tempdir().unwrap();
-        let mcp = Arc::new(FakeMcp { upserts: Mutex::new(Vec::new()) });
+        let mcp = Arc::new(FakeMcp {
+            upserts: Mutex::new(Vec::new()),
+        });
         // detect fails, install succeeds, re-detect succeeds.
         let flow = flow(dir.path(), vec![false, true], true, Arc::clone(&mcp));
 
@@ -605,7 +628,9 @@ mod tests {
     #[tokio::test]
     async fn install_failure_leaves_the_plugin_unusable() {
         let dir = tempfile::tempdir().unwrap();
-        let mcp = Arc::new(FakeMcp { upserts: Mutex::new(Vec::new()) });
+        let mcp = Arc::new(FakeMcp {
+            upserts: Mutex::new(Vec::new()),
+        });
         let flow = flow(dir.path(), vec![false, false], false, Arc::clone(&mcp));
 
         let view = flow
@@ -621,7 +646,9 @@ mod tests {
     #[tokio::test]
     async fn state_persists_across_reload_and_boot_detect_downgrades() {
         let dir = tempfile::tempdir().unwrap();
-        let mcp = Arc::new(FakeMcp { upserts: Mutex::new(Vec::new()) });
+        let mcp = Arc::new(FakeMcp {
+            upserts: Mutex::new(Vec::new()),
+        });
         let boot = flow(dir.path(), vec![true], false, Arc::clone(&mcp));
         let view = boot
             .enable("ark.plugins.test", PluginEnableRequest { install: false })
@@ -631,10 +658,18 @@ mod tests {
 
         // Reload with detection still passing: state survives.
         let reloaded = flow(dir.path(), vec![true, true], false, Arc::clone(&mcp));
-        assert_eq!(reloaded.status("ark.plugins.test").unwrap().state, "enabled");
+        assert_eq!(
+            reloaded.status("ark.plugins.test").unwrap().state,
+            "enabled"
+        );
 
         // Reload with the binary gone: boot detect downgrades to needs_install.
-        let degraded = flow(dir.path(), vec![false, false, false], false, Arc::clone(&mcp));
+        let degraded = flow(
+            dir.path(),
+            vec![false, false, false],
+            false,
+            Arc::clone(&mcp),
+        );
         assert_eq!(
             degraded.status("ark.plugins.test").unwrap().state,
             "needs_install"
@@ -644,7 +679,9 @@ mod tests {
     #[test]
     fn unknown_plugin_id_is_a_validation_error() {
         let dir = tempfile::tempdir().unwrap();
-        let mcp = Arc::new(FakeMcp { upserts: Mutex::new(Vec::new()) });
+        let mcp = Arc::new(FakeMcp {
+            upserts: Mutex::new(Vec::new()),
+        });
         let flow = flow(dir.path(), vec![true], false, Arc::clone(&mcp));
         let err = tokio::runtime::Runtime::new()
             .unwrap()

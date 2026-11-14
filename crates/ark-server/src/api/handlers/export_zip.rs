@@ -27,9 +27,8 @@ pub fn zip_single_entry(name: &str, contents: &[u8]) -> Vec<u8> {
     let size = contents.len() as u32;
     let crc = crc32(contents);
 
-    let mut out = Vec::with_capacity(
-        30 + name_bytes.len() + contents.len() + 46 + name_bytes.len() + 22,
-    );
+    let mut out =
+        Vec::with_capacity(30 + name_bytes.len() + contents.len() + 46 + name_bytes.len() + 22);
 
     // Local file header. The archive starts at offset 0, so the entry's local
     // header offset written into the central directory is always zero.

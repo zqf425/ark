@@ -302,6 +302,21 @@ pub(crate) const CHILD_ROLE_LINE: &str =
     "You are a child run. Finish the delegated task and answer with the result. \
      You cannot delegate further.";
 
+/// Append the workspace's project instructions to a seed's dynamic tail.
+///
+/// Shared by the parent and child paths so both sit in the same repository
+/// voice (requirements/project-instructions.md). This is a dynamic-tail
+/// message, never part of the static prefix: the text varies per workspace and
+/// must not poison the byte-stable prompt-cache window.
+pub(crate) fn push_project_instructions(
+    workspace: &std::path::Path,
+    messages: &mut Vec<ModelMessage>,
+) {
+    if let Some(text) = crate::instructions::seed_for_workspace(workspace) {
+        messages.push(ModelMessage::system(text));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

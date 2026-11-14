@@ -14,10 +14,9 @@ use serde::Deserialize;
 use ark_contract::{
     FolderPickResponse, McpServerEntry, McpServerListResponse, McpServerTestResponse,
     PluginEnableRequest, PluginHostReport, PluginProvisionView, ProviderEntry,
-    ProviderListResponse, ProviderModelCatalogRequest,
-    ProviderModelCatalogResponse, ProviderTestRequest, ProviderTestResponse, SkillDiagnostics,
-    SwitchWorkspaceRequest, ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus,
-    WorkspaceValidateResponse, WorkspaceView,
+    ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
+    ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SwitchWorkspaceRequest,
+    ThreadSkillsResponse, WorkspaceDiff, WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
 };
 use chrono::Utc;
 
@@ -213,13 +212,13 @@ async fn project_candidates(
             }
             newest
                 .into_iter()
-                .map(|(path, last_event_at)| {
-                    crate::service::workspace_projects::ProjectCandidate {
+                .map(
+                    |(path, last_event_at)| crate::service::workspace_projects::ProjectCandidate {
                         path,
                         active: false,
                         last_event_at: Some(last_event_at),
-                    }
-                })
+                    },
+                )
                 .collect()
         }
         // The project menu is display-only derived data; an index hiccup must
@@ -322,10 +321,9 @@ pub async fn workspace_view(
         .as_ref()
         .ok_or_else(|| missing("workspace"))?;
     let candidates = project_candidates(&state).await;
-    Ok(Json(crate::service::workspace_projects::merge_workspace_projects(
-        service.view(),
-        candidates,
-    )))
+    Ok(Json(
+        crate::service::workspace_projects::merge_workspace_projects(service.view(), candidates),
+    ))
 }
 
 /// `POST /v1/workspace/switch`.
@@ -742,7 +740,11 @@ mod tests {
         state
             .store
             .rename_thread(
-                state.store.list_threads().await.expect("rows")
+                state
+                    .store
+                    .list_threads()
+                    .await
+                    .expect("rows")
                     .iter()
                     .find(|meta| meta.title == "new")
                     .expect("new row")
@@ -754,8 +756,14 @@ mod tests {
 
         let view = workspace_view(State(state)).await.expect("view");
         let paths: Vec<&str> = view.recent.iter().map(|d| d.path.as_str()).collect();
-        let new_index = paths.iter().position(|p| *p == "/w/new").expect("new project");
-        let old_index = paths.iter().position(|p| *p == "/w/old").expect("old project");
+        let new_index = paths
+            .iter()
+            .position(|p| *p == "/w/new")
+            .expect("new project");
+        let old_index = paths
+            .iter()
+            .position(|p| *p == "/w/old")
+            .expect("old project");
         assert!(
             new_index < old_index,
             "most recently active project first: {paths:?}"
