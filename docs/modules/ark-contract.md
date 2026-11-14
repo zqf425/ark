@@ -43,6 +43,8 @@ gated 在 `Notice` kind 上）。取消原因词表与自治权词表不在本 c
 
 `SubagentSettings.auto_continue` 是显式 opt-in 的 wire 配置，serde default 为 `false`，保证旧配置不会
 产生额外模型调用；Rust 生成的 TypeScript 使用同名 snake_case 字段。
+`SubagentSettings.default_background` 的 serde default 为 `true`：缺省旧配置保持"委派不阻塞主会话"
+的默认行为，而不是回落到阻塞等待的前台派发。
 
 后台子代理终态使用 `child_completed` 事件传递稳定 `notification_id`、状态、摘要/错误和用量；
 消费者按通知 ID 去重，不得把 child 的完整原始转录复制到父线程。父回合正常完成后以

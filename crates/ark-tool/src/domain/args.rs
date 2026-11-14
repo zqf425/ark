@@ -143,9 +143,10 @@ pub struct DelegateArgs {
     pub provider_id: Option<String>,
     #[serde(default)]
     pub autonomy: Option<String>,
-    /// Return as soon as the queued record and abort handle are installed.
+    /// Ask for the background dispatch explicitly; without the flag the live
+    /// `subagents.default_background` policy decides.
     #[serde(default)]
-    pub background: bool,
+    pub background: Option<bool>,
     /// Resume an existing child session instead of creating a new child.
     #[serde(default, rename = "resumeChildId", alias = "resume_child_id")]
     pub resume_child_id: Option<ChildId>,
@@ -186,7 +187,7 @@ mod tests {
         assert_eq!(parsed.prompt, "scan the repo");
         assert!(parsed.label.is_none());
         assert!(parsed.model.is_none());
-        assert!(!parsed.background);
+        assert!(parsed.background.is_none());
         assert!(parsed.resume_child_id.is_none());
     }
 

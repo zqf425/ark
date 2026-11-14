@@ -747,6 +747,7 @@ fn request_user_input_is_registered_for_both_agent_tool_sets() {
     );
     let parent_tools = build_tools(
         Arc::new(TestSubagentRunner),
+        Arc::new(TestPolicy) as Arc<dyn ark_ports::SubagentPolicySource>,
         Arc::clone(&skills),
         http,
         Arc::clone(&store),
@@ -778,6 +779,15 @@ fn request_user_input_is_registered_for_both_agent_tool_sets() {
 /// Registry-shape stub: `build_tools` only needs the runner for the
 /// `delegate_task` tool; this test never runs a child.
 struct TestSubagentRunner;
+
+/// Policy stub: only the registration shape is under test here.
+struct TestPolicy;
+
+impl ark_ports::SubagentPolicySource for TestPolicy {
+    fn policy(&self) -> ark_ports::SubagentPolicy {
+        ark_ports::SubagentPolicy::default()
+    }
+}
 
 /// Capability stub for registration tests; `web_fetch` is never executed here.
 struct InertHttp;

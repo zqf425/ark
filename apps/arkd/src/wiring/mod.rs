@@ -287,7 +287,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     let delegation = Arc::new(ark_delegation::DelegationRuntime::new(
         Arc::clone(&store_port),
         Arc::clone(&sink),
-        subagent_policy,
+        Arc::clone(&subagent_policy) as Arc<dyn ark_ports::SubagentPolicySource>,
         child_executor,
     ));
     // Subscribe before hydrate so repaired terminal notifications cannot race
@@ -303,6 +303,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
 
     let tools = Arc::new(build_tools(
         Arc::clone(&delegation) as Arc<dyn ark_ports::SubagentRunner>,
+        Arc::clone(&subagent_policy) as Arc<dyn ark_ports::SubagentPolicySource>,
         Arc::clone(&skills),
         Arc::clone(plugins.http()) as Arc<dyn ark_ports::HttpCapability>,
         Arc::clone(&store_port),

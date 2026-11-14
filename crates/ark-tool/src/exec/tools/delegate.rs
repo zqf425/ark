@@ -17,7 +17,8 @@
 use std::sync::Arc;
 
 use ark_ports::{
-    SubagentOutcome, SubagentRequest, SubagentRunner, Tool, ToolArgs, ToolContext, ToolOutput,
+    SubagentOutcome, SubagentPolicySource, SubagentRequest, SubagentRunner, Tool, ToolArgs,
+    ToolContext, ToolOutput,
 };
 
 use crate::domain::{args, schema};
@@ -26,14 +27,29 @@ use crate::exec::common::as_output;
 /// `delegate_task`.
 ///
 /// Held behind an `Arc<dyn SubagentRunner>` rather than a concrete runtime, so a
-/// test can pass a fake and `arkd` can pass the real one.
+/// test can pass a fake and `arkd` can pass the real one. The optional policy
+/// source carries the live `default_background` decision; `None` keeps the
+/// historical foreground default (a runtime assembled without the policy source
+/// must not silently change its dispatch contract).
 pub struct DelegateTaskTool {
     runner: Arc<dyn SubagentRunner>,
+    policy: Option<Arc<dyn SubagentPolicySource>>,
 }
 
 impl DelegateTaskTool {
     pub fn new(runner: Arc<dyn SubagentRunner>) -> Self {
-        Self { runner }
+        Self {
+            runner,
+            policy: None,
+        }
+    }
+
+    /// Attach the live policy source so the tool can apply the configured
+    /// background default on every call (Hot: a Settings change applies to the
+    /// next delegation without a restart).
+    pub fn with_policy(mut self, policy: Arc<dyn SubagentPolicySource>) -> Self {
+        self.policy = Some(policy);
+        self
     }
 
     pub fn runner(&self) -> &Arc<dyn SubagentRunner> {
@@ -86,7 +102,18 @@ impl DelegateTaskTool {
             ));
         }
 
-        let background = parsed.background;
+        // Dispatch mode, in precedence order: an explicit `background` flag from
+        // the model wins; otherwise the live `default_background` policy decides
+        // (default on, so a delegated sub-task never blocks the parent turn);
+        // without a policy source the historical foreground default holds.
+        let background = match parsed.background {
+            Some(explicit) => explicit,
+            None => self
+                .policy
+                .as_ref()
+                .map(|policy| policy.policy().default_background)
+                .unwrap_or(false),
+        };
         let resume_child_id = parsed.resume_child_id;
         let request = SubagentRequest {
             // Identity always comes from the caller's context, never from the

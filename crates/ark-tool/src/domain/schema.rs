@@ -172,7 +172,7 @@ fn delegate_task_schema() -> serde_json::Value {
             "model": { "type": "string", "description": "Model override; defaults to the parent turn's model" },
             "provider_id": { "type": "string", "description": "Provider override; defaults to the parent turn's provider" },
             "autonomy": { "type": "string", "enum": autonomy_values_for_schema(), "description": "Permission override; defaults to the parent thread's permission" },
-            "background": { "type": "boolean", "description": "Return after the child is queued and keep it running under the runtime supervisor" },
+            "background": { "type": "boolean", "description": "Force the dispatch mode: true returns after the child is queued and keeps it running under the runtime supervisor, false waits for the child's final answer. Absent means the configured default (subagents.default_background, usually background)." },
             "resumeChildId": { "type": "string", "description": "Resume this interrupted child on its existing session instead of creating a new child" },
         }),
         &["prompt"],

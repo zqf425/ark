@@ -24,9 +24,10 @@
 - 工具并发由 `ark-agent` 的 `ParallelPolicy` 统一规划（设计刻意保守）：任何变更类调用独占一个批次，
   即使不同路径也不并行；只有**不同资源**的只读调用可共享批次，同资源的只读调用按资源串行。
   未知工具名一律按变更类处理。所有输出走统一 UTF-8 安全截断。
-- `delegate_task` 只消费 `SubagentRunner` 端口，子任务工具集不含它。它另支持后台派发
-  （`background: true`，立即返回 queued，完成经完成收件箱投递）与恢复（`resumeChildId`，优先级高于
-  `background`）；两者均复用同一端口边界。
+- `delegate_task` 只消费 `SubagentRunner` 端口，子任务工具集不含它。派发模式按优先级决定：模型显式
+  `background` 参数优先；缺省时读取注入的 `SubagentPolicySource` 的 `default_background`（Hot，
+  对应 `subagents.default_background`，默认开启=后台派发）；未注入策略源时保持前台默认。
+  恢复（`resumeChildId`，优先级高于 `background`）始终走前台结果契约；两者均复用同一端口边界。
 - `request_user_input` 是无法独立执行的门面工具：schema 为 `{"prompt": string, required}`，
   `execute` 返回结构化错误；生产执行路径永远不会走到它，因为 agent 在派发前拦截该调用并交给用户输入 gate。
 - `web_fetch`（需求见 [web-fetch-tool](../requirements/web-fetch-tool.md)）只消费注入的

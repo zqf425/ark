@@ -10,6 +10,11 @@
 父线程生效权限（组合根校验，越权直接结构化报错）。工作空间不接受模型指定，
 始终由父工具上下文传入。显式权限覆盖会写入 child run 记录，以便恢复同一子代理时仍然生效。
 
+派发模式默认不阻塞主会话：`subagents.default_background`（Hot，默认 `true`）让 `delegate_task`
+在模型未显式传 `background` 时走 `delegate_background`，父回合立即继续；完成摘要经持久
+`child_completed` 通知与收件箱回传父线程。模型显式 `background: false` 或恢复路径仍保持前台
+等待结果契约；该默认只改派发入口，不改变并发预算、记录与取消语义。
+
 ## 分层上下文压缩
 
 当前实现将运行配置和 system 指令保留为永久层；最近消息保留为高保真层；被压缩区间会生成
