@@ -19,6 +19,8 @@ export type { SessionResumeResponse } from "./SessionResumeResponse";
 export type { ReviewRequest } from "./ReviewRequest";
 export type { ThreadExport } from "./ThreadExport";
 export type { CreateThreadRequest } from "./CreateThreadRequest";
+export type { BulkDeleteThreadsResponse } from "./BulkDeleteThreadsResponse";
+export type { BulkDeleteSkipped } from "./BulkDeleteSkipped";
 export type { UpdateThreadRequest } from "./UpdateThreadRequest";
 export type { ThreadDetail } from "./ThreadDetail";
 export type { ThreadRuntimeSnapshot } from "./ThreadRuntimeSnapshot";

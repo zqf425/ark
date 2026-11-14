@@ -115,7 +115,9 @@ fn protected_routes() -> Router<AppState> {
         // ---- threads ----
         .route(
             "/v1/threads",
-            get(crate::api::handlers::threads::list).post(crate::api::handlers::threads::create),
+            get(crate::api::handlers::threads::list)
+                .post(crate::api::handlers::threads::create)
+                .delete(crate::api::handlers::threads::remove_by_workspace),
         )
         .route(
             "/v1/threads/{id}",

@@ -47,6 +47,17 @@
   （响应仍为裸 `ThreadSummary` 数组），不得暗中套用默认页大小截断既有客户端。每行携带 `running`
   （`TurnRegistry.active_thread_ids` 一次读取，表示该线程有 in-flight 回合，重启后恒为 false）与
   `last_event_at`（索引投影的最新事件时间，列表排序与行内活动时间显示的真源）。
+- `POST /v1/threads` 接受可选 `workspace`：经 `WorkspaceService::validate` 校验（与 composer 的
+  新增项目同一条规则）后作为该线程的 workspace 覆盖种子，校验失败返回结构化 400 而不是写入死路径；
+  缺省时保持既有行为（回落配置的 default workspace）。编排宿主 `service::threads::create_thread` 的
+  显式值优先于 default 种子，并统一经 `ark_common::path::normalize` 规范化；scheduler/IM 等其他调用方
+  传 `None` 语义不变。
+- `DELETE /v1/threads?workspace=…`（`service::threads::delete_settled_by_workspace`）按项目批量删除
+  **已结束**的线程：匹配遵循渲染层项目分组规则（显式 override 与路径规范化后比对，无 override 回退
+  运行时 active root；默认组不被此动词服务），"已结束"复用列表 busy 标记的同一持久折叠
+  （`durable_running_ids`，注册表与日志同源，两种判定永不漂移）。整段 sweep 持 `workspace_gate`，
+  与回合注册、单线程删除互斥；运行中/删除失败的线程逐行进入响应 `skipped`（结构化 `ArkErrorCode`，
+  运行中为 `conflict`），不令整个请求失败。响应 `BulkDeleteThreadsResponse`（`deleted`/`skipped`）。
 - `GET /v1/threads/{id}` 的 `child_completions` 是最新 50 个不同通知 ID 的有界视图；它从 store 的窄
   completion 查询投影，不能全量回放普通会话事件。
 - `InteractiveGates` 只做 HTTP 决议与 reactor gate future 的一次性 rendezvous；`prepare_*` 同步插入

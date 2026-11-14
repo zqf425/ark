@@ -2,6 +2,7 @@
  * Thread surface only. No business rules: it maps HTTP shapes, nothing more.
  */
 import type {
+  BulkDeleteThreadsResponse,
   CreateThreadRequest,
   ThreadDetail,
   ThreadId,
@@ -26,6 +27,15 @@ export function getThread(threadId: ThreadId, signal?: AbortSignal): Promise<Thr
 /** `POST /v1/threads`. The runtime assigns the id. */
 export function createThread(request: CreateThreadRequest = {}): Promise<ThreadSummary> {
   return post<ThreadSummary>('/v1/threads', request)
+}
+
+/**
+ * `DELETE /v1/threads?workspace=` — bulk delete of one project's settled
+ * sessions. The server decides "settled" (registry + durable log fold) and
+ * refuses running threads per-row, so the renderer never races a turn start.
+ */
+export function deleteThreadsByWorkspace(workspace: string): Promise<BulkDeleteThreadsResponse> {
+  return del<BulkDeleteThreadsResponse>('/v1/threads', { query: { workspace } })
 }
 
 /** `PATCH /v1/threads/{id}` — rename / archive. */

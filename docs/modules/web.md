@@ -114,6 +114,14 @@
   检查器的四个 Tab（收起用 `hidden` 保挂载，面板草稿与服务端读模型不得因折叠丢失），不再使用带
   遮罩的浮动抽屉。`review`、`new`、`settings` 是同一 shell 下的全屏场景，由 `view-slice` 的 `view`
   选择；`commandOpen` 控制 ⌘K 命令面板。
+- 会话列表按项目分组渲染（`thread-projects.ts`，对齐 smart-ark：先按会话**实际生效**工作空间聚合，
+  无 override 会话回退运行时 active root，active 组置顶）。项目组头部提供两个随 hover/focus 显现的
+  动作：➕ 在该项目下新建会话——把项目路径经 `POST /v1/threads` 的 `workspace` 字段提交，服务端经
+  `WorkspaceService::validate` 校验后作为该线程的 workspace 覆盖种子，新会话即落在该组；🗑 批量清理
+  该项目下已结束的会话——`DELETE /v1/threads?workspace=…` 一次调用，"已结束"由服务端权威判定
+  （turn 注册表 + 持久日志折叠，重启后仍准确），运行中线程按行跳过并在响应 `skipped` 中回报
+  `conflict`，前端以确认框 + toast 呈现结果，被删行经 `removeThread` 折叠出列表，下次刷新仍是权威。
+  默认项目组（无 override 且无 active root）不提供这两个动作。
 - 视觉样式只消费设计令牌：浅色"纸白"为默认主题（`preferences.ts` 默认 `theme: 'light'`），色板在
   `styles/tokens.css`，暗色"石墨"覆盖在 `styles/theme.css`，共享原语样式在 `styles/primitives.css`，
   由 `styles/global.css` 聚合引入；圆角与阴影分级都在令牌层定义，组件 CSS 出现字面 hex/rgba 色值

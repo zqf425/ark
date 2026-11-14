@@ -326,7 +326,7 @@ impl super::im::ImService {
             }
         }
         let title = truncate_utf8(message.text.trim(), THREAD_TITLE_MAX_BYTES);
-        let created = match crate::service::threads::create_thread(state, title).await {
+        let created = match crate::service::threads::create_thread(state, title, None).await {
             Ok(summary) => summary,
             Err(err) => {
                 self.send_reply(

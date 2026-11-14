@@ -9,7 +9,8 @@ import { useMounted } from '../../../shared/api/use-mounted'
 import { describeError } from '../../../shared/api/error-describe'
 import { translateNow } from '../../../shared/i18n/current'
 import type { ThreadSummary } from '../../../shared/contracts'
-import { createThread, deleteThread, forkThread, listThreads, updateThread } from '../api/threads-api'
+import { createThread, deleteThread, deleteThreadsByWorkspace, forkThread, listThreads, updateThread } from '../api/threads-api'
+import type { BulkDeleteThreadsResponse } from '../../../shared/contracts'
 import { useCodeSessionStore } from '../state/store'
 
 function describe(error: unknown): string {
@@ -18,7 +19,8 @@ function describe(error: unknown): string {
 
 export type ThreadListApi = {
   refresh: () => Promise<void>
-  create: () => Promise<ThreadSummary | null>
+  create: (workspace?: string) => Promise<ThreadSummary | null>
+  deleteProject: (workspace: string) => Promise<BulkDeleteThreadsResponse | null>
   rename: (threadId: string, title: string) => Promise<boolean>
   archive: (threadId: string) => Promise<boolean>
   restore: (threadId: string) => Promise<boolean>
@@ -50,12 +52,17 @@ export function useThreadList(): ThreadListApi {
     }
   }, [setListStatus, setThreads])
 
-  const create = useCallback(async () => {
+  const create = useCallback(async (workspace?: string) => {
     setBusy(true)
     try {
       // The backend fallback stays locale-free, so the client supplies the
-      // display-language default title (zh-CN: "新会话").
-      const created = await createThread({ title: translateNow('thread.list.defaultTitle') })
+      // display-language default title (zh-CN: "新会话"). A workspace passed
+      // by the rail's per-project action seeds the thread's override server
+      // side, so the created row already carries its project.
+      const created = await createThread({
+        title: translateNow('thread.list.defaultTitle'),
+        ...(workspace ? { workspace } : {})
+      })
       if (!mounted.current) return null
       upsertThread(created)
       setActiveThread(created.thread_id)
@@ -67,6 +74,29 @@ export function useThreadList(): ThreadListApi {
       if (mounted.current) setBusy(false)
     }
   }, [setActiveThread, setListStatus, upsertThread])
+
+  /**
+   * Bulk delete one project's settled sessions. Rows are folded out of the
+   * store as the server confirms them; skipped ids (running turns) stay, and
+   * the next refresh remains authoritative.
+   */
+  const deleteProject = useCallback(async (workspace: string) => {
+    const path = workspace.trim()
+    if (!path) return null
+    setBusy(true)
+    try {
+      const response = await deleteThreadsByWorkspace(path)
+      if (!mounted.current) return null
+      const store = useCodeSessionStore.getState()
+      for (const threadId of response.deleted) store.removeThread(threadId)
+      return response
+    } catch (error) {
+      if (mounted.current) setListStatus('error', describe(error))
+      return null
+    } finally {
+      if (mounted.current) setBusy(false)
+    }
+  }, [setListStatus])
 
   const mutate = useCallback(async (action: () => Promise<ThreadSummary>, removeId?: string): Promise<boolean> => {
     setBusy(true)
@@ -134,5 +164,5 @@ export function useThreadList(): ThreadListApi {
     if (first) setActiveThread(first.thread_id)
   }, [activeThreadId, listStatus, setActiveThread, threads])
 
-  return { refresh, create, rename, archive, restore, remove, fork, select: setActiveThread, busy }
+  return { refresh, create, deleteProject, rename, archive, restore, remove, fork, select: setActiveThread, busy }
 }

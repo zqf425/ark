@@ -370,7 +370,7 @@ impl SchedulerService {
         state: &AppState,
         mut task: ScheduledTask,
     ) -> Result<(ScheduledTask, ThreadId, DateTime<Utc>)> {
-        let thread = crate::service::threads::create_thread(state, &task.title).await?;
+        let thread = crate::service::threads::create_thread(state, &task.title, None).await?;
         // A scheduled run is unattended by default: `unattended` is what makes
         // the sandbox policy stop asking a human who is not there. The task's
         // own override wins when it names one.

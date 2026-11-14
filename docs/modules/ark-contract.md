@@ -57,6 +57,11 @@ gated 在 `Notice` kind 上）。取消原因词表与自治权词表不在本 c
 PATCH 端校验与回合侧解析分别见 [ark-server](ark-server.md) 与 [arkd](arkd.md)，协议映射见
 [ark-llm](ark-llm.md)。
 
+线程创建与批量删除 wire：`CreateThreadRequest` 除 `title` 外接受可选 `workspace`（服务端校验后作为
+线程覆盖种子，见 ark-server）；`BulkDeleteThreadsResponse`/`BulkDeleteSkipped` 是
+`DELETE /v1/threads?workspace=…` 的按项目批量删除响应，`skipped[].code` 直接复用 `ArkErrorCode`
+枚举（`conflict` 即运行中跳过），二者均已进 TS 生成 barrel。
+
 ## 类型生成
 
 - Rust 类型派生 `serde` 与 `ts-rs`（JSON Schema 导出所需的 `schemars` 派生属计划，尚未引入）；
