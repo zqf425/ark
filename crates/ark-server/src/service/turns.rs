@@ -106,6 +106,22 @@ pub async fn start_turn_as(
         ));
     };
     state.continuations.allow(thread_id);
+    // First explicit user turn on a still-placeholder thread: name the thread
+    // from the message head before the worker runs, so the rename and its
+    // `ThreadUpdated` event are durable before any model token streams (design
+    // §7.9). Only `TurnSource::User` names: IM threads already derive a title
+    // from the first inbound message, auto-continuations have no composer text,
+    // and the review/scheduler prompts are system text, not a user-chosen name.
+    // Naming is best effort: a failure here keeps the placeholder and must
+    // never fail the turn that was already accepted.
+    if matches!(source, TurnSource::User(_)) {
+        crate::service::thread_titles::name_thread_on_first_turn(
+            state.store.as_ref(),
+            thread_id,
+            &raw_text,
+        )
+        .await;
+    }
     let job = TurnJob {
         thread_id,
         turn_id,
@@ -130,15 +146,6 @@ pub fn spawn_turn(state: AppState, job: TurnJob) {
     let turn_id = job.turn_id;
     let thread_id = job.thread_id;
     let is_auto_continuation = matches!(&job.source, TurnSource::AutoContinuation);
-    // Captured before the job moves into the worker: this is the composer text
-    // the first turn was started with, used by the background title generator.
-    // Only explicit user turns name a thread — IM threads already derive their
-    // title from the first message, and auto-continuations have no composer
-    // text at all.
-    let first_user_text = match &job.source {
-        TurnSource::User(text) => Some(text.clone()),
-        TurnSource::Im { .. } | TurnSource::AutoContinuation => None,
-    };
     let turns = Arc::clone(&state.turns);
     let runner = Arc::clone(&state.runner);
     let supervisor_state = state.clone();
@@ -213,28 +220,6 @@ pub fn spawn_turn(state: AppState, job: TurnJob) {
                 if !is_auto_continuation {
                     crate::service::schedule_auto_continuation(supervisor_state.clone(), thread_id)
                         .await;
-                }
-                // First explicit turn on a still-placeholder thread: ask the
-                // model for a short title in the background (design §7.9). The
-                // decision reads the thread title before the state moves into
-                // the detached task; the naming call itself never blocks the
-                // supervisor and cannot delay or reorder continuation work.
-                if let Some(task) = match first_user_text.as_deref() {
-                    Some(text) => {
-                        crate::service::thread_titles::title_task_for(
-                            &supervisor_state,
-                            thread_id,
-                            text,
-                        )
-                        .await
-                    }
-                    None => None,
-                } {
-                    crate::service::thread_titles::schedule_title_generation(
-                        supervisor_state,
-                        thread_id,
-                        task,
-                    );
                 }
             }
             TurnEnd::Failed { .. } | TurnEnd::Aborted(_) if is_auto_continuation => {
@@ -449,6 +434,74 @@ mod tests {
                 "pre_start:user".to_string(),
                 "turn_end:Completed".to_string(),
             ]
+        );
+    }
+
+    /// The first user turn names a still-placeholder thread **before** the
+    /// worker runs: when the runner observes the turn, the title is already
+    /// durable and the rename event is already in the log ahead of the turn's
+    /// own events. A user-renamed thread keeps its name.
+    #[tokio::test]
+    async fn the_first_user_turn_renames_the_thread_before_the_worker_runs() {
+        let dir = tempfile::Builder::new()
+            .prefix("ark-turn-name-")
+            .tempdir()
+            .expect("temp dir");
+        let state = state_with(dir.path(), RecordingBroker::new(false));
+        let thread = state.store.create_thread("新会话").await.expect("thread");
+
+        start_turn_as(
+            &state,
+            thread.thread_id,
+            TurnSource::User("帮我评审这段   Rust 代码".to_string()),
+            "帮我评审这段   Rust 代码".to_string(),
+            Vec::new(),
+        )
+        .await
+        .expect("the turn starts");
+
+        // The runner is immediate, so by the time `start_turn_as` returns the
+        // worker has run: a title that arrives earlier must already be here.
+        let renamed = state
+            .store
+            .get_thread(thread.thread_id)
+            .await
+            .expect("thread");
+        assert_eq!(renamed.title, "帮我评审这段 Rust 代码");
+        let events = state
+            .store
+            .replay_events(thread.thread_id, 0)
+            .await
+            .expect("events");
+        assert!(matches!(
+            events.first().expect("the first event"),
+            ark_contract::RuntimeEvent::ThreadUpdated { title, .. }
+                if title == "帮我评审这段 Rust 代码"
+        ));
+
+        // A thread the user renamed keeps its title across further turns.
+        state
+            .store
+            .rename_thread(thread.thread_id, "我的名字")
+            .await
+            .expect("rename");
+        start_turn_as(
+            &state,
+            thread.thread_id,
+            TurnSource::User("再来一轮".to_string()),
+            "再来一轮".to_string(),
+            Vec::new(),
+        )
+        .await
+        .expect("the second turn starts");
+        assert_eq!(
+            state
+                .store
+                .get_thread(thread.thread_id)
+                .await
+                .expect("thread")
+                .title,
+            "我的名字"
         );
     }
 }

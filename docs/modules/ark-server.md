@@ -136,21 +136,22 @@
   导出：仅含摘要元数据与升序 `seq` 的完整权威事件日志，不含导出时间戳、凭证、API key、header 或
   附件载荷；相同 store 状态两次导出字节一致。
 
-## 会话标题自动生成
+## 会话标题：首轮开始时命名
 
-`service/thread_titles.rs` 在首个显式用户回合完成后，把占位标题替换为模型生成的短标题。策略与调用
-分离：占位集合（`New thread`/`Untitled thread`/`新会话`，覆盖 HTTP 创建、store 归一化与 web 本地化
-三个兜底）、提示词、摘要（首条消息至多 2000 字节，标题钳制到 40 字节，均按字符边界截断）与 15 s
-超时都在本模块；provider 选择、计量与请求构造经 `BaseServices::title_model` 端口（[ark-ports](ark-ports.md)），
-由组合根注入 `TitleModelAdapter`，未注入的构建只是永不命名，不报错。
+`service/thread_titles.rs` 在首个显式用户回合**启动时**（回合已注册、worker 尚未运行），把占位标题替换为
+首条消息开头截断的短标题——改名与它的 `ThreadUpdated` 事件在第一个模型 token 流出前就已落盘，因此每个
+客户端在第一帧事件里看到的就是真实标题，不存在"先显示占位、回复完成后才改名"的窗口。策略纯本地：无模型
+调用、无 provider 依赖、无超时预算；标题即消息开头（与 IM 线程从首条消息派生标题的既有策略一致），空白折叠
+后按字符边界钳制到 40 字节。占位集合（`New thread`/`Untitled thread`/`新会话`，覆盖 HTTP 创建、store
+归一化与 web 本地化三个兜底）也在本模块。
 
-- 只在**显式用户回合**（`TurnSource::User`）完成时触发：IM 线程已从首条消息派生标题，自动续跑没有
-  composer 文本；线程当前标题必须是占位——用户手动的改名是意图，永不覆盖。
+- 只在**显式用户回合**（`TurnSource::User`）的启动路径触发，且在 `start_turn_as` 内于 worker spawn 之前
+  同步执行：IM 线程已从首条消息派生标题，自动续跑没有 composer 文本，review/scheduler 的 prompt 是系统
+  文本而非用户会话名，均不参与命名；回合已被接受，命名是尽力而为——线程不可读、改名失败或事件写入失败
+  一律保留原标题并记 warn，永不使回合失败。
+- 线程当前标题必须是占位——用户手动的改名是意图，永不覆盖。
 - 改名走 `SessionStore::rename_thread` 加 `PATCH /v1/threads/{id}` 同一款 `ThreadUpdated` 事件，只有
-  一条写路径；客户端因此对自动改名与手动改名一视同仁。命名任务在 supervisor 内刻意 detach：慢
-  provider 不能占住回合收尾；失败、超时或空标题一律保留原标题并记 warn，命名永不影响已完成的回合。
-  空标题与超时两条静默路径也各有一条 warn：reasoning 模型的预算耗尽（content 为空）与慢 provider
-  超时在日志里必须与「功能运行且成功」可区分。
+  一条写路径；客户端因此对自动改名与手动改名一视同仁。
 - web 侧 `renameThreadRow` 把流上的 `thread_updated` 折叠进列表行（与手动改名共用），列表接口在下次
   刷新时仍是权威。
 
