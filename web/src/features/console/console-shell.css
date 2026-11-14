@@ -478,19 +478,3 @@ button.console-chip:hover {
   font-weight: 600;
 }
 
-.console-meter {
-  width: 52px;
-  height: 4px;
-  border-radius: 3px;
-  background: var(--console-line);
-  overflow: hidden;
-  display: inline-block;
-  vertical-align: middle;
-}
-
-.console-meter > i {
-  display: block;
-  height: 100%;
-  background: var(--ark-primary);
-}
-

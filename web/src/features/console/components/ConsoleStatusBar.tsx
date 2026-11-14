@@ -1,11 +1,11 @@
 /**
- * Bottom status bar: liveness, workspace, change count, context meter, usage,
- * version and the ⌘K hint. Every number comes from the runtime or the folded
- * usage aggregate — no build constants, no invented telemetry.
+ * Bottom status bar: liveness, workspace, change count, version and the ⌘K
+ * hint. Every number comes from the runtime or the folded usage aggregate —
+ * no build constants, no invented telemetry. Context fill has a single home in
+ * the composer's context ring, so the bar deliberately does not repeat it.
  */
 import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../../code-session/state/store'
-import { useContextLimit } from '../../code-session/hooks/use-context-limit'
 import { useRuntimeStatusLabels } from '../../code-session/hooks/use-runtime-status-labels'
 import { useViewStore } from '../../workbench/state/view-slice'
 import type { ConsoleMeta } from '../hooks/use-console-meta'
@@ -13,11 +13,9 @@ import type { ConsoleMeta } from '../hooks/use-console-meta'
 export function ConsoleStatusBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
   const { t } = useI18n()
   const { online, refreshLabel, refresh } = useRuntimeStatusLabels()
-  const usage = useCodeSessionStore((s) => s.usage)
   const runtimeVersion = useCodeSessionStore((s) => s.runtimeVersion)
   const healthVersion = useCodeSessionStore((s) => s.healthVersion)
   const setCommandOpen = useViewStore((s) => s.setCommandOpen)
-  const reading = useContextLimit()
 
   const onlineLabelText = online === 'online'
     ? t('console.status.connected')
@@ -30,8 +28,6 @@ export function ConsoleStatusBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
       ? 'console-dot--warn'
       : ''
 
-  const lastPrompt = usage?.lastPromptTokens ?? null
-  const percent = lastPrompt && reading.window ? Math.min(100, Math.round((lastPrompt / reading.window) * 100)) : null
   const version = runtimeVersion ?? healthVersion
 
   return (
@@ -61,20 +57,6 @@ export function ConsoleStatusBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
       </span>
 
       <span className="console-status__grow" />
-
-      {percent !== null ? (
-        <span className="console-status__item" title={`${lastPrompt ?? 0} / ${reading.window ?? 0}`}>
-          {t('console.status.context')}
-          <span className="console-meter"><i style={{ width: `${percent}%` }} /></span>
-          <b>{percent}%</b>
-        </span>
-      ) : null}
-
-      {usage ? (
-        <span className="console-status__item">
-          {t('console.status.tokenCount', { count: usage.totalTokens })}
-        </span>
-      ) : null}
 
       <span aria-hidden="true">·</span>
       <span className="console-status__item">{version ?? '—'}</span>

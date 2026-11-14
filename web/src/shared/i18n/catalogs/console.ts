@@ -16,7 +16,6 @@ export const CONSOLE_MESSAGES = {
   'console.top.model': ['模型', 'Model'],
   'console.top.theme': ['切换主题', 'Toggle theme'],
   'console.top.notifications': ['通知', 'Notifications'],
-  'console.top.settings': ['设置', 'Settings'],
   'console.top.openCommand': ['打开命令面板', 'Open command palette'],
   'console.top.refresh': ['重新检查运行时', 'Recheck runtime'],
 
@@ -35,8 +34,6 @@ export const CONSOLE_MESSAGES = {
   'console.status.connected': ['arkd 已连接', 'arkd connected'],
   'console.status.offline': ['arkd 未连接', 'arkd offline'],
   'console.status.checking': ['检查中', 'Checking'],
-  'console.status.context': ['上下文', 'Context'],
-  'console.status.tokenCount': ['{count} tokens', '{count} tokens'],
   'console.status.changes': ['{count} 个变更', '{count} changes'],
   'console.status.changesClean': ['工作区干净', 'No local changes'],
   'console.status.commandHint': ['命令面板', 'Command palette'],

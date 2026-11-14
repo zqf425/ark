@@ -96,16 +96,6 @@ export function ConsoleTopBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
           <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
         </button>
 
-        <button
-          type="button"
-          className="console-iconbtn"
-          onClick={() => setView('settings')}
-          aria-label={t('console.top.settings')}
-          title={t('console.top.settings')}
-        >
-          <Icon name="settings" size={15} />
-        </button>
-
         <span className="console-avatar" aria-hidden="true">YA</span>
       </div>
     </header>
