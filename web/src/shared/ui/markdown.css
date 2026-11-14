@@ -67,13 +67,41 @@
   font-size: 0.84em;
 }
 
-.ark-md pre {
-  background: var(--ark-code-block-bg);
+/* Fenced block shell: the header bar (language label + copy button) sits above
+   the code surface, like mainstream agent canvases (Claude / ChatGPT). */
+.ark-md-code {
   border: 1px solid var(--ark-code-block-border);
   border-radius: var(--ark-radius-lg);
+  overflow: hidden;
+  margin: 0.6em 0;
+}
+
+.ark-md-code__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  background: var(--ark-code-block-bar-bg);
+  border-bottom: 1px solid var(--ark-code-block-border);
+}
+
+.ark-md-code__lang {
+  font-family: var(--ark-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--ark-text-faint);
+  user-select: none;
+}
+
+.ark-md pre {
+  background: var(--ark-code-block-bg);
   box-shadow: inset 0 1px 0 var(--ark-card-ghost);
   padding: 0.65em 0.8em;
   overflow-x: auto;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
 }
 
 .ark-md pre code {
@@ -104,6 +132,49 @@
 .ark-md hr {
   border: none;
   border-top: 1px solid var(--ark-border-muted);
+}
+
+/* Code-block copy button: quiet glyph in the header bar, turns into a check. */
+.ark-md .ark-md-code__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--ark-radius-sm);
+  background: transparent;
+  color: var(--ark-text-faint);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.ark-md .ark-md-code__copy:hover {
+  background: var(--ark-bg-hover);
+  color: var(--ark-text);
+}
+
+.ark-md .ark-md-code__copy.is-copied {
+  color: var(--ark-ok);
+}
+
+/* The glyph is drawn with CSS masks so one token pair serves both states. */
+.ark-md .ark-md-code__copy-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  background-color: currentColor;
+  -webkit-mask: center / contain no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7'%3E%3Crect x='9' y='9' width='11' height='11' rx='2'/%3E%3Cpath d='M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5'/%3E%3C/svg%3E");
+  mask: center / contain no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7'%3E%3Crect x='9' y='9' width='11' height='11' rx='2'/%3E%3Cpath d='M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5'/%3E%3C/svg%3E");
+}
+
+.ark-md .ark-md-code__copy.is-copied .ark-md-code__copy-icon {
+  -webkit-mask: center / contain no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7'/%3E%3C/svg%3E");
+  mask: center / contain no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7'/%3E%3C/svg%3E");
 }
 
 /* highlight.js token classes (subset of the common languages' output). */

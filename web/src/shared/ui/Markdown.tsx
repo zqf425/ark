@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { renderMarkdown } from './markdown-render'
+import { copyText, COPIED_FEEDBACK_MS } from './copy'
 import './markdown.css'
 
 /** Minimum interval between markdown re-parses while text streams in. */
@@ -41,9 +42,45 @@ export function useThrottledValue<T>(value: T, intervalMs: number): T {
  * DOMPurify), so `dangerouslySetInnerHTML` here carries sanitized markup only.
  * Streaming updates are throttled: a mid-turn row re-parses at most
  * `REPARSE_INTERVAL_MS` times per second instead of on every token.
+ *
+ * Code blocks carry their own copy button (emitted by the renderer). One
+ * delegated click handler serves every block of this message — streaming
+ * replaces the DOM wholesale, so per-block listeners would leak or churn.
  */
 export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }): JSX.Element {
   const throttled = useThrottledValue(text, REPARSE_INTERVAL_MS)
   const html = useMemo(() => renderMarkdown(throttled), [throttled])
-  return <div className={className ? `ark-md ${className}` : 'ark-md'} dangerouslySetInnerHTML={{ __html: html }} />
+  const hostRef = useRef<HTMLDivElement | null>(null)
+  // Streamed rows re-render wholesale; a per-block "copied" state would be
+  // lost on the next parse, so the flip lives on the shared handler instead.
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
+    },
+    []
+  )
+
+  const onClick = (event: React.MouseEvent<HTMLDivElement>): void => {
+    const target = (event.target as HTMLElement).closest('[data-md-copy]')
+    if (!target) return
+    const source = target.getAttribute('data-copy-source') ?? ''
+    const button = target as HTMLButtonElement
+    void copyText(source).then((ok) => {
+      if (!ok) return
+      button.classList.add('is-copied')
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
+      copiedTimer.current = setTimeout(() => button.classList.remove('is-copied'), COPIED_FEEDBACK_MS)
+    })
+  }
+
+  return (
+    <div
+      ref={hostRef}
+      className={className ? `ark-md ${className}` : 'ark-md'}
+      onClick={onClick}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  )
 })

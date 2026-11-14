@@ -1,0 +1,47 @@
+/*
+ * Shared copy-button styling: one quiet icon button used by message bubbles,
+ * the composer draft, queued chips and any future surface. Colors come from
+ * styles/tokens.css (theme.css for dark) only.
+ */
+
+.ark-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--ark-radius-sm);
+  background: transparent;
+  color: var(--ark-text-faint);
+  cursor: pointer;
+  opacity: 0.72;
+  transition: background 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+
+.ark-copy:hover:not(:disabled) {
+  background: var(--ark-bg-hover);
+  color: var(--ark-text);
+  opacity: 1;
+}
+
+.ark-copy:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: 1px;
+}
+
+.ark-copy.is-copied {
+  color: var(--ark-ok);
+  opacity: 1;
+}
+
+.ark-copy svg {
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ark-copy {
+    transition: none;
+  }
+}

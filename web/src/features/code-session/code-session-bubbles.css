@@ -75,6 +75,27 @@
   color: var(--ark-text-faint);
 }
 
+/* Copy lives in the meta row and only surfaces on hover/keyboard focus, like
+   mainstream agent canvases: quiet by default, one click when needed. */
+.ark-msg__copy {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.ark-msg:hover .ark-msg__copy,
+.ark-msg__copy:focus-visible,
+.ark-msg__copy.is-copied {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  /* Touch surfaces have no hover: keep the button permanently visible. */
+  .ark-msg__copy {
+    opacity: 0.72;
+  }
+}
+
 .ark-msg--user .ark-msg__head {
   /* The meta row belongs to the bubble; the bubble itself is the payload. */
   order: 2;

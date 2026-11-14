@@ -28,6 +28,7 @@ import { associateAttachment, uploadAttachment } from '../api/attachments-api'
 import { listSkills, listThreadSkills, refreshThreadSkills } from '../api/skills-api'
 import { canEditComposer, canSendToThread } from './composer-availability'
 import { AutonomyPicker, WorkspacePicker, ContextRing, ModelPicker } from './ComposerRuntimeControls'
+import { CopyButton } from '../../../shared/ui/copy'
 import type { SkillSummary } from '../../../shared/contracts'
 
 const MAX_ROWS = 8
@@ -452,6 +453,12 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
             <span key={`${index}-${text.slice(0, 12)}`} className="ark-chip" role="listitem">
               {t('canvas.composer.queuedChip', { index: index + 1 })} {text.slice(0, 40)}
               {text.length > 40 ? '…' : ''}
+              <CopyButton
+                text={text}
+                label={t('canvas.copy.queued')}
+                copiedLabel={t('canvas.copy.copied')}
+                className="ark-chip__copy"
+              />
               <button
                 type="button"
                 className="ark-composer__dismiss"
@@ -507,6 +514,16 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
             }
           }}
         />
+
+        {/* Draft copy: only with text in it, so an empty composer stays clean. */}
+        {draftText.trim() ? (
+          <CopyButton
+            text={draftText}
+            label={t('canvas.copy.draft')}
+            copiedLabel={t('canvas.copy.copied')}
+            className="ark-composer__copy"
+          />
+        ) : null}
 
         {skillsOpen ? (
           <div className="ark-composer__skills" role="listbox" aria-label={t('canvas.composer.skillsAria')}>

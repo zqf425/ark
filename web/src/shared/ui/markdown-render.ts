@@ -20,7 +20,16 @@ const renderer = {
       ? escapeHtml(text)
       : highlight(text, language)
     const langClass = language ? ` language-${language}` : ''
-    return `<pre><code class="hljs"${langClass}>${body}</code></pre>`
+    // The block ships with its own header (language label + copy button); the
+    // raw source rides in a `data-copy-source` attribute so the button works
+    // without re-deriving text from the highlighted DOM.
+    return (
+      `<div class="ark-md-code">` +
+      `<div class="ark-md-code__bar"><span class="ark-md-code__lang">${language ? escapeHtml(language) : 'text'}</span>` +
+      `<button type="button" class="ark-md-code__copy" data-md-copy data-copy-source="${escapeAttr(text)}" aria-label="copy">` +
+      `<span class="ark-md-code__copy-icon" aria-hidden="true"></span></button></div>` +
+      `<pre><code class="hljs"${langClass}>${body}</code></pre></div>`
+    )
   }
 }
 
@@ -47,10 +56,17 @@ export function escapeHtml(text: string): string {
     .replaceAll("'", '&#39;')
 }
 
+/** Attribute-safe escaping: escape then strip line breaks entirely. */
+function escapeAttr(text: string): string {
+  return escapeHtml(text).replaceAll(/\r?\n/g, '&#10;')
+}
+
 /** Parse, highlight and sanitize in one step; always synchronous. */
 export function renderMarkdown(text: string): string {
   // `async: false` keeps the return type a plain string: the renderer is a
   // synchronous projection step, never an async pipeline.
   const html = marked.parse(text, { async: false })
+  // `data-*` attributes survive DOMPurify's defaults (ALLOW_DATA_ATTR), so the
+  // copy button's raw source needs no extra allow-list here.
   return DOMPurify.sanitize(html)
 }

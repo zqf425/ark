@@ -55,6 +55,13 @@
 - 模型输出的 markdown 渲染集中在 `shared/ui` 的 `Markdown`（marked + DOMPurify 消毒后注入）与
   `code-highlight`（文件预览高亮）：模型输出是不可信输入，任何进入 `dangerouslySetInnerHTML` 的
   HTML 必须先经 DOMPurify；这是展示层能力，不与 Rust 侧业务逻辑双实现。
+- 一键复制由 `shared/ui/copy` 统一提供：`copyText` 封装异步 Clipboard API 与 `execCommand` 回落，
+  `CopyButton` 自带 pressed→copied 反馈并阻断祖先点击；消息气泡（用户/助手）、markdown 代码块与
+  输入框（草稿、排队消息）均复用该组件，不各自实现复制。代码块的复制按钮由 markdown 渲染器产出，
+  原始源码放在经转义的 `data-copy-source` 属性（`data-*` 在 DOMPurify 默认白名单内），`Markdown`
+  用单个委托点击处理器服务整条消息的所有代码块——流式整块替换 DOM，逐块监听会泄漏或失效。助手
+  气泡流式期间不提供复制（文本仍在增长），完成后才出现；气泡复制按钮默认隐藏，hover/键盘聚焦时
+  浮现。所有复制 UI 文案走 i18n 键（`canvas.copy.*`）。
 - 设置页的 tuning、provider 与 MCP 都使用生成契约；MCP env/header 值只写不回读，编辑时的空
   secret 字段表示保留，不表示删除。provider 的 api key 分两路：列表、能力与诊断只显示
   `has_api_key` 与掩码 hint，而点「编辑」时单独请求 `GET /v1/runtime/providers/{id}` 取回完整条目，
