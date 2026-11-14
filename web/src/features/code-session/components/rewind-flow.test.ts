@@ -3,7 +3,14 @@ import { ApiError } from '../../../shared/api/client'
 import type { ThreadItem } from '../../../shared/contracts'
 import { emptyItemsState } from '../state/items-reducer'
 import type { ItemsSnapshot } from '../state/types'
-import { executeRewind, hasRunningTurn, rewindAvailability, rewindAvailabilityByTurn } from './rewind-flow'
+import {
+  executeEditResend,
+  executeRewind,
+  hasRunningTurn,
+  rewindAvailability,
+  rewindAvailabilityByTurn,
+  userTextOfTurn
+} from './rewind-flow'
 
 const THREAD_ID = '00000000-0000-0000-0000-000000000001'
 const TURN_A = '00000000-0000-0000-0000-0000000000aa'
@@ -162,5 +169,76 @@ describe('executeRewind', () => {
     expect(ok).toBe(false)
     expect(onError).toHaveBeenCalledTimes(1)
     expect((onError.mock.calls[0]?.[0] as ApiError).status).toBe(404)
+  })
+})
+
+describe('executeEditResend（编辑重发）', () => {
+  const DRAFT = '修正后的提问'
+
+  it('成功时回退并携带原文回调', async () => {
+    const rewind = vi.fn().mockResolvedValue({ last_seq: 7 })
+    const onRewound = vi.fn()
+    const onError = vi.fn()
+
+    const ok = await executeEditResend(
+      { threadId: THREAD_ID, turnId: TURN_A, availability: 'ready' },
+      DRAFT,
+      { rewind, onRewound, onError }
+    )
+
+    expect(ok).toBe(true)
+    expect(rewind).toHaveBeenCalledWith(THREAD_ID, { turn_id: TURN_A })
+    expect(onRewound).toHaveBeenCalledWith({ last_seq: 7 }, DRAFT)
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it('线程仍忙时直接短路,不发请求也不回调', async () => {
+    const rewind = vi.fn()
+    const onRewound = vi.fn()
+    const onError = vi.fn()
+
+    const ok = await executeEditResend(
+      { threadId: THREAD_ID, turnId: TURN_A, availability: 'busy' },
+      DRAFT,
+      { rewind, onRewound, onError }
+    )
+
+    expect(ok).toBe(false)
+    expect(rewind).not.toHaveBeenCalled()
+    expect(onRewound).not.toHaveBeenCalled()
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it('rewind 失败走错误通道且不进入回填', async () => {
+    const rewind = vi.fn().mockRejectedValue(apiError(409))
+    const onRewound = vi.fn()
+    const onError = vi.fn()
+
+    const ok = await executeEditResend(
+      { threadId: THREAD_ID, turnId: TURN_A, availability: 'ready' },
+      DRAFT,
+      { rewind, onRewound, onError }
+    )
+
+    expect(ok).toBe(false)
+    expect(onRewound).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect((onError.mock.calls[0]?.[0] as ApiError).status).toBe(409)
+  })
+})
+
+describe('userTextOfTurn（编辑重发的原文提取）', () => {
+  function userItem(text: string): Pick<ThreadItem, 'kind' | 'text'> {
+    return { kind: 'user_message', text }
+  }
+
+  it('取该回合第一条用户消息的原文', () => {
+    expect(userTextOfTurn({ items: [userItem('  hello  ') as never] })).toBe('hello')
+  })
+
+  it('没有用户消息或纯空白时返回 null', () => {
+    expect(userTextOfTurn({ items: [{ kind: 'assistant_message', text: 'x' } as never] })).toBeNull()
+    expect(userTextOfTurn({ items: [userItem('   ') as never] })).toBeNull()
+    expect(userTextOfTurn({ items: [] })).toBeNull()
   })
 })

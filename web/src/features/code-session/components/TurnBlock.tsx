@@ -17,13 +17,27 @@ import { memo, useState } from 'react'
 import type { ThreadItem } from '../../../shared/contracts'
 import { useI18n } from '../../../shared/i18n'
 import type { TurnGroup } from '../state/selectors'
-import { ErrorBoundary } from '../../../shared/ui'
+import { Button, ErrorBoundary, useToast } from '../../../shared/ui'
 import { splitTurnSections } from './turn-sections'
 import { UserBubble, AssistantBubble, ReasoningBlock } from './MessageBubble'
 import { ToolCard } from './ToolCard'
 import { ErrorRow, NoticeRow, ToolResultRow } from './ErrorRow'
+import { describeError } from '../../../shared/api/error-describe'
+import { translateNow } from '../../../shared/i18n/current'
+import { rewindThread } from '../api/rewind-api'
 import { RewindControl } from './RewindControl'
+import { executeEditResend, userTextOfTurn } from './rewind-flow'
 import type { RewindAvailability } from './rewind-flow'
+import { useCodeSessionStore } from '../state/store'
+
+/**
+ * The server's own message is the only accurate explanation for a refusal
+ * (409 running turn, 404 missing target), so it is shown verbatim after the
+ * localized hint — the same rule `RewindControl` applies.
+ */
+function describe(error: unknown): string {
+  return describeError(error, translateNow)
+}
 
 /**
  * One row dispatcher. This is the entire "event → UI" decision surface left on
@@ -57,6 +71,73 @@ export const StreamRow = memo(function StreamRow({ item }: { item: ThreadItem })
   }
 })
 
+/**
+ * Edit-and-resend entry for one settled turn (最小版:
+ * requirements/edit-and-resend.md).
+ *
+ * Rendered beside the rewind entry on turns that have a user message. Same
+ * availability rules as rewind (the server 409s a live thread); on success the
+ * original user text is placed into the thread's draft so the composer is in
+ * edit mode — the user reviews, changes, and sends as a new turn. The old
+ * turn's rows are already gone (rewind deleted them), so no duplicate view is
+ * possible.
+ */
+function EditResendControl({
+  threadId,
+  turnId,
+  userText,
+  availability
+}: {
+  threadId: string
+  turnId: string
+  userText: string
+  availability: RewindAvailability
+}): JSX.Element | null {
+  const { t } = useI18n()
+  const { push } = useToast()
+  const [pending, setPending] = useState(false)
+
+  const setDraft = useCodeSessionStore((s) => s.setDraft)
+  const requestStreamReload = useCodeSessionStore((s) => s.requestStreamReload)
+  const setCommandError = useCodeSessionStore((s) => s.setCommandError)
+
+  if (availability === 'hidden') return null
+
+  const busy = availability !== 'ready'
+  const run = async (): Promise<void> => {
+    setPending(true)
+    setCommandError(null)
+    await executeEditResend({ threadId, turnId, availability }, userText, {
+      rewind: rewindThread,
+      onRewound: (_response, draft) => {
+        setDraft(threadId, draft)
+        requestStreamReload()
+        push('success', t('session.editResend.done'))
+      },
+      onError: (error) => {
+        const text = describe(error)
+        setCommandError(`${t('session.editResend.failed')}：${text}`)
+        push('error', t('session.editResend.failed'), text)
+      }
+    })
+    setPending(false)
+  }
+
+  return (
+    <div className="ark-rewind ark-edit-resend">
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={busy || pending}
+        title={busy ? t('session.rewind.busyHint') : t('session.editResend.entryHint')}
+        onClick={() => void run()}
+      >
+        {pending ? t('session.editResend.preparing') : t('session.editResend.entry')}
+      </Button>
+    </div>
+  )
+}
+
 export const TurnBlock = memo(function TurnBlock({
   threadId,
   group,
@@ -75,6 +156,7 @@ export const TurnBlock = memo(function TurnBlock({
   // `null` = follow the live state; a user toggle pins the card either way.
   const [pinned, setPinned] = useState<boolean | null>(null)
   const open = pinned ?? live
+  const userText = userTextOfTurn(group)
 
   return (
     <div className="ark-turn" id={`ark-turn-${group.turnId}`}>
@@ -83,6 +165,16 @@ export const TurnBlock = memo(function TurnBlock({
           <StreamRow item={item} />
         </ErrorBoundary>
       ))}
+      {user.length > 0 && userText !== null ? (
+        <ErrorBoundary label={t('thread.canvas.boundaryRewind')}>
+          <EditResendControl
+            threadId={threadId}
+            turnId={group.turnId}
+            userText={userText}
+            availability={availability}
+          />
+        </ErrorBoundary>
+      ) : null}
       {process.length > 0 ? (
         <details
           className={`ark-process${live ? ' is-live' : ''}`}

@@ -107,3 +107,39 @@ export async function executeRewind(guard: RewindGuard, outcome: RewindOutcome):
     return false
   }
 }
+
+/**
+ * Edit-and-resend (最小版, requirements/edit-and-resend.md): rewind to before
+ * the turn that owns `userItem`, then pre-fill the composer with the original
+ * text so the user edits and sends it as a fresh turn.
+ *
+ * The decision surface is deliberately thin: availability rules are exactly
+ * the rewind rules (same 409 semantics), and the only extra precondition is
+ * that the item is still the turn's user message. The original text is
+ * restored verbatim — attachments of the old turn are NOT re-attached; the
+ * new turn starts from text only, and the user can attach again explicitly.
+ */
+export type EditResendOutcome = {
+  rewind: (threadId: ThreadId, request: RewindRequest) => Promise<RewindResponse>
+  onRewound: (response: RewindResponse, draft: string) => void
+  onError: (error: unknown) => void
+}
+
+export function userTextOfTurn(group: { items: { kind: string; text?: string | null }[] }): string | null {
+  const user = group.items.find((item) => item.kind === 'user_message')
+  const text = user?.text?.trim()
+  return text ? text : null
+}
+
+export async function executeEditResend(
+  guard: RewindGuard,
+  draft: string,
+  outcome: EditResendOutcome
+): Promise<boolean> {
+  const rewound = await executeRewind(guard, {
+    rewind: outcome.rewind,
+    onRewound: (response) => outcome.onRewound(response, draft),
+    onError: outcome.onError
+  })
+  return rewound
+}
