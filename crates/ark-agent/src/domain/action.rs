@@ -66,6 +66,11 @@ impl TurnOutcome {
 pub struct SyntheticResult {
     pub call_id: String,
     pub tool: String,
+    /// The call's arguments. The refusal never executes the tool, but the
+    /// journal must still show *what* was refused: with `Null` here a
+    /// suppressed storm call leaves no trace of the command it repeated,
+    /// which made post-hoc audits impossible.
+    pub arguments: serde_json::Value,
     pub ok: bool,
     pub content: String,
     /// Set when the storm breaker refused the call, so the journal can record
@@ -79,6 +84,7 @@ impl SyntheticResult {
         Self {
             call_id: call.call_id.clone(),
             tool: call.tool.clone(),
+            arguments: call.arguments.clone(),
             ok,
             content: content.into(),
             storm_count: None,

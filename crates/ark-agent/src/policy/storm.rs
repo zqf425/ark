@@ -45,16 +45,17 @@ impl StormBreaker {
 
     /// Split calls into "run these" and "refuse these".
     ///
-    /// `repeats[i]` is how many times `calls[i]`'s signature already ran before
-    /// this batch. Earlier matching calls in this batch count too, so the call
-    /// is refused once its effective count exceeds `max_identical_calls`.
-    /// A `repeats` slice shorter than `calls` is treated as zeros.
+    /// `repeats[i]` is how many times `calls[i]`'s storm key already ran
+    /// before this batch. Earlier matching calls in this batch count too, so
+    /// the call is refused once its effective count exceeds
+    /// `max_identical_calls`. A `repeats` slice shorter than `calls` is
+    /// treated as zeros.
     pub fn check(&self, calls: &[ToolCallRequest], repeats: &[u32]) -> StormReport {
         let mut report = StormReport::default();
         let mut seen_in_batch = BTreeMap::<String, u32>::new();
         for (idx, call) in calls.iter().enumerate() {
             let already = repeats.get(idx).copied().unwrap_or(0);
-            let seen = seen_in_batch.entry(call.signature()).or_insert(0);
+            let seen = seen_in_batch.entry(call.storm_key()).or_insert(0);
             let count = already.saturating_add(*seen).saturating_add(1);
             *seen = seen.saturating_add(1);
             if count > self.max_identical_calls {
@@ -161,6 +162,29 @@ mod tests {
     #[test]
     fn zero_limit_is_clamped_to_one() {
         assert_eq!(StormBreaker::new(0).limit(), 1);
+    }
+
+    #[test]
+    fn sleep_prefixed_bash_retries_share_one_limit() {
+        // Byte-exact signatures differ; the normalized storm key must make
+        // the breaker see one repeating call (the observed 60-minute
+        // sleep+push loop would have been cut at the 4th attempt).
+        let breaker = StormBreaker::new(3);
+        let calls: Vec<ToolCallRequest> = ["5", "60", "300", "590"]
+            .iter()
+            .enumerate()
+            .map(|(idx, seconds)| {
+                ToolCallRequest::new(
+                    format!("c{idx}"),
+                    "bash",
+                    serde_json::json!({ "command": format!("sleep {seconds}; git push origin master") }),
+                )
+            })
+            .collect();
+        let report = breaker.check(&calls, &[0, 0, 0, 0]);
+        assert_eq!(report.allowed.len(), 3);
+        assert_eq!(report.suppressed.len(), 1);
+        assert_eq!(report.suppressed[0].count, 4);
     }
 
     #[test]

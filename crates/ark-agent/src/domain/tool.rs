@@ -46,6 +46,27 @@ impl ToolCallRequest {
         format!("{}:{}", self.tool, canonical_json(&self.arguments))
     }
 
+    /// Storm key: the signature with bash commands normalized.
+    ///
+    /// The breaker compares byte-exact signatures, which a one-token change
+    /// defeats while the call keeps repeating the same failed operation. The
+    /// observed case: `sleep 300; git push` → `sleep 590; git push` looped for
+    /// an hour because every sleep duration produced a fresh signature. For
+    /// `bash`, the command is normalized to its first significant verb plus
+    /// everything after the leading wait prefixes, so sleep-only retries
+    /// collapse onto one key. Other tools keep the exact signature.
+    pub fn storm_key(&self) -> String {
+        if self.tool != "bash" {
+            return self.signature();
+        }
+        let command = self
+            .arguments
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        format!("bash:{}", normalize_bash_command(command))
+    }
+
     /// The resource this call touches, used by the parallel-safety policy.
     pub fn resource(&self) -> Option<&str> {
         for key in ["path", "file_path", "filePath", "target"] {
@@ -92,6 +113,26 @@ pub fn canonical_json(value: &serde_json::Value) -> String {
     let mut out = String::new();
     walk(value, &mut out);
     out
+}
+
+/// Normalize a bash command for storm detection: strip the leading wait
+/// prefixes (`sleep N;`, `&&`-joined sleeps) and squeeze whitespace, so a
+/// retry that only changes *how long it waits before repeating the same
+/// failed operation* maps to the same key. The comparison is intentionally
+/// coarse — it bounds a failing loop, it does not fingerprint intent.
+pub fn normalize_bash_command(command: &str) -> String {
+    let mut rest = command.trim();
+    while let Some(semi) = rest.find(';') {
+        let head = rest[..semi].trim();
+        let seconds = head.strip_prefix("sleep").map(str::trim);
+        match seconds {
+            Some(value) if !value.is_empty() && value.chars().all(|c| c.is_ascii_digit()) => {
+                rest = rest[semi + 1..].trim_start();
+            }
+            _ => break,
+        }
+    }
+    rest.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// What actually happened when the reactor ran one call.
@@ -162,5 +203,55 @@ mod tests {
         assert_eq!(call.resource(), Some("x.rs"));
         let none = ToolCallRequest::new("c2", "list", serde_json::json!({}));
         assert_eq!(none.resource(), None);
+    }
+
+    #[test]
+    fn storm_key_collapses_sleep_prefixed_bash_retries() {
+        // The observed failure shape: the same git push retried behind
+        // different sleep durations for an hour, each a fresh byte-exact
+        // signature. They must share one storm key.
+        let a = ToolCallRequest::new(
+            "c1",
+            "bash",
+            serde_json::json!({"command": "sleep 300; cd repo && git push origin master"}),
+        );
+        let b = ToolCallRequest::new(
+            "c2",
+            "bash",
+            serde_json::json!({"command": "sleep 590;cd repo && git push origin master"}),
+        );
+        assert_eq!(a.storm_key(), b.storm_key());
+        // Distinct commands stay distinct.
+        let c = ToolCallRequest::new(
+            "c3",
+            "bash",
+            serde_json::json!({"command": "sleep 5; git status"}),
+        );
+        assert_ne!(a.storm_key(), c.storm_key());
+    }
+
+    #[test]
+    fn non_bash_calls_keep_the_exact_signature_as_storm_key() {
+        let a = ToolCallRequest::new("c1", "read", serde_json::json!({"path": "a.txt"}));
+        assert_eq!(a.storm_key(), a.signature());
+    }
+
+    #[test]
+    fn normalize_bash_strips_only_leading_sleeps() {
+        assert_eq!(normalize_bash_command("sleep 30; cargo test"), "cargo test");
+        assert_eq!(
+            normalize_bash_command("  sleep 5;  sleep  10;  git  push "),
+            "git push"
+        );
+        // A non-sleep prefix ends the stripping: `echo sleep` is a command.
+        assert_eq!(
+            normalize_bash_command("echo sleep; git push"),
+            "echo sleep; git push"
+        );
+        // `sleep` without a number is left in place.
+        assert_eq!(
+            normalize_bash_command("sleep $T; git push"),
+            "sleep $T; git push"
+        );
     }
 }

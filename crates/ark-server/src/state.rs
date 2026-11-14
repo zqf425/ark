@@ -68,6 +68,12 @@ pub enum TurnSource {
     },
     /// System-origin continuation consuming the durable child-completion inbox.
     AutoContinuation,
+    /// Harness recovery: the previous turn died on a transient model-request
+    /// failure and the supervisor is retrying the same request automatically.
+    /// Carries the failed request's text (re-persisted as the user message, so
+    /// the retry is a true resumption) and the 1-based attempt number written
+    /// onto the durable `turn_started`.
+    AutoRecovery { text: String, attempt: u32 },
 }
 
 /// One unit of work handed to the turn runner.
@@ -401,6 +407,10 @@ impl AppState {
                 turn_id,
                 timestamp: Utc::now(),
                 auto_continuation,
+                // The supervisor only synthesizes starts for panic/runner-error
+                // closes, never for the recovery path (which re-registers a
+                // fresh turn), so the recovery counter stays at 0 here.
+                auto_recovery: 0,
                 // The runner failed before it could journal its own start, so no
                 // attachment list was ever recorded for this turn. Reporting an
                 // empty set is honest: this turn referenced nothing.

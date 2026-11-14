@@ -274,6 +274,25 @@ impl Reactor {
         self.history.push(message);
     }
 
+    /// Write the user-visible recovery note for an automatic recovery turn.
+    ///
+    /// The previous turn died on a transient model-request failure; without
+    /// this row the recovery looks like the model answering out of nowhere.
+    /// The note is a `Notice` item: it renders in the transcript but never
+    /// enters the model seed (`conversation_history` replays only user /
+    /// assistant / checkpoint rows), so recovery bookkeeping cannot pollute
+    /// the conversation context. Best effort: a broken writer must not cost
+    /// the recovery its terminal event, mirroring `finish`.
+    pub async fn note_auto_recovery(&mut self, attempt: u32, reason: &str) {
+        let item = ThreadItem::new(self.events.turn_id, ItemKind::Notice)
+            .with_text(format!(
+                "[auto recovery #{attempt}] the previous turn failed on a transient model error \
+             ({reason}); retrying automatically"
+            ))
+            .completed();
+        let _ = self.writer.append(self.events.item_created(item)).await;
+    }
+
     /// Run the turn. Every exit path records exactly one terminal event: an
     /// I/O failure inside the loop is converged into a `Failed` outcome here
     /// instead of leaving a `turn_started` with no terminal (AG-01).

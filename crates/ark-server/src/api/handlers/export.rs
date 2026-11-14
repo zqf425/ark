@@ -180,6 +180,7 @@ mod tests {
             .append_event(
                 created.thread_id,
                 ark_contract::RuntimeEvent::TurnStarted {
+                    auto_recovery: 0,
                     seq: 0,
                     thread_id: created.thread_id,
                     turn_id: ark_common::TurnId::new(),

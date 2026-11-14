@@ -48,6 +48,7 @@ impl RuntimeEvent {
                 turn_id,
                 timestamp,
                 auto_continuation,
+                auto_recovery,
                 attachment_ids,
                 attachment_outcomes,
                 ..
@@ -57,6 +58,7 @@ impl RuntimeEvent {
                 turn_id,
                 timestamp,
                 auto_continuation,
+                auto_recovery,
                 attachment_ids,
                 attachment_outcomes,
             },

@@ -114,6 +114,7 @@ fn interaction_query_excludes_transcript_payloads() {
     state.append(event_at(thread, 1)).unwrap();
     state
         .append(RuntimeEvent::TurnStarted {
+            auto_recovery: 0,
             seq: 0,
             thread_id: thread,
             turn_id: turn,
@@ -211,6 +212,7 @@ fn rewind_rejects_a_thread_with_a_running_persisted_turn() {
     let mut state = state(&dir, thread);
     state
         .append(RuntimeEvent::TurnStarted {
+            auto_recovery: 0,
             seq: 0,
             thread_id: thread,
             turn_id: turn,

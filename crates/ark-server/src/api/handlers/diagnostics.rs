@@ -374,6 +374,7 @@ mod tests {
         let turn_b = TurnId::new();
         let events = vec![
             RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
                 seq: 1,
                 thread_id: thread,
                 turn_id: turn_a,
@@ -390,6 +391,7 @@ mod tests {
                 usage: Usage::new(100, 20).with_cache(Some(80), Some(20)),
             },
             RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
                 seq: 3,
                 thread_id: thread,
                 turn_id: turn_b,
@@ -425,6 +427,7 @@ mod tests {
         let turn = TurnId::new();
         let events = vec![
             RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
                 seq: 1,
                 thread_id: thread,
                 turn_id: turn,
@@ -491,6 +494,7 @@ mod tests {
         let thread = ThreadId::new();
         let turn = TurnId::new();
         let events = vec![RuntimeEvent::TurnStarted {
+            auto_recovery: 0,
             seq: 1,
             thread_id: thread,
             turn_id: turn,
@@ -534,6 +538,7 @@ mod tests {
             .append_event(
                 thread_id,
                 RuntimeEvent::TurnStarted {
+                    auto_recovery: 0,
                     seq: 0,
                     thread_id,
                     turn_id: turn,
@@ -613,6 +618,7 @@ mod tests {
                 .append_event(
                     thread_id,
                     RuntimeEvent::TurnStarted {
+                        auto_recovery: 0,
                         seq: 0,
                         thread_id,
                         turn_id: turn,

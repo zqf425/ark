@@ -15,6 +15,12 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+/// `skip_serializing_if` helper for additive unsigned counters: default `0`
+/// keeps old logs byte-compatible and stays parseable by ts-rs.
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
 /// The full event vocabulary from appendix B.
 ///
 /// The list is exhaustive on purpose: a renderer or a test can assert that it
@@ -311,6 +317,13 @@ pub enum RuntimeEvent {
         /// readable; delivery-attempt accounting depends on it surviving.
         #[serde(default, skip_serializing_if = "is_false")]
         auto_continuation: bool,
+        /// `true` when the turn is the harness retrying a previous turn that
+        /// died on a transient model-request failure (gateway outage, broken
+        /// stream). Carries the retry attempt number so the log records how
+        /// many recoveries one user request already consumed. Additive with a
+        /// serde default so pre-existing logs stay readable.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        auto_recovery: u32,
         /// Attachments this turn referenced, already authorized against the
         /// thread by `attachment_associated` events.
         ///
@@ -718,6 +731,7 @@ mod tests {
     #[test]
     fn seq_can_be_reassigned_by_the_writer() {
         let event = RuntimeEvent::TurnStarted {
+            auto_recovery: 0,
             seq: 0,
             thread_id: ThreadId::new(),
             turn_id: ark_common::TurnId::new(),

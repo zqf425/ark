@@ -53,6 +53,12 @@ pub async fn start_turn_as(
     raw_text: String,
     requested_attachments: Vec<ark_common::AttachmentId>,
 ) -> ark_common::Result<TurnSummary> {
+    // A recovery re-persists the failed request's text; its copy rides the
+    // source, not the caller argument.
+    let raw_text = match &source {
+        TurnSource::AutoRecovery { text, .. } => text.clone(),
+        _ => raw_text,
+    };
     if raw_text.len() > MAX_TURN_TEXT_BYTES {
         return Err(ark_common::ArkError::validation(format!(
             "turn text exceeds the {MAX_TURN_TEXT_BYTES}-byte UTF-8 limit"
@@ -106,14 +112,19 @@ pub async fn start_turn_as(
         ));
     };
     state.continuations.allow(thread_id);
+    // A turn that just failed on the model must not keep the continuation
+    // breaker's "user interrupt" suppression: an auto-recovery is supervisor
+    // work, not explicit input, but it legitimately follows a failure and
+    // should lift the pause so the recovery can run. (The breaker is
+    // re-checked inside the recovery path with the failure-streak rule.)
     // First explicit user turn on a still-placeholder thread: name the thread
     // from the message head before the worker runs, so the rename and its
     // `ThreadUpdated` event are durable before any model token streams (design
     // §7.9). Only `TurnSource::User` names: IM threads already derive a title
-    // from the first inbound message, auto-continuations have no composer text,
-    // and the review/scheduler prompts are system text, not a user-chosen name.
-    // Naming is best effort: a failure here keeps the placeholder and must
-    // never fail the turn that was already accepted.
+    // from the first inbound message, auto-continuations and recoveries carry
+    // no composer text, and the review/scheduler prompts are system text, not
+    // a user-chosen name. Naming is best effort: a failure here keeps the
+    // placeholder and must never fail the turn that was already accepted.
     if matches!(source, TurnSource::User(_)) {
         crate::service::thread_titles::name_thread_on_first_turn(
             state.store.as_ref(),
@@ -146,6 +157,14 @@ pub fn spawn_turn(state: AppState, job: TurnJob) {
     let turn_id = job.turn_id;
     let thread_id = job.thread_id;
     let is_auto_continuation = matches!(&job.source, TurnSource::AutoContinuation);
+    // Recovery bookkeeping survives the move of `job` into the worker: the
+    // failed attempt's origin decides whether the supervisor schedules the
+    // next attempt and with which text/attempt number.
+    let recovery = match &job.source {
+        TurnSource::AutoRecovery { text, attempt } => Some((text.clone(), *attempt)),
+        TurnSource::User(text) | TurnSource::Im { text, .. } => Some((text.clone(), 0)),
+        TurnSource::AutoContinuation => None,
+    };
     let turns = Arc::clone(&state.turns);
     let runner = Arc::clone(&state.runner);
     let supervisor_state = state.clone();
@@ -222,6 +241,37 @@ pub fn spawn_turn(state: AppState, job: TurnJob) {
                         .await;
                 }
             }
+            TurnEnd::Failed {
+                message,
+                model_request_failed: true,
+            } => {
+                // A model-request failure is usually transient (gateway
+                // blip, broken stream): without automatic recovery every
+                // outage pushed the user into manually retyping "继续" (17
+                // historical turn_failed produced 17 manual retries, 12 of
+                // which succeeded unchanged). The supervisor retries the same
+                // request with backoff; the circuit breaker in
+                // `schedule_recovery` bounds both the per-request attempts
+                // and the provider-outage hammering, so a dead gateway can
+                // neither loop forever nor restart its own retry chain.
+                if let Some((text, previous)) = recovery {
+                    let attempt = if previous == 0 { 1 } else { previous + 1 };
+                    crate::service::schedule_recovery(
+                        supervisor_state,
+                        thread_id,
+                        Some(text),
+                        attempt,
+                        message,
+                    )
+                    .await;
+                } else {
+                    tracing::warn!(
+                        thread = %thread_id,
+                        %message,
+                        "model-request failure on a continuation turn; awaiting explicit input or a new child completion"
+                    );
+                }
+            }
             TurnEnd::Failed { .. } | TurnEnd::Aborted(_) if is_auto_continuation => {
                 tracing::warn!(
                     turn = %turn_id,
@@ -241,7 +291,18 @@ pub(crate) fn turn_source_label(source: &TurnSource) -> &'static str {
         TurnSource::User(_) => "user",
         TurnSource::Im { .. } => "im",
         TurnSource::AutoContinuation => "auto_continuation",
+        TurnSource::AutoRecovery { .. } => "auto_recovery",
     }
+}
+
+/// True when this job is harness-origin (auto-continuation or auto-recovery).
+/// Such turns are supervisor work: their lifecycle hooks report the system
+/// label and a failed attempt is retried by the supervisor, not the user.
+pub(crate) fn is_system_origin(source: &TurnSource) -> bool {
+    matches!(
+        source,
+        TurnSource::AutoContinuation | TurnSource::AutoRecovery { .. }
+    )
 }
 
 #[cfg(test)]

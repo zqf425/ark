@@ -19,6 +19,10 @@ pub struct TurnEvents {
     /// Marks the `turn_started` event as supervisor-scheduled, so the
     /// auto-continuation delivery-attempt accounting survives restarts.
     auto_continuation: bool,
+    /// Recovery attempt number for harness-retried turns (`0` = not a
+    /// recovery); written onto `turn_started` so the log records how many
+    /// automatic recoveries one user request consumed.
+    auto_recovery: u32,
     /// Attachments already associated with the thread. Phase one records the
     /// ids; phase two adds the per-attachment delivery outcome beside them.
     attachment_ids: Vec<AttachmentId>,
@@ -32,6 +36,7 @@ impl TurnEvents {
             thread_id,
             turn_id,
             auto_continuation: false,
+            auto_recovery: 0,
             attachment_ids: Vec::new(),
             attachment_outcomes: Vec::new(),
         }
@@ -44,9 +49,24 @@ impl TurnEvents {
             thread_id,
             turn_id,
             auto_continuation: true,
+            auto_recovery: 0,
             attachment_ids: Vec::new(),
             attachment_outcomes: Vec::new(),
         }
+    }
+
+    /// Mark this turn as the `attempt`-th automatic recovery of a turn that
+    /// died on a transient model-request failure. The count lands on the
+    /// durable `turn_started` event, so the log shows both that the harness
+    /// retried and how many attempts one user request consumed.
+    pub fn with_auto_recovery(mut self, attempt: u32) -> Self {
+        self.auto_recovery = attempt;
+        self
+    }
+
+    /// Recovery attempt recorded on this turn (`0` = an ordinary turn).
+    pub fn auto_recovery(&self) -> u32 {
+        self.auto_recovery
     }
 
     /// Attach the authorized attachment ids to this turn's `turn_started`.
@@ -83,6 +103,7 @@ impl TurnEvents {
             turn_id: self.turn_id,
             timestamp: Utc::now(),
             auto_continuation: self.auto_continuation,
+            auto_recovery: self.auto_recovery,
             attachment_ids: self.attachment_ids.clone(),
             attachment_outcomes: self.attachment_outcomes.clone(),
         }

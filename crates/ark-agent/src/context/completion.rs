@@ -65,6 +65,39 @@ pub fn auto_delivery_attempts(events: &[RuntimeEvent]) -> HashMap<String, usize>
     attempts
 }
 
+/// How many consecutive model-request terminations one supervisor tolerates
+/// before pausing its automatic work on a thread. Shared by the
+/// auto-continuation supervisor and the recovery supervisor so both fail
+/// identically on a dead provider.
+pub const RECOVERY_MODEL_FAILURE_STREAK_LIMIT: usize = 2;
+
+/// Counts trailing turns that failed on the model request itself, derived
+/// from the durable interaction log. Any other terminal event (user turn,
+/// completion, abort, or a non-model failure such as a tool or policy error)
+/// breaks the streak, because the provider outage is over.
+///
+/// Unlike [`consecutive_auto_model_request_failures`], this counts every
+/// model-request termination regardless of turn origin, so the recovery
+/// supervisor's breaker also sees user-turn failures: a gateway outage kills
+/// user turns and recoveries alike, and both must stop hammering it.
+pub fn consecutive_model_request_failures(events: &[RuntimeEvent]) -> usize {
+    let mut streak = 0usize;
+    for event in events {
+        match event {
+            RuntimeEvent::TurnFailed {
+                model_request_failed: true,
+                ..
+            } => streak += 1,
+            RuntimeEvent::TurnFailed { .. }
+            | RuntimeEvent::TurnStarted { .. }
+            | RuntimeEvent::TurnCompleted { .. }
+            | RuntimeEvent::TurnAborted { .. } => streak = 0,
+            _ => {}
+        }
+    }
+    streak
+}
+
 /// Counts trailing continuations that failed on the model request itself,
 /// derived from the durable interaction log. Any other terminal event (user
 /// turn, completion, abort, or a non-model failure such as a tool or policy
@@ -236,6 +269,7 @@ mod delivery_bound_tests {
             turn_id: TurnId::new(),
             timestamp: Utc::now(),
             auto_continuation: true,
+            auto_recovery: 0,
             attachment_ids: Vec::new(),
             attachment_outcomes: Vec::new(),
         }
@@ -265,6 +299,7 @@ mod delivery_bound_tests {
                 turn_id: TurnId::new(),
                 timestamp: Utc::now(),
                 auto_continuation: false,
+                auto_recovery: 0,
                 attachment_ids: Vec::new(),
                 attachment_outcomes: Vec::new(),
             },
@@ -290,5 +325,46 @@ mod delivery_bound_tests {
         assert_eq!(consecutive_auto_model_request_failures(&events), 2);
         let events = vec![auto_started(), failed(true), failed(false), failed(true)];
         assert_eq!(consecutive_auto_model_request_failures(&events), 1);
+    }
+
+    #[test]
+    fn recovery_streak_counts_every_model_failure_and_resets_on_any_progress() {
+        let failed = |model: bool| RuntimeEvent::TurnFailed {
+            seq: 0,
+            thread_id: ark_common::ThreadId::new(),
+            turn_id: TurnId::new(),
+            timestamp: Utc::now(),
+            message: "x".into(),
+            model_request_failed: model,
+        };
+        let any_turn = || RuntimeEvent::TurnStarted {
+            seq: 0,
+            thread_id: ark_common::ThreadId::new(),
+            turn_id: TurnId::new(),
+            timestamp: Utc::now(),
+            auto_continuation: false,
+            auto_recovery: 0,
+            attachment_ids: Vec::new(),
+            attachment_outcomes: Vec::new(),
+        };
+        // Consecutive model failures across origins (user turn + recoveries)
+        // accumulate: a gateway outage kills both alike.
+        let events = vec![any_turn(), failed(true), failed(true), failed(true)];
+        assert_eq!(consecutive_model_request_failures(&events), 3);
+        // Any non-model terminal event resets the streak: the outage is over.
+        let events = vec![failed(true), failed(true), failed(false), failed(true)];
+        assert_eq!(consecutive_model_request_failures(&events), 1);
+        // A completion resets it too.
+        let events = vec![
+            failed(true),
+            RuntimeEvent::TurnCompleted {
+                seq: 0,
+                thread_id: ark_common::ThreadId::new(),
+                turn_id: TurnId::new(),
+                timestamp: Utc::now(),
+            },
+            failed(true),
+        ];
+        assert_eq!(consecutive_model_request_failures(&events), 1);
     }
 }

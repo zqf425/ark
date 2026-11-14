@@ -102,6 +102,7 @@ fn prepare_compacted_writer_checkpoint(
     let mut writer = open_writer(paths.clone(), thread, Arc::new(MemoryDiagnostics::new()));
     writer
         .append(RuntimeEvent::TurnStarted {
+            auto_recovery: 0,
             seq: 0,
             thread_id: thread,
             turn_id: turn,
