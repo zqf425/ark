@@ -9,9 +9,36 @@ import { childCompletionStatusKey } from '../child-completion-status'
 import { useCodeSessionStore } from '../state/store'
 import { childRunMeta } from './child-run-meta'
 import { ChildRunViewer } from './ChildRunViewer'
+import { ChildRunStatusDot } from './ChildRunStatusDot'
 
 function describe(error: unknown): string {
   return describeError(error, translateNow)
+}
+
+/**
+ * Lifecycle state of one child run, resolved once per render: the status dot
+ * class, the chip class and the busy/resumable flags all derive from it, so no
+ * call site re-derives "is this one running?" from the raw status string.
+ */
+function statusOf(child: ChildRunSummary): {
+  state: 'queued' | 'running' | 'completed' | 'failed' | 'aborted' | 'ended'
+  active: boolean
+  resumable: boolean
+} {
+  switch (child.status) {
+    case 'queued':
+      return { state: 'queued', active: true, resumable: false }
+    case 'running':
+      return { state: 'running', active: true, resumable: false }
+    case 'completed':
+      return { state: 'completed', active: false, resumable: false }
+    case 'failed':
+      return { state: 'failed', active: false, resumable: true }
+    case 'aborted':
+      return { state: 'aborted', active: false, resumable: true }
+    default:
+      return { state: 'ended', active: false, resumable: false }
+  }
 }
 
 /**
@@ -35,8 +62,9 @@ function ChildRunRow({
   const [busy, setBusy] = useState<string | null>(null)
   const [steerDraft, setSteerDraft] = useState('')
 
-  const active = child.status === 'queued' || child.status === 'running'
-  const resumable = child.status === 'failed' || child.status === 'aborted'
+  const status = statusOf(child)
+  const active = status.active
+  const resumable = status.resumable
   const meta = childRunMeta(child)
 
   const run = async (key: string, action: () => Promise<unknown>): Promise<void> => {
@@ -59,23 +87,41 @@ function ChildRunRow({
   }
 
   return (
-    <div className={`ark-childruns__row${expanded ? ' is-open' : ''}`}>
-      <button type="button" className="ark-childruns__summary" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}>
-        <span className={`ark-childruns__caret${expanded ? ' is-open' : ''}`} aria-hidden="true">▸</span>
-        <span className={`ark-chip ${active ? 'ark-chip--live' : child.status === 'completed' ? 'ark-chip--ok' : 'ark-chip--error'}`}>
+    <div className={`ark-childcard${expanded ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className="ark-childcard__head"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+      >
+        <span className={`ark-childcard__chevron${expanded ? ' is-open' : ''}`} aria-hidden="true">
+          {expanded ? '▾' : '▸'}
+        </span>
+        <ChildRunStatusDot state={status.state} />
+        <span className="ark-childcard__label" title={child.label}>
+          {child.label}
+        </span>
+        {meta.length > 0 ? (
+          <span className="ark-childcard__meta">{meta.map((part) => t(part.key, part.params)).join(' · ')}</span>
+        ) : null}
+        <span className={`ark-chip ${active ? 'ark-chip--live' : status.state === 'completed' ? 'ark-chip--ok' : status.state === 'queued' ? '' : 'ark-chip--error'}`}>
           {t(childCompletionStatusKey(child.status))}
         </span>
-        <strong>{child.label}</strong>
-        {meta.length > 0 ? <span className="ark-childruns__meta">{meta.map((part) => t(part.key, part.params)).join(' · ')}</span> : null}
       </button>
-      {child.summary || child.error ? <p className="ark-childruns__outcome">{child.summary ?? child.error}</p> : null}
+      {child.summary || child.error ? (
+        <p className="ark-childcard__outcome">{child.summary ?? child.error}</p>
+      ) : null}
       {expanded ? (
-        <div className="ark-childruns__viewer">
+        <div className="ark-childcard__viewer">
+          <div className="ark-childcard__viewerHead">
+            <span className="ark-childcard__viewerTitle">{t('canvas.childRuns.viewerTitle')}</span>
+            {active ? <span className="ark-dot ark-dot--live" aria-hidden="true" /> : null}
+          </div>
           <ChildRunViewer threadId={threadId} childId={child.id} active={active} />
           {active ? (
-            <div className="ark-childruns__steer">
+            <div className="ark-childcard__steer">
               <textarea
-                className="ark-childruns__steerInput"
+                className="ark-childcard__steerInput"
                 rows={2}
                 value={steerDraft}
                 placeholder={t('canvas.childRuns.steerPlaceholder')}
@@ -169,5 +215,22 @@ export function ChildRunsPanel({ threadId }: { threadId: string }): JSX.Element 
   }, [threadId, childRunRevision])
 
   if (!data || data.child_runs.length === 0) return null
-  return <section className="ark-childruns"><header><strong>{t('canvas.childRuns.title')}</strong><span>{t('canvas.childRuns.active', { count: data.active })}</span></header>{data.child_runs.map((child) => <ChildRunRow key={child.id} threadId={threadId} child={child} onChanged={refresh} />)}</section>
+  return (
+    <section className="ark-childruns">
+      <header>
+        <span className="ark-childruns__heading">
+          <span className="ark-childruns__glyph" aria-hidden="true" />
+          <strong>{t('canvas.childRuns.title')}</strong>
+        </span>
+        <span className="ark-childruns__count" data-active={data.active > 0 ? 'yes' : 'no'}>
+          {data.active > 0 ? t('canvas.childRuns.active', { count: data.active }) : t('canvas.childRuns.idle', { count: data.child_runs.length })}
+        </span>
+      </header>
+      <div className="ark-childruns__list">
+        {data.child_runs.map((child) => (
+          <ChildRunRow key={child.id} threadId={threadId} child={child} onChanged={refresh} />
+        ))}
+      </div>
+    </section>
+  )
 }

@@ -132,6 +132,8 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.child.meta.resumed': ['已恢复 {count} 次', 'Resumed {count} times'],
 
   'canvas.childRuns.title': ['子代理', 'Subagents'],
+  'canvas.childRuns.idle': ['{count} 个已完成', '{count} finished'],
+  'canvas.childRuns.viewerTitle': ['执行过程', 'Execution trace'],
   'canvas.childRuns.active': ['{count} 活跃', '{count} active'],
   'canvas.childRuns.abort': ['终止', 'Abort'],
   'canvas.childRuns.aborting': ['终止中…', 'Aborting…'],

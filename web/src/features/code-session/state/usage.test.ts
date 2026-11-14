@@ -109,6 +109,7 @@ describe('reducer round streaming window', () => {
       turn_id: TURN_ID,
       timestamp: '2026-10-28T00:02:00.000Z',
       auto_continuation: false,
+      auto_recovery: 0,
       attachment_ids: [],
       attachment_outcomes: []
     })

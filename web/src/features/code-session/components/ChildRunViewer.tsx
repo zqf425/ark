@@ -97,7 +97,12 @@ export function ChildRunViewer({
     return <p className="ark-childruns__viewError">{error}</p>
   }
   if (!transcript) {
-    return <p className="ark-childruns__viewHint">{t('canvas.childRuns.viewerLoading')}</p>
+    return (
+      <div className="ark-childruns__loading" role="status">
+        <span className="ark-childdot is-running" aria-hidden="true" />
+        <span>{t('canvas.childRuns.viewerLoading')}</span>
+      </div>
+    )
   }
   return (
     <div className="ark-childruns__viewerBody">
@@ -110,7 +115,12 @@ export function ChildRunViewer({
         })
       )}
       {error ? <p className="ark-childruns__viewError">{t('canvas.childRuns.viewerStale', { error })}</p> : null}
-      {active ? <p className="ark-childruns__viewHint">{t('canvas.childRuns.viewerLive')}</p> : null}
+      {active ? (
+        <p className="ark-childruns__live">
+          <span className="ark-childdot is-running" aria-hidden="true" />
+          {t('canvas.childRuns.viewerLive')}
+        </p>
+      ) : null}
     </div>
   )
 }

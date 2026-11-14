@@ -495,6 +495,7 @@ describe('items reducer turn_failed', () => {
       turn_id: TURN_ID,
       timestamp: '2026-10-28T00:00:00Z',
       auto_continuation: false,
+      auto_recovery: 0,
       attachment_ids: [],
       attachment_outcomes: []
     })

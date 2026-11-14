@@ -39,6 +39,7 @@
 .ark-toolresult,
 .ark-gate,
 .ark-childruns,
+.ark-childcard,
 .ark-childcompletion,
 .ark-hero-stage__window {
   border-radius: var(--ark-radius);
