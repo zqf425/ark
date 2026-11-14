@@ -182,7 +182,8 @@ export const AssistantBubble = memo(function AssistantBubble({ item }: { item: T
 
 /**
  * The turn's settled final reply, framed like smart-ark's answer card: a
- * check-marked "final reply" title row above a hairline rule, the prose below.
+ * check-marked "final reply" title row above a hairline rule, the prose below,
+ * and the copy action on a footer row at the card's bottom-right.
  *
  * Kept visually separate from the inline narration bubbles so the turn reads
  * as "process → answer". `AssistantBubble` stays for rows inside the process
@@ -207,20 +208,22 @@ export const FinalReplyCard = memo(function FinalReplyCard({ item }: { item: Thr
         <span className="ark-reply__title">{t('canvas.reply.title')}</span>
         {aborted ? <span className="ark-chip ark-chip--muted">{t('canvas.aborted')}</span> : null}
         {failed ? <span className="ark-chip ark-chip--error">{t('canvas.failed')}</span> : null}
-        {!streaming && text ? (
-          <CopyButton
-            text={text}
-            label={t('canvas.copy.message')}
-            copiedLabel={t('canvas.copy.copied')}
-            className="ark-msg__copy ark-reply__copy"
-          />
-        ) : null}
       </header>
       <div className="ark-reply__body">
         <Markdown text={text} />
         {streaming ? <span className="ark-caret" aria-label={t('canvas.generating')} /> : null}
       </div>
       {item.detail ? <p className="ark-msg__detail">{item.detail}</p> : null}
+      {!streaming && text ? (
+        <footer className="ark-reply__foot">
+          <CopyButton
+            text={text}
+            label={t('canvas.copy.message')}
+            copiedLabel={t('canvas.copy.copied')}
+            className="ark-reply__copy"
+          />
+        </footer>
+      ) : null}
     </article>
   )
 })
