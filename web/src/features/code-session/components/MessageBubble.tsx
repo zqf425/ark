@@ -8,6 +8,7 @@ import type {
 import { formatClock } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
 import { Markdown } from '../../../shared/ui/Markdown'
+import { CopyButton } from '../../../shared/ui/copy'
 
 /*
  * Rows are memoized on their `item` object. The reducer keeps the identity of
@@ -63,13 +64,20 @@ export function AttachmentChips({ outcomes }: { outcomes: TurnAttachmentOutcome[
 /** User message bubble. Text is the runtime's accumulated `text`, verbatim. */
 export const UserBubble = memo(function UserBubble({ item }: { item: ThreadItem }): JSX.Element {
   const { t, locale } = useI18n()
+  const text = item.text ?? ''
   return (
     <article className="ark-msg ark-msg--user">
       <header className="ark-msg__head">
         <span className="ark-msg__author">{t('canvas.author.you')}</span>
         <time className="ark-msg__time">{formatClock(item.created_at, locale)}</time>
+        <CopyButton
+          text={text}
+          label={t('canvas.copy.message')}
+          copiedLabel={t('canvas.copy.copied')}
+          className="ark-msg__copy"
+        />
       </header>
-      <div className="ark-msg__body">{item.text ?? ''}</div>
+      <div className="ark-msg__body">{text}</div>
       {item.attachments && item.attachments.length > 0 ? (
         <AttachmentChips outcomes={item.attachments} />
       ) : null}
@@ -79,13 +87,16 @@ export const UserBubble = memo(function UserBubble({ item }: { item: ThreadItem 
 
 /**
  * Assistant bubble. `streaming` only drives the caret: the text itself is never
- * re-parsed or re-assembled on the client.
+ * re-parsed or re-assembled on the client. The copy button appears once the
+ * turn stops streaming — mid-stream the text is still growing, so a snapshot
+ * copy would mislead.
  */
 export const AssistantBubble = memo(function AssistantBubble({ item }: { item: ThreadItem }): JSX.Element {
   const { t, locale } = useI18n()
   const streaming = item.status === 'streaming' || item.status === 'pending'
   const failed = item.status === 'failed'
   const aborted = item.status === 'aborted'
+  const text = item.text ?? ''
 
   return (
     <article className={`ark-msg ark-msg--assistant${failed ? ' is-failed' : ''}`}>
@@ -94,9 +105,17 @@ export const AssistantBubble = memo(function AssistantBubble({ item }: { item: T
         <time className="ark-msg__time">{formatClock(item.created_at, locale)}</time>
         {aborted ? <span className="ark-chip ark-chip--muted">{t('canvas.aborted')}</span> : null}
         {failed ? <span className="ark-chip ark-chip--error">{t('canvas.failed')}</span> : null}
+        {!streaming && text ? (
+          <CopyButton
+            text={text}
+            label={t('canvas.copy.message')}
+            copiedLabel={t('canvas.copy.copied')}
+            className="ark-msg__copy"
+          />
+        ) : null}
       </header>
       <div className="ark-msg__body ark-msg__body--prose">
-        <Markdown text={item.text ?? ''} />
+        <Markdown text={text} />
         {streaming ? <span className="ark-caret" aria-label={t('canvas.generating')} /> : null}
       </div>
       {item.detail ? <p className="ark-msg__detail">{item.detail}</p> : null}

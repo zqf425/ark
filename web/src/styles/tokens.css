@@ -66,6 +66,7 @@
   /* code surfaces */
   --ark-code-block-bg: #f6f8f9;
   --ark-code-block-border: #e1e5e9;
+  --ark-code-block-bar-bg: #f0f3f5;
   --ark-inline-code-bg: #edf0f2;
   --ark-terminal-bg: #f6f8f9;
   --ark-terminal-text: #4e5965;

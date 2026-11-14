@@ -6,10 +6,10 @@
  * degraded or skipped attachment is visible instead of silently missing.
  * Items without attachments render exactly as before.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { ThreadItem, TurnAttachmentOutcome } from '../../../shared/contracts'
 import { installBrowserStubs, mountWithProviders } from '../../../shared/testing/react-harness'
-import { UserBubble } from './MessageBubble'
+import { UserBubble, AssistantBubble } from './MessageBubble'
 
 installBrowserStubs()
 
@@ -95,5 +95,64 @@ describe('UserBubble attachments', () => {
     const chip = harness.host.querySelector('.ark-msg__attachments .ark-chip')
     expect(chip?.textContent).toContain('00000000-0000-0000-0000-100000000001')
     expect(chip?.className).toContain('ark-chip--warn')
+  })
+})
+
+describe('气泡一键复制', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'clipboard')
+  })
+
+  function stubClipboard(written: string[]): void {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: (text: string) => Promise.resolve(written.push(text)) },
+      configurable: true,
+      writable: true
+    })
+  }
+
+  it('用户气泡元信息行带复制按钮,点击复制消息原文', async () => {
+    const written: string[] = []
+    stubClipboard(written)
+    const harness = await mountWithProviders(<UserBubble item={userItem()} />)
+    const button = harness.host.querySelector('.ark-msg__copy')
+    expect(button).not.toBeNull()
+    expect(button?.getAttribute('aria-label')).toBe('复制消息')
+    await import('react').then(({ act }) =>
+      act(async () => {
+        button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+    )
+    expect(written).toEqual(['看看这张图'])
+    expect(button?.className).toContain('is-copied')
+    await harness.unmount()
+  })
+
+  it('助手气泡流式时不渲染复制按钮,完成后可复制原文', async () => {
+    const written: string[] = []
+    stubClipboard(written)
+    const streaming = userItem({
+      item_id: '00000000-0000-0000-0000-0000000000a1',
+      kind: 'assistant_message',
+      status: 'streaming',
+      text: '# 标题\n\n正文'
+    })
+    const done: ThreadItem = { ...streaming, status: 'completed' }
+    const live = await mountWithProviders(<AssistantBubble item={streaming} />)
+    expect(live.host.querySelector('.ark-msg__copy')).toBeNull()
+    await live.unmount()
+
+    const harness = await mountWithProviders(<AssistantBubble item={done} />)
+    const button = harness.host.querySelector('.ark-msg__copy')
+    expect(button).not.toBeNull()
+    await import('react').then(({ act }) =>
+      act(async () => {
+        button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+    )
+    expect(written).toEqual(['# 标题\n\n正文'])
+    await harness.unmount()
   })
 })

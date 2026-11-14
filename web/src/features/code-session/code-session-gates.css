@@ -145,6 +145,28 @@
   color: var(--ark-text-placeholder);
 }
 
+/* Draft copy floats over the textarea's top-right corner; the textarea keeps
+   the first line clear through its padding-right. */
+.ark-composer__copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+}
+
+/* Queued chips carry an inline copy glyph between the label and the remove ×. */
+.ark-composer__queue .ark-chip__copy {
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+  opacity: 0.72;
+}
+
+.ark-composer__queue .ark-chip__copy svg {
+  width: 12px;
+  height: 12px;
+}
+
 /* In-shell toolbar: hairline above, quiet controls left, actions right. */
 .ark-composer__actions {
   display: flex;

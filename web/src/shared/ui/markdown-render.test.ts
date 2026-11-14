@@ -23,9 +23,25 @@ describe('renderMarkdown', () => {
 
   it('未知名语言的代码块仍被转义展示', () => {
     const html = renderMarkdown('```weirdlang\n<b>&raw\n```\n')
-    // highlightAuto may wrap the text in spans; the security property is that
-    // the source never appears as raw markup.
-    expect(html).toContain('&lt;')
-    expect(html).not.toContain('<b>')
+    // The security property is structural: parsing the output must yield no
+    // element from the source. (A string scan would false-positive on the
+    // quoted `data-copy-source` attribute, where a literal `<` is legal.)
+    const host = document.createElement('div')
+    host.innerHTML = html
+    expect(host.querySelector('b')).toBeNull()
+    expect(host.querySelector('pre code')?.textContent).toContain('<b>&raw')
+  })
+
+  it('代码块带语言标签与复制按钮,复制源是原始代码', () => {
+    const html = renderMarkdown('```ts\nconst a = 1\n```\n')
+    expect(html).toContain('ark-md-code__bar')
+    expect(html).toContain('ark-md-code__lang">ts')
+    expect(html).toContain('data-md-copy')
+    expect(html).toContain('data-copy-source="const a = 1"')
+  })
+
+  it('无语言标注的代码块语言标签回落为 text', () => {
+    const html = renderMarkdown('```\nplain\n```\n')
+    expect(html).toContain('ark-md-code__lang">text')
   })
 })
