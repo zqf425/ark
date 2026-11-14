@@ -4,11 +4,9 @@ param()
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 # Keep in sync with AGENTS.md section 4: the repo-wide limit is 1000 lines.
-# Only files genuinely over that limit belong here; files between 800 and 1000
-# are compliant and must not be grandfathered.
-$exceptions = [System.Collections.Generic.HashSet[string]]::new([string[]]@(
-    'crates/ark-agent/src/service/reactor.rs'
-))
+# No file may exceed it; the previous single grandfathered entry
+# (crates/ark-agent/src/service/reactor.rs) was split back under the limit.
+$exceptions = [System.Collections.Generic.HashSet[string]]::new([string[]]@())
 $violations = [System.Collections.Generic.List[string]]::new()
 
 Get-ChildItem -Path (Join-Path $root 'crates'), (Join-Path $root 'apps') -Recurse -File -Filter '*.rs' |

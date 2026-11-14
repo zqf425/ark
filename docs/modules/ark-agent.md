@@ -68,4 +68,6 @@ HTTP 侧批准一条策略表明确拒绝的调用。
 ## 验证
 
 状态迁移和 policy 均应脱离 I/O 单测；取消、审批、工具失败、模型流失败和持久化失败须覆盖
-收敛到终态的路径。
+收敛到终态的路径。reactor 的内联单测宿主在 `service/reactor/tests/reactor_stream_tests.rs`
+（经 `#[path]` 挂回 `reactor.rs` 的 `tests` 模块），gate 与回归套件同目录并列；`reactor.rs`
+与测试文件分别遵守单文件行数上限。

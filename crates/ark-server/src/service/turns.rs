@@ -295,16 +295,6 @@ pub(crate) fn turn_source_label(source: &TurnSource) -> &'static str {
     }
 }
 
-/// True when this job is harness-origin (auto-continuation or auto-recovery).
-/// Such turns are supervisor work: their lifecycle hooks report the system
-/// label and a failed attempt is retried by the supervisor, not the user.
-pub(crate) fn is_system_origin(source: &TurnSource) -> bool {
-    matches!(
-        source,
-        TurnSource::AutoContinuation | TurnSource::AutoRecovery { .. }
-    )
-}
-
 #[cfg(test)]
 mod tests {
     //! The turn-level hook seams are asserted here because both registration

@@ -110,9 +110,31 @@ fn desktop_cors() -> CorsLayer {
 }
 
 /// Every route that requires authentication.
+///
+/// One private builder per resource domain keeps each function short and gives
+/// a new route an obvious home; the merged result is still the single
+/// auditable surface this file owns.
 fn protected_routes() -> Router<AppState> {
+    thread_routes()
+        .merge(turn_routes())
+        .merge(diagnostics_routes())
+        .merge(lifecycle_routes())
+        .merge(platform_service_routes())
+        .merge(settings_routes())
+        .merge(workbench_routes())
+        .merge(gate_routes())
+        .merge(memory_routes())
+        .merge(child_run_routes())
+        .merge(session_routes())
+        .merge(schedule_routes())
+        .merge(im_routes())
+        .merge(subagent_routes())
+        .merge(pending_routes())
+}
+
+/// Thread CRUD, fork, rewind, review and export.
+fn thread_routes() -> Router<AppState> {
     Router::new()
-        // ---- threads ----
         .route(
             "/v1/threads",
             get(crate::api::handlers::threads::list)
@@ -125,7 +147,27 @@ fn protected_routes() -> Router<AppState> {
                 .patch(crate::api::handlers::threads::update)
                 .delete(crate::api::handlers::threads::remove),
         )
-        // ---- turns ----
+        .route(
+            "/v1/threads/{id}/fork",
+            post(crate::api::handlers::threads::fork),
+        )
+        .route(
+            "/v1/threads/{id}/rewind",
+            post(crate::api::handlers::rewind::rewind),
+        )
+        .route(
+            "/v1/threads/{id}/review",
+            post(crate::api::handlers::review::review),
+        )
+        .route(
+            "/v1/threads/{id}/export",
+            get(crate::api::handlers::export::export),
+        )
+}
+
+/// Turn start, projection, steering and interruption.
+fn turn_routes() -> Router<AppState> {
+    Router::new()
         .route(
             "/v1/threads/{id}/turns",
             post(crate::api::handlers::turns::start),
@@ -146,12 +188,17 @@ fn protected_routes() -> Router<AppState> {
             "/v1/threads/{id}/compact",
             post(crate::api::handlers::turns::compact),
         )
-        // ---- events (SSE) ----
+        // The SSE stream is the turn-attached event edge, so it lives beside
+        // the turn routes instead of the diagnostics block.
         .route(
             "/v1/threads/{id}/events",
             get(crate::api::handlers::events::stream),
         )
-        // ---- diagnostics ----
+}
+
+/// Runtime introspection: tool/capability catalog, usage and LLM round logs.
+fn diagnostics_routes() -> Router<AppState> {
+    Router::new()
         .route("/v1/runtime/info", get(crate::api::handlers::runtime::info))
         .route(
             "/v1/runtime/tools",
@@ -163,20 +210,27 @@ fn protected_routes() -> Router<AppState> {
         )
         .route("/v1/usage", get(crate::api::handlers::runtime::usage))
         .route(
+            "/v1/threads/{id}/usage",
+            get(crate::api::handlers::diagnostics::thread_usage),
+        )
+        .route(
             "/v1/debug/llm-rounds",
             get(crate::api::handlers::diagnostics::llm_rounds),
         )
-        // ---- config (single entry point) ----
-        .route(
-            "/v1/runtime/config",
-            get(crate::api::handlers::config_view::view).post(crate::api::handlers::config::apply),
-        )
-        // ---- lifecycle ----
-        .route(
-            "/v1/shutdown",
-            post(crate::api::handlers::runtime::shutdown),
-        )
-        // ---- platform services (design §7.5.4) ----
+}
+
+/// Process shutdown.
+fn lifecycle_routes() -> Router<AppState> {
+    Router::new().route(
+        "/v1/shutdown",
+        post(crate::api::handlers::runtime::shutdown),
+    )
+}
+
+/// Platform services under `/v1/runtime` (design §7.5.4): providers, skills,
+/// workspace, MCP servers and the plugin host report.
+fn platform_service_routes() -> Router<AppState> {
+    Router::new()
         .route(
             "/v1/runtime/providers",
             get(crate::api::handlers::base::providers_list)
@@ -252,11 +306,29 @@ fn protected_routes() -> Router<AppState> {
             "/v1/runtime/plugins/{id}/enable",
             post(crate::api::handlers::base::plugin_enable),
         )
-        // ---- thread planning, gates, workbench projections and child runs ----
+}
+
+/// Settings surface: the single config entry point plus the thread-scoped
+/// skill listing/refresh.
+fn settings_routes() -> Router<AppState> {
+    Router::new()
         .route(
-            "/v1/threads/{id}/fork",
-            post(crate::api::handlers::threads::fork),
+            "/v1/runtime/config",
+            get(crate::api::handlers::config_view::view).post(crate::api::handlers::config::apply),
         )
+        .route(
+            "/v1/threads/{id}/skills",
+            get(crate::api::handlers::base::thread_skills),
+        )
+        .route(
+            "/v1/threads/{id}/skills/refresh",
+            post(crate::api::handlers::base::thread_skills_refresh),
+        )
+}
+
+/// Per-thread workbench projections: plan, changes, files and terminal.
+fn workbench_routes() -> Router<AppState> {
+    Router::new()
         .route(
             "/v1/threads/{id}/plan",
             get(crate::api::handlers::workbench::plan),
@@ -285,18 +357,11 @@ fn protected_routes() -> Router<AppState> {
                 .post(crate::api::handlers::workbench::update_todos)
                 .delete(crate::api::handlers::workbench::clear_todos),
         )
-        .route(
-            "/v1/threads/{id}/skills",
-            get(crate::api::handlers::base::thread_skills),
-        )
-        .route(
-            "/v1/threads/{id}/usage",
-            get(crate::api::handlers::diagnostics::thread_usage),
-        )
-        .route(
-            "/v1/threads/{id}/skills/refresh",
-            post(crate::api::handlers::base::thread_skills_refresh),
-        )
+}
+
+/// Interactive gate resolution: approvals and user-input asks.
+fn gate_routes() -> Router<AppState> {
+    Router::new()
         .route(
             "/v1/approvals/{id}",
             post(crate::api::handlers::gates::resolve_approval),
@@ -305,10 +370,16 @@ fn protected_routes() -> Router<AppState> {
             "/v1/user-inputs/{id}",
             post(crate::api::handlers::gates::resolve_user_input),
         )
+        // Compatibility alias kept for the first shipped renderer.
         .route(
             "/v1/user-input/{id}",
             post(crate::api::handlers::gates::resolve_user_input),
         )
+}
+
+/// Long-term memory CRUD and diagnostics.
+fn memory_routes() -> Router<AppState> {
+    Router::new()
         .route(
             "/v1/memory",
             get(crate::api::handlers::memory::list).post(crate::api::handlers::memory::create),
@@ -322,6 +393,11 @@ fn protected_routes() -> Router<AppState> {
             "/v1/memory/diagnostics",
             get(crate::api::handlers::memory::diagnostics),
         )
+}
+
+/// Child-run management: projection, abort, steer, resume and the session view.
+fn child_run_routes() -> Router<AppState> {
+    Router::new()
         .route(
             "/v1/child-runs",
             get(crate::api::handlers::child_runs::list),
@@ -351,25 +427,21 @@ fn protected_routes() -> Router<AppState> {
             "/v1/child-runs/{child_id}/events",
             get(crate::api::handlers::child_runs::events),
         )
-        .route(
-            "/v1/sessions/{id}/resume-thread",
-            post(crate::api::handlers::sessions::resume_thread),
-        )
-        .route(
-            "/v1/threads/{id}/rewind",
-            post(crate::api::handlers::rewind::rewind),
-        )
-        .route(
-            "/v1/threads/{id}/review",
-            post(crate::api::handlers::review::review),
-        )
-        .route(
-            "/v1/threads/{id}/export",
-            get(crate::api::handlers::export::export),
-        )
-        // Scheduled tasks (requirements/scheduled-tasks.md §HTTP API). Editing
-        // stays available while `config.schedules.enabled` is off; only the run
-        // route reports the switch, as a `409` from the service.
+}
+
+/// Resume of a persisted session into a fresh thread.
+fn session_routes() -> Router<AppState> {
+    Router::new().route(
+        "/v1/sessions/{id}/resume-thread",
+        post(crate::api::handlers::sessions::resume_thread),
+    )
+}
+
+/// Scheduled tasks (requirements/scheduled-tasks.md §HTTP API). Editing stays
+/// available while `config.schedules.enabled` is off; only the run route
+/// reports the switch, as a `409` from the service.
+fn schedule_routes() -> Router<AppState> {
+    Router::new()
         .route(
             "/v1/schedules",
             get(crate::api::handlers::schedules::list)
@@ -384,9 +456,13 @@ fn protected_routes() -> Router<AppState> {
             "/v1/schedules/{id}/run",
             post(crate::api::handlers::schedules::run),
         )
-        // IM channels (requirements/im-channels.md §HTTP API). Editing stays
-        // available while `config.im.enabled` is off; only connections gate on
-        // the switch.
+}
+
+/// IM channels (requirements/im-channels.md §HTTP API). Editing stays
+/// available while `config.im.enabled` is off; only connections gate on the
+/// switch.
+fn im_routes() -> Router<AppState> {
+    Router::new()
         .route(
             "/v1/im/channels",
             get(crate::api::handlers::im::list).post(crate::api::handlers::im::create),
@@ -408,14 +484,26 @@ fn protected_routes() -> Router<AppState> {
             "/v1/im/weixin/login/wait",
             get(crate::api::handlers::im::weixin_login_wait),
         )
+}
+
+/// Subagent settings view/configure.
+fn subagent_routes() -> Router<AppState> {
+    Router::new().route(
+        "/v1/subagents/config",
+        get(crate::api::handlers::subagents::view).post(crate::api::handlers::subagents::configure),
+    )
+}
+
+/// Routes whose milestone has not landed: they answer a structured `NotFound`
+/// from [`crate::api::handlers::pending`] instead of 404-ing at the router
+/// level. `cleanup` remains a maintenance stub: reconciliation already removes
+/// leftover tombstones on startup, so the route exists only so an old client
+/// gets a structured answer.
+fn pending_routes() -> Router<AppState> {
+    Router::new()
         .route(
             "/v1/runtime/model-providers",
             post(crate::api::handlers::pending::model_providers),
-        )
-        .route(
-            "/v1/subagents/config",
-            get(crate::api::handlers::subagents::view)
-                .post(crate::api::handlers::subagents::configure),
         )
         .route(
             "/v1/runtime/tuning",
@@ -425,9 +513,6 @@ fn protected_routes() -> Router<AppState> {
             "/v1/connector-env",
             post(crate::api::handlers::pending::connector_env),
         )
-        // `cleanup` remains a maintenance stub: reconciliation already removes
-        // leftover tombstones on startup, so the route exists only so an old
-        // client gets a structured answer instead of 404 at the router level.
         .route(
             "/v1/child-runs/{child_id}/cleanup",
             delete(crate::api::handlers::pending::child_runs),

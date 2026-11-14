@@ -212,7 +212,12 @@ HTTP；
 ## 路由清单
 
 当前路由以 `src/api/routes.rs` 为准。新增或修改路由必须同步更新 wire DTO、接口测试、渲染层 client
-和对应需求设计；不在本文维护第二份易漂移的完整路由表。
+和对应需求设计；不在本文维护第二份易漂移的完整路由表。`protected_routes()` 按资源域拆为一组私有
+builder（threads/turns/diagnostics/platform services/settings/workbench/gates/memory/
+child-runs/sessions/schedules/im/subagents/pending），每个函数一个域、不超过函数行数上限；合并
+结果仍是本文件拥有的唯一可审计路由面。线程接口测试按主题拆在 `api/handlers/threads/tests/` 下的
+三个套件文件（list/projection、runtime override、workspace/bulk-delete），经 `#[path]` 挂回同一
+`tests` 模块共享 doubles。
 
 附件路由为 `POST /v1/attachments`、`GET /v1/attachments/{id}`、`DELETE /v1/attachments/{id}`、
 `GET /v1/attachments/{id}/content`、`GET /v1/attachments/diagnostics`，以及线程侧的关联入口

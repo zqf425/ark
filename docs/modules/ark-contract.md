@@ -41,6 +41,11 @@ gated 在 `Notice` kind 上）。取消原因词表与自治权词表不在本 c
 该 id 已关联到**本线程**，本阶段只记录本回合引用了哪些附件，不向模型传字节。`TurnStarted` 的
 `attachment_ids` 同样带 serde default，使旧日志可读。
 
+`ToolStormSuppressed` 除 `tool`/`count` 外还携带 `arguments`（serde default，旧行省略时读为 null）：
+被熔断抑制的调用必须留下"重复的是什么"的原始参数记录，且不要求审计方把抑制事件与配对的
+`ToolCallStarted` 做跨事件 join。`with_seq` 的逐变体重写集中在 `event/with_seq.rs`；每行拼写一个
+变体的完整字段表，新增变体或载荷字段必须在此同步一行，编译器的穷尽检查保证不漏。
+
 `TurnStarted.auto_recovery: u32`（serde default `0`，序列化时省略零值）标记 harness 自动恢复
 回合及其尝试序号：前一个回合因瞬态模型请求失败（`model_request_failed = true`）终结后，恢复调度器
 以同一请求文本重开回合并把 1-based 尝试号写进该字段；普通用户/IM/自动续跑回合保持 `0` 且不出现在

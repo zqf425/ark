@@ -1,59 +1,54 @@
 //! `RuntimeEvent::with_seq`: the writer-assigned sequence rewrite.
 //!
-//! One exhaustive arm per variant, so adding a variant still forces this edit.
+//! Every variant repeats its payload fields exactly once, one line per
+//! variant: the field list *is* the information, so a macro that re-spells it
+//! would only move the duplication. Adding a variant or a payload field is
+//! still a deliberate edit here — the match must stay exhaustive.
 
 use super::*;
+
+/// Rewrites the writer-assigned `seq` of one variant, field list spelled out.
+///
+/// `seq: _` binds the producer-assigned placeholder; everything after it is
+/// forwarded verbatim into the fresh variant.
+macro_rules! rewrite_seq {
+    ($event:expr, $seq:expr, $( $variant:ident { $($field:ident),* $(,)? } ),* $(,)?) => {
+        match $event {
+            $(
+                RuntimeEvent::$variant { seq: _, $($field),* } => RuntimeEvent::$variant {
+                    seq: $seq,
+                    $($field),*
+                },
+            )*
+        }
+    };
+}
 
 impl RuntimeEvent {
     /// Sequence numbers are assigned by the session writer, never by producers.
     pub fn with_seq(self, seq: u64) -> Self {
-        match self {
-            RuntimeEvent::ThreadCreated {
+        rewrite_seq!(
+            self,
+            seq,
+            // ---- thread lifecycle ----
+            ThreadCreated {
                 thread_id,
                 timestamp,
-                title,
-                ..
-            } => RuntimeEvent::ThreadCreated {
-                seq,
-                thread_id,
-                timestamp,
-                title,
+                title
             },
-            RuntimeEvent::ThreadUpdated {
+            ThreadUpdated {
                 thread_id,
                 timestamp,
-                title,
-                ..
-            } => RuntimeEvent::ThreadUpdated {
-                seq,
-                thread_id,
-                timestamp,
-                title,
+                title
             },
-            RuntimeEvent::ThreadRewound {
+            ThreadRewound {
                 thread_id,
                 timestamp,
                 rewind_from_seq,
-                target_turn_id,
-                ..
-            } => RuntimeEvent::ThreadRewound {
-                seq,
-                thread_id,
-                timestamp,
-                rewind_from_seq,
-                target_turn_id,
+                target_turn_id
             },
-            RuntimeEvent::TurnStarted {
-                thread_id,
-                turn_id,
-                timestamp,
-                auto_continuation,
-                auto_recovery,
-                attachment_ids,
-                attachment_outcomes,
-                ..
-            } => RuntimeEvent::TurnStarted {
-                seq,
+            // ---- turn lifecycle ----
+            TurnStarted {
                 thread_id,
                 turn_id,
                 timestamp,
@@ -62,157 +57,74 @@ impl RuntimeEvent {
                 attachment_ids,
                 attachment_outcomes,
             },
-            RuntimeEvent::TurnCompleted {
+            TurnCompleted {
                 thread_id,
                 turn_id,
-                timestamp,
-                ..
-            } => RuntimeEvent::TurnCompleted {
-                seq,
-                thread_id,
-                turn_id,
-                timestamp,
+                timestamp
             },
-            RuntimeEvent::TurnFailed {
+            TurnFailed {
                 thread_id,
                 turn_id,
                 timestamp,
                 message,
-                model_request_failed,
-                ..
-            } => RuntimeEvent::TurnFailed {
-                seq,
-                thread_id,
-                turn_id,
-                timestamp,
-                message,
-                model_request_failed,
+                model_request_failed
             },
-            RuntimeEvent::TurnAborted {
+            TurnAborted {
                 thread_id,
                 turn_id,
                 timestamp,
-                reason,
-                ..
-            } => RuntimeEvent::TurnAborted {
-                seq,
-                thread_id,
-                turn_id,
-                timestamp,
-                reason,
+                reason
             },
-            RuntimeEvent::TurnSteered {
+            TurnSteered {
                 thread_id,
                 turn_id,
                 timestamp,
-                text,
-                ..
-            } => RuntimeEvent::TurnSteered {
-                seq,
-                thread_id,
-                turn_id,
-                timestamp,
-                text,
+                text
             },
-            RuntimeEvent::AssistantTextDelta {
+            // ---- streaming ----
+            AssistantTextDelta {
                 thread_id,
                 turn_id,
                 item_id,
                 timestamp,
-                delta,
-                ..
-            } => RuntimeEvent::AssistantTextDelta {
-                seq,
+                delta
+            },
+            AssistantReasoningDelta {
                 thread_id,
                 turn_id,
                 item_id,
                 timestamp,
-                delta,
+                delta
             },
-            RuntimeEvent::AssistantReasoningDelta {
+            // ---- items ----
+            ItemCreated {
                 thread_id,
                 turn_id,
-                item_id,
                 timestamp,
-                delta,
-                ..
-            } => RuntimeEvent::AssistantReasoningDelta {
-                seq,
-                thread_id,
-                turn_id,
-                item_id,
-                timestamp,
-                delta,
+                item
             },
-            RuntimeEvent::ItemCreated {
+            ItemUpdated {
                 thread_id,
                 turn_id,
                 timestamp,
-                item,
-                ..
-            } => RuntimeEvent::ItemCreated {
-                seq,
-                thread_id,
-                turn_id,
-                timestamp,
-                item,
+                item
             },
-            RuntimeEvent::ItemUpdated {
+            ItemCompleted {
                 thread_id,
                 turn_id,
                 timestamp,
-                item,
-                ..
-            } => RuntimeEvent::ItemUpdated {
-                seq,
-                thread_id,
-                turn_id,
-                timestamp,
-                item,
+                item
             },
-            RuntimeEvent::ItemCompleted {
-                thread_id,
-                turn_id,
-                timestamp,
-                item,
-                ..
-            } => RuntimeEvent::ItemCompleted {
-                seq,
-                thread_id,
-                turn_id,
-                timestamp,
-                item,
-            },
-            RuntimeEvent::ToolCallStarted {
+            // ---- tools ----
+            ToolCallStarted {
                 thread_id,
                 turn_id,
                 timestamp,
                 call_id,
                 tool,
-                arguments,
-                ..
-            } => RuntimeEvent::ToolCallStarted {
-                seq,
-                thread_id,
-                turn_id,
-                timestamp,
-                call_id,
-                tool,
-                arguments,
+                arguments
             },
-            RuntimeEvent::ToolCallFinished {
-                thread_id,
-                turn_id,
-                timestamp,
-                call_id,
-                tool,
-                ok,
-                duration_ms,
-                output,
-                detail,
-                ..
-            } => RuntimeEvent::ToolCallFinished {
-                seq,
+            ToolCallFinished {
                 thread_id,
                 turn_id,
                 timestamp,
@@ -223,235 +135,112 @@ impl RuntimeEvent {
                 output,
                 detail,
             },
-            RuntimeEvent::ToolStormSuppressed {
+            ToolStormSuppressed {
                 thread_id,
                 turn_id,
                 timestamp,
                 tool,
                 count,
-                ..
-            } => RuntimeEvent::ToolStormSuppressed {
-                seq,
-                thread_id,
-                turn_id,
-                timestamp,
-                tool,
-                count,
+                arguments,
             },
-            RuntimeEvent::ApprovalRequested {
+            // ---- gates ----
+            ApprovalRequested {
                 thread_id,
                 turn_id,
                 timestamp,
                 approval_id,
                 tool,
-                summary,
-                ..
-            } => RuntimeEvent::ApprovalRequested {
-                seq,
+                summary
+            },
+            ApprovalResolved {
                 thread_id,
                 turn_id,
                 timestamp,
                 approval_id,
-                tool,
-                summary,
+                approved
             },
-            RuntimeEvent::ApprovalResolved {
-                thread_id,
-                turn_id,
-                timestamp,
-                approval_id,
-                approved,
-                ..
-            } => RuntimeEvent::ApprovalResolved {
-                seq,
-                thread_id,
-                turn_id,
-                timestamp,
-                approval_id,
-                approved,
-            },
-            RuntimeEvent::UserInputRequested {
+            UserInputRequested {
                 thread_id,
                 turn_id,
                 timestamp,
                 request_id,
-                prompt,
-                ..
-            } => RuntimeEvent::UserInputRequested {
-                seq,
+                prompt
+            },
+            UserInputResolved {
                 thread_id,
                 turn_id,
                 timestamp,
                 request_id,
-                prompt,
+                answer
             },
-            RuntimeEvent::UserInputResolved {
+            // ---- plan ----
+            GoalUpdated {
+                thread_id,
+                timestamp,
+                goal
+            },
+            GoalCleared {
+                thread_id,
+                timestamp
+            },
+            TodosUpdated {
+                thread_id,
+                timestamp,
+                todos
+            },
+            TodosCleared {
+                thread_id,
+                timestamp
+            },
+            // ---- context ----
+            CompactionStarted {
                 thread_id,
                 turn_id,
-                timestamp,
-                request_id,
-                answer,
-                ..
-            } => RuntimeEvent::UserInputResolved {
-                seq,
-                thread_id,
-                turn_id,
-                timestamp,
-                request_id,
-                answer,
+                timestamp
             },
-            RuntimeEvent::GoalUpdated {
-                thread_id,
-                timestamp,
-                goal,
-                ..
-            } => RuntimeEvent::GoalUpdated {
-                seq,
-                thread_id,
-                timestamp,
-                goal,
-            },
-            RuntimeEvent::GoalCleared {
-                thread_id,
-                timestamp,
-                ..
-            } => RuntimeEvent::GoalCleared {
-                seq,
-                thread_id,
-                timestamp,
-            },
-            RuntimeEvent::TodosUpdated {
-                thread_id,
-                timestamp,
-                todos,
-                ..
-            } => RuntimeEvent::TodosUpdated {
-                seq,
-                thread_id,
-                timestamp,
-                todos,
-            },
-            RuntimeEvent::TodosCleared {
-                thread_id,
-                timestamp,
-                ..
-            } => RuntimeEvent::TodosCleared {
-                seq,
-                thread_id,
-                timestamp,
-            },
-            RuntimeEvent::Usage {
-                thread_id,
-                turn_id,
-                timestamp,
-                usage,
-                ..
-            } => RuntimeEvent::Usage {
-                seq,
-                thread_id,
-                turn_id,
-                timestamp,
-                usage,
-            },
-            RuntimeEvent::Error {
-                thread_id,
-                timestamp,
-                code,
-                message,
-                ..
-            } => RuntimeEvent::Error {
-                seq,
-                thread_id,
-                timestamp,
-                code,
-                message,
-            },
-            RuntimeEvent::Heartbeat {
-                thread_id,
-                timestamp,
-                ..
-            } => RuntimeEvent::Heartbeat {
-                seq,
-                thread_id,
-                timestamp,
-            },
-            RuntimeEvent::SseIdleTimeout {
-                thread_id,
-                timestamp,
-                ..
-            } => RuntimeEvent::SseIdleTimeout {
-                seq,
-                thread_id,
-                timestamp,
-            },
-            RuntimeEvent::TransientRetry {
-                thread_id,
-                timestamp,
-                attempt,
-                message,
-                ..
-            } => RuntimeEvent::TransientRetry {
-                seq,
-                thread_id,
-                timestamp,
-                attempt,
-                message,
-            },
-            RuntimeEvent::CompactionStarted {
-                thread_id,
-                turn_id,
-                timestamp,
-                ..
-            } => RuntimeEvent::CompactionStarted {
-                seq,
-                thread_id,
-                turn_id,
-                timestamp,
-            },
-            RuntimeEvent::CompactionCompleted {
-                thread_id,
-                turn_id,
-                timestamp,
-                removed_items,
-                checkpoint_chars,
-                ..
-            } => RuntimeEvent::CompactionCompleted {
-                seq,
+            CompactionCompleted {
                 thread_id,
                 turn_id,
                 timestamp,
                 removed_items,
                 checkpoint_chars,
             },
-            RuntimeEvent::ChildActivity {
+            // ---- progress and telemetry ----
+            Usage {
                 thread_id,
+                turn_id,
                 timestamp,
-                child_id,
-                label,
-                status,
-                ..
-            } => RuntimeEvent::ChildActivity {
-                seq,
-                thread_id,
-                timestamp,
-                child_id,
-                label,
-                status,
+                usage
             },
-            RuntimeEvent::ChildCompleted {
+            Error {
                 thread_id,
                 timestamp,
-                notification_id,
+                code,
+                message
+            },
+            Heartbeat {
+                thread_id,
+                timestamp
+            },
+            SseIdleTimeout {
+                thread_id,
+                timestamp
+            },
+            TransientRetry {
+                thread_id,
+                timestamp,
+                attempt,
+                message
+            },
+            // ---- child runs ----
+            ChildActivity {
+                thread_id,
+                timestamp,
                 child_id,
                 label,
-                status,
-                summary,
-                error,
-                usage,
-                tool_invocations,
-                ..
-            } => RuntimeEvent::ChildCompleted {
-                seq,
+                status
+            },
+            ChildCompleted {
                 thread_id,
                 timestamp,
                 notification_id,
@@ -463,30 +252,18 @@ impl RuntimeEvent {
                 usage,
                 tool_invocations,
             },
-            RuntimeEvent::ChildCompletionAcknowledged {
-                thread_id,
-                turn_id,
-                timestamp,
-                notification_id,
-                ..
-            } => RuntimeEvent::ChildCompletionAcknowledged {
-                seq,
+            ChildCompletionAcknowledged {
                 thread_id,
                 turn_id,
                 timestamp,
                 notification_id,
             },
-            RuntimeEvent::AttachmentAssociated {
+            // ---- attachments ----
+            AttachmentAssociated {
                 thread_id,
                 timestamp,
-                attachment_id,
-                ..
-            } => RuntimeEvent::AttachmentAssociated {
-                seq,
-                thread_id,
-                timestamp,
-                attachment_id,
+                attachment_id
             },
-        }
+        )
     }
 }

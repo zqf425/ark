@@ -39,8 +39,15 @@ impl Reactor {
             ))
             .await?;
         if let Some(count) = synthetic.storm_count {
+            // The refused call's arguments ride the suppression event: the
+            // paired `ToolCallStarted` row already carries them, but a
+            // suppression-scoped audit should not have to join across events.
             self.writer
-                .append(self.events.tool_storm_suppressed(&synthetic.tool, count))
+                .append(self.events.tool_storm_suppressed(
+                    &synthetic.tool,
+                    count,
+                    synthetic.arguments.clone(),
+                ))
                 .await?;
         }
         self.writer

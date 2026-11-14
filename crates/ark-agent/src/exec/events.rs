@@ -246,7 +246,12 @@ impl TurnEvents {
         }
     }
 
-    pub fn tool_storm_suppressed(&self, tool: &str, count: u32) -> RuntimeEvent {
+    pub fn tool_storm_suppressed(
+        &self,
+        tool: &str,
+        count: u32,
+        arguments: serde_json::Value,
+    ) -> RuntimeEvent {
         RuntimeEvent::ToolStormSuppressed {
             seq: Self::UNASSIGNED,
             thread_id: self.thread_id,
@@ -254,6 +259,7 @@ impl TurnEvents {
             timestamp: Utc::now(),
             tool: tool.to_string(),
             count,
+            arguments,
         }
     }
 
@@ -393,7 +399,9 @@ mod tests {
         assert_eq!(events.turn_completed().kind(), EventKind::TurnCompleted);
         assert_eq!(events.turn_aborted("r").kind(), EventKind::TurnAborted);
         assert_eq!(
-            events.tool_storm_suppressed("read", 3).kind(),
+            events
+                .tool_storm_suppressed("read", 3, serde_json::json!({"path": "a"}))
+                .kind(),
             EventKind::ToolStormSuppressed
         );
         assert_eq!(

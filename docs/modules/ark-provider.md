@@ -54,4 +54,5 @@ unknown 元数据。线程覆盖模型时经 `resolve_for_model` / `resolve_visi
 ## 验证
 
 覆盖 URL、模型 ID、温度、重复 ID、密钥掩码、探测超时、目录错误/大小边界、目录鉴权头、disabled 条目
-发现以及失败后旧快照不变。
+发现以及失败后旧快照不变。`ProviderStore` 的单测宿主在 `service/store/tests/store_tests.rs`
+（经 `#[path]` 挂回 `store.rs` 的 `tests` 模块），生产文件与测试文件分别遵守单文件行数上限。

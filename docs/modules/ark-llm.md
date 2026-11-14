@@ -78,4 +78,6 @@ Messages 无 effort 旋钮，三档映射为固定 thinking 预算（2k/8k/16k�
 
 每个协议族以录制 SSE fixture 覆盖正常分块、畸形帧、断流、重试和 usage 缺失；模拟客户端用于
 agent 无网络测试。`tests/stream_finalization.rs` 以本地 TCP 服务覆盖两条传输收尾边界：发完
-终止帧但保持连接，以及无终止帧直接 EOF 时工具调用的补发。
+终止帧但保持连接，以及无终止帧直接 EOF 时工具调用的补发。`HttpModelClient` 的单测宿主在
+`service/http/tests/http_tests.rs`（经 `#[path]` 挂回 `http.rs` 的 `tests` 模块），生产文件与
+测试文件分别遵守单文件行数上限。

@@ -6,7 +6,11 @@
 执行器、基础能力、服务器状态和 shutdown supervisor，并把实现注入端口。
 
 `wiring` 仅做显式装配，不能包含业务规则、平台特例或生命周期状态机。新增实现应先落入所属 crate；
-只有装配代码才允许在这里引用多个实现 crate。
+只有装配代码才允许在这里引用多个实现 crate。`wiring::build` 按装配阶段拆为一组私有步骤函数
+（`prepare_runtime` → `build_platform_services` → `assemble_plugin_host` → `select_model` →
+`assemble_agent_surface` → `build_tool_runner` → `assemble_turn_pipeline` → `assemble_app_state`），
+步骤间经 `Assembly`/`PlatformServices`/`AgentSurface` 三个结构体传递；每个函数仍只是显式装配，
+不引入业务分支。
 
 入口命令：`serve`（常驻 HTTP/SSE 运行时）与 `run`（[headless 单回合](../requirements/headless-run.md)，
 含 `--review` [审查预设](../requirements/review-preset.md)）。

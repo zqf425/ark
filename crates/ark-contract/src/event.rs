@@ -463,6 +463,12 @@ pub enum RuntimeEvent {
         tool: String,
         #[ts(as = "f64")]
         count: u32,
+        /// The refused call's arguments. `ToolCallStarted` already carries
+        /// them for executed calls; a suppressed call must leave the same
+        /// trace, or a post-hoc audit cannot tell which command repeated.
+        /// Additive with a serde default so old logs stay readable.
+        #[serde(default)]
+        arguments: serde_json::Value,
     },
 
     // ---- gates ----
