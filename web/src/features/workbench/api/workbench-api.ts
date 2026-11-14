@@ -5,7 +5,8 @@ import type {
   PlanView,
   TerminalEntriesResponse,
   TodosRequest,
-  WorkspaceChangesResponse
+  WorkspaceChangesResponse,
+  WorkspaceFilePreview
 } from '../../../shared/contracts'
 import { del, get, post } from '../../../shared/api/client'
 
@@ -32,6 +33,16 @@ export function getChanges(threadId: string, signal?: AbortSignal): Promise<Work
 
 export function getFilePreview(threadId: string, path: string, signal?: AbortSignal): Promise<FilePreview> {
   return get<FilePreview>(`/v1/threads/${threadId}/files`, { query: { path }, ...(signal ? { signal } : {}) })
+}
+
+/**
+ * `GET /v1/workspace/file?path=...` — a bounded, read-only preview of one file
+ * under the active workspace root (requirements/workspace-file-preview.md).
+ * Unlike the thread projection above, this answers for any file under the
+ * root, read or not.
+ */
+export function getWorkspaceFilePreview(path: string, signal?: AbortSignal): Promise<WorkspaceFilePreview> {
+  return get<WorkspaceFilePreview>('/v1/workspace/file', { query: { path }, ...(signal ? { signal } : {}) })
 }
 
 export function getTerminalEntries(threadId: string, signal?: AbortSignal): Promise<TerminalEntriesResponse> {

@@ -60,9 +60,9 @@ pub use dto::{
     ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSummary, ThreadUsageResponse, TodoEntry,
     TodoStatus, TodosRequest, TurnRequest, TurnSummary, UpdateThreadRequest, UsageResponse,
     WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
-    WorkspaceDiffFile, WorkspaceView, LLM_ROUNDS_DEFAULT_LIMIT, LLM_ROUNDS_MAX_LIMIT,
-    LLM_ROUNDS_MAX_THREADS, MAX_TURN_TEXT_BYTES, REASONING_EFFORTS, THREAD_EXPORT_FORMAT_VERSION,
-    THREAD_PAGE_DEFAULT_LIMIT, THREAD_PAGE_MAX_LIMIT,
+    WorkspaceDiffFile, WorkspaceFilePreview, WorkspaceView, LLM_ROUNDS_DEFAULT_LIMIT,
+    LLM_ROUNDS_MAX_LIMIT, LLM_ROUNDS_MAX_THREADS, MAX_TURN_TEXT_BYTES, REASONING_EFFORTS,
+    THREAD_EXPORT_FORMAT_VERSION, THREAD_PAGE_DEFAULT_LIMIT, THREAD_PAGE_MAX_LIMIT,
 };
 pub use event::{
     ChildCompletionNotice, EventKind, RuntimeEvent, TurnAttachmentDelivery, TurnAttachmentOutcome,

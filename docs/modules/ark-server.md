@@ -110,6 +110,12 @@
   `POST /v1/threads/{id}/turns` 在注册回合前拒绝超过 `ark_contract::MAX_TURN_TEXT_BYTES` 的 UTF-8 文本。
 - `POST /v1/workspace/validate` 只转发 `WorkspaceService::validate` 的目录存在性校验，并使用
   `ark_common::path::normalize` 返回规范化路径；handler 不得复制工作区解析规则。
+- `GET /v1/workspace/file?path=...` 在 `spawn_blocking` 中调用
+  `WorkspaceService::read_file`（磁盘 I/O + canonicalize；root 在阻塞调用前从当前 view
+  捕获，并发切换只影响下一次预览的快照语义），返回工作区边界内的
+  `WorkspaceFilePreview`；无 active workspace 是结构化 404。containment 与大小上限语义
+  归 [ark-workspace](ark-workspace.md)，见
+  [文件预览需求](../requirements/workspace-file-preview.md)。
 - `POST /v1/workspace/pick` 在 `spawn_blocking` 中调用 `FolderDialogService::pick_folder`（原生对话框是
   模态 UI，请求取消不关闭已弹出的对话框）；端口未装配时 `runtime_unavailable`/503，返回
   `FolderPickResponse`，`path` 省略即用户取消。见 [workspace-switch 需求](../requirements/workspace-switch-and-git-diff.md)。

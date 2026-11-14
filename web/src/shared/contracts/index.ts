@@ -118,6 +118,7 @@ export type {
   WorkspaceChangesResponse,
   WorkspaceDescriptor,
   WorkspaceView,
+  WorkspaceFilePreview,
   SwitchWorkspaceRequest,
   TaskSchedule,
   UpdateScheduleRequest,

@@ -16,6 +16,15 @@ untracked；不读取 untracked 文件内容。文件数为 200、总 patch 为 
 仅置 `binary` 标志、不带 patch 文本）：每个 `WorkspaceDiffFile.patch` 只携带该文件自身的改动，
 不重复整组差异；被字节上限截断时所有文件行的 `truncated` 均置位。
 
-active workspace 与 generation 由 `arkd` 的进程状态持有；recent descriptors 在进程内展示，并在启动时
-从 `<root>/workspace/workspace-recent.json` 可重建缓存恢复。recent 不属于本模块的 Git 检查职责，也不得作为路径 containment 或
+## 文件预览(`read_file`,requirements/workspace-file-preview.md)
+
+`WorkspaceInspector::read_file(root, path)` 是工作区内任意文件的**只读**预览宿主,输出
+`WorkspaceFilePreview`。三层 containment:词法(拒绝 `..` 逃逸)、canonicalize、真实路径
+(symlink 指向根外即拒绝)。`~` 刻意不展开——预览边界是工作区根,家目录不在其中。
+上限:8 MiB 拒绝读取,文本保留前 256 KiB 并置 `truncated`;非 UTF-8 以 lossy 解码并置
+`binary`(渲染方据此跳过)。纯 `std::fs`,无 git、无 tokio;handler 侧包 `spawn_blocking`
+(`workspace/pick` 先例)。
+
+active workspace 与 generation 由 `arkd` 的进程状态持有;recent descriptors 在进程内展示,并在启动时
+从 `<root>/workspace/workspace-recent.json` 可重建缓存恢复。recent 不属于本模块的 Git 检查职责,也不得作为路径 containment 或
 工具授权依据。

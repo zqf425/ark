@@ -18,7 +18,8 @@ use ark_contract::{
     MemoryDiagnosticsResponse, MemoryEntry, MemoryListResponse, ProviderEntry,
     ProviderListResponse, ProviderModelCatalogRequest, ProviderModelCatalogResponse,
     ProviderTestRequest, ProviderTestResponse, SkillDiagnostics, SkillTurnResolution,
-    ThreadSkillsResponse, UpdateMemoryRequest, WorkspaceDiff, WorkspaceStatus, WorkspaceView,
+    ThreadSkillsResponse, UpdateMemoryRequest, WorkspaceDiff, WorkspaceFilePreview,
+    WorkspaceStatus, WorkspaceView,
 };
 use ark_ports::{
     FolderDialogService, McpServerService, MemoryService, ModelEndpoint, ProviderService,
@@ -261,6 +262,10 @@ impl WorkspaceService for WorkspaceAdapter {
 
     fn status(&self, path: &str) -> WorkspaceStatus {
         self.inner.status(path)
+    }
+
+    fn read_file(&self, root: &std::path::Path, path: &str) -> Result<WorkspaceFilePreview> {
+        self.inner.read_file(root, path)
     }
 
     fn view(&self) -> WorkspaceView {

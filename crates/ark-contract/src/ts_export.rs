@@ -51,7 +51,7 @@ use crate::{
     TurnRequest, TurnSummary, UiCatalog, UpdateImChannelRequest, UpdateMemoryRequest,
     UpdateScheduleRequest, UpdateThreadRequest, UsageResponse, WorkspaceChange,
     WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile,
-    WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
+    WorkspaceFilePreview, WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
 };
 use ark_common::{
     ArkErrorCode, ArkErrorPayload, AttachmentId, ChildId, ItemId, ThreadId, TurnId, Usage,
@@ -106,6 +106,7 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     WorkspaceChange::export_all_to(dir)?;
     WorkspaceDescriptor::export_all_to(dir)?;
     WorkspaceView::export_all_to(dir)?;
+    WorkspaceFilePreview::export_all_to(dir)?;
     SwitchWorkspaceRequest::export_all_to(dir)?;
     WorkspaceDiffFile::export_all_to(dir)?;
     WorkspaceDiff::export_all_to(dir)?;
@@ -305,6 +306,7 @@ const ROOT_NAMES: &[&str] = &[
     "WorkspaceChange",
     "WorkspaceDescriptor",
     "WorkspaceView",
+    "WorkspaceFilePreview",
     "SwitchWorkspaceRequest",
     "WorkspaceDiffFile",
     "WorkspaceDiff",
