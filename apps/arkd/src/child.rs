@@ -344,6 +344,10 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             machine: TurnMachine::new(limits_for_turn(&snapshot, provider.as_ref())),
             chunk_buffer: chunk_buffer_for_turn(&snapshot),
             steering: steer,
+            // Child runs keep text-only steers: children have no attachment
+            // association surface and their seed carries no image resolver.
+            steer_image_resolver: None,
+            steer_outcome_recorder: None,
         });
         reactor.push_user(ctx.prompt.clone());
         let outcome = reactor.run().await;

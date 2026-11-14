@@ -122,6 +122,13 @@
   box-shadow: var(--ark-composer-shadow-focus);
 }
 
+/* Drop-target feedback while files hover over the composer: the same accent
+   the focus ring uses, so the affordance reads as "release here". */
+.ark-composer__box.is-dragover {
+  border-color: var(--ark-border-strong);
+  box-shadow: var(--ark-composer-shadow-focus);
+}
+
 /* Textarea metrics follow smart-ark: 15px / 1.45 line box, 40px minimum. */
 
 /* The editor stack: the mention-highlight mirror sits under the textarea.

@@ -162,7 +162,6 @@ export const SESSION_CANVAS_MESSAGES = {
     '图片仅在模型声明识图能力时才会真正发送（未声明时模型只看到占位）。可在设置→供应商→高级选项里声明「支持识图」。',
     'Images reach the model only when it declares vision (placeholder otherwise). Declare it under Settings → Provider → Advanced.'
   ],
-  'canvas.composer.attachLiveHint': ['回合进行中不支持添加附件；请排队消息，结束后再附。', 'Attachments cannot be added mid-turn; queue a message instead.'],
   'canvas.composer.queuedChip': ['#{index} 排队', '#{index} queued'],
   'canvas.composer.queuedRemove': ['移除排队消息 #{index}', 'Remove queued message #{index}'],
   'canvas.composer.queuedAria': ['排队中的消息，回合结束后按顺序发送', 'Queued messages; sent in order when the turn ends'],

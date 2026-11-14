@@ -4,13 +4,16 @@
  * per thread (`key={threadId}`), so the textarea alone cannot hold the draft:
  * the store keeps one entry per thread and the remount restores it. The same
  * tests pin the complement — a sent draft is pruned, and queued text never
- * leaks into another thread's input.
+ * leaks into another thread's input. Attachment parity pins the steer channel:
+ * a live turn accepts attachments (associated then steered) and a paste/drop
+ * of files lands as attachments instead of inline text.
  */
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installBrowserStubs, mountWithProviders, settle, type ReactHarness } from '../../../shared/testing/react-harness'
 import { useCodeSessionStore } from '../state/store'
 import { Composer } from './Composer'
+import { associateAttachment, uploadAttachment } from '../api/attachments-api'
 
 vi.mock('./ComposerRuntimeControls', () => ({
   AutonomyPicker: () => null,
@@ -26,8 +29,8 @@ vi.mock('../hooks/use-turn', async () => {
       const sending = useCodeSessionStore((s) => s.sending)
       const activeTurnId = useCodeSessionStore((s) => s.activeTurnId)
       return {
-        send: vi.fn(async () => true),
-        steer: vi.fn(async () => true),
+        send: turnMocks.send,
+        steer: turnMocks.steer,
         interrupt: vi.fn(async () => undefined),
         canSend: Boolean(threadId) && !sending,
         canInterrupt: Boolean(threadId) && Boolean(activeTurnId) && !sending
@@ -79,6 +82,12 @@ vi.mock('../api/skills-api', () => ({
 
 const THREAD_A = '00000000-0000-0000-0000-00000000000a'
 const THREAD_B = '00000000-0000-0000-0000-00000000000b'
+
+/** Module-level stand-ins the use-turn mock hands to every consumer. */
+const turnMocks = vi.hoisted(() => ({
+  send: vi.fn(async () => true),
+  steer: vi.fn(async () => true)
+}))
 
 function input(host: HTMLElement): HTMLTextAreaElement {
   const node = host.querySelector<HTMLTextAreaElement>('.ark-composer__input')
@@ -254,5 +263,122 @@ describe('Composer per-thread draft persistence', () => {
     await type(node, 'foo/bar')
     await settle()
     expect(harness.host.querySelector('.ark-skill-palette')).toBeNull()
+  })
+})
+
+describe('Composer attachment parity (steer, paste, drop)', () => {
+  let harness: ReactHarness | null = null
+
+  beforeEach(() => {
+    installBrowserStubs()
+    turnMocks.send.mockClear()
+    turnMocks.steer.mockClear()
+    turnMocks.send.mockResolvedValue(true)
+    turnMocks.steer.mockResolvedValue(true)
+    vi.mocked(uploadAttachment).mockReset()
+    vi.mocked(associateAttachment).mockReset()
+    useCodeSessionStore.setState({ drafts: {}, sending: false, streamStatus: 'open', activeTurnId: null })
+  })
+
+  afterEach(async () => {
+    await harness?.unmount()
+    harness = null
+  })
+
+  function mockUpload(id: string, name: string): void {
+    vi.mocked(uploadAttachment).mockResolvedValue({
+      attachment: {
+        id,
+        original_filename: name,
+        byte_size: 4,
+        created_at: new Date().toISOString(),
+        sha256: ''
+      }
+    })
+    vi.mocked(associateAttachment).mockResolvedValue(undefined)
+  }
+
+  async function pickPng(id: string, name = 'pic.png'): Promise<void> {
+    mockUpload(id, name)
+    const host = harness!.host
+    const fileInput = host.querySelector<HTMLInputElement>('input[type="file"]')
+    if (!fileInput) throw new Error('file input not mounted')
+    const file = new File(['data'], name, { type: 'image/png' })
+    Object.defineProperty(fileInput, 'files', { value: [file], configurable: true })
+    await act(async () => {
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await settle()
+  }
+
+  it('a live turn steers with the picked attachments and clears them after', async () => {
+    useCodeSessionStore.setState({ activeTurnId: '00000000-0000-0000-0000-0000000000t1' })
+    harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+    await pickPng('00000000-0000-0000-0000-0000000000p1')
+
+    // The + trigger stays usable mid-turn: the steer channel carries files.
+    expect(harness.host.querySelector('.ark-composer__round')).not.toBeNull()
+    expect(harness.text()).toContain('pic.png')
+
+    const node = input(harness.host)
+    await type(node, '看看这张截图')
+    await pressEnter(node)
+    await settle()
+
+    // Associated to the thread, then steered with the id; chips cleared.
+    expect(associateAttachment).toHaveBeenCalledWith(THREAD_A, '00000000-0000-0000-0000-0000000000p1')
+    expect(turnMocks.steer).toHaveBeenCalledWith('看看这张截图', ['00000000-0000-0000-0000-0000000000p1'])
+    expect(harness.host.querySelector('.ark-composer__attachments')).toBeNull()
+  })
+
+  it('queueing keeps the attachments for the next steer or send', async () => {
+    useCodeSessionStore.setState({ activeTurnId: '00000000-0000-0000-0000-0000000000t1' })
+    harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+    await pickPng('00000000-0000-0000-0000-0000000000p2')
+
+    const node = input(harness.host)
+    await type(node, '排队这条')
+    // Switch the delivery mode to queue, then Enter queues the text only.
+    const trigger = harness.host.querySelector<HTMLButtonElement>('.ark-composer__delivery-trigger')
+    await click(trigger!)
+    await settle()
+    const queueOption = [...harness.host.querySelectorAll<HTMLButtonElement>('.ark-composer__delivery-option')].find(
+      (option) => option.textContent?.includes('排队')
+    )
+    await click(queueOption!)
+    await settle()
+    await pressEnter(node)
+    await settle()
+
+    expect(harness.text()).toContain('#1 排队')
+    // Nothing was associated or steered; the chips stay for the next delivery.
+    expect(associateAttachment).not.toHaveBeenCalled()
+    expect(harness.host.querySelector('.ark-composer__attachments')).not.toBeNull()
+  })
+
+  it('pasting an image uploads it as an attachment instead of inline text', async () => {
+    harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+    mockUpload('00000000-0000-0000-0000-0000000000p3', 'pasted.png')
+
+    const node = input(harness.host)
+    const file = new File(['data'], 'pasted.png', { type: 'image/png' })
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: { files: [file] },
+      configurable: true
+    })
+    await act(async () => {
+      node.dispatchEvent(pasteEvent)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await settle()
+
+    expect(uploadAttachment).toHaveBeenCalled()
+    expect(harness.text()).toContain('pasted.png')
+    // The draft is untouched: bytes ride the attachment, not the textarea.
+    expect(useCodeSessionStore.getState().drafts[THREAD_A]).toBeUndefined()
   })
 })

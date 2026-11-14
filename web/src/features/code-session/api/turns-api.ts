@@ -15,9 +15,17 @@ export function interruptTurn(threadId: ThreadId, turnId: TurnId): Promise<void>
   return post<void>(`/v1/threads/${threadId}/turns/${turnId}/interrupt`)
 }
 
-/** `POST /v1/threads/{id}/turns/{turnId}/steer`. */
-export function steerTurn(threadId: ThreadId, turnId: TurnId, text: string): Promise<void> {
-  return post<void>(`/v1/threads/${threadId}/turns/${turnId}/steer`, { text })
+/**
+ * `POST /v1/threads/{id}/turns/{turnId}/steer`. The body is the same
+ * `TurnRequest` envelope as a turn start: attachment ids are optional and must
+ * already be associated with the thread (the route authorizes them).
+ */
+export function steerTurn(
+  threadId: ThreadId,
+  turnId: TurnId,
+  request: Pick<TurnRequest, 'text' | 'attachment_ids'>
+): Promise<void> {
+  return post<void>(`/v1/threads/${threadId}/turns/${turnId}/steer`, request)
 }
 
 /** `GET /v1/threads/{id}/turns/{turnId}`. */

@@ -36,7 +36,7 @@ pub use bus::{
     OutboundRequest, OutboundResponse, PageHandle, PanelHandle, UiCapability,
 };
 pub use event::{EventSink, Subscription};
-pub use exec::{CancelToken, SteerQueue};
+pub use exec::{CancelToken, SteerEntry, SteerQueue};
 pub use hook::{
     truncate_utf8, HookBroker, HookScope, LlmCallFact, ModelRequestTuning, NoHooks,
     ToolPreCallVerdict, TurnOutcomeFact, HOOK_ABI, LLM_TAIL_BYTES, TOOL_ARGS_HEAD_BYTES,

@@ -201,12 +201,14 @@ impl TurnRegistry {
     }
 
     /// Queue a correction for the exact active turn and report saturation
-    /// instead of dropping it silently.
+    /// instead of dropping it silently. Attachment ids ride the same entry;
+    /// the route authorizes them against the thread before calling this.
     pub fn enqueue_steering(
         &self,
         thread_id: ThreadId,
         turn_id: TurnId,
         text: &str,
+        attachment_ids: Vec<ark_common::AttachmentId>,
     ) -> std::result::Result<TurnSummary, SteerError> {
         let guard = self.lock();
         let slot = guard.slots.get(&turn_id).ok_or(SteerError::NotFound)?;
@@ -216,7 +218,7 @@ impl TurnRegistry {
         if slot.summary.ended_at.is_some() {
             return Err(SteerError::Finished);
         }
-        if !slot.steering.push(text) {
+        if !slot.steering.push_with_attachments(text, attachment_ids) {
             return Err(SteerError::QueueFull);
         }
         Ok(slot.summary.clone())

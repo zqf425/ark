@@ -48,7 +48,10 @@ pub async fn get(
 ///
 /// Steering enters the active reactor's bounded queue. The reactor journals the
 /// `turn_steered` event only after it has safely added the instruction to model
-/// history at the next round boundary.
+/// history at the next round boundary. Attachment ids ride the same queue
+/// entry; they are authorized against this thread's association events here,
+/// exactly like a turn start, so an unassociated id answers 404 before the
+/// correction is ever queued.
 pub async fn steer(
     State(state): State<AppState>,
     Path((id, turn)): Path<(String, String)>,
@@ -63,9 +66,13 @@ pub async fn steer(
             "steer text must not be empty",
         ));
     }
+    // Same authorization edge as a turn start: only ids already associated
+    // with this thread may ride the correction.
+    crate::service::authorize_turn_attachments(&state, thread_id, body.attachment_ids.clone())
+        .await?;
     let summary = state
         .turns
-        .enqueue_steering(thread_id, turn_id, &text)
+        .enqueue_steering(thread_id, turn_id, &text, body.attachment_ids)
         .map_err(|error| match error {
             SteerError::NotFound => {
                 ApiError::new(ark_common::ArkErrorCode::NotFound, "turn is not known")

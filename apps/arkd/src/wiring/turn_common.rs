@@ -279,6 +279,11 @@ pub(crate) struct ReactorSpec {
     pub machine: TurnMachine,
     pub chunk_buffer: usize,
     pub steering: Arc<SteerQueue>,
+    /// Composition-root resolver for steer-referenced attachment ids. `None`
+    /// keeps steers text-only (child runs, runtimes without attachments).
+    pub steer_image_resolver: Option<ark_agent::SteerImageResolver>,
+    /// Composition-root recorder for the steered item's delivery outcomes.
+    pub steer_outcome_recorder: Option<ark_agent::SteerOutcomeRecorder>,
 }
 
 pub(crate) fn build_reactor(spec: ReactorSpec) -> Reactor {
@@ -293,6 +298,8 @@ pub(crate) fn build_reactor(spec: ReactorSpec) -> Reactor {
         seed: spec.seed,
         machine: spec.machine,
         chunk_buffer: spec.chunk_buffer,
+        steer_image_resolver: spec.steer_image_resolver,
+        steer_outcome_recorder: spec.steer_outcome_recorder,
     })
     .with_steering(spec.steering)
 }

@@ -43,6 +43,11 @@ provider 的模型目录显式声明 `supports_vision`（`ProviderStore::resolve
 agent 不读取文件系统；坏附件不得使回合失败。
 关联回放不经过组合根——它由 `SessionStore` 的事件投影提供。
 
+steer 附件复用同一套种子规则：组合根为每个父回合 reactor 注入 `steer_image_resolver` 与
+`steer_outcome_recorder`（均为 `attachment_seed` 上的同步工厂，vision 门与 20 MiB 预算同
+`resolve_attachments`），reactor 在轮次边界 drain 到带附件 id 的 `SteerEntry` 时调用它们构建
+请求消息与投递结果；子代理 reactor 注入 `None`，保持纯文本 steer。
+
 `wiring/turn_common.rs` 是父/子两条 turn 路径的**共享规则宿主**，属本模块"仅装配"约束的显式例外：
 seed 静态前缀（prompt-cache 字节一致不变量的唯一构造点）、技能动态尾、工作区解析、每回合 limits、
 hook 包装的工具执行与 `ReactorSpec` 构造都住在这里。理由是结构性的——两条路径必须共用同一份规则才

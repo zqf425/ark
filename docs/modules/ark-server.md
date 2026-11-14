@@ -26,6 +26,9 @@
 - 连接有界；慢客户端断开后从最后 `seq` 重连，绝不阻塞线程 writer。
 - `GET /v1/threads/{id}/turns/{turn_id}` 必须校验 `TurnSummary.thread_id` 与路径 `{id}` 一致，
   不一致按 404 处理（与 steer、child-run 单路由的归属校验一致）；turn id 不是跨线程可读的全局句柄。
+- steer 与回合起点共用同一 `TurnRequest` 信封与同一附件授权裁决：`enqueue_steering` 前先
+  `authorize_turn_attachments`（按本线程关联事件，未关联统一 404），id 随文本进入同一条
+  `SteerEntry`，不存在第二条附件通道。
 - `workspace_gate` 是全进程串行启动门，锁内只做注册表变更与必要的轻量存在性检查，不得 await
   磁盘 I/O 或全量事件回放。附件授权（`authorize_turn_attachments`，回放整段事件日志）在取锁前
   完成；`get_thread` 单文件存在性检查与删除路由共用同一 gate，保留在锁内以避免删除竞态。

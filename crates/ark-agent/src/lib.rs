@@ -53,4 +53,7 @@ pub use policy::{
     AccessKind, BudgetVerdict, ParallelPolicy, StormBreaker, StormReport, SuppressedCall,
     ToolSignature, TurnBudget,
 };
-pub use service::{run_calls, step, MachineError, ModelSeed, Reactor, ReactorConfig, TurnMachine};
+pub use service::{
+    run_calls, step, MachineError, ModelSeed, Reactor, ReactorConfig, SteerImageResolver,
+    SteerOutcomeRecorder, TurnMachine,
+};

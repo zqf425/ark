@@ -9,6 +9,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+use ark_common::AttachmentId;
 use tokio::sync::watch;
 
 #[derive(Debug)]
@@ -152,7 +153,9 @@ mod tests {
         let queue = SteerQueue::new();
         assert!(queue.push("first"));
         assert!(queue.push("second"));
-        assert_eq!(queue.drain(), vec!["first", "second"]);
+        let drained = queue.drain();
+        let texts: Vec<&str> = drained.iter().map(|entry| entry.text.as_str()).collect();
+        assert_eq!(texts, vec!["first", "second"]);
         assert!(queue.is_empty());
     }
 
@@ -164,7 +167,9 @@ mod tests {
         let drained = queue.drain();
         assert!(queue.is_empty());
         queue.restore(drained);
-        assert_eq!(queue.drain(), vec!["first", "second"]);
+        let drained = queue.drain();
+        let texts: Vec<&str> = drained.iter().map(|entry| entry.text.as_str()).collect();
+        assert_eq!(texts, vec!["first", "second"]);
     }
 
     #[test]
@@ -174,7 +179,9 @@ mod tests {
         let drained = queue.drain();
         assert!(queue.push("new"));
         queue.restore(drained);
-        assert_eq!(queue.drain(), vec!["old", "new"]);
+        let drained = queue.drain();
+        let texts: Vec<&str> = drained.iter().map(|entry| entry.text.as_str()).collect();
+        assert_eq!(texts, vec!["old", "new"]);
     }
 
     #[test]
@@ -190,6 +197,42 @@ mod tests {
         assert!(queue.push("a"));
         assert!(!queue.push("b"), "the caller must learn the queue is full");
         assert_eq!(queue.len(), 1);
+    }
+
+    #[test]
+    fn attachments_ride_with_their_texts() {
+        let id = AttachmentId::new();
+        let queue = SteerQueue::new();
+        assert!(queue.push_with_attachments("look at this", vec![id]));
+        let drained = queue.drain();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].text, "look at this");
+        assert_eq!(drained[0].attachment_ids, vec![id]);
+    }
+
+    #[test]
+    fn plain_steers_drain_no_attachment_ids() {
+        let queue = SteerQueue::new();
+        assert!(queue.push("text only"));
+        let drained = queue.drain();
+        assert_eq!(drained.len(), 1);
+        assert!(drained[0].attachment_ids.is_empty());
+        assert_eq!(drained[0].text, "text only");
+    }
+
+    #[test]
+    fn a_cancelled_round_restores_queued_attachments() {
+        let id = AttachmentId::new();
+        let queue = SteerQueue::new();
+        assert!(queue.push_with_attachments("retry this", vec![id]));
+        let drained = queue.drain();
+        assert!(queue.is_empty());
+        queue.restore(drained);
+        // The restored round must still carry the ids it was queued with.
+        let restored = queue.drain();
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored[0].attachment_ids, vec![id]);
+        assert_eq!(restored[0].text, "retry this");
     }
 
     #[test]
@@ -212,15 +255,26 @@ mod tests {
     }
 }
 
-/// A bounded queue of steering texts for one turn.
+/// A bounded queue of steering corrections for one turn.
 ///
 /// Bounded on purpose: an unbounded queue lets a caller grow a turn's context
 /// without limit, which is exactly the failure mode `context_pressure` exists to
 /// prevent.
 #[derive(Debug, Default)]
 pub struct SteerQueue {
-    pending: Mutex<VecDeque<String>>,
+    /// One entry per queued correction. Text and its attachment ids live in
+    /// the same entry so they drain, restore and drop together — never a text
+    /// without the ids the user sent it with.
+    pending: Mutex<VecDeque<SteerEntry>>,
     capacity: usize,
+}
+
+/// One queued correction: the instruction text plus the attachment ids the
+/// user referenced with it (empty for a text-only steer).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SteerEntry {
+    pub text: String,
+    pub attachment_ids: Vec<AttachmentId>,
 }
 
 impl SteerQueue {
@@ -241,8 +295,19 @@ impl SteerQueue {
     /// Queue `text`. Returns `false` when the queue is full, so the caller can
     /// report back instead of silently dropping the instruction.
     pub fn push(&self, text: impl Into<String>) -> bool {
+        self.push_with_attachments(text, Vec::new())
+    }
+
+    /// Queue a correction that carries attachment ids. The ids must already be
+    /// authorized for the turn's thread; the queue only transports them. The
+    /// text is still required: a steer is an instruction, never bytes alone.
+    pub fn push_with_attachments(
+        &self,
+        text: impl Into<String>,
+        attachment_ids: Vec<AttachmentId>,
+    ) -> bool {
         let text = text.into();
-        let text = text.trim();
+        let text = text.trim().to_string();
         if text.is_empty() {
             return false;
         }
@@ -252,31 +317,34 @@ impl SteerQueue {
         if pending.len() >= self.capacity {
             return false;
         }
-        pending.push_back(text.to_string());
+        pending.push_back(SteerEntry {
+            text,
+            attachment_ids,
+        });
         true
     }
 
     /// Take everything queued so far, in arrival order.
-    pub fn drain(&self) -> Vec<String> {
+    pub fn drain(&self) -> Vec<SteerEntry> {
         let Ok(mut pending) = self.pending.lock() else {
             return Vec::new();
         };
         pending.drain(..).collect()
     }
 
-    /// Put drained texts back at the front, preserving their order. Used when a
-    /// model round is cancelled after draining but before the request was sent:
-    /// a 202-accepted correction must not be silently lost (AG-02).
-    pub fn restore(&self, texts: Vec<String>) {
+    /// Put drained corrections back at the front, preserving their order. Used
+    /// when a model round is cancelled after draining but before the request
+    /// was sent: a 202-accepted correction must not be silently lost (AG-02).
+    pub fn restore(&self, entries: Vec<SteerEntry>) {
         let Ok(mut pending) = self.pending.lock() else {
             return;
         };
-        for (index, text) in texts.into_iter().enumerate() {
+        for (index, entry) in entries.into_iter().enumerate() {
             let len = pending.len();
             if len >= self.capacity {
                 break;
             }
-            pending.insert(index.min(len), text);
+            pending.insert(index.min(len), entry);
         }
     }
 
