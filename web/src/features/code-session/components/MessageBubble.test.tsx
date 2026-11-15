@@ -257,6 +257,16 @@ describe('最终回复卡', () => {
     await harness.unmount()
   })
 
+  it('完成后 footer 行带生成时间,与用户气泡 footer 同款时钟', async () => {
+    const harness = await mountWithProviders(<FinalReplyCard item={replyItem('completed')} />)
+    const time = harness.host.querySelector('.ark-reply__foot time')
+    expect(time).not.toBeNull()
+    expect(time?.textContent).not.toBe('')
+    // 时钟语义与用户气泡一致：local HH:MM:SS。
+    expect(harness.text()).toMatch(/\d{2}:\d{2}:\d{2}/)
+    await harness.unmount()
+  })
+
   it('失败状态以错误色标记并展示失败 chip', async () => {
     const harness = await mountWithProviders(<FinalReplyCard item={replyItem('failed')} />)
     expect(harness.host.querySelector('.ark-reply.is-failed')).not.toBeNull()

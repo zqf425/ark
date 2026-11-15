@@ -11,20 +11,31 @@
   overflow-wrap: break-word;
   color: var(--ark-text);
   letter-spacing: 0.002em;
+  /* The renderer's inter-block newline text nodes must never paint: the block
+     spacing below is the only rhythm. A host rule elsewhere may not re-enable
+     pre-wrap on this subtree (see code-session-bubbles.css prose variants). */
+  white-space: normal;
 }
 
 .ark-md > :first-child { margin-top: 0; }
 .ark-md > :last-child { margin-bottom: 0; }
 
-/* Block rhythm: a touch more air than 0.6em so headings and paragraphs read
-   as separate thoughts instead of one wall of text. */
+/*
+ * Block rhythm: 0.4em between sibling blocks, 0.6em before a list, so
+ * paragraphs read as separate thoughts without stacking air — markdown hosts
+ * sit inside chat cards, where 0.75em per block reads as one blank line per
+ * paragraph gap.
+ */
 .ark-md p,
-.ark-md ul,
-.ark-md ol,
 .ark-md pre,
 .ark-md blockquote,
 .ark-md table {
-  margin: 0.75em 0;
+  margin: 0.4em 0;
+}
+
+.ark-md ul,
+.ark-md ol {
+  margin: 0.6em 0;
 }
 
 .ark-md h1,
@@ -33,7 +44,7 @@
 .ark-md h4,
 .ark-md h5,
 .ark-md h6 {
-  margin: 1.35em 0 0.45em;
+  margin: 0.9em 0 0.35em;
   line-height: 1.35;
   letter-spacing: -0.01em;
   font-weight: 650;
@@ -49,13 +60,13 @@
   padding-left: 1.45em;
 }
 
-.ark-md li { margin: 0.28em 0; }
+.ark-md li { margin: 0.2em 0; }
 .ark-md li::marker { color: var(--ark-text-faint); }
 
 /* Nested lists tighten up so deep indentation does not stack air. */
 .ark-md li > ul,
 .ark-md li > ol {
-  margin: 0.28em 0;
+  margin: 0.2em 0;
 }
 
 /* Task-list checkboxes pick up the accent instead of the UA default. */
@@ -94,7 +105,7 @@
 }
 
 .ark-md blockquote p {
-  margin: 0.35em 0;
+  margin: 0.25em 0;
 }
 
 .ark-md code {
@@ -112,7 +123,7 @@
   border: 1px solid var(--ark-code-block-border);
   border-radius: var(--ark-radius-lg);
   overflow: hidden;
-  margin: 0.75em 0;
+  margin: 0.5em 0;
   box-shadow: var(--ark-shadow-ctl);
 }
 
@@ -187,7 +198,7 @@
 .ark-md hr {
   border: none;
   border-top: 1px solid var(--ark-border-muted);
-  margin: 1.25em 0;
+  margin: 0.8em 0;
 }
 
 /* Code-block copy button: quiet glyph in the header bar, turns into a check. */
