@@ -3,16 +3,18 @@
  * The new-task page mounts the session composer with no thread and no mode
  * picker. Its send action is a pending start: create the thread, commit the
  * staged runtime picks, associate the picked attachments and start the first
- * turn — exactly one delivery. A failed create must keep the draft and the
- * attachments so the next attempt still has everything, and the staged
- * workspace rides the create call (server-side validation), not a PATCH after
- * the fact.
+ * turn — exactly one delivery. A delivered send jumps into the workbench
+ * (view switch to `code`) with the new thread already active in the store; a
+ * failed create must keep the draft and the attachments so the next attempt
+ * still has everything, and the staged workspace rides the create call
+ * (server-side validation), not a PATCH after the fact.
  */
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installBrowserStubs, mountWithProviders, settle, type ReactHarness } from '../../../shared/testing/react-harness'
 import { useCodeSessionStore } from '../../code-session/state/store'
 import { NEW_TASK_DRAFT_KEY } from '../../code-session/components/Composer'
+import { useViewStore } from '../../workbench/state/view-slice'
 import { NewTaskPage } from './NewTaskPage'
 
 vi.mock('../../code-session/api/threads-api', () => ({
@@ -103,6 +105,7 @@ describe('NewTaskPage composer delivery', () => {
   beforeEach(() => {
     installBrowserStubs()
     useCodeSessionStore.setState({ drafts: {}, sending: false, streamStatus: 'closed', activeTurnId: null })
+    useViewStore.setState({ view: 'new' })
     vi.mocked(createThread).mockReset()
     vi.mocked(updateThread).mockReset()
     vi.mocked(startTurn).mockReset()
@@ -161,6 +164,9 @@ describe('NewTaskPage composer delivery', () => {
     expect(useCodeSessionStore.getState().activeThreadId).toBe(THREAD)
     // The delivered draft is pruned; nothing is left for a phantom resend.
     expect(useCodeSessionStore.getState().drafts[NEW_TASK_DRAFT_KEY]).toBeUndefined()
+    // The send jumps into the workbench: the shell's scene switches to `code`
+    // with the new thread already active, opening it in the session list.
+    expect(useViewStore.getState().view).toBe('code')
     // No staged overrides → no runtime PATCH.
     expect(updateThread).not.toHaveBeenCalled()
   })
@@ -178,6 +184,9 @@ describe('NewTaskPage composer delivery', () => {
 
     expect(startTurn).not.toHaveBeenCalled()
     expect(useCodeSessionStore.getState().drafts[NEW_TASK_DRAFT_KEY]).toBe('不能丢的草稿')
+    // A failed delivery never switches the scene: the user stays on the
+    // new-task page with draft and picks intact for the next attempt.
+    expect(useViewStore.getState().view).toBe('new')
   })
 
   it('a picked attachment is associated after the thread exists and rides the turn', async () => {

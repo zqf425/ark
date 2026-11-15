@@ -8,8 +8,10 @@
  * creates the thread (`POST /v1/threads` with the staged workspace), commits
  * the remaining overrides (`PATCH /v1/threads/{id}`), associates the picked
  * attachments and starts the first turn — one delivery, like every composer
- * send. There is no mode picker on the page: the changes review stays
- * reachable from the command palette, and a new session always starts live.
+ * send. A delivered send jumps straight into the workbench with the new
+ * thread selected: the store's active thread is set before the delivery, and
+ * the view switches to `code` only after the whole chain lands, so a failure
+ * keeps the user on this page with draft and picks intact.
  */
 import { useState } from 'react'
 import { describeError } from '../../../shared/api/error-describe'
@@ -22,12 +24,14 @@ import { startTurn } from '../../code-session/api/turns-api'
 import { associateAttachment } from '../../code-session/api/attachments-api'
 import { useCodeSessionStore } from '../../code-session/state/store'
 import { NEW_TASK_DRAFT_KEY, Composer, type ComposerSubmit } from '../../code-session/components/Composer'
+import { useViewStore } from '../../workbench/state/view-slice'
 import type { ConsoleMeta } from '../hooks/use-console-meta'
 
 /** Props stay `meta`-compatible with the other console scenes (unused here). */
 export function NewTaskPage(_props: { meta?: ConsoleMeta }): JSX.Element {
   const { t } = useI18n()
   const push = useToast().push
+  const setView = useViewStore((s) => s.setView)
   const setActiveThread = useCodeSessionStore((s) => s.setActiveThread)
   const upsertThread = useCodeSessionStore((s) => s.upsertThread)
 
@@ -71,6 +75,9 @@ export function NewTaskPage(_props: { meta?: ConsoleMeta }): JSX.Element {
       // Delivered: the page's staged picks are now the thread's stored state.
       setStaged({})
       useCodeSessionStore.getState().clearDraft(NEW_TASK_DRAFT_KEY)
+      // Jump into the workbench: the thread is already active in the store, so
+      // the canvas opens this session and the rail shows it under its project.
+      setView('code')
       return true
     } catch (error) {
       push('error', t('console.new.failed'), describeError(error, translateNow))
@@ -94,8 +101,9 @@ export function NewTaskPage(_props: { meta?: ConsoleMeta }): JSX.Element {
           The session composer, unkeyed: the new-task page never remounts it on
           a thread switch (the page owns the draft under NEW_TASK_DRAFT_KEY and
           the staged overrides live in `staged`), so pills and attachments keep
-          their state while the user types. Delivered drafts land on the canvas
-          via the store — the thread switch re-renders App away from this page.
+          their state while the user types. A delivered send sets the active
+          thread and switches the shell's view to `code`, opening the session
+          in the workbench's thread list + canvas.
         */}
         <Composer
           threadId={null}

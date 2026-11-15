@@ -231,7 +231,9 @@ ARK Console 的 `new` 场景（⌘K「新建任务」）此前是独立的简化
 - 发送是一次完整投递：`POST /v1/threads`（staged workspace 经服务端 `WorkspaceService::validate`
   种为覆盖）→ `PATCH /v1/threads/{id}`（provider/model/autonomy/reasoning_effort）→ 逐个
   `POST /v1/threads/{id}/attachments` 关联 → `POST /v1/threads/{id}/turns`（首回合）。
-  投递成功才清草稿与暂存覆盖并跳转工作台，任一步失败全量保留可重试，错误走共享 toast。
+  投递成功才清草稿与暂存覆盖，并跳转工作台：新线程在 create 返回时即 `setActiveThread`，
+  随后 `setView('code')`，左侧会话列表与画布直接打开该会话；任一步失败全量保留可重试且不切
+  场景，错误走共享 toast。
   页面不设模式卡片：新会话一律直接启动首回合，变更审查保留在 ⌘K 命令面板入口。
 - 该路径不受 SSE `streamStatus` 闸门约束（尚无流可订阅），仅 `sending` 阻塞
   （`canSendToThread` 的 `pendingStart` 语义，单测钉住）。草稿存于 store 保留键
