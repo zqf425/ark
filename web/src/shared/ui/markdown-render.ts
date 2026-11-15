@@ -70,14 +70,56 @@ function escapeAttr(text: string): string {
  * A inline-code fragment that may be upgraded to a file chip
  * (requirements/prose-path-links.md): path-shaped, no protocol/home/space
  * noise. The real gate is the caller's `writable` whitelist — shape alone
- * never promotes, it only *allows* promotion.
+ * never promotes, it only *allows* promotion. A bare basename (no separator)
+ * is also allowed: models habitually cite just `a.md` in prose, and the
+ * whitelist's basename index decides whether that name is unambiguous.
  */
 function pathShaped(text: string): boolean {
   if (text.includes('`') || /\s/.test(text)) return false
   if (text.endsWith('/') || text.endsWith('\\')) return false
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return false // http://, file:// …
   if (text.startsWith('~') || text.startsWith('%')) return false // home, URL-enc
+  if (text.includes('.') && /^[\w.-]+$/.test(text)) return true // bare `a.md`
   return text.includes('/') || text.includes('\\')
+}
+
+/**
+ * Index over the write whitelist: exact paths, `/`-normalized paths and bare
+ * basenames. A basename is resolvable only when exactly one whitelisted file
+ * carries it — two `a.md` in different dirs stay unlinked because the click
+ * could not say which one to open.
+ */
+function buildPathIndex(writable: readonly string[]): {
+  exact: Set<string>
+  normalized: Map<string, string>
+  basenames: Map<string, string>
+} {
+  const exact = new Set(writable)
+  const normalized = new Map<string, string>()
+  const basenames = new Map<string, string>()
+  for (const path of writable) {
+    const norm = path.replace(/\\/g, '/')
+    if (!normalized.has(norm)) normalized.set(norm, path)
+    const base = norm.slice(norm.lastIndexOf('/') + 1)
+    if (basenames.has(base)) basenames.set(base, '') // ambiguous: disable
+    else basenames.set(base, path)
+  }
+  return { exact, normalized, basenames }
+}
+
+/**
+ * Resolve a prose mention to the whitelisted path it names: exact, then
+ * `/`-normalized, then a unique basename. Returns the canonical whitelisted
+ * path (not the prose text) so `selectFile` always receives what the write
+ * tool actually carried.
+ */
+function resolveMention(text: string, index: ReturnType<typeof buildPathIndex>): string | null {
+  const norm = text.replace(/\\/g, '/')
+  if (index.exact.has(text)) return text
+  if (index.normalized.has(norm)) return index.normalized.get(norm)!
+  const base = norm.slice(norm.lastIndexOf('/') + 1)
+  const hit = index.basenames.get(base)
+  return hit ? hit : null
 }
 
 /**
@@ -89,19 +131,18 @@ function pathShaped(text: string): boolean {
  */
 function promotePathChips(root: HTMLElement, writable: readonly string[]): void {
   if (writable.length === 0) return
-  const exact = new Set(writable)
-  const normalized = new Set(writable.map((p) => p.replace(/\\/g, '/')))
+  const index = buildPathIndex(writable)
   for (const code of Array.from(root.querySelectorAll('code'))) {
     if (code.closest('pre')) continue
     const text = code.textContent ?? ''
     if (!pathShaped(text)) continue
-    const norm = text.replace(/\\/g, '/')
-    if (!exact.has(text) && !normalized.has(norm)) continue
+    const resolved = resolveMention(text, index)
+    if (!resolved) continue
     const chip = document.createElement('button')
     chip.type = 'button'
     chip.className = 'ark-md-filechip'
-    chip.setAttribute('data-md-file', text)
-    chip.setAttribute('title', text)
+    chip.setAttribute('data-md-file', resolved)
+    chip.setAttribute('title', resolved)
     chip.textContent = text
     code.replaceWith(chip)
   }
