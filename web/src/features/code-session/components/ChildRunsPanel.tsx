@@ -223,7 +223,11 @@ export function ChildRunsPanel({ threadId }: { threadId: string }): JSX.Element 
     return () => controller.abort()
   }, [threadId, childRunRevision])
 
-  if (!data || data.child_runs.length === 0) return null
+  if (!data || data.child_runs.length === 0) {
+    return (
+      <p className="ark-panel__hint">{t('canvas.childRuns.empty')}</p>
+    )
+  }
 
   // Claude-style ordering: everything with a pulse sits on top, settled runs
   // sink below and overflow into one expandable count so old runs stop
@@ -240,11 +244,9 @@ export function ChildRunsPanel({ threadId }: { threadId: string }): JSX.Element 
 
   return (
     <section className="ark-childruns">
+      {/* The inspector tab already carries the "子代理" title, so the header
+          only reports the live/settled split. */}
       <header>
-        <span className="ark-childruns__heading">
-          <span className="ark-childruns__glyph" aria-hidden="true" />
-          <strong>{t('canvas.childRuns.title')}</strong>
-        </span>
         <span className="ark-childruns__count" data-active={data.active > 0 ? 'yes' : 'no'}>
           {data.active > 0 ? t('canvas.childRuns.active', { count: data.active }) : t('canvas.childRuns.idle', { count: data.child_runs.length })}
         </span>

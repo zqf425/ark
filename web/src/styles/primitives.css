@@ -172,6 +172,23 @@
   color: var(--ark-text-faint);
 }
 
+/* Live badge (active subagent count): a filled accent pill, not muted text. */
+.ark-tabs__badge.is-live {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--ark-accent);
+  color: var(--ark-bg);
+  font-family: var(--ark-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
 /* ---------- chips & dots ---------- */
 
 .ark-chip {

@@ -37,6 +37,7 @@ export function emptyItemsState(): ItemsSnapshot {
     userInputs: {},
     childCompletions: {},
     childRunRevision: 0,
+    childRunActiveCount: 0,
     workbenchRevision: 0,
     rewindRevision: 0,
     rewoundFromSeq: null,
@@ -196,6 +197,9 @@ function setTurn(draft: ItemsDraft, turnId: TurnId, state: TurnState): void {
   if (terminal && draft.activeTurnId === turnId) draft.activeTurnId = null
 }
 
+/** Statuses after which a child run no longer counts as active for the badge. */
+const TERMINAL_CHILD_STATUSES = new Set(['completed', 'failed', 'aborted', 'ended'])
+
 /** Keep UI-only completion cards bounded even if a stream is unusually long. */
 function recordChildCompletion(draft: ItemsDraft, notice: ChildCompletionNotice): void {
   if (currentChildCompletion(draft, notice.notification_id)) return
@@ -319,6 +323,7 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       // the suffix; let those panels refetch. Revisions stay monotonic so a
       // rebuilt projection never looks older than the one it replaced.
       rebuilt.childRunRevision = draft.childRunRevision + 1
+      rebuilt.childRunActiveCount = 0
       rebuilt.workbenchRevision = draft.workbenchRevision + 1
       return rebuilt
     }
@@ -396,9 +401,15 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       return commitDraft(draft)
     }
 
-    case 'child_activity':
+    case 'child_activity': {
       draft.childRunRevision += 1
+      // The event carries the child's own status, so the badge count tracks it
+      // without a second request. An unknown future wire status counts as
+      // active: a badge that over-reports beats one that hides live work.
+      const active = event.status === 'queued' || event.status === 'running' || !TERMINAL_CHILD_STATUSES.has(event.status)
+      draft.childRunActiveCount = Math.max(0, draft.childRunActiveCount + (active ? 1 : -1))
       return commitDraft(draft)
+    }
 
     case 'usage': {
       // tok/s pairs the round's provider-reported completion tokens with the

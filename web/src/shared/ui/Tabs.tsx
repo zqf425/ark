@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 export type TabItem<T extends string> = {
   id: T
   label: string
+  /** Rendered verbatim after the label; the caller owns badge styling. */
   badge?: ReactNode
 }
 
@@ -27,7 +28,7 @@ export function Tabs<T extends string>({ items, active, onChange, label }: TabsP
           onClick={() => onChange(item.id)}
         >
           {item.label}
-          {item.badge ? <span className="ark-tabs__badge">{item.badge}</span> : null}
+          {item.badge}
         </button>
       ))}
     </div>

@@ -151,6 +151,7 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.childRuns.actionFailed': ['子代理操作失败', 'The subagent action failed'],
   'canvas.childRuns.completedToast': ['子代理「{label}」{status}', 'Subagent "{label}" {status}'],
   'canvas.childRuns.showMore': ['更早 {count} 个', '{count} earlier'],
+  'canvas.childRuns.empty': ['本会话还没有子代理运行记录。', 'No subagent runs in this thread yet.'],
 
   'canvas.composer.attach': ['附件', 'Attach'],
   'canvas.composer.runtime.modelLabel': ['模型：{value}', 'Model: {value}'],

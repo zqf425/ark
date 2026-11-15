@@ -22,7 +22,6 @@ import { ChildCompletionCard } from './ErrorRow'
 import { UserInputCard } from './UserInputCard'
 import { Composer } from './Composer'
 import { SessionStatsBar } from './SessionStatsBar'
-import { ChildRunsPanel } from './ChildRunsPanel'
 import { rewindAvailabilityByTurn } from './rewind-flow'
 import { startReview } from '../api/turns-api'
 
@@ -283,7 +282,6 @@ export function ThreadStream({
           {completions.map((notice) => (
             <ChildCompletionCard key={notice.notification_id} notice={notice} />
           ))}
-          <ChildRunsPanel threadId={threadId} />
 
           {approvals.map((approval) => (
             <ApprovalCard key={approval.approval_id} approval={approval} onResolved={resolveApprovalLocally} />

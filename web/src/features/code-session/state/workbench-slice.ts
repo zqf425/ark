@@ -1,9 +1,9 @@
 import type { StateCreator } from 'zustand'
 
 /** Right-hand panel slots the Code page exposes (design §7.10.2 workbench). */
-export type PanelId = 'changes' | 'plan' | 'file' | 'terminal'
+export type PanelId = 'changes' | 'plan' | 'file' | 'terminal' | 'subagents'
 
-export const PANEL_IDS: PanelId[] = ['changes', 'plan', 'file', 'terminal']
+export const PANEL_IDS: PanelId[] = ['changes', 'plan', 'file', 'terminal', 'subagents']
 
 /** Purely presentational layout state; no business semantics. */
 export type WorkbenchSlice = {

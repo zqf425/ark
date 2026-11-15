@@ -85,6 +85,12 @@ export type ItemsSnapshot = {
   /** Advances only for child lifecycle events, not every streamed token. */
   childRunRevision: number
   /**
+   * Child runs the last lifecycle event said are queued/running. UI-only
+   * affordance for the inspector badge; the panel itself always refetches the
+   * authoritative list from the API.
+   */
+  childRunActiveCount: number
+  /**
    * Advances only for events that change a server-side workbench projection
    * (plan, changes, file, terminal). Panels subscribe to this instead of
    * `lastSeq`, which advances on every streamed token.
