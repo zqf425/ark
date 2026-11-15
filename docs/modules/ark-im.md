@@ -131,8 +131,8 @@ feishu/lark)。群聊事件带 `mention` 列表,归一化为 `is_mention`。发�
 ### 微信(阶段 4)
 
 iLink bot 协议(`ilink/bot/getupdates` 长轮询 35s + `ilink/bot/sendmessage`,
-`ilink_bot_token` 鉴权;协议形状以 smart-ark `weixin-bridge-runtime.ts` 及其
-`@tencent-weixin/openclaw-weixin` 依赖为参照原生实现,不引 Node 依赖)。二维码登录经
+`ilink_bot_token` 鉴权;协议形状以 `@tencent-weixin/openclaw-weixin` 依赖为参照原生实现,
+不引 Node 依赖)。二维码登录经
 `ImLoginFlow` 暴露(start/wait 两段,状态机 wait/scanned/expired/confirmed),成功后
 `owner_user_id` 随凭证落盘(必填,编排层按它过滤 sender)。`context_token` 保活是适配器
 内部状态。退出条件:协议逆向不可行或鉴权不稳定时,微信移出 v1 范围、更新需求非目标并
@@ -145,8 +145,8 @@ iLink bot 协议(`ilink/bot/getupdates` 长轮询 35s + `ilink/bot/sendmessage`,
   编排循环 `select` 入站消息与 `shutdown_receiver()`,每轮 select 顶部检查
   `is_shutting_down()`——两个信号任一到达(或标志位为真)即 cancel 该渠道 token 并等待
   `run` 返回,`Ctrl-C`/drain 这类只置标志位的关闭路径因此同样收敛(对齐 arkd.md 的两条
-  shutdown 路径)。渠道增删/凭证变更走 reconcile(`sync` 语义,同 smart-ark
-  `ClawRuntime::sync`):按 `id|credentials|policy` 指纹比较,变更的渠道 cancel 旧实例、
+  shutdown 路径)。渠道增删/凭证变更走 reconcile:按 `id|credentials|policy` 指纹比较,
+  变更的渠道 cancel 旧实例、
   重建连接,其余不动。
 - 回复路径:先 `SessionStore::subscribe(thread_id, since_seq=当前水位)`(与 SSE 复用
   同一临界区),再 `start_turn`;订阅仅探测终态(事件按 `turn_id` 过滤),最终文本取

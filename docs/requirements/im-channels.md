@@ -1,25 +1,21 @@
 # IM 渠道接入（IM Channels）
 
 > 状态:**已实现**(2026-11-02 设计定稿,五个阶段全部落地,离线可测部分;真实 Telegram/飞书/微信
-> 平台端到端由发布验收承接,本机未执行)。设计节即实现语义,落地情况见文末。参照 smart-ark 桌面端
-> IM 接入(内部代号
-> claw,`src/main/claw-runtime.ts` 及 feishu/telegram/weixin 三个平台
-> runtime)按 ark 架构
-> 裁剪。QQ、企业微信等新渠道按同一扩展点后续另立项,不在本需求范围。
+> 平台端到端由发布验收承接,本机未执行)。设计节即实现语义,落地情况见文末。QQ、企业微信等
+> 新渠道按同一扩展点后续另立项,不在本需求范围。
 
 ## 背景与目标
 
-smart-ark 在桌面端主进程实现了 IM 接入:外部 IM 平台(飞书/Telegram/微信)的消息驱动一个
-kun 会话回合,回复经平台 API 推回聊天。ark 作为重写版需要等价能力:用户在 arkd 配置一个
-IM 渠道(凭证+策略),对应平台上的私聊/群聊消息自动映射到 ark 会话线程并触发真实回合,
-助手回复推回 IM;渠道可启停、可增删,后续可扩展新平台。
+IM 接入让外部 IM 平台(飞书/Telegram/微信)的消息驱动一个 ark 会话回合,回复经平台 API
+推回聊天:用户在 arkd 配置一个 IM 渠道(凭证+策略),对应平台上的私聊/群聊消息自动映射到
+ark 会话线程并触发真实回合,助手回复推回 IM;渠道可启停、可增删,后续可扩展新平台。
 
-对标结论(取自 smart-ark,按 ark 架构裁剪):
+设计取舍:
 
-| smart-ark 概念 | 本需求取舍 |
+| 原型方案 | 本需求取舍 |
 |---|---|
-| Electron main 进程内平台 runtime(claw-runtime 等) | arkd 进程内 IM 服务:编排居 `ark-server` service 层,平台适配居新 crate `ark-im` |
-| 经 HTTP 自调用 kun 建线程+回合 | 进程内复用 `start_turn` 全部校验路径(同定时任务先例) |
+| 独立 GUI 进程承载平台 runtime | arkd 进程内 IM 服务:编排居 `ark-server` service 层,平台适配居新 crate `ark-im` |
+| 经 HTTP 自调用建线程+回合 | 进程内复用 `start_turn` 全部校验路径(同定时任务先例) |
 | `approvalPolicy:'auto'` + `disableUserInput` | 线程 runtime `autonomy=unattended` 覆盖(gate 永不等待不在场的人) |
 | 飞书流式卡片(`feishu-streamer.ts`) | v1 整段回复;流式卡片为非目标 |
 | IM↔桌面会话镜像(mirror coordinator) | 非目标,后续需求另立 |
@@ -163,7 +159,7 @@ GET 不回传,客户端不可写。
   `turn_id` 过滤的最后一条非空 assistant 文本;本回合无 assistant 文本(失败/中止)时
   按终态分支发失败/中止提示,**不回退到历史回合文本**(投影保证 lag 时回复仍完整,
   turn_id 过滤保证不会把上一回合的答案发给用户)。
-- **超时解耦**(对标 smart-ark `scheduleImResultPush`):回合超过 `IM_ACK_SECS = 120` 未
+- **超时解耦**:回合超过 `IM_ACK_SECS = 120` 未
   完成先发 ack("正在处理…"),后台继续等待至多 `IM_MAX_WAIT_SECS = 1800`,超时回复失败
   提示并放弃等待(回合本身继续跑到终态,结果留在会话线程里)。
 - 发送按平台上限分块(Telegram 4096 字符等);发送失败降级为截断纯文本,再失败记录
@@ -296,7 +292,7 @@ arkd 装配(`ImFileStore` + 经治理的 transport client + `im.spawn`,仅随 se
 `ark-im` 行;文档同步清单第 1、2 行均已回填。
 
 阶段 3(飞书)已实现:`ark-im/src/feishu.rs` WebSocket 长连接,协议自官方
-`@larksuiteoapi/node-sdk`(smart-ark 的参照实现)原生提取:`POST /callback/ws/endpoint`
+`@larksuiteoapi/node-sdk`(官方 Node SDK)原生提取:`POST /callback/ws/endpoint`
 拉取签名 URL 与 PingInterval 等客户端配置、pbbp2.Frame protobuf 帧手写编解码(SeqID/
 LogID/service/method/headers/payload 九字段)、ping/pong 心跳、事件按 message_id/sum/seq
 分片重组(10s TTL)、echo ack 回帧(`{"code":200}` base64);REST 侧 tenant_access_token
@@ -306,8 +302,8 @@ LogID/service/method/headers/payload 九字段)、ping/pong 心跳、事件按 m
 重组、事件归一化)。飞书无重放游标(网关在带内 ack,重投递由网关重试窗口与去重集合兜底),
 `cursor()` 恒为 `None`。
 
-阶段 4(微信)已实现:`ark-im/src/weixin.rs` iLink bot 协议原生实现(参照 smart-ark
-`weixin-bridge-runtime.ts` 与 `@tencent-weixin/openclaw-weixin` 2.4.3,不引 Node 依赖):
+阶段 4(微信)已实现:`ark-im/src/weixin.rs` iLink bot 协议原生实现(参照
+`@tencent-weixin/openclaw-weixin` 2.4.3,不引 Node 依赖):
 `getupdates` 长轮询(游标 `get_updates_buf` 随渠道持久化)、`message_type==2` 自过滤、
 TEXT/VOICE 文本提取、`context_token` 按发送者缓存(主动推送凭据)、`sendmessage`
 (BOT/FINISH/TEXT,分块)、`ret`/`errcode` 业务错误检查、连续失败退避(2s/30s)。二维码登录
@@ -334,9 +330,8 @@ ImChannelForm/WeixinLoginDialog;上限后放宽至 1000 行)通过。
 **2026-11-03 补强(扫码渲染)**:微信扫码对话框此前把 `qr_content` 当纯文本放进 `<code>`,
 用户看到的是登录 URL 字符串而非可扫的二维码(实测 `get_bot_qrcode` 返回的
 `qrcode_img_content`/`qrcodeUrl` 是 `https://liteapp.weixin.qq.com/q/...` 形态的登录
-链接)。对齐 smart-ark 渲染策略(`SidebarClawDialogStepContent` 的
-`qrValueIsImage` 双路径):`data:image/` 前缀直接以 `<img>` 展示,其余内容用
+链接)。渲染策略采用双路径:`data:image/` 前缀直接以 `<img>` 展示,其余内容用
 `qrcode.react` 编码为二维码(白底容器保证深色主题下可扫);新增 3 个对话框渲染单测。
-依赖变更:web `dependencies` 新增 `qrcode.react@^4.2.0`(与 smart-ark 同版本,无传递
+依赖变更:web `dependencies` 新增 `qrcode.react@^4.2.0`(无传递
 依赖,约 10KB gzip 量级进主 chunk)。
 
