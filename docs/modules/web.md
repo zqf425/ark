@@ -160,7 +160,11 @@
   回合终态（`turn_completed`/`turn_failed`/`turn_aborted`）弹出一次 toast 通知（`turn-end-toast.ts`，
   文案带会话标题）：被订阅线程由 SSE 终态事件即时触发，后台线程与其它窗口的回合由列表轮询的
   busy→idle 边沿触发；两侧用终态事件的 durable `timestamp`（即行上的 `last_event_at`）做同一键去重，
-  同一回合最多提示一次，之后重放/再轮询不再提示。客户端只在**回合边界**推进活动键并随之重排：用户发消息
+  同一回合最多提示一次，之后重放/再轮询不再提示。桌面壳内窗口**失焦**时同一终态边沿还经
+  `shared/desktop.ts` 的 `postSystemNotification`（`notify_session_event` 命令）发一条系统级通知
+  （Windows toast / macOS 横幅），标题用 `thread.notify.os.*` 键、正文复用 toast 文案；焦点在投递时
+  采样而非监听器维护，系统投递失败（返回 `false`）静默回退到已弹出的应用内 toast，点击通知不产生
+  任何路由。浏览器（非桌面壳）中该调用降级为 no-op，行为与原先只有 toast 时一致。客户端只在**回合边界**推进活动键并随之重排：用户发消息
   （`turn_started`/`turn_steered`）与回合终态（`turn_completed`/`turn_failed`/`turn_aborted`）；
   delta、工具调用、gate 等回合内事件只推进行内 `last_seq` 水位，detail 播种（点击会话触发的
   `GET /v1/threads/{id}` 重载）也不同步行内活动键——否则被订阅（即被点开）的运行中会话会持续
@@ -295,7 +299,9 @@
 
 `apps/ark-desktop` 是已实现的 Tauri 窗口和本地 `arkd` 生命周期宿主。它不会成为 web 的业务 API：生产构建
 仅通过 `VITE_ARK_BASE_URL` 将既有 typed HTTP/SSE client 指向受限 loopback 运行时；开发仍使用 Vite proxy。
-不得在 React 组件中引入 Tauri command、shell/plugin API 或 provider/Agent 分支。
+不得在 React 组件中引入 Tauri command、shell/plugin API 或 provider/Agent 分支。桌面壳的原生能力只经
+`shared/desktop.ts` 的降级桥进入渲染层（当前：文件夹选择、保存文件、系统通知），组件直接 invoke
+Tauri 命令属于检视阻断项；系统通知的发送时机与去重留在 web（`turn-end-toast.ts`），外壳只渲染文本。
 
 独立 `plugin-code-ui` 尚未成为当前 workspace 模块。其未来迁移必须先建立需求设计，不能借桌面外壳绕过
 `ark-ui` 注册总线。

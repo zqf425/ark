@@ -41,3 +41,6 @@
 - 打包命令产出携带同 target triple `arkd` sidecar 的 NSIS 安装包。
 - 生产 Web 请求指向 loopback，CORS 预检仅接受 Tauri origin、允许的 HTTP 方法和必要 headers。
 - `ark-agent`、`ark-plugin`、Provider、MCP 和现有 HTTP/SSE wire 契约无桌面实现分支。
+- 回合终态在窗口失焦时投递系统级通知（Windows toast / macOS 横幅）：外壳只提供文本进文本出的
+  `notify_session_event` 命令（`tauri-plugin-notification`），发送时机、去重与文案由渲染层决定；
+  浏览器与通知被系统拒绝时静默回退到应用内 toast。
