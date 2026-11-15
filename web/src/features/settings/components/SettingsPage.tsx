@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react'
 import { ErrorBoundary } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import { useViewStore } from '../../workbench/state/view-slice'
+import { Icon } from '../../../shared/ui'
 import { useSettings } from '../hooks/use-settings'
 import { useProviders } from '../hooks/use-providers'
 import { GeneralSection } from './GeneralSection'
@@ -30,6 +31,7 @@ export function SettingsPage(): JSX.Element {
   const { t } = useI18n()
   const settings = useSettings()
   const providers = useProviders()
+  const setView = useViewStore((state) => state.setView)
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('general')
   const current = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0]
 
@@ -133,9 +135,24 @@ export function SettingsPage(): JSX.Element {
 
       <main className="ark-settings__scroll">
         <div className="ark-settings__body">
-          <header className="ark-settings__hero">
-            <h1>{current ? t(current.labelKey) : ''}</h1>
-            <p>{current ? t(current.detailKey) : ''}</p>
+          <header className="ark-settings__hero ark-settings__hero--row">
+            <div>
+              <h1>{current ? t(current.labelKey) : ''}</h1>
+              <p>{current ? t(current.detailKey) : ''}</p>
+            </div>
+            {/* The scene-level exit back to the code workbench: visible from
+                every section, so leaving settings never depends on the top-bar
+                gear or remembering ⌘K. */}
+            <button
+              type="button"
+              className="ark-btn ark-btn--sm ark-settings__back"
+              onClick={() => setView('code')}
+              aria-label={t('settings.backToWorkbench')}
+              title={t('settings.backToWorkbench')}
+            >
+              <Icon name="undo" size={13} />
+              {t('settings.backToWorkbench')}
+            </button>
           </header>
           {body}
         </div>

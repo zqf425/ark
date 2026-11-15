@@ -161,7 +161,10 @@
   纠偏。Plan、Changes、File、Terminal 是常驻
   检查器的四个 Tab（收起用 `hidden` 保挂载，面板草稿与服务端读模型不得因折叠丢失），不再使用带
   遮罩的浮动抽屉。`review`、`new`、`settings` 是同一 shell 下的全屏场景，由 `view-slice` 的 `view`
-  选择；`commandOpen` 控制 ⌘K 命令面板。
+  选择；`commandOpen` 控制 ⌘K 命令面板。设置场景的返回不依赖记忆 ⌘K：顶栏右侧齿轮按钮按场景
+  变义——工作台下是「设置」入口，settings 场景下变为「返回工作台」（`console.top.backToWorkbench`，
+  undo 图标）；设置页自身 hero 行右缘还有常驻「返回工作台」按钮（`settings.backToWorkbench`，
+  所有 section 可见），两处都直接 `setView('code')`。
 - 会话列表按项目分组渲染（`thread-projects.ts`，对齐 smart-ark：先按会话**实际生效**工作空间聚合，
   无 override 会话回退运行时 active root，active 组置顶）。项目组头部提供两个随 hover/focus 显现的
   动作：➕ 在该项目下新建会话——把项目路径经 `POST /v1/threads` 的 `workspace` 字段提交，服务端经

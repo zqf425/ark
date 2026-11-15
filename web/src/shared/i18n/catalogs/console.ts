@@ -17,6 +17,7 @@ export const CONSOLE_MESSAGES = {
   'console.top.notifications': ['通知', 'Notifications'],
   'console.top.openCommand': ['打开命令面板', 'Open command palette'],
   'console.top.settings': ['设置', 'Settings'],
+  'console.top.backToWorkbench': ['返回工作台', 'Back to workbench'],
   'console.top.refresh': ['重新检查运行时', 'Recheck runtime'],
 
   /* activity rail */
