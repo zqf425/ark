@@ -41,7 +41,8 @@ vi.mock('../hooks/use-turn', async () => {
 
 vi.mock('../api/attachments-api', () => ({
   uploadAttachment: vi.fn(),
-  associateAttachment: vi.fn()
+  associateAttachment: vi.fn(),
+  fetchAttachmentObjectUrl: vi.fn(async () => 'blob:mock')
 }))
 
 vi.mock('../api/skills-api', () => ({
@@ -320,14 +321,15 @@ describe('Composer attachment parity (steer, paste, drop)', () => {
 
     // The + trigger stays usable mid-turn: the steer channel carries files.
     expect(harness.host.querySelector('.ark-composer__round')).not.toBeNull()
-    expect(harness.text()).toContain('pic.png')
+    // The image lands as a clickable thumbnail, not a text chip.
+    expect(harness.host.querySelector('.ark-composer__attachments .ark-thumb--image')).not.toBeNull()
 
     const node = input(harness.host)
     await type(node, '看看这张截图')
     await pressEnter(node)
     await settle()
 
-    // Associated to the thread, then steered with the id; chips cleared.
+    // Associated to the thread, then steered with the id; previews cleared.
     expect(associateAttachment).toHaveBeenCalledWith(THREAD_A, '00000000-0000-0000-0000-0000000000p1')
     expect(turnMocks.steer).toHaveBeenCalledWith('看看这张截图', ['00000000-0000-0000-0000-0000000000p1'])
     expect(harness.host.querySelector('.ark-composer__attachments')).toBeNull()
@@ -377,8 +379,23 @@ describe('Composer attachment parity (steer, paste, drop)', () => {
     await settle()
 
     expect(uploadAttachment).toHaveBeenCalled()
-    expect(harness.text()).toContain('pasted.png')
+    // The paste lands as an image thumbnail preview.
+    expect(harness.host.querySelector('.ark-composer__attachments .ark-thumb--image')).not.toBeNull()
     // The draft is untouched: bytes ride the attachment, not the textarea.
     expect(useCodeSessionStore.getState().drafts[THREAD_A]).toBeUndefined()
+  })
+
+  it('clicking a picked image thumbnail opens the shared lightbox', async () => {
+    harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+    await pickPng('00000000-0000-0000-0000-0000000000p4')
+
+    const thumb = harness.host.querySelector<HTMLButtonElement>('.ark-composer__attachments .ark-thumb--image')
+    expect(thumb).not.toBeNull()
+    await act(async () => {
+      thumb!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    await settle()
+    expect(harness.host.querySelector('.ark-lightbox')).not.toBeNull()
   })
 })

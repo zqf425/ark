@@ -4,6 +4,7 @@
  * Split so no single file exceeds the 1000-line CI limit:
  *   - code-session-stream.css   stream canvas, turns, jump pill, usage footer
  *   - code-session-bubbles.css  message bubbles and reasoning rows
+ *   - attachment-preview.css    attachment thumbnails and the image lightbox
  *   - code-session-tools.css    tool cards, tool results, error / notice rows
  *   - code-session-gates.css    gates and the floating composer shell
  *   - code-session-composer.css composer quick runtime pickers
@@ -16,6 +17,7 @@
  */
 @import './code-session-stream.css';
 @import './code-session-bubbles.css';
+@import './attachment-preview.css';
 @import './code-session-tools.css';
 @import './code-session-gates.css';
 @import './code-session-composer.css';
