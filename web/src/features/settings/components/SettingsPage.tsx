@@ -5,9 +5,10 @@
  * the shared `useSettings` / `useProviders` instances so the default-model picker
  * and the provider list cannot disagree.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ErrorBoundary } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
+import { useViewStore } from '../../workbench/state/view-slice'
 import { useSettings } from '../hooks/use-settings'
 import { useProviders } from '../hooks/use-providers'
 import { GeneralSection } from './GeneralSection'
@@ -31,6 +32,17 @@ export function SettingsPage(): JSX.Element {
   const providers = useProviders()
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('general')
   const current = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0]
+
+  // A caller that jumps to a specific section (schedule creation → task list)
+  // wins once; without a pending request the page opens on its default
+  // section, exactly as it did before the request channel existed.
+  const consumeSettingsSection = useViewStore((state) => state.consumeSettingsSection)
+  useEffect(() => {
+    const requested = consumeSettingsSection() as SettingsSectionId | null
+    if (requested && SETTINGS_SECTIONS.some((section) => section.id === requested)) {
+      setActiveSection(requested)
+    }
+  }, [consumeSettingsSection])
 
   const body = (() => {
     switch (activeSection) {

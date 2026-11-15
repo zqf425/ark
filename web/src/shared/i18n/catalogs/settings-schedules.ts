@@ -25,6 +25,7 @@ export const SETTINGS_SCHEDULES_MESSAGES = {
 
   'settings.schedules.add': ['新增任务', 'Add task'],
   'settings.schedules.createTitle': ['新增定时任务', 'New scheduled task'],
+  'settings.schedules.openAll': ['查看全部定时任务', 'View all scheduled tasks'],
   'settings.schedules.editTitle': ['编辑「{title}」', 'Edit "{title}"'],
   'settings.schedules.enabledLabel': ['启用（enabled）', 'Enabled (enabled)'],
   'settings.schedules.toggleHint': ['开关切换即保存。', 'Toggling saves immediately.'],
@@ -51,6 +52,10 @@ export const SETTINGS_SCHEDULES_MESSAGES = {
   'settings.schedules.field.modelHint': ['在二级菜单中先选供应商再选模型；「跟随默认」表示不覆盖。', 'Pick a provider then a model in the two-level menu; "Follow default" clears the override.'],
   'settings.schedules.field.workspace': ['工作区（可选）', 'Workspace (optional)'],
   'settings.schedules.field.workspaceHint': ['留空表示使用全局默认工作区。', 'Blank means the global default workspace.'],
+  'settings.schedules.workspace.unset': ['未设置（使用全局默认工作区）', 'Not set (using the global default workspace)'],
+  'settings.schedules.workspace.pick': ['选择文件夹…', 'Choose folder…'],
+  'settings.schedules.workspace.browsing': ['选择中…', 'Selecting…'],
+  'settings.schedules.workspace.clear': ['清除', 'Clear'],
 
   'settings.schedules.saveFailed': ['保存定时任务失败', 'Failed to save the scheduled task'],
   'settings.schedules.created': ['已创建定时任务「{title}」', 'Scheduled task "{title}" created'],

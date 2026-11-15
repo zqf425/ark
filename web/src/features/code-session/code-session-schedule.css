@@ -47,6 +47,13 @@
   border-bottom: 1px solid var(--ark-border-muted);
 }
 
+/* Title left, "view all" + close right; the link yields its width to the ×. */
+.ark-scheduledialog__head-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .ark-scheduledialog__head strong {
   font-size: 14.5px;
   color: var(--ark-text);
