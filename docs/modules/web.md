@@ -84,6 +84,16 @@
   折叠切换；`selectFile` 是显式"打开该文件"意图，检查器收起时同时展开（只切 Tab 不展开
   曾把收起态下的芯片变成死按钮）；因此头部拆为行容器 + 内层折叠按钮（`ark-tool__headtoggle`），
   避免 button 嵌套 button 的非法 DOM；无路径的工具卡渲染不变。
+  助手**正文**里的文件路径同样可点（需求见
+  [prose-path-links](../requirements/prose-path-links.md)）：`renderMarkdown` 第二参
+  接收本回合 write/edit 的路径白名单（`code-session/tool-file.ts` 的 `threadWritePaths`
+  投影，去重保序），DOM 后处理只把**行内 code** 且命中白名单的片段升级为
+  `ark-md-filechip`（协议前缀/家目录/空格路径不升级，`pre code` 围栏不参与，
+  白名单为空零开销直通）；芯片是 renderer 自产 button（`data-md-file`），
+  `Markdown` 组件的可选 `onFileChip` prop 经委托点击路由到 `selectFile`
+  （同一收起展开语义），`shared/ui` 不反依 feature——白名单与接线都在
+  `TurnBlock`（每回合一次 `useMemo`）与 `MessageBubble` 侧；子代理查看器
+  传空白名单与 no-op 回调，不产生跨线程导航。
 - 设置页的 tuning、provider 与 MCP 都使用生成契约；MCP env/header 值只写不回读，编辑时的空
   secret 字段表示保留，不表示删除。provider 的 api key 分两路：列表、能力与诊断只显示
   `has_api_key` 与掩码 hint，而点「编辑」时单独请求 `GET /v1/runtime/providers/{id}` 取回完整条目，

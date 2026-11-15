@@ -161,7 +161,18 @@ export const UserBubble = memo(function UserBubble({ item, threadId = null }: { 
  * turn stops streaming — mid-stream the text is still growing, so a snapshot
  * copy would mislead.
  */
-export const AssistantBubble = memo(function AssistantBubble({ item }: { item: ThreadItem }): JSX.Element {
+export const AssistantBubble = memo(function AssistantBubble({
+  item,
+  onFileChip,
+  writablePaths
+}: {
+  item: ThreadItem
+  /** Prose path chips (requirements/prose-path-links.md): forwarded to the
+   * shared Markdown; identity instability is absorbed by a ref inside it. */
+  onFileChip?: (path: string) => void
+  /** Whitelist of paths this turn wrote; gates which prose chips render. */
+  writablePaths?: readonly string[]
+}): JSX.Element {
   const { t, locale } = useI18n()
   const streaming = item.status === 'streaming' || item.status === 'pending'
   const failed = item.status === 'failed'
@@ -188,7 +199,7 @@ export const AssistantBubble = memo(function AssistantBubble({ item }: { item: T
         ) : null}
       </header>
       <div className="ark-msg__body ark-msg__body--prose">
-        <Markdown text={text} />
+        <Markdown text={text} onFileChip={onFileChip} writablePaths={writablePaths} />
         {streaming ? <span className="ark-caret" aria-label={t('canvas.generating')} /> : null}
       </div>
       {item.detail ? <p className="ark-msg__detail">{item.detail}</p> : null}
@@ -205,7 +216,17 @@ export const AssistantBubble = memo(function AssistantBubble({ item }: { item: T
  * as "process → answer". `AssistantBubble` stays for rows inside the process
  * card, where a card-in-card would double the chrome.
  */
-export const FinalReplyCard = memo(function FinalReplyCard({ item }: { item: ThreadItem }): JSX.Element {
+export const FinalReplyCard = memo(function FinalReplyCard({
+  item,
+  onFileChip,
+  writablePaths
+}: {
+  item: ThreadItem
+  /** Prose path chips (requirements/prose-path-links.md), same as AssistantBubble. */
+  onFileChip?: (path: string) => void
+  /** Whitelist of paths this turn wrote; gates which prose chips render. */
+  writablePaths?: readonly string[]
+}): JSX.Element {
   const { t } = useI18n()
   const streaming = item.status === 'streaming' || item.status === 'pending'
   const failed = item.status === 'failed'
@@ -226,7 +247,7 @@ export const FinalReplyCard = memo(function FinalReplyCard({ item }: { item: Thr
         {failed ? <span className="ark-chip ark-chip--error">{t('canvas.failed')}</span> : null}
       </header>
       <div className="ark-reply__body">
-        <Markdown text={text} />
+        <Markdown text={text} onFileChip={onFileChip} writablePaths={writablePaths} />
         {streaming ? <span className="ark-caret" aria-label={t('canvas.generating')} /> : null}
       </div>
       {item.detail ? <p className="ark-msg__detail">{item.detail}</p> : null}

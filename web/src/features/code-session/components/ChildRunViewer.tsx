@@ -20,6 +20,9 @@ import { getChildRunEvents, getChildRunThread } from '../api/child-runs-api'
 import { foldChildEvent, seedChildTranscript, type ChildTranscript } from './child-transcript'
 import { StreamRow } from './TurnBlock'
 
+/** Shared no-op whitelist: child transcripts render without prose chips. */
+const EMPTY_PATHS: readonly string[] = []
+
 /** Poll cadence while the child is still active. */
 export const ACTIVE_POLL_INTERVAL_MS = 1_500
 
@@ -111,7 +114,11 @@ export function ChildRunViewer({
       ) : (
         transcript.itemOrder.map((itemId) => {
           const item = transcript.itemsById[itemId] as ThreadItem
-          return <StreamRow key={itemId} item={item} threadId={null} />
+          // Child transcripts are view-only context: no prose file chips, no
+          // inspector navigation from another thread's rows.
+          return (
+            <StreamRow key={itemId} item={item} threadId={null} onFileChip={() => undefined} writtenPaths={EMPTY_PATHS} />
+          )
         })
       )}
       {error ? <p className="ark-childruns__viewError">{t('canvas.childRuns.viewerStale', { error })}</p> : null}

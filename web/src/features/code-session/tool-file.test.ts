@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ToolPayload } from '../../shared/contracts'
-import { toolTargetPath } from './tool-file'
+import { threadWritePaths, toolTargetPath } from './tool-file'
 
 function payload(overrides: Partial<ToolPayload>): ToolPayload {
   return { call_id: 'c1', tool: 'write', arguments: { path: 'docs/a.md', content: 'x' }, ...overrides }
@@ -36,5 +36,22 @@ describe('toolTargetPath', () => {
     expect(toolTargetPath(payload({ arguments: { path: 42 } } as unknown as ToolPayload))).toBeNull()
     expect(toolTargetPath(payload({ arguments: { path: '   ' } }))).toBeNull()
     expect(toolTargetPath(payload({ arguments: ['docs/a.md'] } as unknown as ToolPayload))).toBeNull()
+  })
+})
+
+describe('threadWritePaths', () => {
+  it('按首次出现顺序去重收集 write/edit 路径', () => {
+    const items = [
+      { tool: { call_id: 'c1', tool: 'write', arguments: { path: 'a.md', content: '' } } },
+      { tool: { call_id: 'c2', tool: 'bash', arguments: { cmd: 'x' } } },
+      { tool: { call_id: 'c3', tool: 'edit', arguments: { path: 'b/c.ts' } } },
+      { tool: { call_id: 'c4', tool: 'write', arguments: { path: 'a.md', content: '' } } }
+    ]
+    expect(threadWritePaths(items)).toEqual(['a.md', 'b/c.ts'])
+  })
+
+  it('无工具或无 path 时返回空数组', () => {
+    expect(threadWritePaths([{ tool: undefined }])).toEqual([])
+    expect(threadWritePaths([])).toEqual([])
   })
 })

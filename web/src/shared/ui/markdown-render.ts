@@ -66,11 +66,62 @@ function escapeAttr(text: string): string {
   return escapeHtml(text).replaceAll(/\r?\n/g, '&#10;')
 }
 
+/**
+ * A inline-code fragment that may be upgraded to a file chip
+ * (requirements/prose-path-links.md): path-shaped, no protocol/home/space
+ * noise. The real gate is the caller's `writable` whitelist — shape alone
+ * never promotes, it only *allows* promotion.
+ */
+function pathShaped(text: string): boolean {
+  if (text.includes('`') || /\s/.test(text)) return false
+  if (text.endsWith('/') || text.endsWith('\\')) return false
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return false // http://, file:// …
+  if (text.startsWith('~') || text.startsWith('%')) return false // home, URL-enc
+  return text.includes('/') || text.includes('\\')
+}
+
+/**
+ * Promote inline `<code>` fragments that match a path this thread wrote into
+ * clickable file chips. Runs on the parsed (pre-sanitize) DOM so the emitted
+ * markup is renderer-owned — model input can only ever *name* a chip, never
+ * craft one. Blocks (`pre code`) are program text and stay untouched; an empty
+ * whitelist short-circuits to a no-op.
+ */
+function promotePathChips(root: HTMLElement, writable: readonly string[]): void {
+  if (writable.length === 0) return
+  const exact = new Set(writable)
+  const normalized = new Set(writable.map((p) => p.replace(/\\/g, '/')))
+  for (const code of Array.from(root.querySelectorAll('code'))) {
+    if (code.closest('pre')) continue
+    const text = code.textContent ?? ''
+    if (!pathShaped(text)) continue
+    const norm = text.replace(/\\/g, '/')
+    if (!exact.has(text) && !normalized.has(norm)) continue
+    const chip = document.createElement('button')
+    chip.type = 'button'
+    chip.className = 'ark-md-filechip'
+    chip.setAttribute('data-md-file', text)
+    chip.setAttribute('title', text)
+    chip.textContent = text
+    code.replaceWith(chip)
+  }
+}
+
 /** Parse, highlight and sanitize in one step; always synchronous. */
-export function renderMarkdown(text: string): string {
+export function renderMarkdown(text: string, writable: readonly string[] = []): string {
   // `async: false` keeps the return type a plain string: the renderer is a
   // synchronous projection step, never an async pipeline.
   const html = marked.parse(text, { async: false })
+  // Path promotion happens *before* sanitize on renderer-owned markup only;
+  // `data-*` attributes survive DOMPurify's defaults (ALLOW_DATA_ATTR).
+  if (writable.length > 0) {
+    const host = document.createElement('div')
+    host.innerHTML = html
+    promotePathChips(host, writable)
+    // `data-*` attributes survive DOMPurify's defaults (ALLOW_DATA_ATTR), so the
+    // copy button's raw source needs no extra allow-list here.
+    return DOMPurify.sanitize(host.innerHTML)
+  }
   // `data-*` attributes survive DOMPurify's defaults (ALLOW_DATA_ATTR), so the
   // copy button's raw source needs no extra allow-list here.
   return DOMPurify.sanitize(html)

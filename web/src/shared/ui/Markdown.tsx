@@ -47,13 +47,37 @@ export function useThrottledValue<T>(value: T, intervalMs: number): T {
  * delegated click handler serves every block of this message — streaming
  * replaces the DOM wholesale, so per-block listeners would leak or churn.
  */
-export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }): JSX.Element {
+export const Markdown = memo(function Markdown({
+  text,
+  className,
+  onFileChip,
+  writablePaths
+}: {
+  text: string
+  className?: string
+  /** Fired when a prose file chip (`data-md-file`) is clicked. Absent = chips
+   * never render, so consumers opt in and `shared/ui` stays feature-agnostic. */
+  onFileChip?: (path: string) => void
+  /** This thread's written-path whitelist (requirements/prose-path-links.md);
+   * passed through to `renderMarkdown`'s promotion pass. Empty = no chips. */
+  writablePaths?: readonly string[]
+}): JSX.Element {
   const throttled = useThrottledValue(text, REPARSE_INTERVAL_MS)
-  const html = useMemo(() => renderMarkdown(throttled), [throttled])
+  const writable = writablePaths ?? []
+  const writableKey = writable.join('\u0000')
+  const html = useMemo(
+    () => renderMarkdown(throttled, writable),
+    // join() gives useMemo a stable primitive key without sorting the array.
+    [throttled, writableKey]
+  )
   const hostRef = useRef<HTMLDivElement | null>(null)
   // Streamed rows re-render wholesale; a per-block "copied" state would be
   // lost on the next parse, so the flip lives on the shared handler instead.
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The handler identity rides a ref so the memoized row never re-renders
+  // because the parent passed a fresh lambda each render.
+  const fileChipRef = useRef(onFileChip)
+  fileChipRef.current = onFileChip
 
   useEffect(
     () => () => {
@@ -63,6 +87,12 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
   )
 
   const onClick = (event: React.MouseEvent<HTMLDivElement>): void => {
+    const fileChip = (event.target as HTMLElement).closest('[data-md-file]')
+    if (fileChip) {
+      event.stopPropagation()
+      fileChipRef.current?.(fileChip.getAttribute('data-md-file') ?? '')
+      return
+    }
     const target = (event.target as HTMLElement).closest('[data-md-copy]')
     if (!target) return
     const source = target.getAttribute('data-copy-source') ?? ''

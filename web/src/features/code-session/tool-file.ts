@@ -35,3 +35,24 @@ export function toolTargetPath(tool: ToolPayload): ToolFileTarget | null {
     dir: cut > 0 ? path.slice(0, cut) : ''
   }
 }
+
+/**
+ * Deduplicated write-path set of a turn's items, in first-seen order
+ * (requirements/prose-path-links.md). This is the whitelist the prose renderer
+ * upgrades inline-code paths against: a mention is clickable only when this
+ * thread actually wrote the file, so model narration can never conjure a chip
+ * for a file it never touched.
+ */
+export function threadWritePaths(items: readonly { tool?: ToolPayload }[]): string[] {
+  const seen = new Set<string>()
+  const paths: string[] = []
+  for (const item of items) {
+    const tool = item.tool
+    if (!tool) continue
+    const target = toolTargetPath(tool)
+    if (!target || seen.has(target.path)) continue
+    seen.add(target.path)
+    paths.push(target.path)
+  }
+  return paths
+}
