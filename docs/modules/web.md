@@ -18,6 +18,11 @@
   稳定存活一段时间后重置，不能每收到一帧就清零，否则运行时重启时会形成重连风暴。
   `onError` 写入的传输诊断不能被随后裸 `onStatus('reconnecting')` 抹掉：仅显式传参或恢复到
   `open` 才清除 `streamError`。
+- 实时回合的工具行由前端 reducer 折叠:`tool_call_started`/`tool_call_finished` 在 wire 上是
+  裸事件(服务端只把它们折叠进**持久** items 投影,实时通道不发 item 快照),渲染器按
+  `apply_tool_started/finished` 同语义映射为 `tool_call:{call_id}` 的确定性 item
+  (FNV-1a,与 `turn_failed` 同构),否则回合进行中的画布缺所有工具行——工具卡、
+  正文路径白名单(prose-path-links)全部落空,直到整页 detail 重载才补齐。
 - Plan、Changes、File、Terminal 面板订阅 `workbenchRevision` 而非 `lastSeq`。`lastSeq` 每个事件
   （含每个 text delta token）都递增，作为 effect 依赖会让每个 token 触发约 6 次 HTTP 全量重取；
   只有 `goal/todos` 与 `tool_call_started/finished` 这些会改变服务端投影的事件才递增 revision，
