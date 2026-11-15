@@ -562,3 +562,46 @@ describe('items reducer turn_failed', () => {
     expect(state.itemsById['00000000-0000-0000-0000-000000000004']?.status).toBe('failed')
   })
 })
+
+describe('live tool_call fold (实时回合工具行投影)', () => {
+  const base = {
+    seq: 1,
+    thread_id: '00000000-0000-0000-0000-000000000000' as const,
+    timestamp: '2026-11-16T01:00:00Z',
+    auto_continuation: false,
+    auto_recovery: 0,
+    attachment_ids: [] as string[],
+    attachment_outcomes: []
+  }
+  const turnId = '00000000-0000-0000-0000-0000000000t1' as const
+
+  it('tool_call_started/finished 折叠出与服务器同 id 的 write 行(含 arguments)', () => {
+    let state = applyEvent(emptyItemsState(), {
+      ...base, kind: 'turn_started', turn_id: turnId
+    })
+    state = applyEvent(state, {
+      ...base, seq: 2, kind: 'tool_call_started', turn_id: turnId,
+      call_id: 'c1', tool: 'write', arguments: { path: 'a.md', content: 'x' }
+    })
+    state = applyEvent(state, {
+      ...base, seq: 3, kind: 'tool_call_finished', turn_id: turnId,
+      call_id: 'c1', tool: 'write', ok: true, duration_ms: 5, output: 'wrote 1 byte'
+    })
+    const rows = state.itemOrder.map((id) => state.itemsById[id]!)
+    const write = rows.find((r) => r.tool?.tool === 'write')
+    expect(write).toBeTruthy()
+    expect(write!.status).toBe('completed')
+    expect(write!.tool!.ok).toBe(true)
+    expect((write!.tool!.arguments as { path: string }).path).toBe('a.md')
+  })
+
+  it('finished 先于 started 到达(重连窗口)也能建行', () => {
+    let state = applyEvent(emptyItemsState(), {
+      ...base, seq: 2, kind: 'tool_call_finished', turn_id: turnId,
+      call_id: 'c2', tool: 'bash', ok: false, duration_ms: 1, output: '', detail: 'cancelled'
+    })
+    const row = state.itemOrder.map((id) => state.itemsById[id]!).find((r) => r.tool?.call_id === 'c2')
+    expect(row).toBeTruthy()
+    expect(row!.tool!.ok).toBe(false)
+  })
+})

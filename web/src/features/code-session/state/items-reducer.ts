@@ -87,6 +87,66 @@ function turnFailedItemId(turnId: TurnId): ItemId {
 }
 
 /**
+ * Deterministic `ItemId` for a live tool call, mirroring the Rust
+ * `keyed_item_id("tool_call:{call_id}")` (ark-store domain/items.rs). The
+ * realtime SSE channel carries bare `tool_call_started`/`finished` events —
+ * the server folds them into the durable items projection, but nothing on the
+ * wire turns them into `item_created` snapshots — so the renderer must fold
+ * them identically or a turn that just ran vanishes from the live canvas
+ * (tool cards, prose path whitelist, all of it) until a full detail reload.
+ */
+function toolCallItemId(callId: string): ItemId {
+  const namespace = new TextEncoder().encode(`tool_call:${callId}`)
+  const hi = fnv1a(namespace, FNV_BASIS_HI)
+  const lo = fnv1a(namespace, FNV_BASIS_LO)
+  const view = new DataView(new ArrayBuffer(16))
+  view.setBigUint64(0, hi)
+  view.setBigUint64(8, lo)
+  const bytes = new Uint8Array(view.buffer)
+  bytes[6] = (bytes[6]! & 0x0f) | 0x80
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}` as ItemId
+}
+
+/**
+ * Fold a bare `tool_call_started`/`finished` event into the same `tool_call`
+ * item the server's projector would store. Field semantics mirror
+ * `apply_tool_started`/`apply_tool_finished` (ark-store domain/items.rs):
+ * started = streaming + arguments, finished = ok/duration/output + completed.
+ * A `finished` for an unseen call creates the row (the started frame can be
+ * lost to a reconnect window); a `started` after `finished` never downgrades
+ * the settled row.
+ */
+function foldToolCall(
+  draft: ItemsDraft,
+  event: Extract<RuntimeEvent, { kind: 'tool_call_started' | 'tool_call_finished' }>
+): void {
+  const id = toolCallItemId(event.call_id)
+  const existing = currentItem(draft, id)
+  const started = event.kind === 'tool_call_started'
+  const tool = {
+    call_id: event.call_id,
+    tool: event.tool,
+    arguments: 'arguments' in event ? (event.arguments ?? undefined) : existing?.tool?.arguments,
+    output: started ? existing?.tool?.output : (event.output || existing?.tool?.output),
+    ok: started ? existing?.tool?.ok : (event.ok ?? existing?.tool?.ok),
+    duration_ms: started ? existing?.tool?.duration_ms : (event.duration_ms ?? existing?.tool?.duration_ms)
+  }
+  const item: ThreadItem = {
+    item_id: id,
+    turn_id: event.turn_id,
+    kind: 'tool_call',
+    status: started ? (existing?.status ?? 'streaming') : 'completed',
+    created_at: existing?.created_at ?? event.timestamp,
+    text: existing?.text,
+    detail: started ? existing?.detail : (event.detail ?? existing?.detail),
+    tool
+  }
+  upsertItem(draft, item)
+}
+
+/**
  * Streaming windows shorter than this are too noisy for a tok/s readout: a
  * near-instant round would otherwise print absurd spikes. Rounds below the
  * threshold simply show no speed.
@@ -246,6 +306,14 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
     case 'assistant_reasoning_delta':
       appendDelta(draft, event)
       trackDeltaWindow(draft, event.timestamp)
+      return commitDraft(draft)
+
+    case 'tool_call_started':
+    case 'tool_call_finished':
+      // The realtime channel carries bare tool events (the server folds them
+      // into the durable projection only); without this fold the live canvas
+      // misses every tool row of an in-flight turn.
+      foldToolCall(draft, event)
       return commitDraft(draft)
 
     case 'turn_started':
