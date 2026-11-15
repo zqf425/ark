@@ -58,14 +58,18 @@ describe('ToolCard file chip', () => {
     harness = null
   })
 
-  it('selectFile routes the chip to the inspector File panel', async () => {
-    useCodeSessionStore.setState({ selectedFilePath: null, activePanel: 'changes' })
+  it('selectFile routes the chip to the inspector File panel and expands it', async () => {
+    useCodeSessionStore.setState({ selectedFilePath: null, activePanel: 'changes', rightCollapsed: true })
     const h = await mount(toolItem({}))
     const chip = h.host.querySelector<HTMLButtonElement>('.ark-tool__filechip')!
     await click(chip)
     const state = useCodeSessionStore.getState()
     expect(state.selectedFilePath).toBe('docs/a.md')
     expect(state.activePanel).toBe('file')
+    // A chip click is an explicit "open this file" intent: the inspector must
+    // expand even though it starts collapsed (the collapsed state was the
+    // reported "chip does nothing" bug).
+    expect(state.rightCollapsed).toBe(false)
     await h.unmount()
     harness = null
   })
