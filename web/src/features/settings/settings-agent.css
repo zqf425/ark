@@ -127,6 +127,20 @@
   margin-bottom: 8px;
 }
 
+/* Hero doubles as the page-level exit row: title on the left, the
+   "back to workbench" button pinned to the right edge. */
+.ark-settings__hero--row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ark-settings__back {
+  flex: none;
+  margin-top: 2px;
+}
+
 .ark-settings__hero h1 {
   margin: 0;
   font-size: 24px;

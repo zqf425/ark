@@ -7,6 +7,7 @@
 export const SETTINGS_CORE_MESSAGES = {
   'settings.title': ['设置', 'Settings'],
   'settings.description': ['配置本地运行时与外部能力。', 'Configure the local runtime and external capabilities.'],
+  'settings.backToWorkbench': ['返回工作台', 'Back to workbench'],
   'settings.appearance.title': ['外观与语言', 'Appearance & language'],
   'settings.appearance.desc': ['仅保存在当前设备，立即生效。', 'Stored only on this device and applied immediately.'],
   'settings.language': ['显示语言', 'Display language'],
