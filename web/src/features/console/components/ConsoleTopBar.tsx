@@ -44,9 +44,17 @@ export function ConsoleTopBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
   return (
     <header className="console-topbar">
       <div className="console-topbar__brand">
-        {/* Wordmark only: the letter tile and the text merged into one
-            green-badge "Ark" so the corner carries a single brand element. */}
-        <span className="console-mark console-mark--word">Ark</span>
+        {/* The brand is the home control: like a logo link, clicking it lands
+            on the session list no matter which full-screen scene is shown. */}
+        <button
+          type="button"
+          className="console-mark console-mark--word console-mark--home"
+          onClick={() => setView('code')}
+          aria-label={t('console.top.backToWorkbench')}
+          title={t('console.top.backToWorkbench')}
+        >
+          Ark
+        </button>
       </div>
 
       <button

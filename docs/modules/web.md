@@ -186,7 +186,9 @@
   选择；`commandOpen` 控制 ⌘K 命令面板。设置场景的返回不依赖记忆 ⌘K：顶栏右侧齿轮按钮按场景
   变义——工作台下是「设置」入口，settings 场景下变为「返回工作台」（`console.top.backToWorkbench`，
   undo 图标）；设置页自身 hero 行右缘还有常驻「返回工作台」按钮（`settings.backToWorkbench`，
-  所有 section 可见），两处都直接 `setView('code')`。`new` 场景（新任务页）的输入区**就是会话
+  所有 section 可见），两处都直接 `setView('code')`。顶栏左侧品牌区是单个绿底 “Ark”
+  词标（`.console-mark--word`），它同时是 home 控件：任意场景下点击都 `setView('code')`
+  回到会话列表工作台（复用 `console.top.backToWorkbench` 作为可访问名）。`new` 场景（新任务页）的输入区**就是会话
   输入框本体**（`Composer`，`threadId = null` + `onPendingStart`）：工作空间 / 模型 / 权限 /
   推理强度 pill、附件与技能提及在会话存在前全部可用——pill 的选择写入页面的暂存覆盖
   （`stagedRuntime` / `onStagedChange`），附件仍走 `/v1/attachments` 上传，草稿存于 store 的
