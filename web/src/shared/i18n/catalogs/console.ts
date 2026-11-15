@@ -57,14 +57,8 @@ export const CONSOLE_MESSAGES = {
     '描述目标，ark 会自己读代码、改文件、跑测试。你可以随时接管。',
     'Describe the goal; ark reads code, edits files and runs tests. You can take over anytime.'
   ],
-  'console.new.modeCode': ['Code', 'Code'],
-  'console.new.modeCodeHint': ['直接修改工作区并执行工具，适合明确的实现任务。', 'Edit the workspace and run tools directly.'],
-  'console.new.modePlan': ['Plan', 'Plan'],
-  'console.new.modePlanHint': ['先产出分步计划，确认后再动手。', 'Draft a plan first, then act after approval.'],
-  'console.new.modeReview': ['Review', 'Review'],
-  'console.new.modeReviewHint': ['审查当前分支变更并给出问题清单。', 'Review current changes and report findings.'],
   'console.new.failed': ['创建任务失败', 'Could not create the task'],
-  'console.new.planHint': ['Plan 模式先创建会话，再由你确认计划。', 'Plan mode creates a thread and waits for your confirmation.'],
+  'console.new.recentHint': ['发送后进入会话画布，可随时接管。', 'Sending opens the session canvas; you can take over anytime.'],
 
   /* changes review */
   'console.review.title': ['变更审查', 'Review changes'],

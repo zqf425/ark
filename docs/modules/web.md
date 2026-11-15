@@ -192,11 +192,12 @@
   输入框本体**（`Composer`，`threadId = null` + `onPendingStart`）：工作空间 / 模型 / 权限 /
   推理强度 pill、附件与技能提及在会话存在前全部可用——pill 的选择写入页面的暂存覆盖
   （`stagedRuntime` / `onStagedChange`），附件仍走 `/v1/attachments` 上传，草稿存于 store 的
-  保留键 `NEW_TASK_DRAFT_KEY`（与线程 UUID 命名空间隔离）。发送是一次完整投递：
+  保留键 `NEW_TASK_DRAFT_KEY`（与线程 UUID 命名空间隔离）。页面不再提供 Code/Plan/Review 模式
+  卡片（变更审查仍从 ⌘K 命令面板进入）。发送是一次完整投递：
   `POST /v1/threads`（staged workspace 经服务端 validate 种为覆盖）→ `PATCH /v1/threads/{id}`
-  （其余覆盖）→ 逐个关联附件 → `POST /v1/threads/{id}/turns`（首回合，Plan 模式只建会话不启动
-  回合），投递成功才清草稿与暂存覆盖，失败全保留可重试；该路径不受 `streamStatus` 闸门约束
-  （尚无流可订阅），仅 `sending` 阻塞。
+  （其余覆盖）→ 逐个关联附件 → `POST /v1/threads/{id}/turns`（首回合），投递成功才清草稿与
+  暂存覆盖，失败全保留可重试；该路径不受 `streamStatus` 闸门约束（尚无流可订阅），仅 `sending`
+  阻塞。
 - 会话列表按项目分组渲染（`thread-projects.ts`：先按会话**实际生效**工作空间聚合，
   无 override 会话回退运行时 active root，active 组置顶）。项目组头部提供两个随 hover/focus 显现的
   动作：➕ 在该项目下新建会话——把项目路径经 `POST /v1/threads` 的 `workspace` 字段提交，服务端经

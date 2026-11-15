@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 /**
- * The new-task page mounts the session composer with no thread. Its send
- * action is a pending start: create the thread, commit the staged runtime
- * picks, associate the picked attachments and start the first turn — exactly
- * one delivery. A failed create must keep the draft and the attachments so the
- * next attempt still has everything, and the staged workspace rides the create
- * call (server-side validation), not a PATCH after the fact.
+ * The new-task page mounts the session composer with no thread and no mode
+ * picker. Its send action is a pending start: create the thread, commit the
+ * staged runtime picks, associate the picked attachments and start the first
+ * turn — exactly one delivery. A failed create must keep the draft and the
+ * attachments so the next attempt still has everything, and the staged
+ * workspace rides the create call (server-side validation), not a PATCH after
+ * the fact.
  */
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -113,7 +114,7 @@ describe('NewTaskPage composer delivery', () => {
     harness = null
   })
 
-  it('the composer renders its full toolbar before any thread exists', async () => {
+  it('the composer renders its full toolbar before any thread exists and no mode cards remain', async () => {
     harness = await mountWithProviders(<NewTaskPage meta={undefined} />)
 
     // The textarea is live without a thread (the page owns delivery), and the
@@ -127,6 +128,8 @@ describe('NewTaskPage composer delivery', () => {
     const send = harness.host.querySelector<HTMLButtonElement>('.ark-composer__sendbtn')
     expect(send).not.toBeNull()
     expect(send!.getAttribute('aria-label')).toBe('开始任务')
+    // The Code/Plan/Review mode cards are gone from the page.
+    expect(harness.host.querySelector('.console-new__modes')).toBeNull()
   })
 
   it('Enter creates the thread, starts the first turn and lands on the canvas', async () => {

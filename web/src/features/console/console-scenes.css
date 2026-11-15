@@ -165,54 +165,6 @@
   margin: 0 0 24px;
 }
 
-.console-new__modes {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 9px;
-  margin-bottom: 16px;
-}
-
-.console-mode {
-  border: 1px solid var(--console-line);
-  border-radius: var(--ark-radius-lg);
-  background: var(--ark-bg-canvas);
-  padding: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.console-mode:hover {
-  border-color: var(--console-line-strong);
-  background: var(--ark-bg-raised);
-}
-
-.console-mode.is-selected {
-  border-color: var(--ark-accent);
-  background: var(--ark-accent-soft);
-}
-
-.console-mode__top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  font-weight: 650;
-  margin-bottom: 6px;
-  color: var(--ark-text);
-}
-
-.console-mode__top .console-mode__icon {
-  color: var(--ark-accent);
-  display: inline-flex;
-}
-
-.console-mode p {
-  margin: 0;
-  color: var(--ark-text-faint);
-  font-size: 11px;
-  line-height: 1.55;
-}
-
 .console-new__box {
   border: 1px solid var(--console-line-strong);
   border-radius: var(--ark-radius-xl);
