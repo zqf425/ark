@@ -295,6 +295,10 @@
 设置页「定时任务」section(需求见 [scheduled-tasks](../requirements/scheduled-tasks.md)):
 只消费 `/v1/schedules` 的生成契约类型;节奏编辑、启停、删除、立即运行、最近结果展示与
 "打开会话"跳转运行线程;全部文案走 i18n 消息键。客户端不做 next_run 计算,以后端返回为准。
+表单的工作区不手填:复用 `POST /v1/workspace/pick` 弹出宿主文件夹选择,`POST /v1/workspace/validate`
+归一化后写入草稿,取消与失败都保持原值;"清除"是回到全局默认的唯一入口。线程轨的「定时任务」
+创建弹窗与设置页共用同一 `ScheduleForm`,头部提供"查看全部定时任务"链接,经
+`setView('settings', section)` 一次性落到任务列表 section。
 
 ## 记忆与技能配置
 

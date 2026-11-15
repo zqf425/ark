@@ -89,6 +89,8 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
 
 - 设置页新增「定时任务」section:任务列表(标题、节奏、启停开关、最近结果、打开线程)、
   新建/编辑表单(标题、提示词、节奏、autonomy、model/provider、工作区)、立即运行按钮。
+  工作区经 `POST /v1/workspace/pick` + `/v1/workspace/validate` 弹出宿主文件夹选择,不手填路径;
+  线程轨的创建弹窗与设置页共用同一表单,并从弹窗一键跳转任务列表 section。
 - 全局开关 `schedules.enabled` 关闭时调度循环空转,列表只读可编辑不触发。
 - 全部文案走 `web/src/shared/i18n/` 消息键与中英文资源。
 
