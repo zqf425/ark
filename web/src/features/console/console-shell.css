@@ -77,10 +77,15 @@
   border-radius: 5px;
 }
 
-.console-brand-name {
-  font-weight: 650;
+/* Wordmark variant: same green tile as `.console-mark`, widened to carry the
+   full "ark" so the top bar needs no separate brand text next to it. */
+.console-mark--word {
+  width: auto;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  font-size: 12.5px;
   letter-spacing: 0.2px;
-  font-size: 13px;
 }
 
 .console-chip {
