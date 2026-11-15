@@ -1,6 +1,5 @@
 import type {
   LoadStatus,
-  ChildCompletionNotice,
   ItemId,
   PendingApprovalView,
   PendingUserInputView,
@@ -12,7 +11,7 @@ import type {
 } from '../../../shared/contracts'
 import type { StreamStatus } from '../api/events-api'
 
-export type { ChildCompletionNotice, LoadStatus } from '../../../shared/contracts'
+export type { LoadStatus } from '../../../shared/contracts'
 
 /**
  * Per-thread usage projection, folded from the runtime's authoritative `usage`
@@ -81,7 +80,6 @@ export type ItemsSnapshot = {
   lastSeq: number
   approvals: Record<string, PendingApproval>
   userInputs: Record<string, PendingUserInput>
-  childCompletions: Record<string, ChildCompletionNotice>
   /** Advances only for child lifecycle events, not every streamed token. */
   childRunRevision: number
   /**

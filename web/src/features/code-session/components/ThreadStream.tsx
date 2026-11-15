@@ -6,7 +6,6 @@ import { describeError } from '../../../shared/api/error-describe'
 import { useCodeSessionStore } from '../state/store'
 import {
   approvalCards,
-  childCompletionNotices,
   groupByTurn,
   hasLiveItems,
   splitInheritedPrefix,
@@ -18,7 +17,6 @@ import {
 import { TurnBlock } from './TurnBlock'
 import { LiveActivity } from './LiveActivity'
 import { ApprovalCard } from './ApprovalCard'
-import { ChildCompletionCard } from './ErrorRow'
 import { UserInputCard } from './UserInputCard'
 import { Composer } from './Composer'
 import { SessionStatsBar } from './SessionStatsBar'
@@ -108,15 +106,14 @@ export function ThreadStream({
   const toast = useToast()
 
   // One slice per channel: an event that only appends a delta leaves
-  // `approvals`, `userInputs`, `errors` and `childCompletions` untouched, so
-  // their subscribers never wake up (see `items-draft.ts`).
+  // `approvals` and `userInputs` untouched, so their subscribers never wake up
+  // (see `items-draft.ts`).
   const itemOrder = useCodeSessionStore((s) => s.itemOrder)
   const itemsById = useCodeSessionStore((s) => s.itemsById)
   const turnState = useCodeSessionStore((s) => s.turnState)
   const activeTurnId = useCodeSessionStore((s) => s.activeTurnId)
   const approvalsById = useCodeSessionStore((s) => s.approvals)
   const userInputsById = useCodeSessionStore((s) => s.userInputs)
-  const completionsById = useCodeSessionStore((s) => s.childCompletions)
   const detailStatus = useCodeSessionStore((s) => s.detailStatus)
   const detailError = useCodeSessionStore((s) => s.detailError)
   const activeThread = useCodeSessionStore((s) => s.threads.find((thread) => thread.thread_id === threadId) ?? null)
@@ -155,7 +152,6 @@ export function ThreadStream({
   )
   const approvals = useMemo(() => approvalCards({ approvals: approvalsById }), [approvalsById])
   const userInputs = useMemo(() => userInputCards({ userInputs: userInputsById }), [userInputsById])
-  const completions = useMemo(() => childCompletionNotices({ childCompletions: completionsById }), [completionsById])
   const live = useMemo(() => hasLiveItems(visibleItemView), [visibleItemView])
 
   const { scrollRef, contentRef, atBottom, scrollToBottom } = useStickToBottom(threadId)
@@ -277,10 +273,6 @@ export function ThreadStream({
               group={group}
               availability={rewindByTurn.get(group.turnId) ?? 'hidden'}
             />
-          ))}
-
-          {completions.map((notice) => (
-            <ChildCompletionCard key={notice.notification_id} notice={notice} />
           ))}
 
           {approvals.map((approval) => (

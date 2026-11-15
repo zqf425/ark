@@ -13,7 +13,7 @@
  * object, so the row memo still bails out.
  */
 import type { ItemId, ThreadItem, TurnId, TurnState } from '../../../shared/contracts'
-import type { ChildCompletionNotice, CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput, RoundWindow, UsageAggregate } from './types'
+import type { CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput, RoundWindow, UsageAggregate } from './types'
 
 export type ItemsDraft = {
   base: ItemsSnapshot
@@ -24,7 +24,6 @@ export type ItemsDraft = {
   lastSeq: number
   approvals: Record<string, PendingApproval> | null
   userInputs: Record<string, PendingUserInput> | null
-  childCompletions: Record<string, ChildCompletionNotice> | null
   childRunRevision: number
   childRunActiveCount: number
   workbenchRevision: number
@@ -45,7 +44,6 @@ export function draftOf(base: ItemsSnapshot): ItemsDraft {
     lastSeq: base.lastSeq,
     approvals: null,
     userInputs: null,
-    childCompletions: null,
     childRunRevision: base.childRunRevision,
     childRunActiveCount: base.childRunActiveCount,
     workbenchRevision: base.workbenchRevision,
@@ -82,11 +80,6 @@ export function draftUserInputs(draft: ItemsDraft): Record<string, PendingUserIn
   return draft.userInputs
 }
 
-export function draftChildCompletions(draft: ItemsDraft): Record<string, ChildCompletionNotice> {
-  draft.childCompletions ??= { ...draft.base.childCompletions }
-  return draft.childCompletions
-}
-
 export function commitDraft(draft: ItemsDraft): ItemsSnapshot {
   const base = draft.base
   return {
@@ -97,7 +90,6 @@ export function commitDraft(draft: ItemsDraft): ItemsSnapshot {
     lastSeq: draft.lastSeq,
     approvals: draft.approvals ?? base.approvals,
     userInputs: draft.userInputs ?? base.userInputs,
-    childCompletions: draft.childCompletions ?? base.childCompletions,
     childRunRevision: draft.childRunRevision,
     childRunActiveCount: draft.childRunActiveCount,
     workbenchRevision: draft.workbenchRevision,

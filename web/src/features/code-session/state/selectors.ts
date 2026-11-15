@@ -11,7 +11,7 @@
  * is what lets a memoized turn block bail out while one token streams.
  */
 import type { ItemId, ThreadItem, TurnId } from '../../../shared/contracts'
-import type { ChildCompletionNotice, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
+import type { ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
 
 /** Channels needed to walk the ordered stream. */
 export type ItemView = Pick<ItemsSnapshot, 'itemOrder' | 'itemsById'>
@@ -105,11 +105,6 @@ export function approvalCards(view: Pick<ItemsSnapshot, 'approvals'>): PendingAp
 /** Both pending and answered prompts stay visible for the current session. */
 export function userInputCards(view: Pick<ItemsSnapshot, 'userInputs'>): PendingUserInput[] {
   return Object.values(view.userInputs).sort((a, b) => Date.parse(a.requested_at) - Date.parse(b.requested_at))
-}
-
-/** Completed background children in their durable event order. */
-export function childCompletionNotices(view: Pick<ItemsSnapshot, 'childCompletions'>): ChildCompletionNotice[] {
-  return Object.values(view.childCompletions).sort((left, right) => left.seq - right.seq)
 }
 
 /** True while any item still streams — used to disable send and show a caret. */

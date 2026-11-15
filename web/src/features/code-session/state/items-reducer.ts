@@ -14,7 +14,6 @@ import type { ItemId, ItemKind, RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot,
 import {
   commitDraft,
   draftApprovals,
-  draftChildCompletions,
   draftItemOrder,
   draftItems,
   draftOf,
@@ -24,7 +23,7 @@ import {
   type ItemsDraft
 } from './items-draft'
 import { foldUsage } from './usage'
-import type { ChildCompletionNotice, CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
+import type { CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
 
 export function emptyItemsState(): ItemsSnapshot {
   return {
@@ -35,7 +34,6 @@ export function emptyItemsState(): ItemsSnapshot {
     lastSeq: 0,
     approvals: {},
     userInputs: {},
-    childCompletions: {},
     childRunRevision: 0,
     childRunActiveCount: 0,
     workbenchRevision: 0,
@@ -52,8 +50,6 @@ const DELTA_ITEM_KIND: Partial<Record<RuntimeEvent['kind'], ItemKind>> = {
   assistant_text_delta: 'assistant_message',
   assistant_reasoning_delta: 'reasoning'
 }
-
-const MAX_CHILD_COMPLETIONS = 50
 
 /**
  * Deterministic `ItemId` for one turn's terminal failure, mirroring the Rust
@@ -132,10 +128,6 @@ function currentItem(draft: ItemsDraft, itemId: ItemId): ThreadItem | undefined 
   return draft.itemsById ? draft.itemsById[itemId] : draft.base.itemsById[itemId]
 }
 
-function currentChildCompletion(draft: ItemsDraft, id: string): ChildCompletionNotice | undefined {
-  return draft.childCompletions ? draft.childCompletions[id] : draft.base.childCompletions[id]
-}
-
 /**
  * Snapshot events are authoritative, but a snapshot may be partial (status-only
  * `item_updated`). Field-level merge keeps accumulated text in that case.
@@ -200,33 +192,15 @@ function setTurn(draft: ItemsDraft, turnId: TurnId, state: TurnState): void {
 /** Statuses after which a child run no longer counts as active for the badge. */
 const TERMINAL_CHILD_STATUSES = new Set(['completed', 'failed', 'aborted', 'ended'])
 
-/** Keep UI-only completion cards bounded even if a stream is unusually long. */
-function recordChildCompletion(draft: ItemsDraft, notice: ChildCompletionNotice): void {
-  if (currentChildCompletion(draft, notice.notification_id)) return
-  const completions = draftChildCompletions(draft)
-  completions[notice.notification_id] = notice
-  const notificationIds = Object.keys(completions)
-  if (notificationIds.length <= MAX_CHILD_COMPLETIONS) return
-
-  const oldestId = notificationIds.reduce((oldest, id) => {
-    const candidate = completions[id]
-    const current = completions[oldest]
-    return candidate && current && candidate.seq < current.seq ? id : oldest
-  })
-  delete completions[oldestId]
-}
-
 /** Seed history from `GET /v1/threads/{id}`. */
 export function seedFromItems(
   items: ThreadItem[],
   lastSeq: number,
-  childCompletions: ChildCompletionNotice[],
   runtime: ThreadRuntimeSnapshot
 ): ItemsSnapshot {
   const draft = draftOf(emptyItemsState())
   draft.lastSeq = lastSeq
   for (const item of items) upsertItem(draft, item)
-  for (const notice of childCompletions) recordChildCompletion(draft, notice)
   if (runtime.active_turn) {
     draft.activeTurnId = runtime.active_turn.turn_id
     // An active registry entry can only be running or aborting. Keep an
@@ -384,22 +358,12 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       return commitDraft(draft)
     }
 
-    case 'child_completed': {
-      const notice: ChildCompletionNotice = {
-        notification_id: event.notification_id,
-        child_id: event.child_id,
-        thread_id: event.thread_id,
-        label: event.label,
-        status: event.status,
-        summary: event.summary,
-        error: event.error,
-        completed_at: event.timestamp,
-        seq: event.seq
-      }
-      recordChildCompletion(draft, notice)
+    case 'child_completed':
+      // The durable summary lives in the subagent panel (fetched from the
+      // registry) and the instant toast (raised in the stream hook); the item
+      // projection keeps no copy of it.
       draft.childRunRevision += 1
       return commitDraft(draft)
-    }
 
     case 'child_activity': {
       draft.childRunRevision += 1

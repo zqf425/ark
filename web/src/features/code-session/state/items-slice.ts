@@ -3,7 +3,7 @@ import type { RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot, ThreadUsageRespon
 import type { StreamStatus } from '../api/events-api'
 import { applyEvent, emptyItemsState, markApprovalLocally, markUserInputLocally, seedFromItems } from './items-reducer'
 import { seedUsage } from './usage'
-import type { ChildCompletionNotice, ItemsSnapshot, LoadStatus } from './types'
+import type { ItemsSnapshot, LoadStatus } from './types'
 
 export type ItemsSlice = ItemsSnapshot & {
   detailStatus: LoadStatus
@@ -17,7 +17,7 @@ export type ItemsSlice = ItemsSnapshot & {
   reloadToken: number
   requestStreamReload: () => void
   /** Replace the stream with the authoritative server snapshot. */
-  seedItems: (items: ThreadItem[], lastSeq: number, childCompletions: ChildCompletionNotice[], runtime: ThreadRuntimeSnapshot) => void
+  seedItems: (items: ThreadItem[], lastSeq: number, runtime: ThreadRuntimeSnapshot) => void
   /** Fold one SSE event through the pure reducer. */
   ingestEvent: (event: RuntimeEvent) => void
   resetItems: () => void
@@ -39,8 +39,8 @@ export const createItemsSlice: StateCreator<ItemsSlice, [], [], ItemsSlice> = (s
 
   requestStreamReload: () => set((state) => ({ reloadToken: state.reloadToken + 1 })),
 
-  seedItems: (items, lastSeq, childCompletions, runtime) => set((state) => ({
-    ...seedFromItems(items, lastSeq, childCompletions, runtime),
+  seedItems: (items, lastSeq, runtime) => set((state) => ({
+    ...seedFromItems(items, lastSeq, runtime),
     // A fresh server snapshot invalidates every workbench projection, even
     // when the thread id did not change (reload after rewind, another client).
     workbenchRevision: state.workbenchRevision + 1,

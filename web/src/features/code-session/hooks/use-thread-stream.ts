@@ -79,7 +79,7 @@ export function useThreadStream(threadId: ThreadId | null): void {
         const detail = await getThread(threadId, controller.signal)
         if (cancelled) return
         const watermark = detail.summary.last_seq ?? 0
-        seedItems(detail.items, watermark, detail.child_completions, detail.runtime_snapshot)
+        seedItems(detail.items, watermark, detail.runtime_snapshot)
         // The detail watermark is authoritative; pull the rail row up to it in
         // case the list was loaded before the newest events landed.
         noteThreadSeq(threadId, watermark)

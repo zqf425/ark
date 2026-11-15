@@ -19,15 +19,6 @@ function childCompleted(seq: number): RuntimeEvent {
 }
 
 describe('items reducer child completions', () => {
-  it('keeps only the newest fifty distinct completion cards', () => {
-    let state = emptyItemsState()
-    for (let seq = 1; seq <= 51; seq += 1) state = applyEvent(state, childCompleted(seq))
-
-    expect(Object.keys(state.childCompletions)).toHaveLength(50)
-    expect(state.childCompletions['child:1']).toBeUndefined()
-    expect(state.childCompletions['child:51']?.seq).toBe(51)
-  })
-
   it('maps terminal child status to localized message keys', () => {
     expect(childCompletionStatusKey('queued')).toBe('canvas.child.status.queued')
     expect(childCompletionStatusKey('running')).toBe('canvas.child.status.running')
@@ -67,7 +58,7 @@ describe('items reducer child completions', () => {
 
 describe('items reducer runtime snapshot', () => {
   it('restores the active turn and only server-authorized pending gates', () => {
-    const state = seedFromItems([], 8, [], {
+    const state = seedFromItems([], 8, {
       active_turn: {
         turn_id: '00000000-0000-0000-0000-000000000003',
         thread_id: '00000000-0000-0000-0000-000000000001',
@@ -114,16 +105,6 @@ describe('items reducer thread_rewound', () => {
         }
       ],
       6,
-      [{
-        notification_id: 'child:1',
-        child_id: '00000000-0000-0000-0000-000000000002',
-        thread_id: THREAD_ID,
-        label: 'inspect runtime',
-        status: 'completed',
-        summary: 'healthy',
-        completed_at: '2026-10-28T00:00:01Z',
-        seq: 5
-      }],
       {
         pending_approvals: [{
           approval_id: 'approval-1',
@@ -155,7 +136,6 @@ describe('items reducer thread_rewound', () => {
     expect(state.itemsById[ITEM_ID]).toBeUndefined()
     expect(state.turnState[TURN_ID]).toBeUndefined()
     expect(state.approvals['approval-1']).toBeUndefined()
-    expect(state.childCompletions['child:1']).toBeUndefined()
   })
 
   it('保留通知自身的不复用 seq 作为新水位，并标记待重建', () => {
@@ -187,7 +167,7 @@ describe('items reducer thread_rewound', () => {
 
   it('重建后 seedFromItems 从 detail 水位恢复干净投影', () => {
     const afterRewind = applyEvent(seeded(), rewound(9, 3))
-    const rebuilt = seedFromItems([], afterRewind.lastSeq, [], {
+    const rebuilt = seedFromItems([], afterRewind.lastSeq, {
       pending_approvals: [],
       pending_user_inputs: []
     })
@@ -216,7 +196,6 @@ describe('items reducer reference stability', () => {
         { item_id: ITEM_B, turn_id: TURN_ID, kind: 'assistant_message', status: 'streaming', created_at: '2026-10-28T00:00:01Z', text: 'a' }
       ],
       2,
-      [],
       { pending_approvals: [], pending_user_inputs: [] }
     )
   }
@@ -242,7 +221,6 @@ describe('items reducer reference stability', () => {
     expect(next.turnState).toBe(start.turnState)
     expect(next.approvals).toBe(start.approvals)
     expect(next.userInputs).toBe(start.userInputs)
-    expect(next.childCompletions).toBe(start.childCompletions)
   })
 
   it('未变化的行对象在增量后保持同一引用', () => {
@@ -445,7 +423,6 @@ describe('items reducer workbench revision', () => {
         text: 'a'
       }],
       5,
-      [],
       { pending_approvals: [], pending_user_inputs: [] }
     )
     const replayed = applyEvent(seeded, {
@@ -462,7 +439,7 @@ describe('items reducer workbench revision', () => {
   })
 
   it('重放的 usage 事件不会重复累加', () => {
-    const seeded = seedFromItems([], 5, [], { pending_approvals: [], pending_user_inputs: [] })
+    const seeded = seedFromItems([], 5, { pending_approvals: [], pending_user_inputs: [] })
     const replayed = applyEvent(seeded, {
       kind: 'usage',
       ...base,
