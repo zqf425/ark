@@ -1,7 +1,7 @@
 /*
  * Markdown prose and highlight.js token colors, mapped to the theme tokens so
  * light and dark both work without shipping a highlight.js theme. Code blocks
- * follow the smart-ark markdown look: a tinted code surface under a header bar
+ * follow the markdown look: a tinted code surface under a header bar
  * (language label + copy button), the reading rhythm of mainstream agent
  * canvases: generous block spacing, quiet hairlines, roomy code.
  */

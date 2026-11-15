@@ -197,7 +197,7 @@ export const AssistantBubble = memo(function AssistantBubble({ item }: { item: T
 })
 
 /**
- * The turn's settled final reply, framed like smart-ark's answer card: a
+ * The turn's settled final reply, framed as an answer card: a
  * check-marked "final reply" title row above a hairline rule, the prose below,
  * and the copy action on a footer row at the card's bottom-right.
  *

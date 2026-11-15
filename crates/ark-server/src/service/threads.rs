@@ -70,7 +70,7 @@ pub async fn create_thread(
 ///
 /// The turn registry is process-local truth: a restart drops it, and turns
 /// started by another process (IM channel, scheduled run in a separate
-/// renderer) never register here. Mirrors the smart-ark busy rule — a thread
+/// renderer) never register here. Mirrors the busy rule — a thread
 /// reads busy when its newest durable turn-lifecycle event has not reached a
 /// terminal state (`turn_completed` / `turn_failed` / `turn_aborted`) — so the
 /// marker survives restarts. Only threads outside the registry's active set

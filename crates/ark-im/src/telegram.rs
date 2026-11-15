@@ -26,7 +26,7 @@ use crate::domain::{chunk_text, truncate_inbound, InboundMessage};
 /// body drain.
 const POLL_WINDOW_SECS: u64 = 25;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(POLL_WINDOW_SECS + 10);
-/// Backoff floor/ceiling with jitter, mirroring smart-ark's reconnect curve.
+/// Backoff floor/ceiling with jitter for the reconnect curve.
 const BACKOFF_MIN: Duration = Duration::from_millis(1500);
 const BACKOFF_MAX: Duration = Duration::from_secs(30);
 

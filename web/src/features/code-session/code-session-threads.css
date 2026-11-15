@@ -1,6 +1,6 @@
 /**
  * Thread rail: the glass sidebar's session list (rows, search, scope, footer)
- * plus per-turn rewind controls. Row styling follows the smart-ark sidebar:
+ * plus per-turn rewind controls. Row styling follows the sidebar:
  * 8px-radius rows, tinted hover, active row with an inset ring.
  *
  * Part of the Code screen stylesheet; split to stay under the 1000-line
@@ -285,7 +285,7 @@
   font: inherit;
 }
 
-/* ---------- project groups (smart-ark 风格：项目 → 会话) ---------- */
+/* ---------- project groups (项目 → 会话) ---------- */
 
 .ark-projectgroup {
   display: flex;
@@ -431,7 +431,7 @@
   font-size: 11px;
 }
 
-/* Sessions sit slightly indented under their project, mirroring smart-ark. */
+/* Sessions sit slightly indented under their project. */
 .ark-projectgroup__threads {
   display: flex;
   flex-direction: column;

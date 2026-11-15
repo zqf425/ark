@@ -11,10 +11,9 @@
 //!   the global `switch` surface (settings page).
 //!
 //! Merging both into one list keeps the composer's "existing projects" menu
-//! and the session rail's project groups derived from the same fact, which is
-//! the parity rule smart-ark upheld with a single renderer-side set
-//! (`codeWorkspaceRoots`). ark's authority lives in the store, so the merge
-//! happens here, at the read boundary.
+//! and the session rail's project groups derived from the same fact: ark's
+//! authority lives in the store, so the merge happens here, at the read
+//! boundary.
 //!
 //! Paths are compared after normalization only for dedupe and grouping: the
 //! descriptor always carries the first-seen original string (the canonical
@@ -26,13 +25,12 @@ use std::collections::HashMap;
 
 use ark_contract::{WorkspaceDescriptor, WorkspaceView};
 
-/// Upper bound on merged projects, matching smart-ark's
-/// `MAX_CODE_WORKSPACE_ROOTS`. Bounded so a long-lived installation cannot
-/// grow the response without limit.
+/// Upper bound on merged projects. Bounded so a long-lived installation
+/// cannot grow the response without limit.
 pub const MAX_WORKSPACE_PROJECTS: usize = 30;
 
 /// One candidate source row. `active` is whether this workspace is the
-/// runtime's active root (sorts first, like smart-ark's sidebar).
+/// runtime's active root (sorts first, like the sidebar).
 pub struct ProjectCandidate {
     pub path: String,
     pub active: bool,
@@ -42,7 +40,7 @@ pub struct ProjectCandidate {
 }
 
 /// Normalized identity key for dedupe: case-insensitive, separator-insensitive,
-/// without a trailing slash. Mirrors smart-ark's `workspaceRootIdentityKey`.
+/// without a trailing slash.
 fn identity_key(path: &str) -> String {
     path.trim()
         .replace('\\', "/")
@@ -52,7 +50,7 @@ fn identity_key(path: &str) -> String {
 
 /// Merge thread-index and recent-history workspaces into one project list.
 ///
-/// Ordering (mirrors smart-ark's sidebar): the active root first, then by the
+/// Ordering (mirrors the sidebar): the active root first, then by the
 /// workspace's most recent thread activity (newest first, never-active
 /// last in input order), deduped by identity key. The active root is always
 /// present even when no thread references it.

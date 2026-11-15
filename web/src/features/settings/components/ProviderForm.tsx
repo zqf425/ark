@@ -9,7 +9,7 @@
  * not silently drop it.
  *
  * Saving never promotes the entry to the default provider (aligned with
- * smart-ark): a default switch silently re-routes every session that follows
+ * the provider list): a default switch silently re-routes every session that follows
  * the default, so it stays a deliberate action on the list row or in
  * Settings -> 通用, never a side effect of adding a provider.
  */

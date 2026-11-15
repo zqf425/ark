@@ -16,7 +16,7 @@ pub const DEFAULT_CATALOG_BUDGET_BYTES: usize = 8_000;
 /// The app's own skill root (`~/.arkd/skills`), in precedence order before the
 /// shared convention.
 ///
-/// Own home root, separate from smart-ark's `.ark`, so the two runtimes never
+/// Own home root, separate from any generic `.ark` root, so other runtimes never
 /// discover or write each other's skills. A convention directory: silently
 /// skipped when absent instead of reporting a warning on every scan.
 pub fn own_skills_root() -> PathBuf {
@@ -177,7 +177,7 @@ mod tests {
         // 默认技能根：本应用自有 `.arkd` 主目录 + 共享的 `.agents` 约定目录。
         assert_eq!(config.roots, default_roots());
         assert_eq!(config.roots.len(), 2);
-        // 自有根必须落在本应用自己的 `.arkd` 主目录下，不得回退到 smart-ark 的 `.ark`。
+        // 自有根必须落在本应用自己的 `.arkd` 主目录下，不得回退到通用的 `.ark` 目录。
         assert_eq!(config.roots[0], own_skills_root());
         // 共享约定根固定为家目录下的 `.agents/skills`。
         assert_eq!(config.roots[1], shared_skills_root());

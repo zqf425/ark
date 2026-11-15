@@ -72,7 +72,7 @@ export function catalogLabel(model: ProviderModelSummary): string {
 }
 
 // ---------------------------------------------------------------------------
-// Batch model import (adapted from smart-ark's import dialog, sized to arkd)
+// Batch model import (sized to arkd)
 // ---------------------------------------------------------------------------
 
 /**
@@ -124,7 +124,7 @@ export function buildImportCandidates(
     if (seen.has(model.id)) continue
     seen.add(model.id)
     // Probe the catalog's declared window; when the provider publishes none,
-    // every imported row still gets a concrete 256K default (smart-ark parity)
+    // every imported row still gets a concrete 256K default
     // instead of an empty field that silently falls back at runtime.
     const probed = model.context_window_tokens !== undefined
     const label = catalogLabel(model) + (probed ? '' : ` · ${translateNow('settings.providerImport.fallbackContext')}`)

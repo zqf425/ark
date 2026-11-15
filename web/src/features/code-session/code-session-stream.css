@@ -33,7 +33,7 @@
   width: 100%;
   display: flex;
   flex-direction: column;
-  /* Turn-to-turn breathing room, like smart-ark's 1.25rem timeline gap. */
+  /* Turn-to-turn breathing room, a 1.25rem timeline gap. */
   gap: 20px;
   padding: 26px max(24px, calc((100% - var(--ark-canvas-width)) / 2)) 16px;
 }
@@ -140,7 +140,7 @@
   border-color: var(--ark-accent-dim);
 }
 
-/* ---------- turn process card (smart-ark work card) ---------- */
+/* ---------- turn process card (work card) ---------- */
 
 .ark-process {
   border: 1px solid var(--ark-border-muted);

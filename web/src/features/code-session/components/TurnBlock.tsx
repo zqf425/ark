@@ -5,7 +5,7 @@
  * Rows inside the process card keep the real event order (see `splitTurnSections`):
  * intermediate narration, reasoning and tool calls interleave exactly as they
  * happened, and only the last textful assistant message is promoted to the
- * final-reply card — the same rule smart-ark applies.
+ * final-reply card.
  *
  * `group` keeps its identity while the turn's rows and state do (see
  * `groupByTurn`), so a token streaming into the newest turn leaves every

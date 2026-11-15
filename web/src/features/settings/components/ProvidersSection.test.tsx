@@ -3,7 +3,7 @@
  * The provider section's save path over a mocked API surface.
  *
  * Pinned here: adding a provider never flips the global default
- * (`make_default` is always false — the smart-ark alignment fix), while the
+ * (`make_default` is always false), while the
  * row-level "Set as default" action still reaches `POST .../default`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

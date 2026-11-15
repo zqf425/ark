@@ -151,8 +151,8 @@ impl ModelClient for HttpModelClient {
                             // backoff schedule (already capped by the parser);
                             // jitter desynchronises concurrent turns hitting
                             // the same rate-limit window. A zero value counts
-                            // as "not provided" — the same rule as smart-ark's
-                            // `computeRetryDelay`, which only adopts
+                            // as "not provided" — the same rule as the
+                            // retry-delay computation, which only adopts
                             // `retryAfterMs` when it is > 0 — so
                             // `Retry-After: 0` cannot bypass the rate-limit
                             // floor and hammer the provider.

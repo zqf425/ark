@@ -464,7 +464,7 @@ impl SchedulerService {
 
         record_run(&mut task, record);
         // The cadence is recomputed from *now*, not from the stored time: an
-        // interval task counts from completion, matching smart-ark, so a run that
+        // interval task counts from completion, so a run that
         // took 10 minutes does not fire again 5 minutes later.
         apply_next_run_at(&mut task, Local::now());
         let rounded = task.clone();

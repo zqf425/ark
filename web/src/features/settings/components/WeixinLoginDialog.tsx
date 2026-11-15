@@ -4,7 +4,7 @@
  * A confirmed login creates the channel server-side (disabled); the dialog
  * only surfaces it. Session expiry and failure both stop the poll.
  *
- * Rendering mirrors smart-ark: the iLink payload carries either a ready-made
+ * The iLink payload carries either a ready-made
  * image (`data:image/...`) or a plain login URL — the former is shown as-is,
  * the latter must be encoded into a QR code, or the user sees a bare string
  * instead of something scannable.
@@ -22,7 +22,7 @@ const LOGIN_POLL_INTERVAL_MS = 2000
 const LOGIN_POLL_MAX_ATTEMPTS = 150
 const QR_SIZE_PX = 192
 
-/** smart-ark's rule: a `data:image/` payload is the picture itself, anything else is the content to encode. */
+/** A `data:image/` payload is the picture itself, anything else is the content to encode. */
 function qrIsImage(content: string): boolean {
   return content.startsWith('data:image/')
 }

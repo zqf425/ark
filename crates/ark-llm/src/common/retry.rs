@@ -45,10 +45,10 @@ pub struct RetryPolicy {
 
 impl Default for RetryPolicy {
     fn default() -> Self {
-        // Matches smart-ark's compat-model-client: initial call + 3 retries
-        // (their competitor survey landed on 3 as the middle ground between
-        // dsh's 2 and gemini-cli's stall-prone 10). The 30s cap keeps a
-        // provider-supplied Retry-After from stalling a turn for minutes.
+        // Budget: initial call + 3 retries — the middle ground between the
+        // common 2-attempt clients and stall-prone 10-attempt ones. The 30s
+        // cap keeps a provider-supplied Retry-After from stalling a turn for
+        // minutes.
         Self {
             max_attempts: 4,
             base: Duration::from_millis(500),
@@ -99,10 +99,10 @@ impl RetryPolicy {
 }
 
 /// Upper bound for a provider-supplied `Retry-After`, so a misconfigured
-/// gateway cannot stall a turn for minutes (same ceiling as smart-ark).
+/// gateway cannot stall a turn for minutes.
 pub const RETRY_AFTER_CAP: Duration = Duration::from_secs(30);
 
-/// Relative jitter half-width (±25%), matching smart-ark's thundering-herd
+/// Relative jitter half-width (±25%), damping thundering-herd
 /// desynchronisation range.
 const JITTER_FRACTION: u64 = 25;
 
@@ -280,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn default_policy_matches_smart_ark_budget() {
+    fn default_policy_matches_budget() {
         let policy = RetryPolicy::default();
         assert_eq!(policy.max_attempts, 4);
         assert_eq!(policy.base, Duration::from_millis(500));

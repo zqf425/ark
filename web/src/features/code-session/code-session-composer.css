@@ -1,5 +1,5 @@
 /**
- * Composer toolbar pills, ported from the smart-ark composer toolbar: a round
+ * Composer toolbar pills: a round
  * + trigger on the left with the amber autonomy pill; workspace, context ring
  * and the combined provider:model/effort pill on the right. Popovers float
  * above the toolbar as cards.
@@ -25,7 +25,7 @@
 
 /* ---------- pill trigger (shared) ---------- */
 
-/* 32px rounded pill with a hairline border, like smart-ark's h-8 pills. */
+/* 32px rounded pill with a hairline border. */
 .ark-composer__pill {
   display: inline-flex;
   align-items: center;
@@ -77,7 +77,7 @@
   font-size: 12px;
 }
 
-/* Amber autonomy pill: the warn wash reads as the smart-ark amber chip in
+/* Amber autonomy pill: the warn wash reads as an amber chip in
    both themes (light amber / dark amber come from the token pair). */
 .ark-composer__pill--autonomy {
   border-color: transparent;
@@ -153,7 +153,7 @@
   }
 }
 
-/* Popover opens above the toolbar, floating card like smart-ark menus. */
+/* Popover opens above the toolbar, floating card menu. */
 .ark-composer__popover {
   position: absolute;
   bottom: calc(100% + 8px);

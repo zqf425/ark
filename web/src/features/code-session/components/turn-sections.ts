@@ -3,7 +3,7 @@
  *
  * The process card used to be fed only by reasoning/tool items while every
  * assistant message rendered after it, so a tool that actually ran *after* a
- * narrating reply displayed *before* it. smart-ark's rule is chronological:
+ * narrating reply displayed *before* it. The rule is chronological:
  * everything except the single final assistant answer belongs inside the
  * process trace, in event order.
  */
@@ -17,7 +17,7 @@ export type TurnRunState = 'running' | 'settled'
 /**
  * The single assistant message rendered as the reply bubble.
  *
- * Mirrors smart-ark's `findLastAssistantContentIndex`: the last assistant item
+ * The last assistant item
  * that carries visible (non-blank) text. Narration between tool rounds and
  * blank/aborted assistant rows stay in the process card.
  */

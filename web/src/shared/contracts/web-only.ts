@@ -59,7 +59,7 @@ export const PROVIDER_MODELS_MAX = 64
 
 /**
  * Context window used when a `/models` entry publishes no usable limit.
- * Mirrors smart-ark's `DEFAULT_PROVIDER_CONTEXT_WINDOW_TOKENS` (256K): every
+ * The 256K default context-window budget: every
  * model row therefore gets a concrete value instead of an empty field.
  * 非 Rust 契约：纯 UI 兜底值，不进 wire 类型。
  */
