@@ -18,4 +18,11 @@ describe('canSendToThread', () => {
     expect(canEditComposer('thread-1', true)).toBe(false)
     expect(canEditComposer(null, false)).toBe(false)
   })
+
+  it('the new-task composer sends by creating a thread, so no SSE gate applies', () => {
+    // No thread and a closed stream: the pending-start composer may still send.
+    expect(canSendToThread(null, false, 'closed', true)).toBe(true)
+    // An in-flight create+start still blocks, like any other send.
+    expect(canSendToThread(null, true, 'closed', true)).toBe(false)
+  })
 })

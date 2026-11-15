@@ -1,19 +1,26 @@
 /**
  * New-task page: pick an intent, describe the goal, start.
  *
- * Code and Plan both create a thread (Plan stops there so the user can write
- * the planning prompt in the composer); Review switches to the changes review
- * page instead of creating a thread. The button is disabled while the request
- * is in flight, and failures surface through the shared toast.
+ * The input area IS the session composer (same component as the canvas dock),
+ * mounted with `threadId = null`: workspace / model / permission / reasoning
+ * pills, attachments and skill mentions all work exactly like an open session.
+ * Picking a model or workspace only stages the override; the send action
+ * creates the thread (`POST /v1/threads` with the staged workspace), commits
+ * the remaining overrides (`PATCH /v1/threads/{id}`), associates the picked
+ * attachments and starts the first turn — one delivery, like every composer
+ * send. Review still switches to the changes review page without a thread.
  */
 import { useState } from 'react'
 import { describeError } from '../../../shared/api/error-describe'
 import { translateNow } from '../../../shared/i18n/current'
 import { useI18n } from '../../../shared/i18n'
 import { Icon, useToast } from '../../../shared/ui'
-import { createThread } from '../../code-session/api/threads-api'
+import type { ThreadRuntimeSettings } from '../../../shared/contracts'
+import { createThread, updateThread } from '../../code-session/api/threads-api'
 import { startTurn } from '../../code-session/api/turns-api'
+import { associateAttachment } from '../../code-session/api/attachments-api'
 import { useCodeSessionStore } from '../../code-session/state/store'
+import { NEW_TASK_DRAFT_KEY, Composer, type ComposerSubmit } from '../../code-session/components/Composer'
 import { useViewStore } from '../../workbench/state/view-slice'
 import type { ConsoleMeta } from '../hooks/use-console-meta'
 
@@ -25,14 +32,8 @@ const MODES: { id: Mode; icon: string; labelKey: 'console.new.modeCode' | 'conso
   { id: 'review', icon: 'diff', labelKey: 'console.new.modeReview', hintKey: 'console.new.modeReviewHint' }
 ]
 
-const EXAMPLE_KEYS = [
-  'console.new.example1',
-  'console.new.example2',
-  'console.new.example3',
-  'console.new.example4'
-] as const
-
-export function NewTaskPage({ meta }: { meta: ConsoleMeta }): JSX.Element {
+/** Props stay `meta`-compatible with the other console scenes (unused here). */
+export function NewTaskPage(_props: { meta?: ConsoleMeta }): JSX.Element {
   const { t } = useI18n()
   const push = useToast().push
   const setView = useViewStore((s) => s.setView)
@@ -40,27 +41,55 @@ export function NewTaskPage({ meta }: { meta: ConsoleMeta }): JSX.Element {
   const upsertThread = useCodeSessionStore((s) => s.upsertThread)
 
   const [mode, setMode] = useState<Mode>('code')
-  const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  // Overrides picked on the page before the thread exists. Committed at start
+  // time: the workspace seeds the create call, the rest merge into the fresh
+  // thread's runtime. Cleared on success so the next task starts neutral.
+  const [staged, setStaged] = useState<ThreadRuntimeSettings>({})
 
-  const start = async (): Promise<void> => {
-    if (busy) return
+  const stage = (patch: ThreadRuntimeSettings): void => {
+    setStaged((current) => ({ ...current, ...patch }))
+  }
+
+  const start: ComposerSubmit = async (text, attachmentIds) => {
+    if (busy) return false
     if (mode === 'review') {
       setView('review')
-      return
+      return true
     }
-    const text = draft.trim()
     setBusy(true)
     try {
-      const created = await createThread({})
+      // A staged workspace is validated server-side (the same
+      // `WorkspaceService::validate` rule as the composer's pick), so an
+      // invalid path fails the create instead of seeding a dead override.
+      const created = await createThread({ title: t('thread.list.defaultTitle'), ...(staged.workspace ? { workspace: staged.workspace } : {}) })
       upsertThread(created)
       setActiveThread(created.thread_id)
-      if (mode === 'code' && text) {
-        await startTurn(created.thread_id, { text, attachment_ids: [] })
+      // merge_runtime keeps omitted fields, so only what the user picked lands.
+      const overrides: ThreadRuntimeSettings = {}
+      if (staged.provider_id !== undefined) overrides.provider_id = staged.provider_id
+      if (staged.model !== undefined) overrides.model = staged.model
+      if (staged.autonomy !== undefined) overrides.autonomy = staged.autonomy
+      if (staged.reasoning_effort !== undefined) overrides.reasoning_effort = staged.reasoning_effort
+      if (Object.keys(overrides).length > 0) {
+        await updateThread(created.thread_id, { runtime: overrides })
       }
+      // The runtime rejects turn starts that carry unassociated attachment
+      // ids, so every picked id is linked before the turn starts.
+      for (const id of attachmentIds) {
+        await associateAttachment(created.thread_id, id)
+      }
+      if (mode === 'code' && text) {
+        await startTurn(created.thread_id, { text, attachment_ids: attachmentIds })
+      }
+      // Delivered: the page's staged picks are now the thread's stored state.
+      setStaged({})
+      useCodeSessionStore.getState().clearDraft(NEW_TASK_DRAFT_KEY)
       setView('code')
+      return true
     } catch (error) {
       push('error', t('console.new.failed'), describeError(error, translateNow))
+      return false
     } finally {
       setBusy(false)
     }
@@ -95,54 +124,18 @@ export function NewTaskPage({ meta }: { meta: ConsoleMeta }): JSX.Element {
           ))}
         </div>
 
-        <div className="console-new__box">
-          <textarea
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder={t('console.new.placeholder')}
-            aria-label={t('console.new.placeholder')}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                event.preventDefault()
-                void start()
-              }
-            }}
-          />
-          <div className="console-new__foot">
-            <span className="console-chip" title={meta.workspacePath ?? ''}>
-              <span className="console-chip__icon"><Icon name="folder" size={13} /></span>
-              <span className="console-chip__path">{meta.workspacePath ?? t('console.new.workspace')}</span>
-            </span>
-            {meta.headSha ? (
-              <span className="console-chip">
-                <span className="console-chip__icon"><Icon name="git" size={13} /></span>
-                <span className="console-chip__path">{meta.headSha.slice(0, 7)}</span>
-              </span>
-            ) : null}
-            <span className="console-chip">
-              <span className="console-chip__icon"><Icon name="shield" size={13} /></span>
-              <span className="console-chip__path">{t('console.new.standard')}</span>
-            </span>
-            <span className="console-new__foot-grow" />
-            <button
-              type="button"
-              className="ark-btn ark-btn--primary ark-btn--sm"
-              onClick={() => void start()}
-              disabled={busy}
-            >
-              {busy ? t('console.new.starting') : t('console.new.start')}
-              <kbd className="console-kbd">↵</kbd>
-            </button>
-          </div>
-        </div>
-
-        <div className="console-new__examples">
-          {EXAMPLE_KEYS.map((key) => (
-            <button key={key} type="button" onClick={() => setDraft(t(key))}>
-              {t(key)}
-            </button>
-          ))}
-        </div>
+        {/*
+          The session composer, unkeyed: the new-task page never remounts it on
+          a thread switch (the page owns the draft under NEW_TASK_DRAFT_KEY and
+          the staged overrides live in `staged`), so pills and attachments keep
+          their state while the user types.
+        */}
+        <Composer
+          threadId={null}
+          onPendingStart={start}
+          stagedRuntime={staged}
+          onStagedChange={stage}
+        />
 
         <div className="console-new__recent">
           <Icon name="clock" size={12} />

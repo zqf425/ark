@@ -215,3 +215,26 @@ UI 重构混入本需求。
 「设置 → 通用」的默认模型选择器；后端 `upsert(make_default)` 契约不变，MCP 等其他客户端不受影响。
 回归测试 `ProvidersSection.test.tsx` 钉住三条：新增保存携带 `make_default: false`、表单无该勾选、
 行内「设为默认」仍到达 default 端点。
+
+## 阶段 J：新任务页复用会话输入框
+
+> 状态：**当前实现**。
+
+ARK Console 的 `new` 场景（⌘K「新建任务」）此前是独立的简化 textarea + 静态工作区/权限 chip：
+工作空间无法切换、模型无法选择、附件不能添加，与工作台会话输入框形成两套能力。本阶段把该页的
+输入区替换为会话输入框本体（`Composer`，`threadId = null` + `onPendingStart` + 暂存覆盖
+`stagedRuntime` / `onStagedChange`），不加 wire 字段、不改运行时语义：
+
+- 会话存在前即可用：工作空间 pill（active/recent + 新增项目空间）、供应商/模型二级 pill、
+  权限档位 pill、推理强度、附件（+ 菜单 / 粘贴 / 拖拽）与 `/id` 技能提及。pill 的选择写入页面
+  暂存覆盖，不产生线程请求；附件仍走 `/v1/attachments` 上传。
+- 发送是一次完整投递：`POST /v1/threads`（staged workspace 经服务端 `WorkspaceService::validate`
+  种为覆盖）→ `PATCH /v1/threads/{id}`（provider/model/autonomy/reasoning_effort）→ 逐个
+  `POST /v1/threads/{id}/attachments` 关联 → `POST /v1/threads/{id}/turns`（Code 模式启动首回合，
+  Plan 模式只建会话；Review 模式仍打开变更审查页）。投递成功才清草稿与暂存覆盖并跳转工作台，
+  任一步失败全量保留可重试，错误走共享 toast。
+- 该路径不受 SSE `streamStatus` 闸门约束（尚无流可订阅），仅 `sending` 阻塞
+  （`canSendToThread` 的 `pendingStart` 语义，单测钉住）。草稿存于 store 保留键
+  `NEW_TASK_DRAFT_KEY`（`'new-task'`，与线程 UUID 命名空间隔离），随既有 localStorage 镜像持久化。
+- 回归测试 `NewTaskPage.test.tsx` 钉住：无会话时输入框/附件菜单可用、投递序列
+  （create→PATCH→associate→start）与成功清空、失败保草稿、附件先关联后随首回合提交。

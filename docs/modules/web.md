@@ -175,7 +175,15 @@
   选择；`commandOpen` 控制 ⌘K 命令面板。设置场景的返回不依赖记忆 ⌘K：顶栏右侧齿轮按钮按场景
   变义——工作台下是「设置」入口，settings 场景下变为「返回工作台」（`console.top.backToWorkbench`，
   undo 图标）；设置页自身 hero 行右缘还有常驻「返回工作台」按钮（`settings.backToWorkbench`，
-  所有 section 可见），两处都直接 `setView('code')`。
+  所有 section 可见），两处都直接 `setView('code')`。`new` 场景（新任务页）的输入区**就是会话
+  输入框本体**（`Composer`，`threadId = null` + `onPendingStart`）：工作空间 / 模型 / 权限 /
+  推理强度 pill、附件与技能提及在会话存在前全部可用——pill 的选择写入页面的暂存覆盖
+  （`stagedRuntime` / `onStagedChange`），附件仍走 `/v1/attachments` 上传，草稿存于 store 的
+  保留键 `NEW_TASK_DRAFT_KEY`（与线程 UUID 命名空间隔离）。发送是一次完整投递：
+  `POST /v1/threads`（staged workspace 经服务端 validate 种为覆盖）→ `PATCH /v1/threads/{id}`
+  （其余覆盖）→ 逐个关联附件 → `POST /v1/threads/{id}/turns`（首回合，Plan 模式只建会话不启动
+  回合），投递成功才清草稿与暂存覆盖，失败全保留可重试；该路径不受 `streamStatus` 闸门约束
+  （尚无流可订阅），仅 `sending` 阻塞。
 - 会话列表按项目分组渲染（`thread-projects.ts`，对齐 smart-ark：先按会话**实际生效**工作空间聚合，
   无 override 会话回退运行时 active root，active 组置顶）。项目组头部提供两个随 hover/focus 显现的
   动作：➕ 在该项目下新建会话——把项目路径经 `POST /v1/threads` 的 `workspace` 字段提交，服务端经
@@ -215,6 +223,8 @@
   推理强度是输入框工具条上的即时选择器（`ComposerRuntimeControls`），打开时重读 `GET /v1/threads/{id}`
   再经 `PATCH /v1/threads/{id}` 的 `runtime` 覆盖立即保存；后端按字段合并、无清除语义，因此不可清除的
   字段不提供"未设置"选项，`reasoning_effort` 空串即"跟随默认"（协议映射见 [ark-llm](ark-llm.md)）。
+  同一组 pill 在新任务页（无会话）读写页面的暂存覆盖而非线程记录（见上方 `new` 场景条目），
+  提交时机是任务启动而不是选择动作。
   工作空间、上下文结构和手动压缩也收进同一排工具条，不再有展开式详细面板：工作空间 pill 直接列出
   `GET /v1/workspace` 的 active / recent 项目，点选即 `POST /v1/workspace/switch` 并把同一路径经
   `PATCH /v1/threads/{id}` 写成本会话覆盖；「新增项目空间」调用 `POST /v1/workspace/pick` 与
@@ -249,7 +259,9 @@
   `clearDraft`）：Composer 因 `key={threadId}` 在切换会话时重挂载，textarea 不持草稿，挂载时从
   store 恢复本线程草稿，输入即写回（受控 textarea）。发送成功仅清除与已发送文本一致的草稿条目，
   发送失败或被闸门拦截（`sending`、SSE 非 `open`）时草稿原样保留；排队动作把文本移入组件本地
-  队列并清掉对应 store 草稿。草稿只存内存、不进 wire；`state/draft-storage.ts` 把同一映射镜像到
+  队列并清掉对应 store 草稿。新任务页的无会话 Composer 把草稿存在同一条 map 的保留键
+  `NEW_TASK_DRAFT_KEY`（`'new-task'`，与线程 UUID 命名空间隔离），随同一条 localStorage 镜像
+  持久化。草稿只存内存、不进 wire；`state/draft-storage.ts` 把同一映射镜像到
   localStorage（键 `ark.composer.drafts`，≤100 条、单条 ≤100k 字符，读写失败静默降级），`main.tsx`
   渲染前 `hydrateDrafts()` 恢复——渲染器整页重载（arkd 重启拖垮连接后外壳重开窗口、HMR、崩溃）
   对用户即"某个会话完成后其它输入框全被清空"，因此草稿必须跨页面存活；store 仍是运行期唯一真源，

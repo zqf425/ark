@@ -86,6 +86,11 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.composer.steerPlaceholder': ['向运行中的回合补充指令（Enter steer）', 'Add instructions to the running turn (Enter to steer)'],
   'canvas.composer.sendPlaceholder': ['发送消息（Enter 发送，Shift+Enter 换行）', 'Send a message (Enter sends, Shift+Enter adds a line)'],
   'canvas.composer.noThreadPlaceholder': ['先新建或选择一个会话', 'Create or select a thread first'],
+  'canvas.composer.newTaskPlaceholder': [
+    '例如：把工具超时重试统一收敛到 ark-agent，并补上回归测试…',
+    'e.g. Consolidate tool timeout retries into ark-agent and add regression tests…'
+  ],
+  'canvas.composer.newTaskSend': ['开始任务', 'Start task'],
   'canvas.composer.steerAria': ['向运行中的回合补充指令', 'Add instructions to the running turn'],
   'canvas.composer.sendAria': ['发送消息', 'Send a message'],
   'canvas.composer.interrupt': ['中断', 'Interrupt'],
