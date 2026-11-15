@@ -19,7 +19,8 @@
   min-width: 0;
 }
 
-/* Meta row: one quiet identity line per message, shared by both roles. */
+/* Meta row: one quiet identity line per message, shared by both roles.
+   On the user bubble it renders after the payload (`order: 2`) as a footer. */
 .ark-msg__head {
   display: flex;
   align-items: center;
@@ -29,8 +30,9 @@
   color: var(--ark-text-faint);
 }
 
-/* Small round identity glyph: "you" is a solid accent disc, "ark" is a
-   hairline-ringed disc with the wordmark inside — no bitmaps, pure CSS. */
+/* Small round identity glyph: the assistant is a hairline-ringed disc with
+   the wordmark inside — no bitmaps, pure CSS. The user bubble carries no
+   avatar: the right-aligned card already says who is speaking. */
 .ark-msg__avatar {
   display: inline-flex;
   align-items: center;
@@ -43,11 +45,6 @@
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.02em;
-}
-
-.ark-msg__avatar--you {
-  background: var(--ark-accent-soft);
-  color: var(--ark-accent);
 }
 
 .ark-msg__avatar--assistant {
@@ -77,7 +74,8 @@
   color: var(--ark-text);
 }
 
-/* Attachment chips: under the bubble text, inside the same card, wrapping. */
+/* Message attachments: thumbnails (images) or filename pills (everything
+   else) under the bubble text, inside the same card, wrapping. */
 .ark-msg__attachments {
   display: flex;
   flex-wrap: wrap;
@@ -86,7 +84,20 @@
   max-width: 100%;
 }
 
-.ark-msg__attachments .ark-chip {
+/* Wrapper around one thumbnail; the warn tone keeps degraded deliveries
+   visible through a ring, not a wall of text. */
+.ark-msg-attachment {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  border-radius: var(--ark-radius);
+}
+
+.ark-msg-attachment--warn {
+  box-shadow: 0 0 0 2px var(--ark-warn-wash);
+}
+
+.ark-msg__attachments .ark-thumb--file {
   font-size: 11px;
   max-width: 100%;
   overflow: hidden;
@@ -136,8 +147,7 @@
 }
 
 .ark-msg--user .ark-msg__head {
-  /* The meta row belongs to the bubble; the bubble itself is the payload. */
-  order: 2;
+  /* The meta row follows the payload as a quiet footer line. */
   padding-right: 2px;
 }
 
@@ -147,7 +157,7 @@
 }
 
 .ark-msg--user .ark-msg__author {
-  color: var(--ark-text-dim);
+  display: none;
 }
 
 .ark-msg__time {

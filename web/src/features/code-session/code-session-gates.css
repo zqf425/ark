@@ -471,13 +471,33 @@
   padding: 2px 8px 4px;
 }
 
-.ark-composer__queue .ark-chip,
-.ark-composer__attachments .ark-chip {
+.ark-composer__queue .ark-chip {
   gap: 6px;
   max-width: 360px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* One picked attachment: thumbnail (image) or filename pill (other), with the
+   remove button beside it. */
+.ark-composer__attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 240px;
+}
+
+.ark-composer__attachments .ark-thumb--file {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-composer__attachments .ark-thumb--image .ark-thumb__img {
+  width: 54px;
+  height: 54px;
 }
 
 .ark-composer__attachments .ark-composer__status {

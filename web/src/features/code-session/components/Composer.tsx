@@ -31,12 +31,14 @@ import { filterSkills, mentionTokenAt, type MentionToken } from './skill-mention
 import { AutonomyPicker, WorkspacePicker, ContextRing, ModelPicker } from './ComposerRuntimeControls'
 import { SkillPalette } from './SkillPalette'
 import { DraftHighlight } from './DraftHighlight'
+import { AttachmentThumb } from './AttachmentThumb'
 import { CopyButton } from '../../../shared/ui/copy'
 const MAX_ROWS = 8
 /** Base64 of a file is ~4/3 of its bytes; keep uploads inside the runtime cap. */
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
-type PickedAttachment = { id: string; name: string }
+/** A picked (uploaded, not yet sent) attachment; `mime` drives image previews. */
+type PickedAttachment = { id: string; name: string; mime?: string }
 
 /** Where a draft goes while a turn is live: steer the current turn or hold it. */
 type RunningDeliveryMode = 'steer' | 'queue'
@@ -408,7 +410,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
         })
         setAttachments((current) => [
           ...current,
-          { id: uploaded.attachment.id, name: file.name }
+          { id: uploaded.attachment.id, name: file.name, mime: file.type || undefined }
         ])
       }
     } catch (error) {
@@ -550,8 +552,8 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
         {attachments.length > 0 ? (
           <div className="ark-composer__attachments" role="list" aria-label={t('canvas.composer.attachmentsAria')}>
             {attachments.map((picked) => (
-              <span key={picked.id} className="ark-chip" role="listitem">
-                {picked.name}
+              <span key={picked.id} className="ark-composer__attachment" role="listitem">
+                <AttachmentThumb preview={picked} />
                 <button
                   type="button"
                   className="ark-composer__dismiss"

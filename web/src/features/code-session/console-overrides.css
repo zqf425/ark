@@ -29,11 +29,6 @@
   line-height: 1.65;
 }
 
-.ark-msg--user .ark-msg__head {
-  order: 2;
-  padding-right: 2px;
-}
-
 /* Tool/process cards, gates and the composer shell: tighten radii. */
 .ark-tool,
 .ark-toolresult,

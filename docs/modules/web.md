@@ -67,10 +67,11 @@
 - Toast 是 `shared/ui/Toast` 独占的表面：组件内用 `useToast().push`；SSE 回调、轮询间隔等非 React
   调用方（回合终态通知）用 `pushToastProgrammatic`——`ToastProvider` 挂载时注册推送句柄，卸载时注销，
   provider 未挂载期间的推送静默丢弃（无表面可渲染），不排队。不得在 feature 内自建浮层通知。
-- 消息行带身份标识（对齐主流 agent 画布）：元信息行前置 18px 圆形头像盘——用户为强调色浅底、
-  助手为 hairline 圆环内嵌 "ark" 字标，均为纯 CSS 无位图（`ark-msg__avatar`）；助手正文
-  `padding-left: 25px` 与头像后的作者名对齐，形成稳定的纵向导轨。头像进入 i18n 的只有
-  `canvas.author.youInitial`；助手字标 "ark" 是产品名，不进 i18n。
+- 消息行带身份标识（对齐主流 agent 画布）：助手元信息行前置 18px 圆形头像盘——hairline 圆环内嵌
+  "ark" 字标，纯 CSS 无位图（`ark-msg__avatar`）；助手正文 `padding-left: 25px` 与头像后的作者名
+  对齐，形成稳定的纵向导轨。用户气泡不渲染头像与「你」作者行：右侧独立气泡卡本身已表明说话者，
+  冗余的作者标签是重复信息——气泡 meta 行退化为底部一行（时间 + 复制按钮），`canvas.author.you` 与
+  `canvas.author.youInitial` 键已随行为删除；助手字标 "ark" 是产品名，不进 i18n。
 - 工具卡头部带工具族图标盘（`ark-tool__icon`，22px 圆角方块 + CSS mask 单色图标）：按工具名
   归入 read/write/exec/search 四族，未知名回落 wrench，与主流 agent 的活动行一致让长回合可按
   形状扫读；折叠头部新增单行参数摘要（`ark-tool__digest`，取首个参数 `key=value` 截断省略，
@@ -241,10 +242,19 @@
   镜像只服务水合。清空以"删除条目"表示，不会在下次水合时复活旧内容。
 - 附件经 `POST /v1/attachments`（Base64 JSON）上传后以 id 列表随 `TurnRequest.attachment_ids` 提交；
   上传失败走命令错误提示，已传 id 可在发送前移除（服务端无删除路由，孤儿附件由运行时清理策略负责）。
-- 消息画布用 `ThreadItem.attachments`（serde default，可为空）渲染用户消息下的附件 chips：
-  每个投递结果一枚 chip（文件名 + 投递通道 i18n 标签），`image`/`preview_text` 为中性样式，
-  `degraded`/`skipped`/`unavailable` 用警示色并以 `detail` 作 title 提示。字段由后端持久化，
-  历史回放与 live 流渲染一致；运行时未发附件字段的旧 item 保持原样。
+- 附件可视化预览由 `AttachmentThumb`（缩略图）与 `AttachmentLightbox`（全屏查看器）统一提供，消息画布
+  与输入框复用同一组件，不得各自实现第二套预览。字节经 `GET /v1/attachments/{id}/content` 的认证 fetch
+  取回并转 `blob:` URL（api 层按附件 id 缓存，`exportThread` 同款模式）——运行时所有路由在 Bearer
+  Token 之后，`<img>` 的裸 URL 无法通过认证，且生产 CSP 允许 `blob:` 不允许跨源运行时 URL 进 `img-src`。
+  图片渲染为可点击缩略图（cursor zoom-in），点击打开灯箱（scrim/×/Esc 关闭，z-index 在 toast 之下）；
+  非图片与加载失败的记录回落为文件名 pill，不阻塞渲染。图片性判定在 `attachment-preview-model.ts`：
+  画布按投递通道推断（只有图片形文件会走 `image`/`degraded`/`skipped`），输入框用 `File.type`，两者都
+  缺时回落扩展名。降级/跳过/读取失败的投递记录外层加警示环（`--ark-warn-wash`），投递通道标签移入
+  外层 title，不再内联展开。
+- 消息画布用 `ThreadItem.attachments`（serde default，可为空）渲染用户消息下的附件预览：
+  每个投递结果一枚缩略图或文件名 pill，`image`/`preview_text` 为中性样式，`degraded`/`skipped`/
+  `unavailable` 加警示环并以投递通道 i18n 标签作 title 提示。字段由后端持久化，历史回放与 live 流
+  渲染一致；运行时未发附件字段的旧 item 保持原样。
 - 「技能」面板的消费面见上方"输入框「技能」面板"条目：线程级视图 + 全局回落，显式 `/id` 提及即激活
   是 arkd 的技能指定方式；不新增技能运行时字段。用户消息正文里的 `/id` 提及在渲染层识别
   （`skill-mention.ts`，仅当 token 与已加载技能 id 精确匹配时）并渲染成 `.ark-mention` 芯片，
