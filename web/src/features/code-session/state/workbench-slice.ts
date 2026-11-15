@@ -46,8 +46,11 @@ export const createWorkbenchSlice: StateCreator<WorkbenchSlice, [], [], Workbenc
   setLeftWidth: (width) => set({ leftWidth: clampSideWidth(width) }),
   toggleLeft: () => set((state) => ({ leftCollapsed: !state.leftCollapsed })),
   toggleRight: () => set((state) => ({ rightCollapsed: !state.rightCollapsed })),
-  // Picking a file switches the tab only. The row can only be clicked while the
-  // inspector is already open, so forcing `rightCollapsed: false` here bought
-  // nothing and made a closed drawer spring back open.
-  selectFile: (path) => set(path ? { selectedFilePath: path, activePanel: 'file' } : { selectedFilePath: null })
+  // Picking a file is an explicit "open this file" intent, from the Changes
+  // diff rows and the tool-card file chip alike: switch to the File panel AND
+  // expand the inspector. Only `openPanel` (an explicit tab click) keeps a
+  // closed inspector closed — a chip click while collapsed used to update
+  // invisible state and read as a dead button (requirements/tool-file-preview.md).
+  selectFile: (path) =>
+    set(path ? { selectedFilePath: path, activePanel: 'file', rightCollapsed: false } : { selectedFilePath: null })
 })

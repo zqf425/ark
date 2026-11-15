@@ -81,8 +81,9 @@
   [tool-file-preview](../requirements/tool-file-preview.md)）：路径提取的唯一宿主是
   `code-session/tool-file.ts` 纯函数（只认结构化 `path` 参数，`bash` 等间接写入不猜），
   点击芯片调用 `selectFile` 把该文件送入检查器 File 面板（`.md` 自动富文本渲染）并阻断
-  折叠切换；因此头部拆为行容器 + 内层折叠按钮（`ark-tool__headtoggle`），避免 button 嵌套
-  button 的非法 DOM；无路径的工具卡渲染不变。
+  折叠切换；`selectFile` 是显式"打开该文件"意图，检查器收起时同时展开（只切 Tab 不展开
+  曾把收起态下的芯片变成死按钮）；因此头部拆为行容器 + 内层折叠按钮（`ark-tool__headtoggle`），
+  避免 button 嵌套 button 的非法 DOM；无路径的工具卡渲染不变。
 - 设置页的 tuning、provider 与 MCP 都使用生成契约；MCP env/header 值只写不回读，编辑时的空
   secret 字段表示保留，不表示删除。provider 的 api key 分两路：列表、能力与诊断只显示
   `has_api_key` 与掩码 hint，而点「编辑」时单独请求 `GET /v1/runtime/providers/{id}` 取回完整条目，

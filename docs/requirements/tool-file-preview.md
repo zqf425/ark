@@ -1,6 +1,6 @@
 # 工具卡文件预览入口(写文件类工具点击查看)
 
-> 状态:**已批准计划**(2026-11-05)。
+> 状态:**已实现**(2026-11-05;同日修订:`selectFile` 收起态下展开检查器,修复芯片点击无效)。
 > 让会话流里的 `write`/`edit` 类工具卡成为文件预览入口:卡片头部显示目标文件名,
 > 点击即在右侧检查器 File 面板打开该文件(`.md` 自动获得富文本渲染),
 > 对齐主流 agent 画布"写文件出现可点击文件卡"的心智。
@@ -52,9 +52,11 @@ toolTargetPath(tool: ToolPayload): string | null
 ### 3. 状态接线
 
 `selectFile` 来自 `useCodeSessionStore`(workbench-slice,既有 action):
-设置 `selectedFilePath` 并把检查器切到 `file` Tab。检查器收起时**不自动展开**
-(与 Changes 面板行点击同语义:能点到卡片说明用户正在看画布,是否展开检查器由用户决定;
-但 Tab 切换保证展开后看到的是 File 面板)。
+设置 `selectedFilePath` 并把检查器切到 `file` Tab,同时**展开收起的检查器**。
+`selectFile` 的两个调用点(Changes 面板 diff 行、工具卡文件芯片)都是显式的
+"打开这个文件"意图:检查器收起时只写 `selectedFilePath` 会变成用户眼里的死按钮
+(实测反馈),因此与 `openPanel` 同语义展开;只有 `setActivePanel`(检查器内部
+Tab 切换)保持不展开。
 
 ## 验收
 
