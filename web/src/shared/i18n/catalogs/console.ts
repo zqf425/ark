@@ -63,22 +63,7 @@ export const CONSOLE_MESSAGES = {
   'console.new.modePlanHint': ['先产出分步计划，确认后再动手。', 'Draft a plan first, then act after approval.'],
   'console.new.modeReview': ['Review', 'Review'],
   'console.new.modeReviewHint': ['审查当前分支变更并给出问题清单。', 'Review current changes and report findings.'],
-  'console.new.placeholder': [
-    '例如：把工具超时重试统一收敛到 ark-agent，并补上回归测试…',
-    'e.g. Consolidate tool timeout retries into ark-agent and add regression tests…'
-  ],
-  'console.new.start': ['开始', 'Start'],
-  'console.new.starting': ['正在创建…', 'Creating…'],
-  'console.new.example1': ['解释这个仓库的架构分层', 'Explain this repository architecture'],
-  'console.new.example2': ['修复失败的 CI 检查', 'Fix the failing CI checks'],
-  'console.new.example3': ['为 SSE 看门狗补测试', 'Add tests for the SSE watchdog'],
-  'console.new.example4': ['审查未提交的变更', 'Review uncommitted changes'],
-  'console.new.workspace': ['工作区', 'Workspace'],
-  'console.new.branch': ['分支', 'Branch'],
-  'console.new.permission': ['权限', 'Permission'],
-  'console.new.standard': ['标准权限', 'Standard'],
   'console.new.failed': ['创建任务失败', 'Could not create the task'],
-  'console.new.reviewHint': ['Review 模式会打开变更审查页。', 'Review mode opens the changes review page.'],
   'console.new.planHint': ['Plan 模式先创建会话，再由你确认计划。', 'Plan mode creates a thread and waits for your confirmation.'],
 
   /* changes review */
