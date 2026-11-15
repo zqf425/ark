@@ -17,12 +17,13 @@
  * filtered in `useEchoSafeToggle` — without the filter the mount echo pins
  * the card open and a settled turn never collapses.
  */
-import { memo, useState } from 'react'
+import { memo, useMemo, useRef, useState } from 'react'
 import type { ThreadItem } from '../../../shared/contracts'
 import { useI18n } from '../../../shared/i18n'
 import type { TurnGroup } from '../state/selectors'
 import { Button, ErrorBoundary, useToast } from '../../../shared/ui'
 import { splitTurnSections } from './turn-sections'
+import { threadWritePaths } from '../tool-file'
 import { useEchoSafeToggle } from './use-echo-safe-toggle'
 import { UserBubble, AssistantBubble, FinalReplyCard, ReasoningBlock } from './MessageBubble'
 import { ToolCard } from './ToolCard'
@@ -45,6 +46,24 @@ function describe(error: unknown): string {
 }
 
 /**
+ * Stable handler factory: maps a prose chip path to `selectFile` (the
+ * inspector's File panel expands on pick, per tool-file-preview.md). A hook
+ * here is fine — `StreamRow` is a component — but the whitelist itself is
+ * computed once per turn in `TurnBlock`, not per row.
+ */
+function useOpenWrittenFile(writtenPaths: readonly string[]): (path: string) => void {
+  const selectFile = useCodeSessionStore((s) => s.selectFile)
+  const pathsRef = useRef(writtenPaths)
+  pathsRef.current = writtenPaths
+  return (path: string) => {
+    // Belt and suspenders: only files this turn actually wrote open. The
+    // renderer already gates on the same whitelist; this keeps the store
+    // write honest even if a chip slips through with a stale prop.
+    if (pathsRef.current.includes(path)) selectFile(path)
+  }
+}
+
+/**
  * One row dispatcher. This is the entire "event → UI" decision surface left on
  * the client: pick a component by `item.kind`, no semantic reconstruction.
  *
@@ -53,12 +72,25 @@ function describe(error: unknown): string {
  * thread id rides along for the user bubble's skill-mention chips; it is stable
  * per mounted stream, so the memo still holds for streamed tokens.
  */
-export const StreamRow = memo(function StreamRow({ item, threadId }: { item: ThreadItem; threadId: string | null }): JSX.Element | null {
+export const StreamRow = memo(function StreamRow({
+  item,
+  threadId,
+  onFileChip,
+  writtenPaths
+}: {
+  item: ThreadItem
+  threadId: string | null
+  /** Prose file-chip click handler (requirements/prose-path-links.md), one
+   * stable identity per turn, created in TurnBlock. */
+  onFileChip: (path: string) => void
+  /** This turn's write-path whitelist; the renderer upgrades only these. */
+  writtenPaths: readonly string[]
+}): JSX.Element | null {
   switch (item.kind) {
     case 'user_message':
       return <UserBubble item={item} threadId={threadId} />
     case 'assistant_message':
-      return <AssistantBubble item={item} />
+      return <AssistantBubble item={item} onFileChip={onFileChip} writablePaths={writtenPaths} />
     case 'reasoning':
       return <ReasoningBlock item={item} />
     case 'tool_call':
@@ -160,6 +192,12 @@ export const TurnBlock = memo(function TurnBlock({
   // in event order. Once settled, the last textful reply is promoted out into
   // its own answer card.
   const { user, process, reply } = splitTurnSections(group.items, live ? 'running' : 'settled')
+  // One whitelist per turn (requirements/prose-path-links.md): the exact paths
+  // this turn's write/edit calls carried. Recomputed only when the turn's item
+  // identity changes — `group` keeps its identity across token streams.
+  const writtenPaths = useMemo(() => threadWritePaths(group.items), [group.items])
+  // Same handler identity for every row of the turn; Markdown absorbs it.
+  const openWritten = useOpenWrittenFile(writtenPaths)
 
   // `null` = follow the live state; a user toggle pins the card either way.
   // The hook ignores native `toggle` echoes of React's own writes (mount and
@@ -172,7 +210,7 @@ export const TurnBlock = memo(function TurnBlock({
     <div className="ark-turn" id={`ark-turn-${group.turnId}`}>
       {user.map((item) => (
         <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
-          <StreamRow item={item} threadId={threadId} />
+          <StreamRow item={item} threadId={threadId} onFileChip={openWritten} writtenPaths={writtenPaths} />
         </ErrorBoundary>
       ))}
       {user.length > 0 && userText !== null ? (
@@ -199,7 +237,7 @@ export const TurnBlock = memo(function TurnBlock({
           <div className="ark-process__body">
             {process.map((item) => (
               <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
-                <StreamRow item={item} threadId={threadId} />
+                <StreamRow item={item} threadId={threadId} onFileChip={openWritten} writtenPaths={writtenPaths} />
               </ErrorBoundary>
             ))}
           </div>
@@ -207,7 +245,7 @@ export const TurnBlock = memo(function TurnBlock({
       ) : null}
       {reply.map((item) => (
         <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
-          <FinalReplyCard item={item} />
+          <FinalReplyCard item={item} onFileChip={openWritten} writablePaths={writtenPaths} />
         </ErrorBoundary>
       ))}
       <ErrorBoundary label={t('thread.canvas.boundaryRewind')}>
