@@ -1,7 +1,7 @@
 /**
  * Composer: attachments, skill mentions, queueing and steering.
  *
- * Layout follows the smart-ark Code composer: a 24px frosted shell whose first
+ * Layout follows the Code composer design: a 24px frosted shell whose first
  * row is the auto-growing textarea, a hairline-separated toolbar underneath
  * (round attach button, quiet runtime pickers on the left; the delivery
  * chooser and the circular gradient send button on the right). Workspace
@@ -10,7 +10,7 @@
  *
  * Enter sends, Shift+Enter inserts a newline. While a turn is live the primary
  * control is the interrupt button — until the user starts a draft, at which
- * point it is replaced by the smart-ark running-action pair: a steer/queue
+ * point it is replaced by the running-action pair: a steer/queue
  * delivery picker plus a submit button for the chosen mode. Queued drafts
  * flush automatically when the turn ends, in order. Message state is local:
  * the runtime owns conversation state, and the user's own message returns as
@@ -256,7 +256,7 @@ export function Composer({
   // Locally queued drafts: filled by 「排队」 during a live turn, flushed in
   // order when the turn ends (the effect below watches the live transition).
   const [queued, setQueued] = useState<string[]>([])
-  // Running-action delivery mode, like the smart-ark composer: choosing a mode
+  // Running-action delivery mode: choosing a mode
   // never submits the draft; it is applied on Enter or the send button. Reset
   // to steer when the draft empties so a fresh draft starts as a steer.
   const [deliveryMode, setDeliveryMode] = useState<RunningDeliveryMode>('steer')
@@ -315,7 +315,7 @@ export function Composer({
     [token, skills]
   )
   // The steer/queue chooser only exists while the user actually has a draft:
-  // an empty running composer is pure stop, matching the smart-ark composer.
+  // an empty running composer is pure stop.
   const showDeliveryChooser = live && !sendDisabled && draftText.trim().length > 0
 
   // Store-backed textarea: writes keep the per-thread draft in sync, and the
@@ -354,7 +354,7 @@ export function Composer({
   }, [live, queued, send])
 
   // The delivery chooser is bound to the running state: a fresh turn defaults
-  // back to steer, like the smart-ark composer's reset.
+  // back to steer, resetting the delivery picker.
   useEffect(() => {
     if (!live) setDeliveryMode('steer')
   }, [live])
@@ -382,7 +382,7 @@ export function Composer({
 
   /**
    * The primary action, shared by Enter and the send button. During a live
-   * turn the delivery picker decides the channel (smart-ark's running-action
+   * turn the delivery picker decides the channel (running-action
    * pair): steer injects into the current turn, queue holds the draft for the
    * automatic end-of-turn drain. Both channels can carry attachments; queueing
    * only takes the text, so attachments stay for the next steer/send.
@@ -557,7 +557,7 @@ export function Composer({
       : t('canvas.composer.noThreadPlaceholder')
 
   // Primary-action label follows the delivery mode during a live turn, like
-  // smart-ark: the button and Enter both submit through the chosen channel.
+  // The button and Enter both submit through the chosen channel.
   const primaryActionLabel = pendingStart
     ? t('canvas.composer.newTaskSend')
     : live
@@ -740,7 +740,7 @@ export function Composer({
               aria-hidden="true"
               onChange={(event) => void pickFiles(event.target.files)}
             />
-            {/* Round + trigger with a small insert menu, like the smart-ark
+            {/* Round + trigger with a small insert menu, like the
                 composer menu: attachment and skills live behind one button.
                 Attachments stay available during a live turn: a steer can
                 carry them, so only `sending` (an in-flight command) blocks. */}
@@ -806,7 +806,7 @@ export function Composer({
             <WorkspacePicker threadId={threadId} stagedRuntime={stagedRuntime} onStagedChange={onStagedChange} />
             <ContextRing threadId={threadId} />
             <ModelPicker threadId={threadId} stagedRuntime={stagedRuntime} onStagedChange={onStagedChange} />
-            {/* Running state, mirroring the smart-ark composer: the rightmost
+            {/* Running state, mirroring the composer design: the rightmost
                 control has one job at a time — interrupt while the draft is
                 empty, submit (with a steer/queue chooser) once the user types. */}
             {showDeliveryChooser ? <DeliveryChooser mode={deliveryMode} onModeChange={setDeliveryMode} /> : null}

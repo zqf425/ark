@@ -4,7 +4,7 @@
  *
  * Pinned here: the iLink payload is never shown as a bare string — an image
  * data URL renders as `<img>`, any other content (the login URL) is encoded
- * into an actual QR code, matching smart-ark's renderer. Without this the
+ * into an actual QR code. Without this the
  * dialog used to display a raw string the user could not scan.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

@@ -1,6 +1,6 @@
 /**
  * Approval / user-input gates and the floating composer, ported from the
- * smart-ark composer: a 24px-radius frosted shell with an in-shell toolbar
+ * Composer: a 24px-radius frosted shell with an in-shell toolbar
  * row, centered on the canvas reading measure.
  *
  * Part of the Code screen stylesheet; split to stay under the 1000-line
@@ -101,7 +101,7 @@
   cursor: pointer;
 }
 
-/* The floating shell, copied from smart-ark's ds-chat-composer: a 24px-radius
+/* The floating shell: a 24px-radius
    near-opaque card, 12px side / 8px vertical padding, 4px inner rhythm, and a
    shadow that deepens on focus. */
 .ark-composer__box {
@@ -129,7 +129,7 @@
   box-shadow: var(--ark-composer-shadow-focus);
 }
 
-/* Textarea metrics follow smart-ark: 15px / 1.45 line box, 40px minimum. */
+/* Textarea metrics: 15px / 1.45 line box, 40px minimum. */
 
 /* The editor stack: the mention-highlight mirror sits under the textarea.
    Both layers share `.ark-composer__editor-font` so glyphs land pixel-identical
@@ -230,7 +230,7 @@
   min-width: 0;
 }
 
-/* Round toolbar button (attach / stop), 36px like smart-ark's h-9 w-9. */
+/* Round toolbar button (attach / stop), 36px. */
 .ark-composer__round {
   display: inline-flex;
   flex: none;
@@ -371,7 +371,7 @@
   gap: 2px;
 }
 
-/* Two-line radio rows, mirroring smart-ark's running-action menu. */
+/* Two-line radio rows, mirroring the running-action menu. */
 .ark-composer__delivery-option {
   display: flex;
   align-items: flex-start;

@@ -1,5 +1,5 @@
 /**
- * Pure grouping for the thread rail's project view (对齐 smart-ark：左侧列表
+ * Pure grouping for the thread rail's project view (左侧列表
  * 先按会话的**实际生效**工作空间聚合成项目，再列会话)。
  *
  * 分组键优先取 `ThreadSummary.workspace`——`GET /v1/threads` 行内已携带的解析后
@@ -37,10 +37,10 @@ function parentLabel(path: string, label: string): string {
 /**
  * Group threads by their effective workspace. A thread without its own
  * workspace override inherits the runtime's active root (same resolution order
- * as a turn), mirroring smart-ark's sidebar where a session runs inside the
+ * as a turn), mirroring the sidebar where a session runs inside the
  * currently selected project until it explicitly points elsewhere.
  *
- * Ordering mirrors smart-ark: the active workspace's group comes first — even
+ * The active workspace's group comes first — even
  * when it holds no threads, so the "current project" is always visible — and
  * the remaining projects follow in input order, inheriting the runtime's
  * deterministic ordering (the project whose thread was updated most recently

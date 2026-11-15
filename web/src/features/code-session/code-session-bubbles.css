@@ -2,7 +2,7 @@
  * Message rows, ported from mainstream agent canvases: the user speaks in a
  * whale-tinted card hugging the right edge; ark answers in prose on the canvas
  * with a small identity avatar on the meta row. The turn's settled final reply
- * is framed as its own answer card (`ark-reply`, the smart-ark style).
+ * is framed as its own answer card (`ark-reply`).
  *
  * Part of the Code screen stylesheet; split to stay under the 1000-line
  * per-file limit (design §7.10.2). Code-session.css is the entry. Colors come
@@ -189,7 +189,7 @@
   background: var(--ark-error-wash);
 }
 
-/* ---------- final reply: the turn's settled answer card (smart-ark style) ---------- */
+/* ---------- final reply: the turn's settled answer card ---------- */
 
 /*
  * Only the promoted final reply gets this frame: white card, hairline border,

@@ -248,7 +248,7 @@ export function ThreadListPanel(): JSX.Element {
   /**
    * The runtime's active workspace root: the fallback grouping key for
    * threads without an override (same resolution order as a turn) and the
-   * first group in the rail, mirroring smart-ark's sidebar.
+   * first group in the rail.
    */
   const [activeWorkspace, setActiveWorkspace] = useState('')
   useEffect(() => {

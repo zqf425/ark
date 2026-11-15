@@ -1,7 +1,7 @@
 //! Feishu/Lark transport (requirements/im-channels.md, stage 3).
 //!
 //! The WebSocket long connection follows the official gateway protocol as
-//! implemented by `@larksuiteoapi/node-sdk` (the protocol reference smart-ark
+//! implemented by `@larksuiteoapi/node-sdk` (the protocol reference this
 //! uses), reimplemented here without a Node dependency:
 //!
 //! 1. `POST {domain}/callback/ws/endpoint` with `{AppID, AppSecret}` returns a

@@ -124,7 +124,7 @@
   font-size: 11px;
 }
 
-/* Live state: the accent pill treatment from the smart-ark titlebar. */
+/* Live state: the accent pill treatment from the titlebar. */
 .ark-threadfocus p.is-live {
   color: var(--ark-accent);
   font-weight: 550;

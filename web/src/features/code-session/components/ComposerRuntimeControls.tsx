@@ -1,5 +1,5 @@
 /**
- * Composer toolbar pills, laid out like the smart-ark Code composer:
+ * Composer toolbar pills, laid out like the Code composer:
  * left — the amber autonomy pill; right — workspace, context ring and the
  * combined provider:model/reasoning pill. Each picker re-reads the stored
  * overrides when it opens and writes through `PATCH /v1/threads/{id}` on

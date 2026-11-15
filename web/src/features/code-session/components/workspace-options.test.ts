@@ -10,13 +10,13 @@ describe('workspaceOptions', () => {
     const result = workspaceOptions({
       override: '/code/ark',
       active: descriptor('/code/ark'),
-      recent: [descriptor('/code/qdc'), descriptor('/code/smart-ark')]
+      recent: [descriptor('/code/qdc'), descriptor('/code/webapp')]
     })
     expect(result.current).toBe('/code/ark')
     expect(result.options.map((option) => option.path)).toEqual([
       '/code/ark',
       '/code/qdc',
-      '/code/smart-ark'
+      '/code/webapp'
     ])
   })
 

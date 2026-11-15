@@ -117,9 +117,8 @@ export function useThreadStream(threadId: ThreadId | null): void {
           onEvent: (event) => {
             if (cancelled) return
             ingestEvent(event)
-            // Event classes (mirrors the server-side projector in smart-ark's
-            // runtime-event-reducer: transport/synthetic frames mutate no
-            // projection field):
+            // Event classes (mirrors the server-side projector:
+            // transport/synthetic frames mutate no projection field):
             // - transport frames (heartbeat, sse_idle_timeout,
             //   transient_retry) carry no thread activity at all: a
             //   subscribe's opening heartbeat is stamped `Utc::now()` by the

@@ -1,6 +1,6 @@
 /**
  * Tool cards, tool results, error and notice rows, restyled after the
- * smart-ark tool entry: soft rounded cards with a floating shadow, mono tool
+ * Tool entry: soft rounded cards with a floating shadow, mono tool
  * names and uppercase section labels. Each card opens with a glyph disc whose
  * icon is picked from the tool family (read / write / exec / search), like
  * mainstream agent activity rows.

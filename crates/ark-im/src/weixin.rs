@@ -1,6 +1,6 @@
 //! WeChat iLink bot transport (requirements/im-channels.md, stage 4).
 //!
-//! The protocol shapes follow smart-ark's `weixin-bridge-runtime.ts` and its
+//! The protocol shapes follow the reference weixin bridge runtime and its
 //! `@tencent-weixin/openclaw-weixin` dependency (protocol reference only — no
 //! Node dependency here):
 //!
@@ -39,7 +39,7 @@ use crate::domain::{chunk_text, truncate_inbound, InboundMessage};
 use crate::ImLoginFlow;
 use crate::{LoginPoll, LoginSession};
 
-/// Per smart-ark: the packaged iLink app id and its wire client version.
+/// The packaged iLink app id and its wire client version.
 const APP_ID: &str = "bot";
 const CLIENT_VERSION: u32 = (2 << 16) | (4 << 8) | 3; // openclaw-weixin 2.4.3
 const DEFAULT_BASE_URL: &str = "https://ilinkai.weixin.qq.com";
@@ -60,7 +60,7 @@ fn base_info() -> serde_json::Value {
 
 fn random_uin() -> String {
     // A fresh random uin per request, base64 of its decimal digits — the
-    // server treats it as telemetry, not identity (same shape as smart-ark).
+    // server treats it as telemetry, not identity.
     use base64::Engine;
     let value = uuid::Uuid::new_v4().as_u128() as u32;
     base64::engine::general_purpose::STANDARD.encode(value.to_string().as_bytes())
@@ -285,7 +285,7 @@ impl crate::ImTransport for WeixinTransport {
                 Err(err) => {
                     failures += 1;
                     // Three consecutive failures mean more than a blip: back
-                    // off before hammering the gateway (smart-ark's curve).
+                    // off before hammering the gateway.
                     let delay = if failures >= 3 {
                         failures = 0;
                         Duration::from_secs(30)
