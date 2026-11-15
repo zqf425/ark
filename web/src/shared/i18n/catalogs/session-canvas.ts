@@ -60,6 +60,7 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.tool.failed': ['失败', 'Failed'],
   'canvas.tool.arguments': ['参数', 'Arguments'],
   'canvas.tool.output': ['输出', 'Output'],
+  'canvas.tool.openFile': ['在工作台查看 {path}', 'Open {path} in the workbench'],
   'canvas.toolResult.name': ['工具结果', 'tool result'],
 
   'canvas.approval.title': ['需要审批', 'Approval required'],
