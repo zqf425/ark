@@ -230,11 +230,15 @@ ARK Console 的 `new` 场景（⌘K「新建任务」）此前是独立的简化
   暂存覆盖，不产生线程请求；附件仍走 `/v1/attachments` 上传。
 - 发送是一次完整投递：`POST /v1/threads`（staged workspace 经服务端 `WorkspaceService::validate`
   种为覆盖）→ `PATCH /v1/threads/{id}`（provider/model/autonomy/reasoning_effort）→ 逐个
-  `POST /v1/threads/{id}/attachments` 关联 → `POST /v1/threads/{id}/turns`（Code 模式启动首回合，
-  Plan 模式只建会话；Review 模式仍打开变更审查页）。投递成功才清草稿与暂存覆盖并跳转工作台，
-  任一步失败全量保留可重试，错误走共享 toast。
+  `POST /v1/threads/{id}/attachments` 关联 → `POST /v1/threads/{id}/turns`（首回合）。
+  投递成功才清草稿与暂存覆盖并跳转工作台，任一步失败全量保留可重试，错误走共享 toast。
+  页面不设模式卡片：新会话一律直接启动首回合，变更审查保留在 ⌘K 命令面板入口。
 - 该路径不受 SSE `streamStatus` 闸门约束（尚无流可订阅），仅 `sending` 阻塞
   （`canSendToThread` 的 `pendingStart` 语义，单测钉住）。草稿存于 store 保留键
   `NEW_TASK_DRAFT_KEY`（`'new-task'`，与线程 UUID 命名空间隔离），随既有 localStorage 镜像持久化。
 - 回归测试 `NewTaskPage.test.tsx` 钉住：无会话时输入框/附件菜单可用、投递序列
   （create→PATCH→associate→start）与成功清空、失败保草稿、附件先关联后随首回合提交。
+- 界面收敛（阶段 J 后续）：页面移除 Code/Plan/Review 三张模式卡片——Plan 语义随卡删除（发送即建
+  会话并启动首回合），Review 不经新任务页进入（⌘K 命令面板的「审查工作区变更」仍是入口）；
+  删除 `console.new.mode*` 6 个失效 i18n 键，页脚提示改为 `console.new.recentHint`。
+  回归测试钉住页面不渲染 `.console-new__modes`。
