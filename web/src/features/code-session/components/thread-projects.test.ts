@@ -77,32 +77,42 @@ describe('groupThreadsByProject', () => {
     expect(grouped.projects.map((project) => project.path)).toEqual(['/code/ark', '/w/qdc'])
   })
 
-  it('prefers the explicit override over the active workspace', () => {
+  it('keeps the active group first while it still owns threads', () => {
     const grouped = groupThreadsByProject(
-      [row({ workspace: '/w/override' })],
-      '/code/ark'
-    )
-    // The override owns the thread; the active root still leads the rail, but
-    // as an empty group.
-    expect(grouped.projects.map((project) => project.path)).toEqual([
-      '/code/ark',
-      '/w/override'
-    ])
-    expect(grouped.projects[0]?.threads).toHaveLength(0)
-    expect(grouped.projects[1]?.threads).toHaveLength(1)
-    expect(grouped.default.threads).toHaveLength(0)
-  })
-
-  it('surfaces the active workspace first even without threads', () => {
-    const grouped = groupThreadsByProject(
-      [row({ workspace: '/w/old' })],
+      [row({ workspace: '/w/old' }), row({})],
       '/code/ark'
     )
     expect(grouped.projects.map((project) => project.path)).toEqual([
       '/code/ark',
       '/w/old'
     ])
-    expect(grouped.projects[0]?.threads).toHaveLength(0)
+    expect(grouped.projects[0]?.threads).toHaveLength(1)
+  })
+
+  it('prefers the explicit override over the active workspace', () => {
+    const grouped = groupThreadsByProject(
+      [row({ workspace: '/w/override' })],
+      '/code/ark'
+    )
+    // The override owns the thread; the active root holds no thread here, so
+    // its group is dropped instead of shell-ing the rail.
+    expect(grouped.projects.map((project) => project.path)).toEqual([
+      '/w/override'
+    ])
+    expect(grouped.projects[0]?.threads).toHaveLength(1)
+    expect(grouped.default.threads).toHaveLength(0)
+  })
+
+  it('drops the active group once its last thread is deleted (bulk delete clears the project)', () => {
+    // The rail's bulk delete folds rows out of the store; with every thread of
+    // the active project gone the project must vanish with them, not linger
+    // as an unremovable empty group.
+    const grouped = groupThreadsByProject(
+      [row({ workspace: '/w/old' })],
+      '/code/ark'
+    )
+    expect(grouped.projects.map((project) => project.path)).toEqual(['/w/old'])
+    expect(grouped.projects.some((project) => project.path === '/code/ark')).toBe(false)
   })
 
   it('keeps the runtime ordering untouched when no active workspace is given', () => {

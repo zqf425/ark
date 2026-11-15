@@ -40,9 +40,10 @@ function parentLabel(path: string, label: string): string {
  * as a turn), mirroring the sidebar where a session runs inside the
  * currently selected project until it explicitly points elsewhere.
  *
- * The active workspace's group comes first — even
- * when it holds no threads, so the "current project" is always visible — and
- * the remaining projects follow in input order, inheriting the runtime's
+ * The active workspace's group comes first when it actually holds threads —
+ * an empty active group is dropped, so sweeping a project's sessions (the
+ * rail's bulk delete) also removes the project from the rail — and the
+ * remaining projects follow in input order, inheriting the runtime's
  * deterministic ordering (the project whose thread was updated most recently
  * first). Projects stay mutually exclusive—one thread belongs to exactly one
  * group.
@@ -78,12 +79,17 @@ export function groupThreadsByProject(
   }
   const projects = [...buckets.values()]
   if (active) {
-    // The active root may hold no thread of its own; still surface its group
-    // first so the rail reflects the project the composer is pointed at.
-    const activeProject = ensureProject(active)
-    const rest = projects.filter((project) => project.path !== active)
-    rest.unshift(activeProject)
-    return { default: defaultProject, projects: rest }
+    // The active root leads the rail, but only while at least one thread
+    // resolves to it. A session-less active group would be a shell the rail's
+    // delete verb cannot clear (it only serves projects that own threads), so
+    // after sweeping a project's sessions the project disappears with them.
+    const activeProject = buckets.get(active)
+    if (activeProject && activeProject.threads.length > 0) {
+      const rest = projects.filter((project) => project.path !== active)
+      rest.unshift(activeProject)
+      return { default: defaultProject, projects: rest }
+    }
+    return { default: defaultProject, projects: projects.filter((project) => project.path !== active) }
   }
   return { default: defaultProject, projects }
 }

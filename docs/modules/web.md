@@ -211,7 +211,9 @@
   因此跳转后左侧会话列表与画布直接打开该会话；失败全保留且**不切场景**（用户留在新任务页重试）；
   该路径不受 `streamStatus` 闸门约束（尚无流可订阅），仅 `sending` 阻塞。
 - 会话列表按项目分组渲染（`thread-projects.ts`：先按会话**实际生效**工作空间聚合，
-  无 override 会话回退运行时 active root，active 组置顶）。项目组头部提供两个随 hover/focus 显现的
+  无 override 会话回退运行时 active root，active 组置顶）。**项目组只在确有归属会话时渲染**：
+  active root 组同样如此，删光某项目下的全部会话（🗑 批量清理或逐条删除）后该项目组随之消失，
+  不留无法操作的空壳组。项目组头部提供两个随 hover/focus 显现的
   动作：➕ 在该项目下新建会话——把项目路径经 `POST /v1/threads` 的 `workspace` 字段提交，服务端经
   `WorkspaceService::validate` 校验后作为该线程的 workspace 覆盖种子，新会话即落在该组；🗑 批量清理
   该项目下已结束的会话——`DELETE /v1/threads?workspace=…` 一次调用，"已结束"由服务端权威判定
