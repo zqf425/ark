@@ -36,6 +36,14 @@ Documents 或仓库根。已有 18791 监听必须通过健康检查才会复用
 外壳不向 JavaScript 暴露 shell 命令。它只从 Rust 调用 Tauri 的 shell plugin 启动固定的 `arkd` 命令，因此
 Web UI 不能借桌面能力执行任意程序。
 
+### 系统通知
+
+外壳注册 `tauri-plugin-notification` 并暴露唯一的 `notify_session_event(title, body)` 命令：渲染器
+传入**纯展示文本**（标题 + 正文），外壳经插件投递 Windows toast / macOS 横幅；点击通知不做任何路由，
+因此不建模任何 IPC 载荷或动作。投递失败（系统关闭通知、无通知后端）返回 `false` 而不是报错——丢失
+一条通知绝不能破坏触发它的回合终态流程。是否发送（窗口失焦才发）、去重和文案全部由渲染层
+（`turn-end-toast.ts`）决定；外壳不知道"会话"概念，只渲染给定文本。
+
 ## 图标资产
 
 `src-tauri/icons/` 下的全部图标由 `npm run icons`（即 `tauri icon src-tauri/icons/ark.svg`）从唯一源
@@ -45,7 +53,8 @@ target 会按 `bundle.icon` 找第一个 `.png` 条目（找不到就回退硬�
 
 ## 验证
 
-- `node --test apps/ark-desktop/scripts/desktop-layout.test.mjs` 验证根 `npm run dev`、Tauri 与 Vite 编排配置。
+- `node --test apps/ark-desktop/scripts/desktop-layout.test.mjs` 验证根 `npm run dev`、Tauri 与 Vite 编排配置
+  （含系统通知命令的桥接断言）。
 - `npm --prefix apps/ark-desktop run build:web` 验证生产 Web 构建把 API origin 指向桌面专属 loopback。
 - `cargo check -p ark-desktop`、`npm run dev` 验证 Rust 宿主与真实窗口/sidecar；Windows GNU 工具链必须提供
   `dlltool.exe`，否则这是环境失败，不得将其表述为代码通过。
