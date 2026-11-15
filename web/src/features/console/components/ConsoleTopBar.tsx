@@ -44,8 +44,9 @@ export function ConsoleTopBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
   return (
     <header className="console-topbar">
       <div className="console-topbar__brand">
-        <span className="console-mark">A</span>
-        <span className="console-brand-name">ark</span>
+        {/* Wordmark only: the letter tile and the text merged into one
+            green-badge "ark" so the corner carries a single brand element. */}
+        <span className="console-mark console-mark--word">ark</span>
       </div>
 
       <button
