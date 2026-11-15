@@ -6,7 +6,7 @@
 
 ## 1. 目标与范围
 
-ark 用 Rust 重建原 smart-ark 的 Code 运行时与渲染层，重点解决契约漂移、重复逻辑、巨型装配、
+ark 用 Rust 实现独立的 Code 运行时与渲染层，重点解决契约漂移、重复逻辑、巨型装配、
 会话持久化和 UI 自动化双决策循环等问题。
 
 范围包括 Agent runtime、模型适配、工具、会话存储、HTTP/SSE、Code UI、子代理、skills、provider、

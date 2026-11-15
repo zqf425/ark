@@ -6,15 +6,13 @@
 
 ## 背景与目标
 
-smart-ark 在桌面端主进程实现了定时任务(`src/main/schedule-runtime.ts` + 管理界面),可按
-manual/at/interval/weekly/monthly 五种节奏周期性向运行时发起一个无人值守回合;ark 的契约
-枚举在此基础上增加 `daily`,共六种节奏。ark 作为重写
-版需要等价能力:用户配置一个提示词与触发节奏,arkd 到点自动建会话执行,并把结果留在可打开的
-会话线程里。
+定时任务支持 manual/at/interval/weekly/monthly 五种节奏周期性向运行时发起一个无人值守
+回合,ark 的契约枚举在此基础上增加 `daily`,共六种节奏:用户配置一个提示词与触发节奏,
+arkd 到点自动建会话执行,并把结果留在可打开的会话线程里。
 
-对标结论(取自 smart-ark,按 ark 架构裁剪):
+设计取舍:
 
-| smart-ark 概念 | 本需求取舍 |
+| 原型方案 | 本需求取舍 |
 |---|---|
 | 任务存应用设置 JSON | 独立 `<root>/tasks/schedules.json`(运行态高频更新,不进 config) |
 | 主进程 setInterval tick | arkd 进程内调度循环(ark-server service 层) |
@@ -34,7 +32,7 @@ ScheduledTask {
   workspace                    # 可选;空 = 使用全局默认工作区
   autonomy                     # strict | workspace_write | unattended;默认 unattended
   model, provider_id           # 可选;空 = 运行时默认
-  schedule {                   # 五种触发节奏,与 smart-ark 对齐
+  schedule {                   # 六种触发节奏
     kind: manual|at|interval|daily|weekly|monthly
     every_minutes              # interval
     time_of_day "HH:mm"        # daily/weekly/monthly
@@ -51,7 +49,7 @@ ScheduledRunRecord = last_run 的形状,另存最近 10 条历史(有界,随任�
 ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
 ```
 
-- 归一化规则与 smart-ark 一致:非法 `HH:mm` 回退 09:00;weekly 空星期回退周一;monthly 空
+- 归一化规则:非法 `HH:mm` 回退 09:00;weekly 空星期回退周一;monthly 空
   日期回退 1 号;`every_minutes` clamp 到 `[1, 525600]`;任务数上限 100,超限拒绝创建。
 - `next_run_at` 在本地时区计算;`manual` 与已触发的 `at` 为空串。
 
@@ -64,7 +62,7 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
    不变式:总开关 `config.schedules.enabled` 只门控**触发**(`tick`/`run_now`),不门控**修复**——
    `reconcile` 的崩溃遗留收敛(`running`→`aborted`、misfire→`skipped`)不受开关影响,启动时一律执行。
 2. 到期判定:`enabled && next_run_at <= now`;执行后立刻按节奏计算下一次 `next_run_at`
-   (interval 从本次执行完成时刻起算,与 smart-ark 一致)。
+   (interval 从本次执行完成时刻起算)。
 3. **执行 = 新线程 + 真实回合**:复用 `start_turn` 的注册/冲突/文本上限/workspace_gate 全部
    校验,提示词为任务 `prompt`,不伪造消息类型;线程 runtime 覆盖 `autonomy`(任务字段)、
    `provider_id`/`model`(任务字段,空则缺省)。无人值守语义由 `autonomy=unattended` 的
@@ -111,9 +109,9 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
 
 ## 非目标(后续需求另立项)
 
-- 云端执行/云端下发任务(smart-ark 的云端派发链路)。
+- 云端执行/云端下发任务。
 - 任务依赖链(dependsOn)、优先级队列、并发执行、worktree 池隔离。
-- agent 经 MCP 工具创建/管理任务;自然语言识别"定时做 X"(smart-ark 的 detector)。
+- agent 经 MCP 工具创建/管理任务;自然语言识别"定时做 X"。
 - workflow 图(n8n 式多节点编排)。
 - 补跑(misfire catch-up)与持久化调度账本。
 
