@@ -170,7 +170,15 @@
   word-break: break-word;
 }
 
+/*
+ * Markdown host variant. The shared `.ark-md` grid already owns block spacing,
+ * so the host must not also be `pre-wrap`: marked emits a newline text node
+ * between sibling blocks (`</p>\n<p>`), and pre-wrap would paint each of those
+ * as a rendered blank line on top of the margins — the "one blank line per
+ * paragraph gap" blow-up. User bubbles keep the plain-text variant above.
+ */
 .ark-msg__body--prose {
+  white-space: normal;
   line-height: 1.66;
   font-size: 15px;
 }
@@ -244,14 +252,24 @@
 }
 
 /*
- * Footer action row: the copy button sits at the card's bottom-right, outside
- * the prose, instead of the title row's right corner. Hover reveal mirrors the
- * message-level rule; the row collapses entirely while streaming.
+ * Footer action row: the settled time and the copy button sit at the card's
+ * bottom-right, outside the prose, instead of the title row's right corner —
+ * the user bubble's footer carries the same clock, so both roles end with a
+ * quiet timestamp. Hover reveal mirrors the message-level rule; the row
+ * collapses entirely while streaming.
  */
 .ark-reply__foot {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
   margin-top: 2px;
+}
+
+.ark-reply__time {
+  font-family: var(--ark-mono);
+  font-size: 10.5px;
+  color: var(--ark-text-faint);
 }
 
 .ark-reply__copy {
@@ -272,11 +290,16 @@
   }
 }
 
+/*
+ * Same pre-wrap exemption as `.ark-msg__body--prose`: the markdown host must
+ * stay `normal` or the renderer's inter-block newline text nodes paint as
+ * blank lines on top of the block margins.
+ */
 .ark-reply__body {
+  white-space: normal;
   padding-top: 6px;
   line-height: 1.66;
   font-size: 15px;
-  white-space: pre-wrap;
   word-break: break-word;
 }
 

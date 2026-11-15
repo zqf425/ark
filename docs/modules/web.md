@@ -60,8 +60,13 @@
 - 模型输出的 markdown 渲染集中在 `shared/ui` 的 `Markdown`（marked + DOMPurify 消毒后注入）与
   `code-highlight`（文件预览高亮）：模型输出是不可信输入，任何进入 `dangerouslySetInnerHTML` 的
   HTML 必须先经 DOMPurify；这是展示层能力，不与 Rust 侧业务逻辑双实现。markdown 排版对齐主流
-  agent 画布的阅读节奏（`markdown.css`）：标题带下划线分隔（h2）、块间距 0.75em、表格
+  agent 画布的阅读节奏（`markdown.css`）：标题带下划线分隔（h2）、块间距 0.4em（列表 0.6em，
+  聊天卡片内的紧凑节奏）、表格
   `display: block` 横向滚动不挤压画布、代码块壳带控制阴影、任务列表勾选框用主题强调色。
+  Markdown 宿主（`.ark-md`、`.ark-msg__body--prose`、`.ark-reply__body`）必须是
+  `white-space: normal`：marked 在块级元素之间输出换行文本节点，pre-wrap 会把每个换行画成
+  真实空行、叠加块 margin 后变成"每段之间一行空行"（纯文本宿主如用户气泡仍是 pre-wrap，
+  见 `reply-prose-layout.test.ts` 的钉子）。
 - 一键复制由 `shared/ui/copy` 统一提供：`copyText` 封装异步 Clipboard API 与 `execCommand` 回落，
   `CopyButton` 自带 pressed→copied 反馈并阻断祖先点击；消息气泡（用户/助手）、markdown 代码块与
   输入框（草稿、排队消息）均复用该组件，不各自实现复制。代码块的复制按钮由 markdown 渲染器产出，
@@ -122,8 +127,9 @@
   与挂载本身都会产生回声事件；钩子以"上报状态 == React 上次渲染值"识别回声并忽略（等价于 Radix
   trigger 只报用户交互的契约），否则挂载回声会把运行中的卡钉死在展开态，回合结束永不收起。
   回合结束后，被提升的最终回复渲染为独立答案卡（`FinalReplyCard`，`ark-reply`）：对勾圆环图标 +
-  "最终回复"标题行 + 全宽分隔线 + markdown 正文（答案卡样式），复制按钮在卡底
-  右下角的操作行（`ark-reply__foot`，hover 显现），流式/中断/失败状态与气泡一致；过程卡内的中间
+  "最终回复"标题行 + 全宽分隔线 + markdown 正文（答案卡样式），卡底右下角的操作行
+  （`ark-reply__foot`，hover 显现复制按钮）带生成时间（`formatClock(item.created_at)`，与用户
+  气泡 footer 的时钟同款），流式/中断/失败状态与气泡一致；过程卡内的中间
   叙述仍是普通助手气泡，避免卡中卡。
   分组规则在 `turn-sections.ts` 纯函数中，可独立单测。回合多于一个时在画布右缘提供逐回合跳转导航条。
   会话标题行提供「评审改动」

@@ -210,7 +210,8 @@ export const AssistantBubble = memo(function AssistantBubble({
 /**
  * The turn's settled final reply, framed as an answer card: a
  * check-marked "final reply" title row above a hairline rule, the prose below,
- * and the copy action on a footer row at the card's bottom-right.
+ * and the settled clock + copy action on a footer row at the card's
+ * bottom-right — the same quiet timestamp the user bubble's footer carries.
  *
  * Kept visually separate from the inline narration bubbles so the turn reads
  * as "process → answer". `AssistantBubble` stays for rows inside the process
@@ -227,7 +228,7 @@ export const FinalReplyCard = memo(function FinalReplyCard({
   /** Whitelist of paths this turn wrote; gates which prose chips render. */
   writablePaths?: readonly string[]
 }): JSX.Element {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const streaming = item.status === 'streaming' || item.status === 'pending'
   const failed = item.status === 'failed'
   const aborted = item.status === 'aborted'
@@ -253,6 +254,7 @@ export const FinalReplyCard = memo(function FinalReplyCard({
       {item.detail ? <p className="ark-msg__detail">{item.detail}</p> : null}
       {!streaming && text ? (
         <footer className="ark-reply__foot">
+          <time className="ark-reply__time">{formatClock(item.created_at, locale)}</time>
           <CopyButton
             text={text}
             label={t('canvas.copy.message')}
