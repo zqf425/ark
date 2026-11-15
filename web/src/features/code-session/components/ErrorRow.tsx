@@ -39,7 +39,12 @@ export const NoticeRow = memo(function NoticeRow({ item }: { item: ThreadItem })
   )
 })
 
-/** Durable parent-thread summary for one finished background child. */
+/**
+ * Durable parent-thread summary for one finished background child. One quiet
+ * line, same shape as the subagent panel rows: the panel holds the detail, so
+ * the parent stream keeps only status + label + time instead of the full
+ * summary text.
+ */
 export const ChildCompletionCard = memo(function ChildCompletionCard({
   notice
 }: {
@@ -47,18 +52,15 @@ export const ChildCompletionCard = memo(function ChildCompletionCard({
 }): JSX.Element {
   const { t, locale } = useI18n()
   const failed = notice.status !== 'completed'
-  const detail = notice.summary ?? notice.error ?? t('canvas.child.noSummary')
+  const title = failed ? notice.summary ?? notice.error ?? t('canvas.child.noSummary') : notice.label
 
   return (
     <div className={`ark-childcompletion ${failed ? 'is-failed' : ''}`} role="status">
-      <div className="ark-childcompletion__head">
-        <span className={`ark-chip ${failed ? 'ark-chip--error' : 'ark-chip--ok'}`}>
-          {t(childCompletionStatusKey(notice.status))}
-        </span>
-        <strong>{notice.label}</strong>
-        <span className="ark-childcompletion__time">{formatClock(notice.completed_at, locale)}</span>
-      </div>
-      <p className="ark-childcompletion__summary">{detail}</p>
+      <span className={`ark-chip ${failed ? 'ark-chip--error' : 'ark-chip--ok'}`}>
+        {t(childCompletionStatusKey(notice.status))}
+      </span>
+      <strong className="ark-childcompletion__label" title={title}>{title}</strong>
+      <span className="ark-childcompletion__time">{formatClock(notice.completed_at, locale)}</span>
     </div>
   )
 })

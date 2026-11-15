@@ -117,46 +117,45 @@
   margin-top: 12px;
 }
 
-/* ---------- child completion notices ---------- */
+/* ---------- child completion notices ----------
+   One quiet line in the parent stream (chip + label + time); the full summary
+   lives in the subagent panel, so the transcript no longer carries a second
+   full-text copy of every finished run. */
 
 .ark-childcompletion {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 10px 12px;
-  border: 1px solid transparent;
-  border-radius: var(--ark-radius-lg);
-  background: var(--ark-ok-wash);
+  align-items: center;
+  gap: 8px;
+  padding: 2px 12px;
   color: var(--ark-ok);
-  max-width: 72ch;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .ark-childcompletion.is-failed {
-  background: var(--ark-error-wash);
   color: var(--ark-error);
 }
 
-.ark-childcompletion__head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
+.ark-childcompletion__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
   font-weight: 550;
+  color: var(--ark-text);
+}
+
+.ark-childcompletion.is-failed .ark-childcompletion__label {
+  color: var(--ark-error);
 }
 
 .ark-childcompletion__time {
-  margin-left: auto;
+  flex: none;
   color: var(--ark-text-faint);
   font-family: var(--ark-mono);
   font-size: 11px;
-}
-
-.ark-childcompletion__summary {
-  margin: 0;
-  color: var(--ark-text-dim);
-  font-size: 12px;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 /* ---------- jump pill ---------- */

@@ -150,6 +150,7 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.childRuns.loadFailed': ['读取子代理失败', 'Failed to read subagents'],
   'canvas.childRuns.actionFailed': ['子代理操作失败', 'The subagent action failed'],
   'canvas.childRuns.completedToast': ['子代理「{label}」{status}', 'Subagent "{label}" {status}'],
+  'canvas.childRuns.showMore': ['更早 {count} 个', '{count} earlier'],
 
   'canvas.composer.attach': ['附件', 'Attach'],
   'canvas.composer.runtime.modelLabel': ['模型：{value}', 'Model: {value}'],
