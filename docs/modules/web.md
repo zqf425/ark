@@ -87,7 +87,8 @@
   助手**正文**里的文件路径同样可点（需求见
   [prose-path-links](../requirements/prose-path-links.md)）：`renderMarkdown` 第二参
   接收本回合 write/edit 的路径白名单（`code-session/tool-file.ts` 的 `threadWritePaths`
-  投影，去重保序），DOM 后处理只把**行内 code** 且命中白名单的片段升级为
+  投影，去重保序），DOM 后处理只把**行内 code** 且经三级解析(精确 → 归一 → 唯一 basename,
+  同名多文件不升级,解析结果还原白名单原路径)命中的片段升级为
   `ark-md-filechip`（协议前缀/家目录/空格路径不升级，`pre code` 围栏不参与，
   白名单为空零开销直通）；芯片是 renderer 自产 button（`data-md-file`），
   `Markdown` 组件的可选 `onFileChip` prop 经委托点击路由到 `selectFile`

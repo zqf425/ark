@@ -103,3 +103,28 @@ describe('prose path chips (requirements/prose-path-links.md)', () => {
     expect(chip?.hasAttribute('href')).toBe(false)
   })
 })
+
+describe('basename 与歧义回退(prose-path-links 修订)', () => {
+  it('正文只写 basename 也能命中唯一白名单路径,chip 携带全路径', () => {
+    const html = renderMarkdown('文档已生成:**`markdown-demo.md`**', [
+      '/Users/admin/.arkd/workspace/markdown-demo.md'
+    ])
+    expect(html).toContain('ark-md-filechip')
+    expect(html).toContain('data-md-file="/Users/admin/.arkd/workspace/markdown-demo.md"')
+  })
+
+  it('basename 在白名单中出现两次(不同目录)时不升级', () => {
+    const html = renderMarkdown('见 `a.md`', ['docs/a.md', 'src/a.md'])
+    expect(html).not.toContain('ark-md-filechip')
+  })
+
+  it('basename 与版本号类词不误伤:无点的纯词不升级', () => {
+    const html = renderMarkdown('运行 `bun-dev` 即可', ['/x/bun-dev'])
+    expect(html).not.toContain('ark-md-filechip')
+  })
+
+  it('路径片段(带分隔符)命中后 chip 携带白名单原路径', () => {
+    const html = renderMarkdown('改了 `web/src/App.tsx`', ['/repo/web/src/App.tsx'])
+    expect(html).toContain('data-md-file="/repo/web/src/App.tsx"')
+  })
+})
