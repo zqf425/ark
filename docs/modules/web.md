@@ -196,8 +196,9 @@
   卡片（变更审查仍从 ⌘K 命令面板进入）。发送是一次完整投递：
   `POST /v1/threads`（staged workspace 经服务端 validate 种为覆盖）→ `PATCH /v1/threads/{id}`
   （其余覆盖）→ 逐个关联附件 → `POST /v1/threads/{id}/turns`（首回合），投递成功才清草稿与
-  暂存覆盖，失败全保留可重试；该路径不受 `streamStatus` 闸门约束（尚无流可订阅），仅 `sending`
-  阻塞。
+  暂存覆盖并 `setView('code')` 跳入工作台——新线程在 create 返回时即写入 store 并置为 active，
+  因此跳转后左侧会话列表与画布直接打开该会话；失败全保留且**不切场景**（用户留在新任务页重试）；
+  该路径不受 `streamStatus` 闸门约束（尚无流可订阅），仅 `sending` 阻塞。
 - 会话列表按项目分组渲染（`thread-projects.ts`：先按会话**实际生效**工作空间聚合，
   无 override 会话回退运行时 active root，active 组置顶）。项目组头部提供两个随 hover/focus 显现的
   动作：➕ 在该项目下新建会话——把项目路径经 `POST /v1/threads` 的 `workspace` 字段提交，服务端经
