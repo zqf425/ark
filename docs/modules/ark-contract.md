@@ -60,6 +60,9 @@ runtime 每轮结算的 usage 事件写入（`ark-llm` 解析的 provider payloa
 以同一请求文本重开回合并把 1-based 尝试号写进该字段；普通用户/IM/自动续跑回合保持 `0` 且不出现在
 JSON 里。消费方据此区分"用户发的消息"与"harness 重放的上一条消息"，并审计一个请求消耗了几次自动恢复。
 
+`TuningSettings` 的首次启动默认值是 `max_rounds=1000`、`max_tokens=0`（不限）和
+`max_tool_calls=1000`；它是设置页面与运行时配置的共享 wire 基线，其余字段保持类型定义的默认值。
+
 `SubagentSettings.auto_continue` 是显式 opt-in 的 wire 配置，serde default 为 `false`，保证旧配置不会
 产生额外模型调用；Rust 生成的 TypeScript 使用同名 snake_case 字段。
 `SubagentSettings.default_background` 的 serde default 为 `true`：缺省旧配置保持"委派不阻塞主会话"

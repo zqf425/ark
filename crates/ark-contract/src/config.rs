@@ -158,9 +158,9 @@ pub struct TuningSettings {
 impl Default for TuningSettings {
     fn default() -> Self {
         Self {
-            max_rounds: 24,
-            max_tokens: 1_000_000,
-            max_tool_calls: 200,
+            max_rounds: 1_000,
+            max_tokens: 0,
+            max_tool_calls: 1_000,
             max_identical_calls: 3,
             keep_recent_messages: 12,
             chunk_buffer: 64,
@@ -411,6 +411,14 @@ mod tests {
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("\"result\":\"rejected\""));
         assert!(json.contains("server.port"));
+    }
+
+    #[test]
+    fn tuning_defaults_match_the_settings_baseline() {
+        let tuning = TuningSettings::default();
+        assert_eq!(tuning.max_rounds, 1_000);
+        assert_eq!(tuning.max_tokens, 0);
+        assert_eq!(tuning.max_tool_calls, 1_000);
     }
 
     #[test]

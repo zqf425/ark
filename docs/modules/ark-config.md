@@ -18,7 +18,8 @@ HTTP 配置与子代理配置保存都回写该路径。`AppState::new` 默认�
 - `Restart`：整批 patch 被拒绝并返回字段清单，禁止部分应用。
 
 `ConfigStore` 使用自洽快照，任何失败都保留旧值。已经运行的任务必须捕获并继续使用其创建时的
-策略；新任务读取最新快照。
+策略；新任务读取最新快照。首次启动或 `tuning` 缺失字段使用的默认调优值为：`max_rounds=1000`、
+`max_tokens=0`（不限）、`max_tool_calls=1000`；其余调优字段沿用类型定义的默认值。
 
 `default_autonomy` 是未设置会话覆盖时使用的 `Hot` 全局默认值。它只接受 `strict`、`workspace_write` 或向后兼容的 `unattended`；非法 patch 会被事务性拒绝，不得静默回退。
 
