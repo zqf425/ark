@@ -17,6 +17,9 @@ Tauri 2.12 及其 shell plugin 的最低 Rust 版本为 1.90，因此 `ark-deskt
 - 开发：根目录 `npm run dev` 调用 `apps/ark-desktop` 的 `tauri dev`；Tauri 启动既有 Vite 服务（以
   `ARK_RUNTIME_PORT=18791` 重定向 proxy），并从仓库根启动
   `cargo run -p arkd -- serve --port 18791 --data-dir ~/.arkd/data --workspace ~/.arkd/workspace`。
+  Windows 下 supervisor 用当前 Node 直接执行 `@tauri-apps/cli/tauri.js`；npm 生成的无扩展名 `#!/bin/sh`
+  shim 无法由 `CreateProcess` 启动，直接用 `spawn` 会报 `ENOENT`。Unix 继续走 `.bin/tauri`，两种路径
+  启动的都是同一个 `tauri dev` 进程树，退出回收语义不变。
 - 发布：打包前先编译 `arkd`，按当前 Rust target triple 复制为 Tauri `externalBin`；sidecar 准备脚本从 Cargo 实际使用的 `CARGO_TARGET_DIR` 读取产物，未设置时回退仓库 `target`。仅 `tauri.release.conf.json`
   声明这个发布产物，开发和普通 `cargo check` 不依赖它。外壳从 sidecar 启动它。
   发布构建将 `VITE_ARK_BASE_URL` 固定为受限的 loopback 地址，不能把生产 API 请求误发给 WebView 自身。

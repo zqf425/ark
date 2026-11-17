@@ -28,9 +28,13 @@ test('desktop package routes dev through the lifetime-bound supervisor', () => {
   const desktopPackage = readJson(packagePath)
   assert.equal(desktopPackage.scripts.dev, 'node scripts/dev.mjs')
 
-  // The supervisor must still run tauri dev, not replace it.
+  // The supervisor must still run tauri dev, not replace it. Windows launches
+  // the CLI entry through node because the extensionless npm shim is not
+  // executable by CreateProcess; Unix keeps using the shim.
   const supervisor = readFileSync(resolve(desktopRoot, 'scripts', 'dev.mjs'), 'utf8')
-  assert.match(supervisor, /spawn\(tauriBin, \['dev'\]/)
+  assert.match(supervisor, /process\.platform === 'win32'/)
+  assert.match(supervisor, /'@tauri-apps', 'cli', 'tauri\.js'/)
+  assert.match(supervisor, /spawn\(tauriLaunch\.command, \[\.\.\.tauriLaunch\.args, 'dev'\]/)
 })
 
 test('dev supervisor sweeps exactly the ports the dev stack owns', () => {

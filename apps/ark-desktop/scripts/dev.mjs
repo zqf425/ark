@@ -78,7 +78,17 @@ async function sweepListeners(signal) {
 }
 
 async function main() {
-  const tauriBin = join(desktopRoot, 'node_modules', '.bin', 'tauri')
+  // Windows CreateProcess cannot execute the extensionless `#!/bin/sh` npm
+  // shim. Run the CLI entry with the current node instead, which is exactly
+  // what that shim does on POSIX, and leaves a supervised node process whose
+  // child tree is covered by taskkill on Windows.
+  const tauriLaunch =
+    process.platform === 'win32'
+      ? {
+          command: process.execPath,
+          args: [join(desktopRoot, 'node_modules', '@tauri-apps', 'cli', 'tauri.js')]
+        }
+      : { command: join(desktopRoot, 'node_modules', '.bin', 'tauri'), args: [] }
 
   let child = null
   let shuttingDown = false
@@ -116,7 +126,7 @@ async function main() {
     })
   }
 
-  child = spawn(tauriBin, ['dev'], {
+  child = spawn(tauriLaunch.command, [...tauriLaunch.args, 'dev'], {
     cwd: desktopRoot,
     stdio: 'inherit',
     // Own process group: the supervisor — not the terminal — decides when the
