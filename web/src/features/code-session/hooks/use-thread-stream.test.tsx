@@ -180,6 +180,7 @@ describe('useThreadStream thread ownership', () => {
       thread_id: THREAD_A,
       turns: 1,
       samples: 2,
+      turn_usage: [],
       prompt_tokens: 100,
       completion_tokens: 20,
       total_tokens: 120
@@ -211,8 +212,8 @@ describe('useThreadStream thread ownership', () => {
     ))
     getThreadUsageMock.mockImplementation((threadId) => Promise.resolve(
       threadId === THREAD_A
-        ? { thread_id: THREAD_A, turns: 1, samples: 2, prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 }
-        : { thread_id: THREAD_B, turns: 1, samples: 1, prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 }
+        ? { thread_id: THREAD_A, turns: 1, samples: 2, turn_usage: [], prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 }
+        : { thread_id: THREAD_B, turns: 1, samples: 1, turn_usage: [], prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 }
     ))
 
     harness = await mountWithProviders(<Probe threadId={THREAD_A} />)

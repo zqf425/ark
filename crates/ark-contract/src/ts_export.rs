@@ -48,7 +48,7 @@ use crate::{
     TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadExport, ThreadItem,
     ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSkillsResponse,
     ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest, TuningSettings,
-    TurnRequest, TurnSummary, UiCatalog, UpdateImChannelRequest, UpdateMemoryRequest,
+    TurnRequest, TurnSummary, TurnUsage, UiCatalog, UpdateImChannelRequest, UpdateMemoryRequest,
     UpdateScheduleRequest, UpdateThreadRequest, UsageResponse, WorkspaceChange,
     WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile,
     WorkspaceFilePreview, WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
@@ -115,6 +115,7 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     TerminalEntry::export_all_to(dir)?;
     UsageResponse::export_all_to(dir)?;
     ThreadUsageResponse::export_all_to(dir)?;
+    TurnUsage::export_all_to(dir)?;
     LlmRound::export_all_to(dir)?;
     LlmRoundError::export_all_to(dir)?;
     LlmRoundsResponse::export_all_to(dir)?;
@@ -276,6 +277,7 @@ const ROOT_NAMES: &[&str] = &[
     "ThreadSummary",
     "ThreadListQuery",
     "ThreadUsageResponse",
+    "TurnUsage",
     "LlmRound",
     "LlmRoundError",
     "LlmRoundsResponse",

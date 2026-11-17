@@ -7,11 +7,11 @@
 //! usage state, which is what keeps `GET /v1/usage`, the per-thread route, and
 //! `GET /v1/debug/llm-rounds` consistent across restarts.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use ark_common::{ArkErrorCode, ThreadId, TurnId, Usage};
 use ark_contract::{
-    LlmRound, LlmRoundError, LlmRoundsResponse, RuntimeEvent, ThreadUsageResponse,
+    LlmRound, LlmRoundError, LlmRoundsResponse, RuntimeEvent, ThreadUsageResponse, TurnUsage,
     LLM_ROUNDS_DEFAULT_LIMIT, LLM_ROUNDS_MAX_LIMIT, LLM_ROUNDS_MAX_THREADS,
 };
 use axum::extract::{Path, Query, State};
@@ -117,10 +117,16 @@ fn parse_turn(raw: &str) -> Result<TurnId, ApiError> {
 }
 
 /// Fold every persisted `usage` event of one thread into the wire totals.
+///
+/// The per-turn breakdown is built in the same single pass, so the thread
+/// totals and the turn rows can never disagree: a turn's row is exactly the
+/// fold of the samples counted into the thread total. Turns keep first-seen
+/// order (the log is append-only, so that is also chronological).
 fn aggregate_thread_usage(thread: ThreadId, events: &[RuntimeEvent]) -> ThreadUsageResponse {
-    let mut turns: HashSet<TurnId> = HashSet::new();
     let mut samples = 0u64;
     let mut usage = ark_common::Usage::default();
+    let mut order: Vec<TurnId> = Vec::new();
+    let mut per_turn: HashMap<TurnId, TurnUsage> = HashMap::new();
     for event in events {
         if let RuntimeEvent::Usage {
             turn_id,
@@ -128,15 +134,36 @@ fn aggregate_thread_usage(thread: ThreadId, events: &[RuntimeEvent]) -> ThreadUs
             ..
         } = event
         {
-            turns.insert(*turn_id);
             samples += 1;
             usage.merge(sample);
+            match per_turn.get_mut(turn_id) {
+                Some(row) => {
+                    row.samples += 1;
+                    row.usage.merge(sample);
+                }
+                None => {
+                    order.push(*turn_id);
+                    per_turn.insert(
+                        *turn_id,
+                        TurnUsage {
+                            turn_id: *turn_id,
+                            samples: 1,
+                            usage: sample.clone(),
+                        },
+                    );
+                }
+            }
         }
     }
+    let turn_usage: Vec<TurnUsage> = order
+        .into_iter()
+        .filter_map(|turn_id| per_turn.remove(&turn_id))
+        .collect();
     ThreadUsageResponse {
         thread_id: thread,
-        turns: turns.len() as u64,
+        turns: turn_usage.len() as u64,
         samples,
+        turn_usage,
         usage,
     }
 }
@@ -427,6 +454,73 @@ mod tests {
         // instead of inventing a definite hit rate from mixed evidence.
         assert_eq!(response.usage.cache_hit_tokens, Some(80));
         assert_eq!(response.usage.cache_hit_rate, None);
+        // The per-turn breakdown is the same fold in miniature, so the turn
+        // rows always add up to the thread totals.
+        assert_eq!(response.turn_usage.len(), 2);
+        assert_eq!(response.turn_usage[0].turn_id, turn_a);
+        assert_eq!(response.turn_usage[0].samples, 1);
+        assert_eq!(response.turn_usage[1].turn_id, turn_b);
+        let folded_prompt: u64 = response
+            .turn_usage
+            .iter()
+            .map(|turn| turn.usage.prompt_tokens)
+            .sum();
+        assert_eq!(folded_prompt, response.usage.prompt_tokens);
+    }
+
+    #[test]
+    fn per_turn_usage_keeps_every_turn_regardless_of_page_bounds() {
+        // The regression behind the "122 steps in 11 seconds" report: the
+        // per-turn clock used to be re-derived from the *paginated*
+        // diagnostics route, so once a session exceeded one page the newest
+        // turns fell off the page and their clocks collapsed. The usage
+        // aggregate replays the whole log, so it must report every turn's
+        // measured time no matter how many rounds came before it.
+        let thread = ThreadId::new();
+        let mut events = Vec::new();
+        let mut turns = Vec::new();
+        for index in 0..40u64 {
+            let turn = TurnId::new();
+            turns.push(turn);
+            events.push(RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
+                seq: index * 4,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(index as i64 * 100),
+                auto_continuation: false,
+                attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
+            });
+            for round in 0..2u64 {
+                let mut usage = Usage::new(10, 1);
+                // Each round is measured; the newest turn's span must survive.
+                usage.duration_ms = Some(1_500);
+                events.push(RuntimeEvent::Usage {
+                    seq: index * 4 + round + 1,
+                    thread_id: thread,
+                    turn_id: turn,
+                    timestamp: at(index as i64 * 100 + round as i64 + 1),
+                    usage,
+                });
+            }
+        }
+
+        let response = aggregate_thread_usage(thread, &events);
+        assert_eq!(response.turns, 40);
+        assert_eq!(response.turn_usage.len(), 40);
+        let last = response.turn_usage.last().expect("newest turn");
+        assert_eq!(last.turn_id, *turns.last().unwrap());
+        assert_eq!(last.samples, 2);
+        // Two measured rounds of 1.5s each: the whole span, not a remainder.
+        assert_eq!(last.usage.duration_ms, Some(3_000));
+        // And the thread total still equals the sum of its turns.
+        let folded: u64 = response
+            .turn_usage
+            .iter()
+            .map(|turn| turn.usage.duration_ms.unwrap_or(0))
+            .sum();
+        assert_eq!(Some(folded), response.usage.duration_ms);
     }
 
     #[test]

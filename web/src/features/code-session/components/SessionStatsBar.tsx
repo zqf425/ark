@@ -1,38 +1,33 @@
 /**
  * Session statistics strip under the thread header.
  *
- * Single home for the canvas meta strip: authoritative session counters
- * (turns from `GET /v1/threads/{id}/usage`; rounds from
- * `GET /v1/debug/llm-rounds`, folded by the server from the same `usage`
- * events; the duration clock sums the store's per-round model timings —
- * seeded from the same endpoint, extended live by `usage` events — so it
- * counts model time only, never tool execution) plus the live segments that
- * used to sit above the composer (tok/s,
- * context fill, compaction notice). Accumulated tokens/cost/cache render from
- * the store's fold of the same authoritative `usage` events, so live samples
- * update the strip without waiting for an HTTP round trip. A failed
- * diagnostics read keeps the last verified turns/rounds instead of silently
- * replacing them with zeros.
+ * Single home for the canvas meta strip: authoritative session counters and
+ * the live segments that used to sit above the composer (tok/s, context fill,
+ * compaction notice). Everything numeric comes from the store's fold of the
+ * authoritative `usage` events, seeded once from
+ * `GET /v1/threads/{id}/usage` and extended live per sample, so the strip
+ * updates without waiting for an HTTP round trip and the totals never describe
+ * a narrower window than the session itself. The duration clock is the
+ * aggregate's own `duration_ms` — model time only, never tool execution.
+ * `GET /v1/debug/llm-rounds` is deliberately not read here: it is a bounded
+ * diagnostics page, and summing it understated long sessions.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useI18n } from '../../../shared/i18n'
 import { formatTokens, formatUsd } from '../../../shared/format'
 import { getThreadUsage } from '../api/threads-api'
-import { listLlmRounds } from '../api/llm-rounds-api'
 import { useCodeSessionStore } from '../state/store'
 import { hasLiveItems, type ItemView } from '../state/selectors'
 import { useContextLimit } from '../hooks/use-context-limit'
-import { totalRoundsMs } from '../state/rounds'
 import { useDurationFormat } from '../hooks/use-duration-words'
 
 type Stats = {
   owner: string | null
   turns: number | null
   roundsCount: number | null
-  truncated: boolean
 }
 
-const EMPTY_STATS: Stats = { owner: null, turns: null, roundsCount: null, truncated: false }
+const EMPTY_STATS: Stats = { owner: null, turns: null, roundsCount: null }
 
 export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.Element | null {
   const { t, locale } = useI18n()
@@ -42,7 +37,6 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
   const samples = usage?.samples ?? 0
   const streamError = useCodeSessionStore((s) => s.streamError)
   const lastCompaction = useCodeSessionStore((s) => s.lastCompaction)
-  const rounds = useCodeSessionStore((s) => s.rounds)
   const itemOrder = useCodeSessionStore((s) => s.itemOrder)
   const itemsById = useCodeSessionStore((s) => s.itemsById)
   const live = useMemo(() => hasLiveItems({ itemOrder, itemsById } satisfies ItemView), [itemOrder, itemsById])
@@ -55,18 +49,13 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
       return
     }
     const controller = new AbortController()
-    setStats((current) => (current.owner === threadId ? current : { owner: threadId, turns: null, roundsCount: null, truncated: false }))
-    void Promise.all([
-      getThreadUsage(threadId, controller.signal),
-      listLlmRounds(threadId, controller.signal)
-    ]).then(([usage, response]) => {
+    setStats((current) => (current.owner === threadId ? current : { owner: threadId, turns: null, roundsCount: null }))
+    // One read, one truth: turns and model calls both come from the same
+    // event-folded aggregate, so the strip can never report a call count that
+    // disagrees with the turn count it is derived from.
+    void getThreadUsage(threadId, controller.signal).then((usage) => {
       if (controller.signal.aborted) return
-      setStats({
-        owner: threadId,
-        turns: usage.turns,
-        roundsCount: response.rounds.length,
-        truncated: response.truncated
-      })
+      setStats({ owner: threadId, turns: usage.turns, roundsCount: usage.samples })
     }).catch(() => {
       // Keep the last verified numbers: a diagnostics outage is not zero usage.
     })
@@ -77,10 +66,12 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
   const visible = stats.owner === threadId ? stats : null
   const turns = visible?.turns ?? null
   const roundsCount = visible?.roundsCount ?? null
-  const truncated = visible?.truncated ?? false
   // Total measured model time, in the same spelled-out units as the per-turn
-  // clock so the session total and the turn totals read alike.
-  const totalMs = useMemo(() => totalRoundsMs(rounds), [rounds])
+  // clock so the session total and the turn totals read alike. It is the
+  // aggregate's own `duration_ms` — not a sum over the renderer's per-turn
+  // rows, which only cover turns the client has seen and would understate a
+  // long session. The two agree because the same fold produces both.
+  const totalMs = usage?.durationMs ?? 0
   const totalClock = useDurationFormat(totalMs, roundsCount != null)
 
   const number = (value: number): string => new Intl.NumberFormat(locale).format(value)
@@ -107,15 +98,10 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
       {roundsCount != null ? (
         <>
           <span className="ark-stats-bar__item" title={t('canvas.stats.turnsTitle')}>
-            {t('canvas.stats.turns', { count: number(Math.max(turns ?? 0, roundsCount)) })}
+            {t('canvas.stats.turns', { count: number(turns ?? 0) })}
           </span>
-          <span
-            className="ark-stats-bar__item"
-            title={truncated ? t('canvas.stats.truncatedTitle') : t('canvas.stats.roundsTitle')}
-          >
-            {truncated
-              ? t('canvas.stats.roundsTruncated', { count: number(roundsCount) })
-              : t('canvas.stats.rounds', { count: number(roundsCount) })}
+          <span className="ark-stats-bar__item" title={t('canvas.stats.roundsTitle')}>
+            {t('canvas.stats.rounds', { count: number(roundsCount) })}
           </span>
           <span
             className="ark-stats-bar__item"

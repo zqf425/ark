@@ -57,6 +57,7 @@ describe('seedUsage cache counters', () => {
       thread_id: THREAD_ID,
       turns: 1,
       samples: 2,
+      turn_usage: [],
       prompt_tokens: 10,
       completion_tokens: 4,
       total_tokens: 14,

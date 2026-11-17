@@ -13,7 +13,6 @@ import type { RuntimeEvent, ThreadId } from '../../../shared/contracts'
 import { useToast } from '../../../shared/ui'
 import { subscribeThreadEvents } from '../api/events-api'
 import { getThread, getThreadUsage } from '../api/threads-api'
-import { listLlmRounds } from '../api/llm-rounds-api'
 import { childCompletionStatusKey } from '../child-completion-status'
 import { useCodeSessionStore } from '../state/store'
 import { notifyTurnEnded } from './turn-end-toast'
@@ -106,26 +105,22 @@ export function useThreadStream(threadId: ThreadId | null): void {
         // stream; seed it once per load. Best effort: an unavailable counter
         // must not block the canvas, and the reducer only fills an empty
         // channel, so a live `usage` event can never be double counted.
+        //
+        // The same response seeds the per-turn clocks. It must be this
+        // aggregate and not `GET /v1/debug/llm-rounds`: the latter is a
+        // bounded diagnostics page, so in a long session whole turns fell
+        // past the page and their clocks rendered as a few seconds.
         void getThreadUsage(threadId, controller.signal)
           .then((usage) => {
-            if (!cancelled) noteThreadUsage(usage)
+            if (cancelled) return
+            noteThreadUsage(usage)
+            noteThreadRounds(usage)
           })
           .catch(() => {
             // Seeding is best effort, but "footer shows no usage" must stay
             // diagnosable: surface the failure in development like the
             // reducer's unhandled-event warn.
             if (import.meta.env.DEV) console.warn('[ark] thread usage seed failed')
-          })
-
-        // Per-round model timings come from the bounded diagnostics surface
-        // and are authoritative over live-estimated rounds; same best-effort
-        // seeding contract as the usage aggregate above.
-        void listLlmRounds(threadId, controller.signal)
-          .then((rounds) => {
-            if (!cancelled) noteThreadRounds(rounds)
-          })
-          .catch(() => {
-            if (import.meta.env.DEV) console.warn('[ark] thread rounds seed failed')
           })
 
         await subscribeThreadEvents({

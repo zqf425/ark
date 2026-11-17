@@ -39,6 +39,9 @@ export function foldUsage(
       sample.cache_miss_tokens != null
         ? (current?.cacheMissTokens ?? 0) + sample.cache_miss_tokens
         : current?.cacheMissTokens ?? null,
+    // Same `sum_opt` rule: a sample without a measured duration contributes
+    // nothing, and the total stays null until at least one was timed.
+    durationMs: sample.duration_ms != null ? (current?.durationMs ?? 0) + sample.duration_ms : current?.durationMs ?? null,
     lastPromptTokens: sample.prompt_tokens,
     lastRoundTokensPerSec: tokensPerSec
   }
@@ -62,7 +65,11 @@ export function seedUsage(state: ItemsSnapshot, response: ThreadUsageResponse): 
       costUsd: response.cost_usd ?? null,
       cacheHitTokens: response.cache_hit_tokens ?? null,
       cacheMissTokens: response.cache_miss_tokens ?? null,
-      // The seed is a lifetime aggregate; it carries no per-round timing.
+      // The seed IS the lifetime spanning total: it covers every round in the
+      // log, including rounds of turns the client never rendered.
+      durationMs: response.duration_ms ?? null,
+      // It carries no per-round timing though: prompt fill and speed describe
+      // the newest round only, and the seed knows no "newest".
       lastPromptTokens: null,
       lastRoundTokensPerSec: null
     }
