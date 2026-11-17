@@ -25,11 +25,11 @@ export const SESSION_CANVAS_MESSAGES = {
 
   'canvas.process.title': ['执行过程', 'Work in progress'],
   'canvas.process.count': ['{count} 步', '{count} steps'],
+  'canvas.process.duration': ['用时 {duration}', '{duration} elapsed'],
+  'canvas.process.durationTitle': ['本回合各次模型调用的实测耗时之和（不含工具执行）', 'Sum of the measured model-call durations in this turn (tool execution excluded)'],
   'canvas.process.folded': ['展开较早的 {count} 步', 'Show {count} earlier steps'],
   'canvas.process.unfold': ['收起较早的 {count} 步', 'Hide {count} earlier steps'],
   'canvas.reply.title': ['最终回复', 'Final reply'],
-  'canvas.reply.duration': ['耗时 {duration}', '{duration} elapsed'],
-  'canvas.reply.durationTitle': ['本回合各次模型调用的实测耗时之和（不含工具执行）', 'Sum of the measured model-call durations in this turn (tool execution excluded)'],
   'canvas.activity.thinking': ['思考中', 'Thinking'],
   'canvas.activity.tool': ['运行 {tool}', 'Running {tool}'],
   'canvas.activity.writing': ['正在生成', 'Generating'],

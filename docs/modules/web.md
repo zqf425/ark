@@ -83,9 +83,14 @@
   冗余的作者标签是重复信息——气泡 meta 行退化为底部一行（时间 + 模型标签 + 复制按钮；模型标签
   `ark-msg__model` 渲染 `ThreadItem.model`，即该回合实际使用的 `provider:model`，缺失时省略），
   `canvas.author.you` 与 `canvas.author.youInitial` 键已随行为删除；助手字标 "ark" 是产品名，不进 i18n。
-- 被提升的最终回复卡在 footer 的时间旁展示本回合的模型耗时（`ark-reply__duration`，`TurnBlock` 按回合
-  从 store 的每轮耗时折叠 `turnDurationMs` 求和传入）：回合内各次模型调用实测耗时之和，与会话统计条
-  的总耗时同源（同一 `state/rounds.ts` 折叠），因此"各轮次之和 = 统计条总耗时"成立；无已记录轮次时不显示。
+- 本回合的模型耗时显示在**过程卡头部行**右端（`ark-process__duration`，`TurnBlock` 按回合从 store 的
+  每轮耗时折叠 `turnDurationMs` 求和传入）：实测耗时是描述"本回合做了什么"的那一行的成本，不属于
+  "最终回复"答案卡的内容区，因此不放在回复卡右下角操作行。`ark-process__duration` 用 `margin-left: auto`
+  占据头部右端，头部 `::after` 箭头随之改为 `margin-left: 0`（`-head:has(-duration)::after`），避免箭头被
+  二次右推。**没有过程卡**的回合（单轮问答、无工具/思考行）把同一耗时交给回复卡标题行
+  （`ark-reply__head` 内的 `ark-reply__duration`），耗时不会因为无可折叠步骤而消失；两种情况都不出现在
+  `ark-reply__foot` 操作行。数值与会话统计条总耗时同源（同一 `state/rounds.ts` 折叠），因此"各轮次之和
+  = 统计条总耗时"成立；无已记录轮次时不显示。
 - 工具卡头部带工具族图标盘（`ark-tool__icon`，22px 圆角方块 + CSS mask 单色图标）：按工具名
   归入 read/write/exec/search 四族，未知名回落 wrench，与主流 agent 的活动行一致让长回合可按
   形状扫读；折叠头部新增单行参数摘要（`ark-tool__digest`，取首个参数 `key=value` 截断省略，
@@ -136,8 +141,8 @@
   回合结束后，被提升的最终回复渲染为独立答案卡（`FinalReplyCard`，`ark-reply`）：对勾圆环图标 +
   "最终回复"标题行 + 全宽分隔线 + markdown 正文（答案卡样式），卡底右下角的操作行
   （`ark-reply__foot`，hover 显现复制按钮）带生成时间（`formatClock(item.created_at)`，与用户
-  气泡 footer 的时钟同款）与本回合模型耗时（`ark-reply__duration`，实测轮次之和，见下文统计条与
-  `state/rounds.ts` 折叠），流式/中断/失败状态与气泡一致；过程卡内的中间
+  气泡 footer 的时钟同款），流式/中断/失败状态与气泡一致；本回合耗时只在无过程卡时由
+  `ark-reply__duration` 出现在标题行（见上文），不会进入 footer；过程卡内的中间
   叙述仍是普通助手气泡，避免卡中卡。
   分组规则在 `turn-sections.ts` 纯函数中，可独立单测。回合多于一个时在画布右缘提供逐回合跳转导航条。
   过程卡内默认只完整展示最近 3 条活动行（`RECENT_ACTIVITY_ROW_LIMIT`，活动行 =

@@ -49,7 +49,7 @@ import { RewindControl } from './RewindControl'
 import { executeEditResend, userTextOfTurn } from './rewind-flow'
 import type { RewindAvailability } from './rewind-flow'
 import { useCodeSessionStore } from '../state/store'
-import { turnDurationMs } from './session-stats'
+import { formatDuration, turnDurationMs } from './session-stats'
 
 /**
  * The server's own message is the only accurate explanation for a refusal
@@ -266,8 +266,10 @@ export const TurnBlock = memo(function TurnBlock({
   // The earlier slice renders only what the fold must not hide (errors and
   // notices); everything else in it is represented by the summary row.
   const headRows = foldActive ? trace.prefix.filter((item) => !isFoldedProcessRow(item)) : trace.prefix
-  // This turn's measured model time: the store's per-round fold, recomputed
-  // only when the rounds channel changes (usage events / snapshot refresh).
+  // This turn's measured model time (the store's per-round fold, recomputed
+  // only when the rounds channel changes — usage events or snapshot refresh).
+  // It renders in the process-card header, which is the row describing what
+  // this turn did; the answer card stays about the answer.
   const allRounds = useCodeSessionStore((s) => s.rounds)
   const turnMs = useMemo(() => turnDurationMs(allRounds, group.turnId), [allRounds, group.turnId])
   // Same handler identity for every row of the turn; Markdown absorbs it.
@@ -306,6 +308,14 @@ export const TurnBlock = memo(function TurnBlock({
             <span className={`ark-dot ${live ? 'ark-dot--live' : 'ark-dot--idle'}`} aria-hidden="true" />
             <span className="ark-process__title">{t('canvas.process.title')}</span>
             <span className="ark-process__meta">{t('canvas.process.count', { count: process.length })}</span>
+            {/* Measured model time of this turn, at the row's right edge:
+                the reply card below is where the answer lives, not where
+                the work's cost belongs. */}
+            {turnMs > 0 ? (
+              <span className="ark-process__duration" title={t('canvas.process.durationTitle')}>
+                {t('canvas.process.duration', { duration: formatDuration(turnMs) })}
+              </span>
+            ) : null}
           </summary>
           <div className="ark-process__body">
             {headRows.map((item) => (
@@ -330,7 +340,12 @@ export const TurnBlock = memo(function TurnBlock({
       ) : null}
       {reply.map((item) => (
         <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
-          <FinalReplyCard item={item} onFileChip={openWritten} writablePaths={writtenPaths} turnMs={turnMs} />
+          <FinalReplyCard
+            item={item}
+            onFileChip={openWritten}
+            writablePaths={writtenPaths}
+            turnMs={process.length === 0 ? turnMs : undefined}
+          />
         </ErrorBoundary>
       ))}
       <ErrorBoundary label={t('thread.canvas.boundaryRewind')}>

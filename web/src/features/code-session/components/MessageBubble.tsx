@@ -235,7 +235,11 @@ export const FinalReplyCard = memo(function FinalReplyCard({
   onFileChip?: (path: string) => void
   /** Whitelist of paths this turn wrote; gates which prose chips render. */
   writablePaths?: readonly string[]
-  /** Sum of this turn's measured model rounds (0 while none landed yet). */
+  /**
+   * This turn's measured model time, rendered in the title row. Only the
+   * turns without a process card pass it: a turn that ran steps shows the
+   * clock in that card's header, and the answer card stays about the answer.
+   */
   turnMs?: number
 }): JSX.Element {
   const { t, locale } = useI18n()
@@ -254,6 +258,11 @@ export const FinalReplyCard = memo(function FinalReplyCard({
           </svg>
         </span>
         <span className="ark-reply__title">{t('canvas.reply.title')}</span>
+        {turnMs != null && turnMs > 0 ? (
+          <span className="ark-reply__duration" title={t('canvas.process.durationTitle')}>
+            {t('canvas.process.duration', { duration: formatDuration(turnMs) })}
+          </span>
+        ) : null}
         {aborted ? <span className="ark-chip ark-chip--muted">{t('canvas.aborted')}</span> : null}
         {failed ? <span className="ark-chip ark-chip--error">{t('canvas.failed')}</span> : null}
       </header>
@@ -264,11 +273,6 @@ export const FinalReplyCard = memo(function FinalReplyCard({
       {item.detail ? <p className="ark-msg__detail">{item.detail}</p> : null}
       {!streaming && text ? (
         <footer className="ark-reply__foot">
-          {turnMs != null && turnMs > 0 ? (
-            <span className="ark-reply__duration" title={t('canvas.reply.durationTitle')}>
-              {t('canvas.reply.duration', { duration: formatDuration(turnMs) })}
-            </span>
-          ) : null}
           <time className="ark-reply__time">{formatClock(item.created_at, locale)}</time>
           <CopyButton
             text={text}
