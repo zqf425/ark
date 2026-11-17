@@ -41,6 +41,7 @@ const RAIL_ACTIVITY_EVENT_KINDS: ReadonlySet<RuntimeEvent['kind']> = new Set([
 
 export function useThreadStream(threadId: ThreadId | null): void {
   const seedItems = useCodeSessionStore((s) => s.seedItems)
+  const setThreadRuntime = useCodeSessionStore((s) => s.setThreadRuntime)
   const resetItems = useCodeSessionStore((s) => s.resetItems)
   const ingestEvent = useCodeSessionStore((s) => s.ingestEvent)
   const setDetailStatus = useCodeSessionStore((s) => s.setDetailStatus)
@@ -80,6 +81,10 @@ export function useThreadStream(threadId: ThreadId | null): void {
         if (cancelled) return
         const watermark = detail.summary.last_seq ?? 0
         seedItems(detail.items, watermark, detail.runtime_snapshot)
+        // The composer pills read their labels from here: this load already
+        // carries the stored overrides, so they need no second detail fetch and
+        // a switch back to a thread shows its own model immediately.
+        setThreadRuntime(threadId, detail.runtime)
         // The detail watermark is authoritative; pull the rail row up to it in
         // case the list was loaded before the newest events landed.
         noteThreadSeq(threadId, watermark)

@@ -257,9 +257,16 @@
   仅限 MCP 等部分编辑客户端；显式空列表 = 清空，与 secret 类"空=保留"语义不同）。目录查询用独立的
   `catalogBusy`，不锁定表单其余字段。
 - 会话运行时覆盖停靠在输入框区（`.ark-composer-stack`），不再占据会话标题区：供应商/模型、权限档位与
-  推理强度是输入框工具条上的即时选择器（`ComposerRuntimeControls`），打开时重读 `GET /v1/threads/{id}`
-  再经 `PATCH /v1/threads/{id}` 的 `runtime` 覆盖立即保存；后端按字段合并、无清除语义，因此不可清除的
-  字段不提供"未设置"选项，`reasoning_effort` 空串即"跟随默认"（协议映射见 [ark-llm](ark-llm.md)）。
+  推理强度是输入框工具条上的即时选择器（`ComposerRuntimeControls`），打开菜单时重读
+  `GET /v1/threads/{id}`，改动经 `PATCH /v1/threads/{id}` 的 `runtime` 覆盖立即保存；后端按字段合并、
+  无清除语义，因此不可清除的字段不提供"未设置"选项，`reasoning_effort` 空串即"跟随默认"
+  （协议映射见 [ark-llm](ark-llm.md)）。
+  **pill 的标签一律来自"当前选中的会话"的覆盖，而不是打开菜单时才读的那份**：会话切换会重挂载输入框
+  （`key={threadId}`），pill 的局部状态随之销毁，因此覆盖存在会话 store 的
+  `threadRuntime[threadId]` 上（`state/threads-slice.ts`），唯一写入方是 `useThreadStream` 的
+  detail 播种（`GET /v1/threads/{id}` 已带 `runtime`），pill 通过 `hooks/use-thread-runtime.ts` 只读它。
+  这样一次切换只产生一次详情读取，且在菜单打开前标签就显示本会话的模型/权限/推理强度；
+  未写入该键（尚未读到详情）时标签回落运行时默认，绝不残留上一个会话的值。
   同一组 pill 在新任务页（无会话）读写页面的暂存覆盖而非线程记录（见上方 `new` 场景条目），
   提交时机是任务启动而不是选择动作。
   工作空间、上下文结构和手动压缩也收进同一排工具条，不再有展开式详细面板：工作空间 pill 直接列出
