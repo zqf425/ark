@@ -7,7 +7,7 @@ import type {
 } from '../../../shared/contracts'
 import { formatClock } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
-import { formatElapsed } from './session-stats'
+import { useDurationFormat } from '../hooks/use-duration-words'
 import { Markdown } from '../../../shared/ui/Markdown'
 import { CopyButton } from '../../../shared/ui/copy'
 import { useThreadSkills } from '../hooks/use-thread-skills'
@@ -247,6 +247,7 @@ export const FinalReplyCard = memo(function FinalReplyCard({
   const failed = item.status === 'failed'
   const aborted = item.status === 'aborted'
   const text = item.text ?? ''
+  const turnClock = useDurationFormat(turnMs ?? 0, turnMs != null && turnMs > 0)
 
   return (
     <article className={`ark-reply${failed ? ' is-failed' : ''}`}>
@@ -258,15 +259,9 @@ export const FinalReplyCard = memo(function FinalReplyCard({
           </svg>
         </span>
         <span className="ark-reply__title">{t('canvas.reply.title')}</span>
-        {turnMs != null && turnMs > 0 ? (
+        {turnClock.labelled ? (
           <span className="ark-reply__duration" title={t('canvas.process.durationTitle')}>
-            {t('canvas.process.duration', {
-              duration: formatElapsed(turnMs, {
-                hours: (count) => t('canvas.duration.hours', { count }),
-                minutes: (count) => t('canvas.duration.minutes', { count }),
-                seconds: (count) => t('canvas.duration.seconds', { count })
-              })
-            })}
+            {turnClock.labelled}
           </span>
         ) : null}
         {aborted ? <span className="ark-chip ark-chip--muted">{t('canvas.aborted')}</span> : null}

@@ -90,13 +90,18 @@
   把同一耗时交给回复卡标题行（`ark-reply__head` 内的 `ark-reply__duration`），耗时不会因为无可折叠
   步骤而消失；两种情况都不出现在 `ark-reply__foot` 操作行。数值与会话统计条总耗时同源（同一
   `state/rounds.ts` 折叠），因此"各轮次之和 = 统计条总耗时"成立；无已记录轮次时不显示。
-- 用时文案是**本地化的单位拼接**（`formatElapsed`，读作“耗时 1时2分3秒”），不是 `m:ss` 时钟：时/分/秒的
-  单位词来自 i18n（`canvas.duration.hours|minutes|seconds`），由调用方传入 translator，因此
-  `session-stats.ts` 仍保持无 React、无硬编码用户文案（与 `shared/format.ts` 的 `formatRelative`
-  同构）。前导零单位省略（`45秒`、`1时2分3秒`），但一旦出现小时就保留分钟位（`1时0分3秒`；折叠成
-  `1时3秒` 会读成另一段时长）；不足一秒仍显示 `0秒`，负值与非有限值一律钳为 `0秒`，不漏出 `NaN秒`。
-  会话统计条的总耗时仍用 `m:ss` 时钟（`formatDuration`）：头部是读过就懂的自然语言，统计条是等宽
-  紧凑的指标，两者用途不同。
+- 用时文案是**本地化的单位拼接**（`formatDurationWords`，读作“耗时 1时2分3秒”），不是 `m:ss` 时钟：
+  时/分/秒的单位词来自 i18n（`canvas.duration.hours|minutes|seconds`），由调用方经
+  `hooks/use-duration-words.ts` 的 `useDurationFormat` 注入，因此 `session-stats.ts` 仍保持无 React、
+  无硬编码用户文案（与 `shared/format.ts` 的 `formatRelative` 同构）。该 hook 是单位映射的唯一宿主：
+  回合头部、回复卡标题行与会话统计条三处共用它，避免同一组文案键被抄三遍后漂移；它同时给出
+  `labelled`（带“耗时”标签）与 `span`（纯时长）两种形态。前导零单位省略（`45秒`、`1时2分3秒`），
+  但一旦出现小时就保留分钟位（`1时0分3秒`；折叠成 `1时3秒` 会读成另一段时长）；不足一秒仍显示
+  `0秒`，负值与非有限值一律钳为 `0秒`，不漏出 `NaN秒`。
+  函数刻意**不叫** `formatElapsed`：`state/live-activity.ts` 已用该名表示运行中 `m:ss` 读数，同名不同
+  渲染正是本仓禁止的漂移。旧的 `m:ss` 辅助函数（原 `formatDuration`）在统计条改用同一文案后已无
+  调用方，随改动删除，不保留死代码。**会话统计条的总耗时与回合耗时用同一文案**，因此“各轮次之和 =
+  统计条总耗时”不仅数值相等、读起来也一致。
 - 工具卡头部带工具族图标盘（`ark-tool__icon`，22px 圆角方块 + CSS mask 单色图标）：按工具名
   归入 read/write/exec/search 四族，未知名回落 wrench，与主流 agent 的活动行一致让长回合可按
   形状扫读；折叠头部新增单行参数摘要（`ark-tool__digest`，取首个参数 `key=value` 截断省略，

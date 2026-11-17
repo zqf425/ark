@@ -23,7 +23,7 @@ import { useCodeSessionStore } from '../state/store'
 import { hasLiveItems, type ItemView } from '../state/selectors'
 import { useContextLimit } from '../hooks/use-context-limit'
 import { totalRoundsMs } from '../state/rounds'
-import { formatDuration } from './session-stats'
+import { useDurationFormat } from '../hooks/use-duration-words'
 
 type Stats = {
   owner: string | null
@@ -78,6 +78,10 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
   const turns = visible?.turns ?? null
   const roundsCount = visible?.roundsCount ?? null
   const truncated = visible?.truncated ?? false
+  // Total measured model time, in the same spelled-out units as the per-turn
+  // clock so the session total and the turn totals read alike.
+  const totalMs = useMemo(() => totalRoundsMs(rounds), [rounds])
+  const totalClock = useDurationFormat(totalMs, roundsCount != null)
 
   const number = (value: number): string => new Intl.NumberFormat(locale).format(value)
 
@@ -117,7 +121,7 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
             className="ark-stats-bar__item"
             title={t('canvas.stats.durationTitle')}
           >
-            {t('canvas.stats.duration', { duration: formatDuration(totalRoundsMs(rounds)) })}
+            {t('canvas.stats.duration', { duration: totalClock.span })}
           </span>
         </>
       ) : (

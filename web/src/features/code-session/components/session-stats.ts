@@ -7,14 +7,15 @@
  */
 import type { RoundTiming } from '../state/types'
 
-/** Numeric clock only (`m:ss` / `h:mm:ss`); wording lives in the i18n catalog. */
-export function formatDuration(ms: number): string {
-  const seconds = Math.floor(Math.max(0, ms) / 1000)
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  const rest = seconds % 60
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(rest)}` : `${minutes}:${pad(rest)}`
+/**
+ * Localized unit words for `formatDurationWords`. Each one takes the count and
+ * returns the rendered unit (`3时` / `3h`), so pluralization stays in the
+ * catalog rather than in this module.
+ */
+export type DurationUnitWords = {
+  hours: (count: number) => string
+  minutes: (count: number) => string
+  seconds: (count: number) => string
 }
 
 /**
@@ -24,14 +25,14 @@ export function formatDuration(ms: number): string {
  * so this module stays free of React and of hardcoded user prose. Leading
  * zero units are dropped — `1时2秒` reads better than `1时0分2秒` — and a
  * sub-second span still prints `0秒` instead of an empty string.
+ *
+ * Deliberately NOT named `formatElapsed`: `state/live-activity.ts` already
+ * exports that name for the in-flight `m:ss` readout, and two identical names
+ * rendering different things is exactly the drift this repo forbids.
  */
-export function formatElapsed(
+export function formatDurationWords(
   ms: number,
-  units: {
-    hours: (count: number) => string
-    minutes: (count: number) => string
-    seconds: (count: number) => string
-  }
+  units: DurationUnitWords
 ): string {
   // `Math.max(0, NaN)` is still NaN, so non-finite spans are clamped first
   // rather than leaking `NaN秒` into the header.

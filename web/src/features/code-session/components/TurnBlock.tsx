@@ -49,7 +49,8 @@ import { RewindControl } from './RewindControl'
 import { executeEditResend, userTextOfTurn } from './rewind-flow'
 import type { RewindAvailability } from './rewind-flow'
 import { useCodeSessionStore } from '../state/store'
-import { formatElapsed, turnDurationMs } from './session-stats'
+import { turnDurationMs } from './session-stats'
+import { useDurationFormat } from '../hooks/use-duration-words'
 
 /**
  * The server's own message is the only accurate explanation for a refusal
@@ -272,6 +273,7 @@ export const TurnBlock = memo(function TurnBlock({
   // this turn did; the answer card stays about the answer.
   const allRounds = useCodeSessionStore((s) => s.rounds)
   const turnMs = useMemo(() => turnDurationMs(allRounds, group.turnId), [allRounds, group.turnId])
+  const turnClock = useDurationFormat(turnMs, turnMs > 0)
   // Same handler identity for every row of the turn; Markdown absorbs it.
   const openWritten = useOpenWrittenFile(writtenPaths)
 
@@ -312,15 +314,9 @@ export const TurnBlock = memo(function TurnBlock({
                 it qualifies. It reads as part of the header's summary line
                 rather than a right-aligned badge, and the reply card below
                 stays about the answer. */}
-            {turnMs > 0 ? (
+            {turnClock.labelled ? (
               <span className="ark-process__duration" title={t('canvas.process.durationTitle')}>
-                {t('canvas.process.duration', {
-                  duration: formatElapsed(turnMs, {
-                    hours: (count) => t('canvas.duration.hours', { count }),
-                    minutes: (count) => t('canvas.duration.minutes', { count }),
-                    seconds: (count) => t('canvas.duration.seconds', { count })
-                  })
-                })}
+                {turnClock.labelled}
               </span>
             ) : null}
           </summary>
