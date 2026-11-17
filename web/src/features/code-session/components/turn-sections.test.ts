@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ThreadItem } from '../../../shared/contracts'
-import { finalReplyIndex, splitTurnSections } from './turn-sections'
+import { finalReplyIndex, splitTurnSections, splitProcessTrace, RECENT_TOOL_ROW_LIMIT } from './turn-sections'
 
 function item(id: string, kind: ThreadItem['kind'], text?: string): ThreadItem {
   return {
@@ -65,5 +65,52 @@ describe('splitTurnSections', () => {
     const { process, reply } = splitTurnSections(rows, 'settled')
     expect(process).toEqual([])
     expect(reply.map((row) => row.item_id)).toEqual(['a'])
+  })
+})
+
+describe('splitProcessTrace (default fold of older tool rows)', () => {
+  it('keeps the newest tool calls in the tail and counts the folded ones', () => {
+    const rows = [
+      item('t1', 'tool_call'),
+      item('t2', 'tool_call'),
+      item('t3', 'tool_call'),
+      item('t4', 'tool_call'),
+      item('t5', 'tool_call')
+    ]
+    const view = splitProcessTrace(rows, RECENT_TOOL_ROW_LIMIT)
+    expect(view.foldedToolCalls).toBe(2)
+    expect(view.prefix.map((row) => row.item_id)).toEqual(['t1', 't2'])
+    expect(view.tail.map((row) => row.item_id)).toEqual(['t3', 't4', 't5'])
+  })
+
+  it('keeps non-tool rows on the side of the fold point they belong to', () => {
+    const rows = [
+      item('t1', 'tool_call'),
+      item('n1', 'assistant_message', '中间叙述'),
+      item('t2', 'tool_call'),
+      item('t3', 'tool_call'),
+      item('t4', 'tool_call')
+    ]
+    const view = splitProcessTrace(rows, RECENT_TOOL_ROW_LIMIT)
+    expect(view.foldedToolCalls).toBe(1)
+    // The narration happened before the first kept tool call, so it stays in
+    // the prefix; the summary row renders between prefix and tail.
+    expect(view.prefix.map((row) => row.item_id)).toEqual(['t1', 'n1'])
+    expect(view.tail.map((row) => row.item_id)).toEqual(['t2', 't3', 't4'])
+  })
+
+  it('passes a short trace through unchanged', () => {
+    const rows = [item('t1', 'tool_call'), item('t2', 'tool_call'), item('t3', 'tool_call')]
+    const view = splitProcessTrace(rows, RECENT_TOOL_ROW_LIMIT)
+    expect(view.foldedToolCalls).toBe(0)
+    expect(view.prefix.map((row) => row.item_id)).toEqual(['t1', 't2', 't3'])
+    expect(view.tail).toEqual([])
+  })
+
+  it('handles a trace without any tool rows', () => {
+    const rows = [item('n1', 'reasoning'), item('n2', 'assistant_message', '想')]
+    const view = splitProcessTrace(rows, RECENT_TOOL_ROW_LIMIT)
+    expect(view.foldedToolCalls).toBe(0)
+    expect(view.prefix.map((row) => row.item_id)).toEqual(['n1', 'n2'])
   })
 })
