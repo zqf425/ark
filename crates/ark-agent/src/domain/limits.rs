@@ -30,9 +30,12 @@ pub struct TurnLimits {
 impl Default for TurnLimits {
     fn default() -> Self {
         Self {
-            max_rounds: 24,
-            max_tokens: 1_000_000,
-            max_tool_calls: 200,
+            max_rounds: 1_000,
+            // `TurnLimits` is the agent's effective internal budget. The wire
+            // and config layers represent "unlimited" as zero; their boundary
+            // translates it to this finite sentinel before constructing a turn.
+            max_tokens: u64::MAX,
+            max_tool_calls: 1_000,
             max_identical_calls: 3,
             max_compactions: 2,
             // 80% of the 256K default context window
@@ -68,6 +71,14 @@ impl TurnLimits {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn defaults_use_the_effective_settings_baseline() {
+        let limits = TurnLimits::default();
+        assert_eq!(limits.max_rounds, 1_000);
+        assert_eq!(limits.max_tokens, u64::MAX);
+        assert_eq!(limits.max_tool_calls, 1_000);
+    }
 
     #[test]
     fn defaults_are_ordered_sensibly() {

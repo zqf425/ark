@@ -30,7 +30,7 @@ HTTP 侧批准一条策略表明确拒绝的调用。
 - `request_user_input` 在 settle 阶段即被拦截为 `Action::AskUser`（契约参数 `{"prompt": string}`，
   兼容别名 `question` 仍被接受），不进入分派计划；答案经 `UserInputResolved` 回填为该调用的
   tool result。助手轮次的工具调用使用 `ModelMessage::tool_calls` 结构化字段进入历史，不再渲染进正文文本。
-- 预算、工具风暴、并发安全和历史裁剪属于独立 policy/context 模块，不得回流为巨型 reactor。
+- 预算、工具风暴、并发安全和历史裁剪属于独立 policy/context 模块，不得回流为巨型 reactor。设置/配置层的默认回合预算为最多 1000 步、累计 token 不限（`0`）和最多 1000 次工具调用；组合根将 `max_tokens=0` 转换为 agent 内部的 `u64::MAX`，以避免直接使用 `TurnLimits::default()` 时将首轮判定为耗尽。
 - 工具风暴按工具名与规范化参数组成的签名计数；跨轮已执行次数与同一 `DispatchPlan` 内先前出现次数共同计入上限。被抑制调用必须以合成结果配对 `ToolCallStarted`/`ToolCallFinished`，并写入 `ToolStormSuppressed` 事件。重复计数默认覆盖整个回合（`tuning.tool_storm_window_size = 0`）；配置正数窗口时，只统计最近 N 个模型轮次内实际执行过的调用。计数键是 storm key：bash 调用先剥掉命令开头的 `sleep N;` 等待前缀再归一化空白（`ToolCallRequest::storm_key`），其他工具用字节级签名——否则改一个 sleep 时长就能绕过熔断（实测 `sleep 300;git push` → `sleep 590;git push` 循环 60 分钟）。被抑制调用的参数必须写入事件（合成结果携带原始 `arguments`），事后审计要能还原重复的是什么。
 - 回合在模型请求失败（`model_request_failed = true`）终结时，由 ark-server 的恢复调度器自动重试同一请求：退避计划 5s/30s/120s（`recovery::RECOVERY_DELAYS`），尝试次数写进 `turn_started.auto_recovery`；连续模型失败达到 `RECOVERY_MODEL_FAILURE_STREAK_LIMIT` 时暂停该线程的自动恢复，任何用户回合或非模型终态重置计数。恢复回合在会话流写一条 Notice item 说明自动重试原因；工具/策略类失败与耗尽尝试预算后的失败保持终态，仍需用户介入。
 - 只读工具的并发批默认不设上限；`tuning.max_parallel_tool_calls > 0` 时批内调用被切成顺序 chunk，批内并发不超过该值，批间顺序不变。

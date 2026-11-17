@@ -46,9 +46,9 @@ pub struct TuningConfig {
 impl Default for TuningConfig {
     fn default() -> Self {
         Self {
-            max_rounds: 24,
-            max_tokens: 1_000_000,
-            max_tool_calls: 200,
+            max_rounds: 1_000,
+            max_tokens: 0,
+            max_tool_calls: 1_000,
             max_identical_calls: 3,
             keep_recent_messages: 12,
             chunk_buffer: 64,
@@ -424,6 +424,14 @@ fn validate_skills(skills: &SkillsSettings) -> Result<(), String> {
 mod tests {
     use super::*;
     use ark_contract::{ApprovalAction, ApprovalRule, UnattendedApproval};
+
+    #[test]
+    fn runtime_tuning_defaults_match_the_settings_baseline() {
+        let tuning = RuntimeConfig::default().tuning;
+        assert_eq!(tuning.max_rounds, 1_000);
+        assert_eq!(tuning.max_tokens, 0);
+        assert_eq!(tuning.max_tool_calls, 1_000);
+    }
 
     #[test]
     fn valid_log_levels_pass_and_unknown_ones_fail() {
