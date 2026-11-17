@@ -66,6 +66,17 @@ fn finish(outcome: TurnOutcome) -> Action {
 
 /// `Preparing`: compact first when the prefix no longer fits, else call the model.
 fn begin(input: &TurnInput) -> Action {
+    compact_or_call(input)
+}
+
+/// The one "may we start another model round" gate for *every* round.
+///
+/// Compaction is checked before the budget, not only at `Preparing` and after a
+/// compaction: a turn that runs hundreds of tool calls grows the prefix with
+/// every result, so checking once at turn start let one turn grow from a few
+/// thousand tokens to the provider's hard window while the budget saw nothing to
+/// do. Every caller that would call the model with a stale prefix routes here.
+fn compact_or_call(input: &TurnInput) -> Action {
     let budget = TurnBudget::new(input.limits);
     if budget.needs_compaction(input.progress.prompt_estimate)
         && budget.compaction_available(&input.progress)
@@ -199,7 +210,7 @@ fn gate_resolved(input: &TurnInput) -> Action {
 }
 
 fn after_tools(input: &TurnInput) -> Action {
-    call_model(input)
+    compact_or_call(input)
 }
 
 /// One ask was answered and its answer already became the tool result. The
@@ -230,7 +241,7 @@ fn after_user_input(input: &TurnInput) -> Action {
         };
     }
     if pending_dispatch.is_empty() {
-        return call_model(input);
+        return compact_or_call(input);
     }
     dispatch(pending_dispatch, repeats, input, DispatchYield::default())
 }
@@ -240,15 +251,7 @@ fn after_user_input(input: &TurnInput) -> Action {
 /// If the prefix still overflows and budget remains, compact again; otherwise
 /// let the shared budget gate allow or refuse the model call.
 fn after_compaction(input: &TurnInput) -> Action {
-    let budget = TurnBudget::new(input.limits);
-    if budget.needs_compaction(input.progress.prompt_estimate)
-        && budget.compaction_available(&input.progress)
-    {
-        return Action::Compact {
-            keep_recent: input.limits.keep_recent_messages,
-        };
-    }
-    call_model(input)
+    compact_or_call(input)
 }
 
 /// Convenience for the machine: build a `Progress` with the round advanced.
@@ -658,6 +661,28 @@ mod tests {
                 outcome: TurnOutcome::Failed { .. }
             }
         ));
+    }
+
+    #[test]
+    fn tools_settled_compacts_before_growing_past_the_threshold() {
+        // The regression this file's `compact_or_call` exists for: a turn that
+        // runs hundreds of tool calls grows the prefix with every result, so
+        // checking the threshold only at `Preparing` let one turn reach the
+        // provider's hard window while the budget saw nothing to do.
+        let limits = TurnLimits {
+            context_limit_tokens: 1_000,
+            ..TurnLimits::default()
+        };
+        let progress = Progress {
+            prompt_estimate: 1_200,
+            ..Progress::default()
+        };
+        let kind = InputKind::ToolsSettled { executions: vec![] };
+        let action = step(
+            TurnState::DispatchingTools,
+            &TurnInput::new(limits, progress, kind),
+        );
+        assert!(matches!(action, Action::Compact { .. }), "got {action:?}");
     }
 
     #[test]

@@ -19,6 +19,16 @@ const ASCII_CHARS_PER_TOKEN: u64 = 4;
 /// CJK codepoints are roughly one token each.
 const WIDE_CHARS_PER_TOKEN: u64 = 1;
 
+/// Flat charge for one multimodal image part.
+///
+/// A constant, not a function of the base64 payload: vision models bill an
+/// image by pixel geometry, so `estimate_text(&image.data)` would charge a
+/// single 1024x1024 screenshot roughly 400K tokens and make every image turn
+/// compact immediately. No dimension is declared anywhere in the contract yet,
+/// so this approximates one 1024x1024 image — enough for images to count,
+/// without fabricating a per-pixel model.
+const IMAGE_PART_TOKENS: u64 = 1_600;
+
 /// Stateless estimator. All call sites must come through here.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TokenEstimator;
@@ -45,6 +55,13 @@ impl TokenEstimator {
     }
 
     /// Estimate tokens for one message, including framing.
+    ///
+    /// Tool-call arguments and image parts are charged here because they are
+    /// what actually dominates a coding session: one `write` call carries the
+    /// whole file, one `bash` call the whole script, and both travel with every
+    /// request. Charging only `content` under-reported real sessions by about
+    /// half, so the budget never reached its own 80% threshold while the
+    /// provider was already at 99% of the window.
     pub fn estimate_message(&self, message: &ModelMessage) -> u64 {
         let mut total = self.estimate_text(&message.content) + MESSAGE_OVERHEAD_TOKENS;
         if let Some(tool_call_id) = &message.tool_call_id {
@@ -53,6 +70,14 @@ impl TokenEstimator {
         if let Some(name) = &message.name {
             total += self.estimate_text(name);
         }
+        for call in &message.tool_calls {
+            total += self.estimate_text(&call.call_id);
+            total += self.estimate_text(&call.name);
+            // Same compact serialisation the adapters put on the wire, so the
+            // estimate and the request agree on what the call costs.
+            total += self.estimate_text(&call.arguments.to_string());
+        }
+        total += IMAGE_PART_TOKENS * message.images.len() as u64;
         total
     }
 
@@ -103,6 +128,7 @@ impl TokenEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark_ports::ToolCallRef;
 
     fn user(text: &str) -> ModelMessage {
         ModelMessage::user(text)
@@ -148,6 +174,52 @@ mod tests {
         plain.tool_call_id = None;
         plain.name = Some("read".to_string());
         assert!(with_fields > TokenEstimator::new().estimate_message(&plain));
+    }
+
+    #[test]
+    fn tool_call_arguments_are_charged() {
+        // A coding session's bulk is tool arguments: one `write` carries the
+        // whole file, one `bash` the whole script. Charging only `content`
+        // under-reported live sessions by about half, which is what kept
+        // compaction from ever reaching the 80% threshold.
+        let estimator = TokenEstimator::new();
+        let body = "a".repeat(4_000);
+        let mut message = ModelMessage::assistant_with_tool_calls(
+            "",
+            vec![ToolCallRef {
+                call_id: "call_1".to_string(),
+                name: "write".to_string(),
+                arguments: serde_json::json!({ "content": body }),
+            }],
+        );
+        let with_call = estimator.estimate_message(&message);
+        assert!(
+            with_call >= 1_000,
+            "tool arguments must dominate the estimate, got {with_call}"
+        );
+        message.tool_calls.clear();
+        assert_eq!(
+            estimator.estimate_message(&message),
+            MESSAGE_OVERHEAD_TOKENS
+        );
+    }
+
+    #[test]
+    fn image_parts_are_charged_flat_not_by_payload() {
+        // Vision is billed by geometry, so a base64 payload must never become
+        // its own token count: a 20 MB turn image would otherwise estimate as
+        // hundreds of thousands of tokens and compact on every image turn.
+        let estimator = TokenEstimator::new();
+        let mut message = user("look");
+        let text_only = estimator.estimate_message(&message);
+        message.images = vec![ark_ports::ModelImage {
+            mime_type: "image/png".to_string(),
+            data: "A".repeat(4_000_000),
+        }];
+        assert_eq!(
+            estimator.estimate_message(&message),
+            text_only + IMAGE_PART_TOKENS
+        );
     }
 
     #[test]

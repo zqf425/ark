@@ -116,10 +116,14 @@ impl TurnMachine {
         self.progress.tool_calls = self.progress.tool_calls.saturating_add(count);
     }
 
-    /// Count one compaction attempt.
+    /// Count one compaction attempt that left the prefix above the threshold.
+    ///
+    /// The reactor only calls this when a fold could not get back under
+    /// `context_limit_tokens`, so `max_compactions` bounds exactly the loop the
+    /// budget needs to stop; a fold that bought headroom stays uncounted.
     pub fn note_compaction(&mut self, removed_items: u32) {
-        self.progress.compactions = self.progress.compactions.saturating_add(1);
         let _ = removed_items;
+        self.progress.compactions = self.progress.compactions.saturating_add(1);
     }
 
     /// Record that these calls ran, so the storm breaker can count repeats.

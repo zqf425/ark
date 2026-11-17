@@ -82,11 +82,21 @@ impl TurnBudget {
     }
 
     /// True when the estimated prompt no longer fits the context window.
+    ///
+    /// `>=`, not `>`: the configured value *is* the trigger point (80% of the
+    /// window), so a prefix that lands exactly on it must fold instead of
+    /// overshooting by the next round.
     pub fn needs_compaction(&self, prompt_estimate: u64) -> bool {
-        prompt_estimate > self.limits.context_limit_tokens
+        prompt_estimate >= self.limits.context_limit_tokens
     }
 
     /// True when a compaction attempt is still within budget.
+    ///
+    /// The budget counts folds that left the prefix above the threshold, not
+    /// every fold (see the reactor's `compact`): a long turn may fold as often
+    /// as its own growth makes necessary, while a fold that cannot get back
+    /// under `context_limit_tokens` — nothing foldable left, or the kept tail
+    /// alone overflows — is bounded so the turn fails instead of looping.
     pub fn compaction_available(&self, progress: &Progress) -> bool {
         progress.compactions < self.limits.max_compactions
     }
@@ -164,6 +174,16 @@ mod tests {
             ..Progress::default()
         };
         assert_eq!(budget().check(&progress), BudgetVerdict::ContextExhausted);
+    }
+
+    #[test]
+    fn a_prompt_exactly_on_the_threshold_compacts() {
+        // The configured value *is* the trigger point (80% of the window), so
+        // landing exactly on it must fold instead of overshooting next round.
+        let limit = TurnLimits::tiny().context_limit_tokens;
+        let budget = TurnBudget::new(TurnLimits::tiny());
+        assert!(budget.needs_compaction(limit));
+        assert!(!budget.needs_compaction(limit - 1));
     }
 
     #[test]

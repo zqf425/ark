@@ -66,9 +66,12 @@ impl TurnState {
         match (self, next) {
             // A compaction that did not shrink the prefix enough may run again
             // while budget remains; `note_compaction` bounds the retries.
+            // `AwaitingUserInput` belongs here because that state may hand
+            // straight to a model round (`after_user_input`), so it needs the
+            // same "compact first" option every other model-calling state has.
             (_, Compacting) => matches!(
                 self,
-                Preparing | DispatchingTools | AwaitingModel | Compacting
+                Preparing | DispatchingTools | AwaitingModel | AwaitingUserInput | Compacting
             ),
             (Preparing, AwaitingModel) => true,
             // Any working state must be able to write a terminal event: an
@@ -167,6 +170,25 @@ mod tests {
         assert!(TurnState::Preparing.can_enter(TurnState::Compacting));
         assert!(!TurnState::Finalizing.can_enter(TurnState::Compacting));
         assert!(!TurnState::AwaitingApproval.can_enter(TurnState::Compacting));
+    }
+
+    #[test]
+    fn every_state_that_can_call_the_model_can_compact_first() {
+        // `compact_or_call` is the one round gate; a state that may reach the
+        // model directly must also be allowed to fold first, or the new gate
+        // turns into an illegal transition at runtime.
+        for state in [
+            TurnState::Preparing,
+            TurnState::AwaitingModel,
+            TurnState::DispatchingTools,
+            TurnState::AwaitingUserInput,
+        ] {
+            assert!(
+                state.can_enter(TurnState::Compacting),
+                "{:?} must be able to compact before a model round",
+                state
+            );
+        }
     }
 
     #[test]

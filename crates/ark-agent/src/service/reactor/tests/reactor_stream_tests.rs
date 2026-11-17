@@ -472,6 +472,143 @@ fn repeated_compaction_replaces_the_previous_checkpoint() {
     );
 }
 
+/// A `tool` role row answering `call_id`, the shape the provider requires.
+fn tool_message(call_id: &str, name: &str, output: &str) -> ModelMessage {
+    ModelMessage {
+        role: ModelRole::Tool,
+        content: output.to_string(),
+        images: Vec::new(),
+        tool_call_id: Some(call_id.to_string()),
+        name: Some(name.to_string()),
+        tool_calls: Vec::new(),
+    }
+}
+
+#[test]
+fn compaction_never_starts_the_kept_tail_with_a_tool_result() {
+    // A kept tail that opens with a tool result has no declaring assistant
+    // row, and every provider rejects that request. The split walks back to
+    // the assistant row instead of trusting `keep_recent` blindly.
+    let writer = Arc::new(MemoryWriter::new());
+    let mut reactor = reactor(writer);
+    reactor.history = vec![
+        ModelMessage::system("system prompt"),
+        ModelMessage::user("old question"),
+        ModelMessage::assistant("old answer"),
+        ModelMessage::assistant_with_tool_calls(
+            "",
+            vec![ToolCallRef {
+                call_id: "c1".to_string(),
+                name: "read".to_string(),
+                arguments: serde_json::json!({ "path": "a" }),
+            }],
+        ),
+        tool_message("c1", "read", "file body"),
+        ModelMessage::assistant_with_tool_calls(
+            "",
+            vec![ToolCallRef {
+                call_id: "c2".to_string(),
+                name: "read".to_string(),
+                arguments: serde_json::json!({ "path": "b" }),
+            }],
+        ),
+        tool_message("c2", "read", "file body two"),
+    ];
+
+    // keep=1 would start the tail at the `c2` result.
+    let (removed, _) = reactor.compact_history(1);
+
+    assert_eq!(removed, 4);
+    assert_eq!(reactor.history[2].role, ModelRole::Assistant);
+    assert_eq!(reactor.history[2].tool_calls[0].call_id, "c2");
+    assert_eq!(reactor.history[3].role, ModelRole::Tool);
+    assert!(
+        HistoryHygiene::new().is_legal(&reactor.history),
+        "compacted history must stay provider-legal: {:?}",
+        reactor.history
+    );
+    // Both results are still represented, through the checkpoint note.
+    assert!(reactor
+        .history
+        .iter()
+        .any(|message| message.content.starts_with("[context checkpoint")));
+}
+
+#[test]
+fn compaction_reports_a_noop_when_the_prefix_is_one_call_run() {
+    // Nothing can be folded without splitting a call/result pair, so the fold
+    // must report zero removed items instead of persisting an empty boundary.
+    let writer = Arc::new(MemoryWriter::new());
+    let mut reactor = reactor(writer);
+    reactor.history = vec![
+        ModelMessage::system("system prompt"),
+        ModelMessage::assistant_with_tool_calls(
+            "",
+            vec![ToolCallRef {
+                call_id: "c1".to_string(),
+                name: "read".to_string(),
+                arguments: serde_json::json!({ "path": "a" }),
+            }],
+        ),
+        tool_message("c1", "read", "file body"),
+    ];
+    let before = reactor.history.clone();
+
+    let (removed, checkpoint) = reactor.compact_history(1);
+
+    assert_eq!(removed, 0);
+    assert!(checkpoint.is_none());
+    assert_eq!(reactor.history, before);
+}
+
+#[tokio::test]
+async fn a_productive_fold_does_not_spend_the_retry_budget() {
+    // The retry budget bounds a fold that cannot shrink the prefix, not the
+    // number of folds: a long turn may legitimately fold once per
+    // `context_limit_tokens` of new tool output.
+    let writer = Arc::new(MemoryWriter::new());
+    let mut reactor = reactor(writer);
+    reactor.history = vec![
+        ModelMessage::system("system prompt"),
+        ModelMessage::user("a".repeat(2_000)),
+        ModelMessage::assistant("old answer"),
+        ModelMessage::user("recent user message"),
+    ];
+
+    reactor.compact(2).await.unwrap();
+
+    assert_eq!(
+        reactor.machine().progress().compactions,
+        0,
+        "a fold that bought headroom must not consume the retry budget"
+    );
+}
+
+#[tokio::test]
+async fn a_fold_that_cannot_shrink_the_prefix_spends_the_retry_budget() {
+    // Otherwise an oversized but incompressible prefix would compact forever:
+    // nothing is foldable without splitting a call/result pair, and the kept
+    // tail alone is already past `context_limit_tokens`.
+    let writer = Arc::new(MemoryWriter::new());
+    let mut reactor = reactor(writer);
+    reactor.history = vec![
+        ModelMessage::system("system prompt"),
+        ModelMessage::assistant_with_tool_calls(
+            "",
+            vec![ToolCallRef {
+                call_id: "c1".to_string(),
+                name: "read".to_string(),
+                arguments: serde_json::json!({ "path": "a" }),
+            }],
+        ),
+        tool_message("c1", "read", &"a".repeat(20_000)),
+    ];
+
+    reactor.compact(1).await.unwrap();
+
+    assert_eq!(reactor.machine().progress().compactions, 1);
+}
+
 #[test]
 fn assistant_tool_call_history_is_legal_hygiene() {
     let mut reactor = reactor(Arc::new(MemoryWriter::new()));

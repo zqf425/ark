@@ -11,11 +11,17 @@ impl Reactor {
         self.writer.append(self.events.compaction_started()).await?;
         let (removed, checkpoint) = self.compact_history(keep_recent);
         // Measure the *shortened* history so the budget can decide whether one
-        // more compaction is needed. A no-op compaction still consumes budget,
-        // otherwise an oversized but uncompressible prefix would loop forever.
-        let estimate = TokenEstimator::new().estimate_request(&self.request());
+        // more compaction is needed. Only a fold that left the prefix above the
+        // threshold spends the retry budget: that is the case that can loop
+        // (nothing foldable is left, or the kept tail alone overflows), while a
+        // fold that brought the prefix back under the limit is the threshold
+        // working as designed and may repeat as the turn grows.
+        let estimator = TokenEstimator::new();
+        let estimate = estimator.estimate_request(&self.request());
         self.machine.set_prompt_estimate(estimate);
-        self.machine.note_compaction(removed);
+        if estimate >= self.machine.limits().context_limit_tokens {
+            self.machine.note_compaction(removed);
+        }
         if removed == 0 {
             return Ok(self.input_of(InputKind::CompactionSettled { removed_items: 0 }));
         }
@@ -53,8 +59,22 @@ impl Reactor {
         if self.history.len() <= system_count + keep {
             return (0, None);
         }
-        let split = self.history.len() - keep;
+        // Never split a `tool_calls` row from its results: a kept tail that
+        // starts with a tool result has no declaring assistant row, and every
+        // provider rejects that request. Walking the split back to the nearest
+        // non-tool row keeps whole call/result pairs on one side of the
+        // boundary; the fold still covers them in the checkpoint.
+        let mut split = self.history.len() - keep;
+        while split > system_count && self.history[split].role == ModelRole::Tool {
+            split -= 1;
+        }
         let removed = (split - system_count) as u32;
+        if removed == 0 {
+            // The whole foldable region is one call/result run: there is
+            // nothing to fold without splitting a pair, so report a no-op
+            // instead of appending a checkpoint that summarises nothing.
+            return (0, None);
+        }
         let mut next: Vec<ModelMessage> = self.history[..system_count].to_vec();
         let checkpoint =
             crate::context::ContextCheckpoint::from_messages(&self.history[system_count..]);

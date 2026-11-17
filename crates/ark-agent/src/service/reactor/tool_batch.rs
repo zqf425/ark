@@ -22,6 +22,12 @@ impl Reactor {
         }
         self.machine.record_calls(&ran);
         self.machine.note_tool_calls(executions.len() as u32);
+        // Re-estimate now that this batch's results are in the history: the
+        // step checks the compaction threshold on `ToolsSettled`, and the
+        // previous round's estimate predates the very output that just grew the
+        // prefix. Without this the check lags one round behind reality.
+        let estimate = TokenEstimator::new().estimate_request(&self.request());
+        self.machine.set_prompt_estimate(estimate);
         Ok(self.input_of(InputKind::ToolsSettled { executions }))
     }
 

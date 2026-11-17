@@ -41,6 +41,21 @@ HTTP 侧批准一条策略表明确拒绝的调用。
   `removed_items` 报告折叠消息数，并报告 checkpoint 字符数。回合种子尾部的持久计划行
   （`[thread plan]` 的 `Goal:` 与 `- [ ]`/`- [~]`/`- [x]` checkbox 行）同样被识别为结构化事实：
   checkpoint 摘要整个历史（含种子尾部），把这些行带上才能让回合内压缩不丢失未完成待办。
+- 压缩判定使用唯一估算器 `TokenEstimator`，它必须计入 `tool_calls` 的 `call_id`/`name`/`arguments`
+  与每条消息的图片部分（按固定 `IMAGE_PART_TOKENS` 计，不按 base64 长度计——视觉模型按几何计费）：
+  编码会话的体积主要来自工具参数（一次 `write` 携带整个文件、一次 `bash` 携带整个脚本），只计 `content`
+  会使估算约为真实值的一半，阈值永远达不到而 provider 早已逼近窗口上限。
+- 压缩检查发生在**每个**模型轮次之前，不只在 `Preparing`：`step` 的 `compact_or_call` 是唯一入口，
+  `begin`、`after_tools`、`after_user_input`、`after_compaction` 都经它决定先折叠还是调用模型
+  （`gate_resolved` 只派发工具，其结果回到 `after_tools` 时同样过这道门）。
+  回合内工具循环会持续增长前缀，只在回合开始检查会让单个回合在阈值之上继续增长。
+  `dispatch` 在本轮结果进入历史后重新估算 `prompt_estimate`，否则 `ToolsSettled` 上的判定
+  会滞后一轮（用的是本轮输出产生之前的数字）。判定用 `>=`：配置值本身就是触发点。
+- `max_compactions` 只约束**未能把前缀压回阈值以下**的压缩（无可折叠项，或保留尾部本身就超阈值），
+  用于阻断死循环；压回阈值以下的压缩不计入，因此长回合可以随自身增长反复折叠，不会在阈值处被预算判死。
+- 压缩切分点按 call/result 配对回退：若 `keep_recent` 落在 `tool` 行上，切分点前移到最后一条
+  非 `tool` 行，保证保留尾部不会出现「没有声明者」的孤儿 tool result（provider 会拒收）；
+  整段可折叠区只有一组调用时报告 `removed_items = 0`，不落空边界。
 - 每个批次在执行器启动前持久化全部 `ToolCallStarted` 已校验参数，`ToolCallFinished` 持久化受工具上限限制的输出和 detail；这既是
   会话重放资料，也是服务端 Changes/File/Terminal 投影的唯一来源，不能由 web 解析自由文本补造。
 - 同一回合的正文 delta 与 reasoning delta 使用各自稳定的 item ID；两类内容不得合并为同一个渲染条目，

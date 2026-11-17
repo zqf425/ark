@@ -14,7 +14,11 @@ pub struct TurnLimits {
     pub max_tool_calls: u32,
     /// A call whose signature repeats at least this many times is suppressed.
     pub max_identical_calls: u32,
-    /// Maximum compaction attempts per turn (prevents a compaction loop).
+    /// Maximum folds per turn that *fail* to bring the prefix back under
+    /// `context_limit_tokens`. Every fold that succeeds is unbounded: a single
+    /// turn may legitimately fold once per `context_limit_tokens` of new tool
+    /// output, and capping those made a long turn fail at the threshold instead
+    /// of compacting.
     pub max_compactions: u32,
     /// Prompt estimate above which compaction is triggered.
     pub context_limit_tokens: u64,
