@@ -16,13 +16,19 @@
  * open-state writes (mount, controlled updates), and those echoes are
  * filtered in `useEchoSafeToggle` — without the filter the mount echo pins
  * the card open and a settled turn never collapses.
+ *
+ * Once settled, the trace also folds its older `tool_call` rows: only the
+ * newest `RECENT_TOOL_ROW_LIMIT` calls stay expanded, earlier ones collapse
+ * behind a summary row (`splitProcessTrace`), so a 30-call turn scans by its
+ * latest activity instead of a wall of cards. While the turn runs the trace
+ * stays unfolded — the row that is streaming right now must stay visible.
  */
 import { memo, useMemo, useRef, useState } from 'react'
 import type { ThreadItem } from '../../../shared/contracts'
 import { useI18n } from '../../../shared/i18n'
 import type { TurnGroup } from '../state/selectors'
 import { Button, ErrorBoundary, useToast } from '../../../shared/ui'
-import { splitTurnSections } from './turn-sections'
+import { splitTurnSections, splitProcessTrace, RECENT_TOOL_ROW_LIMIT } from './turn-sections'
 import { threadWritePaths } from '../tool-file'
 import { useEchoSafeToggle } from './use-echo-safe-toggle'
 import { UserBubble, AssistantBubble, FinalReplyCard, ReasoningBlock } from './MessageBubble'
@@ -177,6 +183,41 @@ function EditResendControl({
   )
 }
 
+/**
+ * Summary row standing in for the tool calls older than the default view: one
+ * line with the count. It is a pure UI fold owned by `TurnBlock` — the
+ * collapsed rows stay in the store and the toggle just switches between the
+ * folded and the full trace, so expanding never rebuilds or reorders the
+ * newest rows below. The state lives in `TurnBlock` (not here) because the
+ * expanded view renders sibling rows this row cannot own.
+ */
+function FoldedToolCallsRow({
+  count,
+  expanded,
+  onToggle
+}: {
+  count: number
+  expanded: boolean
+  onToggle: () => void
+}): JSX.Element {
+  const { t } = useI18n()
+  return (
+    <button
+      type="button"
+      className={`ark-foldedtools${expanded ? ' is-open' : ''}`}
+      aria-expanded={expanded}
+      onClick={onToggle}
+    >
+      <span className="ark-foldedtools__chevron" aria-hidden="true">
+        {expanded ? '▾' : '▸'}
+      </span>
+      {expanded
+        ? t('canvas.process.unfold', { count })
+        : t('canvas.process.folded', { count })}
+    </button>
+  )
+}
+
 export const TurnBlock = memo(function TurnBlock({
   threadId,
   group,
@@ -196,6 +237,20 @@ export const TurnBlock = memo(function TurnBlock({
   // this turn's write/edit calls carried. Recomputed only when the turn's item
   // identity changes — `group` keeps its identity across token streams.
   const writtenPaths = useMemo(() => threadWritePaths(group.items), [group.items])
+  // Default view of the work trace: older tool_call rows fold behind one
+  // summary row so a 30-call turn scans from its newest activity. Settled
+  // turns only — while rows stream the full trace stays visible, so the
+  // newest row is never momentarily swallowed by the fold. `traceExpanded`
+  // is a user override for the life of the block; the summary row keeps
+  // rendering while the fold holds rows, so it is always the way back.
+  const [traceExpanded, setTraceExpanded] = useState(false)
+  const trace = useMemo(() => splitProcessTrace(process, RECENT_TOOL_ROW_LIMIT), [process])
+  const foldActive = !live && !traceExpanded && trace.foldedToolCalls > 0
+  // Non-tool rows before the fold point always render in place; the folded
+  // tool rows themselves render only while the fold is not active.
+  const headRows = foldActive
+    ? trace.prefix.filter((item) => item.kind !== 'tool_call')
+    : trace.prefix
   // Same handler identity for every row of the turn; Markdown absorbs it.
   const openWritten = useOpenWrittenFile(writtenPaths)
 
@@ -235,7 +290,19 @@ export const TurnBlock = memo(function TurnBlock({
             <span className="ark-process__meta">{t('canvas.process.count', { count: process.length })}</span>
           </summary>
           <div className="ark-process__body">
-            {process.map((item) => (
+            {headRows.map((item) => (
+              <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
+                <StreamRow item={item} threadId={threadId} onFileChip={openWritten} writtenPaths={writtenPaths} />
+              </ErrorBoundary>
+            ))}
+            {trace.foldedToolCalls > 0 ? (
+              <FoldedToolCallsRow
+                count={trace.foldedToolCalls}
+                expanded={!foldActive}
+                onToggle={() => setTraceExpanded((v) => !v)}
+              />
+            ) : null}
+            {trace.tail.map((item) => (
               <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
                 <StreamRow item={item} threadId={threadId} onFileChip={openWritten} writtenPaths={writtenPaths} />
               </ErrorBoundary>
