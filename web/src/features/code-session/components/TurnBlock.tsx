@@ -11,24 +11,32 @@
  * `groupByTurn`), so a token streaming into the newest turn leaves every
  * earlier turn untouched — no re-render, no boundary re-mount. The process
  * card auto-expands while the turn runs and auto-collapses when it settles;
- * a user toggle pins it for the life of the block. The pin writes only from
- * real user toggles: the native `toggle` event also fires for React's own
- * open-state writes (mount, controlled updates), and those echoes are
- * filtered in `useEchoSafeToggle` — without the filter the mount echo pins
- * the card open and a settled turn never collapses.
+ * a user toggle pins it for as long as its phase lasts (`useEchoSafeToggle`).
+ * The pin writes only from real user toggles: the native `toggle` event also
+ * fires for React's own open-state writes (mount, controlled updates), and
+ * those echoes are filtered out — without the filter the mount echo pins the
+ * card open and a settled turn never collapses.
  *
- * Once settled, the trace also folds its older `tool_call` rows: only the
- * newest `RECENT_TOOL_ROW_LIMIT` calls stay expanded, earlier ones collapse
- * behind a summary row (`splitProcessTrace`), so a 30-call turn scans by its
- * latest activity instead of a wall of cards. While the turn runs the trace
- * stays unfolded — the row that is streaming right now must stay visible.
+ * Inside the card the earlier steps fold: only the newest
+ * `RECENT_ACTIVITY_ROW_LIMIT` reasoning/tool rows stay visible and everything
+ * earlier collapses behind one summary row (`splitProcessTrace`). The fold is
+ * active while the turn runs *and* after it settles — a long turn is scanned by
+ * its latest activity, and a finished one shows its answer rather than a wall
+ * of cards. Errors and notices never fold (they render at the interruption
+ * point), and the row that is streaming right now is by construction the newest
+ * activity row, so it always stays visible.
  */
 import { memo, useMemo, useRef, useState } from 'react'
 import type { ThreadItem } from '../../../shared/contracts'
 import { useI18n } from '../../../shared/i18n'
 import type { TurnGroup } from '../state/selectors'
 import { Button, ErrorBoundary, useToast } from '../../../shared/ui'
-import { splitTurnSections, splitProcessTrace, RECENT_TOOL_ROW_LIMIT } from './turn-sections'
+import {
+  splitTurnSections,
+  splitProcessTrace,
+  isFoldedProcessRow,
+  RECENT_ACTIVITY_ROW_LIMIT
+} from './turn-sections'
 import { threadWritePaths } from '../tool-file'
 import { useEchoSafeToggle } from './use-echo-safe-toggle'
 import { UserBubble, AssistantBubble, FinalReplyCard, ReasoningBlock } from './MessageBubble'
@@ -184,14 +192,14 @@ function EditResendControl({
 }
 
 /**
- * Summary row standing in for the tool calls older than the default view: one
- * line with the count. It is a pure UI fold owned by `TurnBlock` — the
+ * Summary row standing in for the steps older than the default view: one line
+ * with how many it holds. It is a pure UI fold owned by `TurnBlock` — the
  * collapsed rows stay in the store and the toggle just switches between the
  * folded and the full trace, so expanding never rebuilds or reorders the
  * newest rows below. The state lives in `TurnBlock` (not here) because the
  * expanded view renders sibling rows this row cannot own.
  */
-function FoldedToolCallsRow({
+function FoldedProcessRow({
   count,
   expanded,
   onToggle
@@ -237,27 +245,32 @@ export const TurnBlock = memo(function TurnBlock({
   // this turn's write/edit calls carried. Recomputed only when the turn's item
   // identity changes — `group` keeps its identity across token streams.
   const writtenPaths = useMemo(() => threadWritePaths(group.items), [group.items])
-  // Default view of the work trace: older tool_call rows fold behind one
-  // summary row so a 30-call turn scans from its newest activity. Settled
-  // turns only — while rows stream the full trace stays visible, so the
-  // newest row is never momentarily swallowed by the fold. `traceExpanded`
-  // is a user override for the life of the block; the summary row keeps
+  // Default view of the work trace: the earlier steps fold behind one summary
+  // row so a 30-step turn scans from its newest activity — while it runs and
+  // after it settles. `traceExpanded` is a user override; the summary row keeps
   // rendering while the fold holds rows, so it is always the way back.
   const [traceExpanded, setTraceExpanded] = useState(false)
-  const trace = useMemo(() => splitProcessTrace(process, RECENT_TOOL_ROW_LIMIT), [process])
-  const foldActive = !live && !traceExpanded && trace.foldedToolCalls > 0
-  // Non-tool rows before the fold point always render in place; the folded
-  // tool rows themselves render only while the fold is not active.
-  const headRows = foldActive
-    ? trace.prefix.filter((item) => item.kind !== 'tool_call')
-    : trace.prefix
+  // The phase `traceExpanded` was set in; the same reset rule as the card pin.
+  const [tracePhase, setTracePhase] = useState(live)
+  const expandTrace = (): void => {
+    setTraceExpanded((v) => !v)
+    setTracePhase(live)
+  }
+  const trace = useMemo(() => splitProcessTrace(process, RECENT_ACTIVITY_ROW_LIMIT), [process])
+  // The expansion belongs to the phase it was made in, exactly like the card
+  // pin: expanding the trace mid-turn must not carry over into the settled
+  // turn, where the default view is "newest steps only".
+  const expansionApplies = tracePhase === live
+  const foldActive = !(expansionApplies && traceExpanded) && trace.foldedActivityRows > 0
+  // The earlier slice renders only what the fold must not hide (errors and
+  // notices); everything else in it is represented by the summary row.
+  const headRows = foldActive ? trace.prefix.filter((item) => !isFoldedProcessRow(item)) : trace.prefix
   // Same handler identity for every row of the turn; Markdown absorbs it.
   const openWritten = useOpenWrittenFile(writtenPaths)
 
-  // `null` = follow the live state; a user toggle pins the card either way.
-  // The hook ignores native `toggle` echoes of React's own writes (mount and
-  // controlled updates both fire the event), so `pinned` means a real user
-  // click — that is what lets the card auto-collapse once the turn settles.
+  // `null` = follow the live state; a user toggle pins the card either way, but
+  // only for its own phase — `useEchoSafeToggle` drops a live-phase pin when the
+  // turn settles, so a finished turn always folds down to its answer.
   const { open, onToggle } = useEchoSafeToggle(live)
   const userText = userTextOfTurn(group)
 
@@ -295,11 +308,11 @@ export const TurnBlock = memo(function TurnBlock({
                 <StreamRow item={item} threadId={threadId} onFileChip={openWritten} writtenPaths={writtenPaths} />
               </ErrorBoundary>
             ))}
-            {trace.foldedToolCalls > 0 ? (
-              <FoldedToolCallsRow
-                count={trace.foldedToolCalls}
+            {trace.foldedActivityRows > 0 ? (
+              <FoldedProcessRow
+                count={trace.foldedActivityRows}
                 expanded={!foldActive}
-                onToggle={() => setTraceExpanded((v) => !v)}
+                onToggle={expandTrace}
               />
             ) : null}
             {trace.tail.map((item) => (
