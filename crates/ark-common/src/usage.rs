@@ -24,6 +24,13 @@ pub struct Usage {
     pub cache_hit_rate: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    /// Wall-clock duration of the model call this sample closes, measured
+    /// by the agent loop around the provider stream. Optional because only
+    /// the runtime's per-round samples set it: a provider payload parsed by
+    /// `ark-llm` never carries one, and aggregates must not invent it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub duration_ms: Option<u64>,
     /// Set once any folded sample omitted a native cache counter.
     ///
     /// Not serialized: it is bookkeeping for `merge`, not a wire field. Without
@@ -82,6 +89,10 @@ impl Usage {
             Usage::rate(self.cache_hit_tokens, self.cache_miss_tokens)
         };
         self.cost_usd = sum_opt_f(self.cost_usd, other.cost_usd);
+        // Measured per-round durations fold with `sum_opt`: a sample without
+        // one contributes nothing, so an aggregate stays `None` until every
+        // folded sample was timed. This keeps "unknown" distinct from 0.
+        self.duration_ms = sum_opt(self.duration_ms, other.duration_ms);
     }
 }
 
@@ -131,6 +142,24 @@ mod tests {
         assert_eq!(total.cache_hit_tokens, Some(120));
         assert_eq!(total.cache_miss_tokens, Some(30));
         assert_eq!(total.cache_hit_rate, Some(0.8));
+    }
+
+    #[test]
+    fn merge_sums_measured_durations_and_stays_unknown_without_them() {
+        // Per-round wall-clock samples fold like the cache counters: the
+        // aggregate is a sum only when every sample was timed.
+        let mut total = Usage::new(10, 5);
+        total.duration_ms = Some(1_200);
+        total.merge(&{
+            let mut next = Usage::new(5, 5);
+            next.duration_ms = Some(800);
+            next
+        });
+        assert_eq!(total.duration_ms, Some(2_000));
+
+        let mut unmeasured = Usage::new(10, 5);
+        unmeasured.merge(&Usage::new(5, 5));
+        assert_eq!(unmeasured.duration_ms, None);
     }
 
     #[test]

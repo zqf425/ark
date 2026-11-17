@@ -49,6 +49,7 @@ import { RewindControl } from './RewindControl'
 import { executeEditResend, userTextOfTurn } from './rewind-flow'
 import type { RewindAvailability } from './rewind-flow'
 import { useCodeSessionStore } from '../state/store'
+import { turnDurationMs } from './session-stats'
 
 /**
  * The server's own message is the only accurate explanation for a refusal
@@ -265,6 +266,10 @@ export const TurnBlock = memo(function TurnBlock({
   // The earlier slice renders only what the fold must not hide (errors and
   // notices); everything else in it is represented by the summary row.
   const headRows = foldActive ? trace.prefix.filter((item) => !isFoldedProcessRow(item)) : trace.prefix
+  // This turn's measured model time: the store's per-round fold, recomputed
+  // only when the rounds channel changes (usage events / snapshot refresh).
+  const allRounds = useCodeSessionStore((s) => s.rounds)
+  const turnMs = useMemo(() => turnDurationMs(allRounds, group.turnId), [allRounds, group.turnId])
   // Same handler identity for every row of the turn; Markdown absorbs it.
   const openWritten = useOpenWrittenFile(writtenPaths)
 
@@ -325,7 +330,7 @@ export const TurnBlock = memo(function TurnBlock({
       ) : null}
       {reply.map((item) => (
         <ErrorBoundary key={item.item_id} label={t('thread.canvas.boundaryRow')}>
-          <FinalReplyCard item={item} onFileChip={openWritten} writablePaths={writtenPaths} />
+          <FinalReplyCard item={item} onFileChip={openWritten} writablePaths={writtenPaths} turnMs={turnMs} />
         </ErrorBoundary>
       ))}
       <ErrorBoundary label={t('thread.canvas.boundaryRewind')}>

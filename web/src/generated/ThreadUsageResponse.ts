@@ -15,4 +15,11 @@ turns: number,
 /**
  * Individual model rounds folded in.
  */
-samples: number, prompt_tokens: number, completion_tokens: number, total_tokens: number, cache_hit_tokens?: number, cache_miss_tokens?: number, cache_hit_rate?: number, cost_usd?: number, };
+samples: number, prompt_tokens: number, completion_tokens: number, total_tokens: number, cache_hit_tokens?: number, cache_miss_tokens?: number, cache_hit_rate?: number, cost_usd?: number, 
+/**
+ * Wall-clock duration of the model call this sample closes, measured
+ * by the agent loop around the provider stream. Optional because only
+ * the runtime's per-round samples set it: a provider payload parsed by
+ * `ark-llm` never carries one, and aggregates must not invent it.
+ */
+duration_ms?: number, };

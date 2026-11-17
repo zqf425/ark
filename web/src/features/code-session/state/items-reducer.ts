@@ -23,6 +23,7 @@ import {
   type ItemsDraft
 } from './items-draft'
 import { foldUsage } from './usage'
+import { appendRound } from './rounds'
 import type { CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
 
 export function emptyItemsState(): ItemsSnapshot {
@@ -41,7 +42,8 @@ export function emptyItemsState(): ItemsSnapshot {
     rewoundFromSeq: null,
     usage: null,
     roundWindow: null,
-    lastCompaction: null
+    lastCompaction: null,
+    rounds: []
   }
 }
 
@@ -162,6 +164,10 @@ function eventMs(timestamp: string): number {
  * Track the streaming window of the in-flight model round: from the round's
  * first delta to its latest one. The next `usage` event pairs its
  * provider-reported completion tokens with this window to derive tok/s.
+ *
+ * `startMs` falls back to the round boundary (turn start or the previous
+ * round's `usage`), so a round without visible deltas still yields a sane
+ * duration estimate for the per-round fold.
  */
 function trackDeltaWindow(draft: ItemsDraft, timestamp: string): void {
   const ms = eventMs(timestamp)
@@ -209,7 +215,8 @@ function upsertItem(draft: ItemsDraft, item: ThreadItem): void {
     text: item.text ?? existing.text,
     tool: item.tool ?? existing.tool,
     detail: item.detail ?? existing.detail,
-    attachments: item.attachments ?? existing.attachments
+    attachments: item.attachments ?? existing.attachments,
+    model: item.model ?? existing.model
   }
   if (sameItemContent(existing, merged)) return
   draftItems(draft)[item.item_id] = merged
@@ -316,11 +323,14 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       foldToolCall(draft, event)
       return commitDraft(draft)
 
-    case 'turn_started':
+    case 'turn_started': {
       draft.activeTurnId = event.turn_id
       setTurn(draft, event.turn_id, 'running')
-      resetDeltaWindow(draft)
+      // Seed the round boundary so a first round without visible deltas
+      // still measures from the turn start when its `usage` lands.
+      draft.roundWindow = { startMs: eventMs(event.timestamp), lastMs: eventMs(event.timestamp) }
       return commitDraft(draft)
+    }
 
     case 'turn_completed':
       setTurn(draft, event.turn_id, 'completed')
@@ -452,6 +462,16 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       const tokensPerSec =
         window && seconds >= MIN_STREAM_WINDOW_SECONDS ? event.usage.completion_tokens / seconds : null
       draft.usage = foldUsage(draft.usage, event.usage, tokensPerSec)
+      // The same event closes one model round: record its duration (the
+      // provider-measured value when present, the client window otherwise)
+      // so the turn total covers rounds even before the next HTTP refresh.
+      const measuredMs =
+        event.usage.duration_ms != null && event.usage.duration_ms > 0
+          ? event.usage.duration_ms
+          : window && window.lastMs >= window.startMs
+            ? window.lastMs - window.startMs
+            : 0
+      draft.rounds = appendRound(draft.rounds, { turnId: event.turn_id, durationMs: measuredMs })
       resetDeltaWindow(draft)
       return commitDraft(draft)
     }

@@ -172,15 +172,23 @@ fn close_round(
         }
     }
     acc.pending_errors = deferred;
+    // The loop measures the model call itself (usage.duration_ms); the window
+    // between round boundaries is the fallback for logs written before the
+    // field existed — it includes tool time, so it must not override a real
+    // measurement. The value rides the flattened usage, which is the round's
+    // single duration field on the wire.
+    let mut round_usage = usage.clone();
+    if round_usage.duration_ms.is_none() {
+        round_usage.duration_ms = Some((ended_at - started_at).num_milliseconds().max(0) as u64);
+    }
     acc.rounds.push(LlmRound {
         thread_id,
         turn_id,
         round,
         started_at,
         ended_at,
-        duration_ms: (ended_at - started_at).num_milliseconds().max(0) as u64,
         errors,
-        usage: usage.clone(),
+        usage: round_usage,
     });
     acc.last_end = Some(ended_at);
 }
@@ -479,14 +487,65 @@ mod tests {
         assert_eq!(rounds[0].round, 1);
         assert_eq!(rounds[0].started_at, at(0));
         assert_eq!(rounds[0].ended_at, at(10));
-        assert_eq!(rounds[0].duration_ms, 10);
+        assert_eq!(rounds[0].usage.duration_ms, Some(10));
         assert_eq!(rounds[0].errors.len(), 1);
         assert_eq!(rounds[0].errors[0].message, "provider hiccup");
         assert_eq!(rounds[1].round, 2);
         assert_eq!(rounds[1].started_at, at(10));
-        assert_eq!(rounds[1].duration_ms, 30);
+        assert_eq!(rounds[1].usage.duration_ms, Some(30));
         assert_eq!(rounds[1].errors.len(), 1);
         assert_eq!(rounds[1].errors[0].message, "late failure");
+    }
+
+    #[test]
+    fn measured_round_duration_wins_over_the_boundary_window() {
+        // The loop measures the model call itself. A long tool execution
+        // between rounds must not inflate the reported model time, and a
+        // pre-measurement log (no `usage.duration_ms`) falls back to the
+        // window between round boundaries.
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let mut measured = Usage::new(10, 5);
+        measured.duration_ms = Some(1_200);
+        let events = vec![
+            RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
+                seq: 1,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(0),
+                auto_continuation: false,
+                attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
+            },
+            RuntimeEvent::Usage {
+                seq: 2,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(10),
+                usage: measured,
+            },
+            RuntimeEvent::Usage {
+                seq: 3,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(40),
+                usage: Usage::new(20, 10),
+            },
+        ];
+
+        let rounds = derive_rounds(&events, None);
+        assert_eq!(rounds.len(), 2);
+        assert_eq!(
+            rounds[0].usage.duration_ms,
+            Some(1_200),
+            "measured model time wins"
+        );
+        assert_eq!(
+            rounds[1].usage.duration_ms,
+            Some(30),
+            "unmeasured samples fall back to the window"
+        );
     }
 
     #[test]

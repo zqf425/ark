@@ -9,17 +9,26 @@ import type { TurnId } from "./TurnId";
  * A round is one completed model call, bounded by the authoritative `usage`
  * event the loop appends right after the call settles. `started_at` is the
  * previous boundary inside the same turn (the previous round's end or the
- * `turn_started` timestamp), so `duration_ms` covers the whole call window,
- * not just the final chunk.
+ * `turn_started` timestamp). The flattened usage's `duration_ms` is the
+ * round duration the projection reports: the loop's measured model-call
+ * wall time when present, the boundary window (which includes tool time)
+ * as the fallback for logs written before the field existed.
  */
 export type LlmRound = { thread_id: ThreadId, turn_id: TurnId, 
 /**
  * 1-based index of this model call within its turn.
  */
-round: number, started_at: string, ended_at: string, duration_ms: number, 
+round: number, started_at: string, ended_at: string, 
 /**
  * Errors the runtime recorded inside this round's window, newest last.
  * Always serialized (possibly empty) so the wire shape matches the
  * generated TS type, where `errors` is a required array.
  */
-errors: Array<LlmRoundError>, prompt_tokens: number, completion_tokens: number, total_tokens: number, cache_hit_tokens?: number, cache_miss_tokens?: number, cache_hit_rate?: number, cost_usd?: number, };
+errors: Array<LlmRoundError>, prompt_tokens: number, completion_tokens: number, total_tokens: number, cache_hit_tokens?: number, cache_miss_tokens?: number, cache_hit_rate?: number, cost_usd?: number, 
+/**
+ * Wall-clock duration of the model call this sample closes, measured
+ * by the agent loop around the provider stream. Optional because only
+ * the runtime's per-round samples set it: a provider payload parsed by
+ * `ark-llm` never carries one, and aggregates must not invent it.
+ */
+duration_ms?: number, };

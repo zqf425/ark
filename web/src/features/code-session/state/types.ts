@@ -48,6 +48,16 @@ export type RoundWindow = {
   lastMs: number
 }
 
+/**
+ * Renderer fold of the authoritative per-round model timings. Seeded from
+ * `GET /v1/debug/llm-rounds` and extended by live `usage` events; see
+ * `rounds.ts` for the fold contract.
+ */
+export type RoundTiming = {
+  turnId: TurnId
+  durationMs: number
+}
+
 /** Latest `compaction_completed` notice; diagnostics for the context meter. */
 export type CompactionNotice = {
   removedItems: number
@@ -106,6 +116,8 @@ export type ItemsSnapshot = {
   usage: UsageAggregate | null
   /** Streaming window of the in-flight model round; null between rounds. */
   roundWindow: RoundWindow | null
+  /** Per-round model-call durations (snapshot-seeded, live-extended). */
+  rounds: RoundTiming[]
   /** Newest compaction notice, cleared on rewind with the rest of the projection. */
   lastCompaction: CompactionNotice | null
 }

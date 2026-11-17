@@ -13,6 +13,7 @@ import type { RuntimeEvent, ThreadId } from '../../../shared/contracts'
 import { useToast } from '../../../shared/ui'
 import { subscribeThreadEvents } from '../api/events-api'
 import { getThread, getThreadUsage } from '../api/threads-api'
+import { listLlmRounds } from '../api/llm-rounds-api'
 import { childCompletionStatusKey } from '../child-completion-status'
 import { useCodeSessionStore } from '../state/store'
 import { notifyTurnEnded } from './turn-end-toast'
@@ -47,6 +48,7 @@ export function useThreadStream(threadId: ThreadId | null): void {
   const setDetailStatus = useCodeSessionStore((s) => s.setDetailStatus)
   const setStreamStatus = useCodeSessionStore((s) => s.setStreamStatus)
   const noteThreadUsage = useCodeSessionStore((s) => s.noteThreadUsage)
+  const noteThreadRounds = useCodeSessionStore((s) => s.noteThreadRounds)
   const noteThreadSeq = useCodeSessionStore((s) => s.noteThreadSeq)
   const noteThreadActivity = useCodeSessionStore((s) => s.noteThreadActivity)
   // A rewind physically truncates history; bumping this token re-runs the whole
@@ -113,6 +115,17 @@ export function useThreadStream(threadId: ThreadId | null): void {
             // diagnosable: surface the failure in development like the
             // reducer's unhandled-event warn.
             if (import.meta.env.DEV) console.warn('[ark] thread usage seed failed')
+          })
+
+        // Per-round model timings come from the bounded diagnostics surface
+        // and are authoritative over live-estimated rounds; same best-effort
+        // seeding contract as the usage aggregate above.
+        void listLlmRounds(threadId, controller.signal)
+          .then((rounds) => {
+            if (!cancelled) noteThreadRounds(rounds)
+          })
+          .catch(() => {
+            if (import.meta.env.DEV) console.warn('[ark] thread rounds seed failed')
           })
 
         await subscribeThreadEvents({
@@ -224,5 +237,5 @@ export function useThreadStream(threadId: ThreadId | null): void {
       controller.abort()
       setStreamStatus('closed')
     }
-  }, [threadId, reloadToken, ingestEvent, noteThreadActivity, noteThreadSeq, noteThreadUsage, requestStreamReload, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
+  }, [threadId, reloadToken, ingestEvent, noteThreadActivity, noteThreadRounds, noteThreadSeq, noteThreadUsage, requestStreamReload, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
 }

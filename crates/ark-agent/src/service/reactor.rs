@@ -103,8 +103,9 @@ impl std::fmt::Debug for ReactorConfig {
 }
 
 /// One model round's result, after the stream pump folded the deltas.
+/// `Settled` carries the measured wall-clock duration of the model call.
 enum Round {
-    Settled(ModelResponse),
+    Settled(ModelResponse, Option<u64>),
     Aborted,
     Failed(String),
 }
@@ -168,6 +169,10 @@ pub struct Reactor {
     terminal_outcome: Option<TurnOutcome>,
     /// Monotonic gate id component so duplicate `call_id`s stay distinct.
     gate_seq: u64,
+    /// `provider:model` of the client this turn was built with, stamped on
+    /// the turn's user items. Empty provider/model strings stay unlabeled
+    /// rather than printing a misleading `:` separator.
+    model_label: Option<String>,
 }
 
 /// One correction staged for the in-flight model round: the text plus the
@@ -177,6 +182,22 @@ pub struct Reactor {
 struct StagedSteering {
     text: String,
     attachment_ids: Vec<AttachmentId>,
+}
+
+/// `provider:model` of the client this turn will call. The label is a
+/// turn-time snapshot: a mid-session model switch applies to the next
+/// turn, so only the client itself knows what this turn used.
+fn model_label_of(model: &dyn ModelClient) -> Option<String> {
+    let provider = model.provider_id().trim();
+    let name = model.model().trim();
+    if provider.is_empty() && name.is_empty() {
+        return None;
+    }
+    Some(match (provider.is_empty(), name.is_empty()) {
+        (true, false) => name.to_string(),
+        (false, true) => provider.to_string(),
+        _ => format!("{provider}:{name}"),
+    })
 }
 
 impl Reactor {
@@ -196,6 +217,7 @@ impl Reactor {
             steer_outcome_recorder,
         } = config;
         Self {
+            model_label: model_label_of(model.as_ref()),
             model,
             tools,
             writer,
@@ -375,6 +397,9 @@ impl Reactor {
             let mut item = ThreadItem::new(self.events.turn_id, ItemKind::UserMessage)
                 .with_text(text)
                 .completed();
+            if let Some(label) = self.model_label.clone() {
+                item = item.with_model(label);
+            }
             if !self.events.attachment_outcomes().is_empty() {
                 item = item.with_attachments(self.events.attachment_outcomes().to_vec());
             }
@@ -474,9 +499,9 @@ impl Reactor {
         let estimate = TokenEstimator::new().estimate_request(&self.request());
         self.machine.set_prompt_estimate(estimate);
         match self.pump().await? {
-            Round::Settled(response) => {
+            Round::Settled(response, duration_ms) => {
                 self.commit_steering().await?;
-                self.settle_model(response).await
+                self.settle_model(response, duration_ms).await
             }
             Round::Failed(message) => {
                 self.commit_steering().await?;
@@ -521,6 +546,9 @@ impl Reactor {
             let mut item = ThreadItem::new(self.events.turn_id, ItemKind::UserMessage)
                 .with_text(staged.text)
                 .completed();
+            if let Some(label) = self.model_label.clone() {
+                item = item.with_model(label);
+            }
             if let Some(resolve) = &self.steer_outcome_recorder {
                 let outcomes = resolve(&staged.attachment_ids);
                 if !outcomes.is_empty() {
@@ -585,12 +613,17 @@ impl Reactor {
     }
 
     /// Stream one model round, folding deltas into one response.
+    ///
+    /// The wall-clock window covers the whole provider call (connect plus
+    /// stream): it is the per-round duration the usage event records, so the
+    /// session strip sums model time only — never tool execution.
     async fn pump(&mut self) -> Result<Round> {
         let (sender, mut receiver) = mpsc::channel(self.chunk_buffer.max(1));
         // Clone the Arc so the stream borrows a local, not `self`.
         let model = Arc::clone(&self.model);
         let stream = model.stream(self.request(), sender);
         tokio::pin!(stream);
+        let started = tokio::time::Instant::now();
         let mut acc = Accumulator::default();
         let mut result: Option<Result<ModelResponse>> = None;
         let mut open = true;
@@ -606,8 +639,9 @@ impl Reactor {
                 },
             }
         }
+        let duration_ms = started.elapsed().as_millis().try_into().ok();
         match result {
-            Some(Ok(response)) => Ok(Round::Settled(acc.finish(response))),
+            Some(Ok(response)) => Ok(Round::Settled(acc.finish(response), duration_ms)),
             Some(Err(err)) => Ok(Round::Failed(err.to_string())),
             None => Ok(Round::Failed(
                 "model stream ended without a response".into(),
@@ -703,9 +737,10 @@ impl Reactor {
                 tool: None,
                 detail: None,
                 // StreamItem only buffers assistant/reasoning text, which never
-                // carries a marker or attachments.
+                // carries a marker, attachments or a model label.
                 marker: None,
                 attachments: None,
+                model: None,
             };
             self.writer
                 .append(self.events.item_completed(completed))
@@ -715,8 +750,17 @@ impl Reactor {
     }
 
     /// Fold the settled response into history and build the `ModelSettled` input.
-    async fn settle_model(&mut self, response: ModelResponse) -> Result<TurnInput> {
-        let usage = response.usage.clone();
+    ///
+    /// `duration_ms` is the round's measured model-call wall time; it rides
+    /// the authoritative usage event so every downstream projection (session
+    /// strip, turn total) sums model time without re-timing anything.
+    async fn settle_model(
+        &mut self,
+        response: ModelResponse,
+        duration_ms: Option<u64>,
+    ) -> Result<TurnInput> {
+        let mut usage = response.usage.clone();
+        usage.duration_ms = duration_ms;
         let mut calls = Vec::new();
         let mut user_inputs = Vec::new();
         for (call_id, tool, arguments) in response.tool_calls.clone() {

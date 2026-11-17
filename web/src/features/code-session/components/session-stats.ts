@@ -5,15 +5,7 @@
  * from renderer timestamps; this module only folds the reported samples and
  * renders a numeric clock so no user-facing prose is hardcoded here.
  */
-import type { LlmRound } from '../../../shared/contracts'
-
-/** Sum of completed model-call durations; bad samples are ignored, not faked. */
-export function totalDurationMs(rounds: readonly LlmRound[]): number {
-  return rounds.reduce((total, round) => {
-    const value = round.duration_ms
-    return Number.isFinite(value) ? total + Math.max(0, value) : total
-  }, 0)
-}
+import type { RoundTiming } from '../state/types'
 
 /** Numeric clock only (`m:ss` / `h:mm:ss`); wording lives in the i18n catalog. */
 export function formatDuration(ms: number): string {
@@ -25,7 +17,13 @@ export function formatDuration(ms: number): string {
   return hours > 0 ? `${hours}:${pad(minutes)}:${pad(rest)}` : `${minutes}:${pad(rest)}`
 }
 
-/** Unique turns that produced at least one model round. */
-export function countTurns(rounds: readonly LlmRound[]): number {
-  return new Set(rounds.map((round) => round.turn_id)).size
+/**
+ * Sum of one turn's measured model rounds. A live round without a recorded
+ * duration contributes 0 rather than blocking the row's clock.
+ */
+export function turnDurationMs(rounds: readonly RoundTiming[], turnId: string): number {
+  return rounds.reduce(
+    (total, round) => (round.turnId === turnId && Number.isFinite(round.durationMs) ? total + Math.max(0, round.durationMs) : total),
+    0
+  )
 }

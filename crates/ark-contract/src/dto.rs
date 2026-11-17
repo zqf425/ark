@@ -556,8 +556,10 @@ pub struct ThreadUsageResponse {
 /// A round is one completed model call, bounded by the authoritative `usage`
 /// event the loop appends right after the call settles. `started_at` is the
 /// previous boundary inside the same turn (the previous round's end or the
-/// `turn_started` timestamp), so `duration_ms` covers the whole call window,
-/// not just the final chunk.
+/// `turn_started` timestamp). The flattened usage's `duration_ms` is the
+/// round duration the projection reports: the loop's measured model-call
+/// wall time when present, the boundary window (which includes tool time)
+/// as the fallback for logs written before the field existed.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct LlmRound {
@@ -568,8 +570,6 @@ pub struct LlmRound {
     pub round: u64,
     pub started_at: DateTime<Utc>,
     pub ended_at: DateTime<Utc>,
-    #[ts(as = "f64")]
-    pub duration_ms: u64,
     /// Errors the runtime recorded inside this round's window, newest last.
     /// Always serialized (possibly empty) so the wire shape matches the
     /// generated TS type, where `errors` is a required array.

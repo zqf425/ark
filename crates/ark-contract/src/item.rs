@@ -94,6 +94,14 @@ pub struct ThreadItem {
     /// stream; `#[serde(default)]` keeps pre-existing items readable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<TurnAttachmentOutcome>>,
+    /// `provider:model` identity the turn actually used, stamped on the turn's
+    /// opening `UserMessage` (and on steered corrections). The label travels
+    /// with the item because a mid-session model switch applies only to the
+    /// *next* turn: reading the thread's current override would mislabel every
+    /// historical row. `#[serde(default)]` keeps pre-existing items readable;
+    /// omitted means the turn predates the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 impl ThreadItem {
@@ -109,6 +117,7 @@ impl ThreadItem {
             detail: None,
             marker: None,
             attachments: None,
+            model: None,
         }
     }
 
@@ -119,6 +128,13 @@ impl ThreadItem {
 
     pub fn with_attachments(mut self, attachments: Vec<TurnAttachmentOutcome>) -> Self {
         self.attachments = Some(attachments);
+        self
+    }
+
+    /// Stamp the `provider:model` label the turn actually used (see the field
+    /// docs): the renderer shows it beside the user bubble's clock.
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
         self
     }
 

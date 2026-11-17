@@ -20,4 +20,13 @@ export type ThreadItem = { item_id: ItemId, turn_id: TurnId, kind: ItemKind, sta
  * history replay and thread detail render the same chips as the live
  * stream; `#[serde(default)]` keeps pre-existing items readable.
  */
-attachments?: Array<TurnAttachmentOutcome>, };
+attachments?: Array<TurnAttachmentOutcome>, 
+/**
+ * `provider:model` identity the turn actually used, stamped on the turn's
+ * opening `UserMessage` (and on steered corrections). The label travels
+ * with the item because a mid-session model switch applies only to the
+ * *next* turn: reading the thread's current override would mislabel every
+ * historical row. `#[serde(default)]` keeps pre-existing items readable;
+ * omitted means the turn predates the field.
+ */
+model?: string, };

@@ -13,7 +13,7 @@
  * object, so the row memo still bails out.
  */
 import type { ItemId, ThreadItem, TurnId, TurnState } from '../../../shared/contracts'
-import type { CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput, RoundWindow, UsageAggregate } from './types'
+import type { CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput, RoundTiming, RoundWindow, UsageAggregate } from './types'
 
 export type ItemsDraft = {
   base: ItemsSnapshot
@@ -32,6 +32,7 @@ export type ItemsDraft = {
   usage: UsageAggregate | null
   roundWindow: RoundWindow | null
   lastCompaction: CompactionNotice | null
+  rounds: RoundTiming[]
 }
 
 export function draftOf(base: ItemsSnapshot): ItemsDraft {
@@ -51,7 +52,8 @@ export function draftOf(base: ItemsSnapshot): ItemsDraft {
     rewoundFromSeq: base.rewoundFromSeq,
     usage: base.usage,
     roundWindow: base.roundWindow,
-    lastCompaction: base.lastCompaction
+    lastCompaction: base.lastCompaction,
+    rounds: base.rounds
   }
 }
 
@@ -99,7 +101,8 @@ export function commitDraft(draft: ItemsDraft): ItemsSnapshot {
     // `roundWindow` is a value field, not a copy-on-write channel: null means
     // "window reset", so it must not fall back to the base snapshot here.
     roundWindow: draft.roundWindow,
-    lastCompaction: draft.lastCompaction
+    lastCompaction: draft.lastCompaction,
+    rounds: draft.rounds
   }
 }
 
@@ -118,6 +121,7 @@ export function sameItemContent(left: ThreadItem, right: ThreadItem): boolean {
     left.text === right.text &&
     left.tool === right.tool &&
     left.detail === right.detail &&
-    left.attachments === right.attachments
+    left.attachments === right.attachments &&
+    left.model === right.model
   )
 }

@@ -1,8 +1,9 @@
 import type { StateCreator } from 'zustand'
-import type { RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot, ThreadUsageResponse } from '../../../shared/contracts'
+import type { LlmRoundsResponse, RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot, ThreadUsageResponse } from '../../../shared/contracts'
 import type { StreamStatus } from '../api/events-api'
 import { applyEvent, emptyItemsState, markApprovalLocally, markUserInputLocally, seedFromItems } from './items-reducer'
 import { seedUsage } from './usage'
+import { roundsFromSnapshot } from './rounds'
 import type { ItemsSnapshot, LoadStatus } from './types'
 
 export type ItemsSlice = ItemsSnapshot & {
@@ -27,6 +28,12 @@ export type ItemsSlice = ItemsSnapshot & {
   noteUserInputAnswered: (requestId: string, answer: string) => void
   /** Seed the usage aggregate from the thread usage endpoint (idempotent). */
   noteThreadUsage: (usage: ThreadUsageResponse) => void
+  /**
+   * Replace the per-round model timings from the diagnostics snapshot. The
+   * snapshot is authoritative: it wins over any live-estimated rounds for
+   * the same thread, and never accumulates with them.
+   */
+  noteThreadRounds: (response: LlmRoundsResponse) => void
 }
 
 export const createItemsSlice: StateCreator<ItemsSlice, [], [], ItemsSlice> = (set, get) => ({
@@ -66,5 +73,7 @@ export const createItemsSlice: StateCreator<ItemsSlice, [], [], ItemsSlice> = (s
 
   noteUserInputAnswered: (requestId, answer) => set(markUserInputLocally(get(), requestId, answer)),
 
-  noteThreadUsage: (usage) => set(seedUsage(get(), usage))
+  noteThreadUsage: (usage) => set(seedUsage(get(), usage)),
+
+  noteThreadRounds: (response) => set({ rounds: roundsFromSnapshot(response) })
 })

@@ -1,8 +1,9 @@
 /**
  * Bounded diagnostics surface used by the session statistics strip.
  *
- * Rounds and their `duration_ms` are folded server-side from the authoritative
- * `usage` events; the renderer only sums them, never times model calls itself.
+ * Rounds and their measured `duration_ms` are folded server-side from the
+ * authoritative `usage` events; the renderer only sums them, never times
+ * model calls itself.
  */
 import type { LlmRoundsResponse, ThreadId } from '../../../shared/contracts'
 import { get } from '../../../shared/api/client'

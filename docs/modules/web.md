@@ -80,8 +80,12 @@
 - 消息行带身份标识（对齐主流 agent 画布）：助手元信息行前置 18px 圆形头像盘——hairline 圆环内嵌
   "ark" 字标，纯 CSS 无位图（`ark-msg__avatar`）；助手正文 `padding-left: 25px` 与头像后的作者名
   对齐，形成稳定的纵向导轨。用户气泡不渲染头像与「你」作者行：右侧独立气泡卡本身已表明说话者，
-  冗余的作者标签是重复信息——气泡 meta 行退化为底部一行（时间 + 复制按钮），`canvas.author.you` 与
-  `canvas.author.youInitial` 键已随行为删除；助手字标 "ark" 是产品名，不进 i18n。
+  冗余的作者标签是重复信息——气泡 meta 行退化为底部一行（时间 + 模型标签 + 复制按钮；模型标签
+  `ark-msg__model` 渲染 `ThreadItem.model`，即该回合实际使用的 `provider:model`，缺失时省略），
+  `canvas.author.you` 与 `canvas.author.youInitial` 键已随行为删除；助手字标 "ark" 是产品名，不进 i18n。
+- 被提升的最终回复卡在 footer 的时间旁展示本回合的模型耗时（`ark-reply__duration`，`TurnBlock` 按回合
+  从 store 的每轮耗时折叠 `turnDurationMs` 求和传入）：回合内各次模型调用实测耗时之和，与会话统计条
+  的总耗时同源（同一 `state/rounds.ts` 折叠），因此"各轮次之和 = 统计条总耗时"成立；无已记录轮次时不显示。
 - 工具卡头部带工具族图标盘（`ark-tool__icon`，22px 圆角方块 + CSS mask 单色图标）：按工具名
   归入 read/write/exec/search 四族，未知名回落 wrench，与主流 agent 的活动行一致让长回合可按
   形状扫读；折叠头部新增单行参数摘要（`ark-tool__digest`，取首个参数 `key=value` 截断省略，
@@ -132,7 +136,8 @@
   回合结束后，被提升的最终回复渲染为独立答案卡（`FinalReplyCard`，`ark-reply`）：对勾圆环图标 +
   "最终回复"标题行 + 全宽分隔线 + markdown 正文（答案卡样式），卡底右下角的操作行
   （`ark-reply__foot`，hover 显现复制按钮）带生成时间（`formatClock(item.created_at)`，与用户
-  气泡 footer 的时钟同款），流式/中断/失败状态与气泡一致；过程卡内的中间
+  气泡 footer 的时钟同款）与本回合模型耗时（`ark-reply__duration`，实测轮次之和，见下文统计条与
+  `state/rounds.ts` 折叠），流式/中断/失败状态与气泡一致；过程卡内的中间
   叙述仍是普通助手气泡，避免卡中卡。
   分组规则在 `turn-sections.ts` 纯函数中，可独立单测。回合多于一个时在画布右缘提供逐回合跳转导航条。
   过程卡内默认只完整展示最近 3 条活动行（`RECENT_ACTIVITY_ROW_LIMIT`，活动行 =
@@ -281,7 +286,8 @@
   清单挤占输入框；推理强度留在菜单 footer；所有选择打开时重读线程覆盖、写入仍走 `PATCH`。
   设置页使用生成契约提供同一全局权限，展示“永远询问”“仅工作区修改”“完全访问”三档。
 - 会话标题下方有紧凑统计条（`SessionStatsBar`）：轮次与模型调用数来自 `GET /v1/threads/{id}/usage`，
-  墙钟耗时来自 `GET /v1/debug/llm-rounds`（服务端按权威 `usage` 事件折出的 `duration_ms`），并展示
+  耗时是 store 的每轮耗时折叠（`state/rounds.ts`：HTTP 快照播种、live `usage` 事件追加，快照权威覆盖
+  live 估计），即各次模型调用实测耗时之和——只统计模型回复时间，不含工具执行；并展示
   prompt/completion/total tokens、真实 `cache_hit_rate` 与 `cost_usd`；诊断分页 `truncated` 为真时把调用数
   标为下限，请求失败保留上次已验证数值而不伪造零。运行时版本、SSE 状态、数据目录等诊断信息不能占据
   主任务层级，必须退为状态详情或提示信息。

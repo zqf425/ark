@@ -46,6 +46,15 @@ gated 在 `Notice` kind 上）。取消原因词表与自治权词表不在本 c
 `ToolCallStarted` 做跨事件 join。`with_seq` 的逐变体重写集中在 `event/with_seq.rs`；每行拼写一个
 变体的完整字段表，新增变体或载荷字段必须在此同步一行，编译器的穷尽检查保证不漏。
 
+`ThreadItem.model`（serde default，省略空值）记录创建该 item 的回合实际使用的 `provider:model`
+标识：reactor 在回合开始时从注入的 `ModelClient` 取快照盖在开场的 `UserMessage` item（及 steer
+补写的用户 item）上。标签随 item 走而不是读线程当前覆盖值，因为模型切换只对**下一回合**生效——
+读当前值会给所有历史行贴错标签；web 在用户气泡时间旁渲染该标签。
+
+`Usage.duration_ms`（serde default，省略空值）是该样本关闭的那次模型调用的实测墙钟耗时：只由
+runtime 每轮结算的 usage 事件写入（`ark-llm` 解析的 provider payload 永远不带它，聚合不发明它）；
+`merge` 按 `sum_opt` 语义折叠，任一样本未计时则聚合保持 None（"未知"与 "0" 不混淆）。
+
 `TurnStarted.auto_recovery: u32`（serde default `0`，序列化时省略零值）标记 harness 自动恢复
 回合及其尝试序号：前一个回合因瞬态模型请求失败（`model_request_failed = true`）终结后，恢复调度器
 以同一请求文本重开回合并把 1-based 尝试号写进该字段；普通用户/IM/自动续跑回合保持 `0` 且不出现在

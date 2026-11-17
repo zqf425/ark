@@ -102,6 +102,7 @@ impl TurnRunner for ReplyRunner {
             detail: None,
             marker: None,
             attachments: None,
+            model: None,
         };
         self.store
             .append_event(

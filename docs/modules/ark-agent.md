@@ -46,6 +46,12 @@ HTTP 侧批准一条策略表明确拒绝的调用。
 - 同一回合的正文 delta 与 reasoning delta 使用各自稳定的 item ID；两类内容不得合并为同一个渲染条目，
   以保证默认折叠的 reasoning 不会遮蔽用户可见正文。
 - 每个模型轮次创建的正文和 reasoning 条目在该轮结算时写入最终文本并完成；失败、取消和其它回合终态也会完成仍打开的条目，工具循环的下一轮使用新的 item ID。
+- reactor 在回合开始时从注入的 `ModelClient` 取 `provider:model` 快照（`model_label_of`），盖在开场的
+  `UserMessage` item 与 steer 补写的用户 item 上（`ThreadItem.model`）：标签是回合时快照，模型切换只影响
+  下一回合，回放后 UI 才能与 live 流一致地显示"这条消息发给了哪个模型"。
+- 每轮模型调用在 `pump()` 内实测墙钟耗时（连接 + 流式全程），随该轮结算的 usage 事件写入
+  `Usage.duration_ms`——它只覆盖模型调用本身，不含工具执行；取消/失败的轮次没有 usage 事件，也就没有
+  耗时。服务端 llm-rounds 投影与 web 会话统计条都只汇总这个实测值，渲染层从不自行计时。
 - 新回合须从权威线程项恢复此前的 user/assistant 对话，并在回合启动时持久化当前用户消息；reasoning 不进入
   后续模型历史。会话级工作空间、模型和权限覆盖只在创建新回合时读取，运行中回合保留其创建快照。
 - parent steer 的有界 `SteerQueue` 由 server registry 创建并由 `arkd` 注入同一个 reactor；reactor 只在

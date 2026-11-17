@@ -7,6 +7,7 @@ import type {
 } from '../../../shared/contracts'
 import { formatClock } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
+import { formatDuration } from './session-stats'
 import { Markdown } from '../../../shared/ui/Markdown'
 import { CopyButton } from '../../../shared/ui/copy'
 import { useThreadSkills } from '../hooks/use-thread-skills'
@@ -130,7 +131,12 @@ function MentionBody({ text, threadId }: { text: string; threadId: string | null
   )
 }
 
-/** User message bubble. Text is the runtime's accumulated `text`, verbatim. */
+/**
+ * User message bubble. Text is the runtime's accumulated `text`, verbatim.
+ * The meta row carries the `provider:model` label the runtime stamped on the
+ * item — what this turn actually used, not the thread's current override —
+ * so a mid-session switch reads as two differently-labeled rows.
+ */
 export const UserBubble = memo(function UserBubble({ item, threadId = null }: { item: ThreadItem; threadId?: string | null }): JSX.Element {
   const { t, locale } = useI18n()
   const text = item.text ?? ''
@@ -144,6 +150,7 @@ export const UserBubble = memo(function UserBubble({ item, threadId = null }: { 
       ) : null}
       <footer className="ark-msg__head">
         <time className="ark-msg__time">{formatClock(item.created_at, locale)}</time>
+        {item.model ? <span className="ark-msg__model" title={t('canvas.msg.modelTitle')}>{item.model}</span> : null}
         <CopyButton
           text={text}
           label={t('canvas.copy.message')}
@@ -220,13 +227,16 @@ export const AssistantBubble = memo(function AssistantBubble({
 export const FinalReplyCard = memo(function FinalReplyCard({
   item,
   onFileChip,
-  writablePaths
+  writablePaths,
+  turnMs
 }: {
   item: ThreadItem
   /** Prose path chips (requirements/prose-path-links.md), same as AssistantBubble. */
   onFileChip?: (path: string) => void
   /** Whitelist of paths this turn wrote; gates which prose chips render. */
   writablePaths?: readonly string[]
+  /** Sum of this turn's measured model rounds (0 while none landed yet). */
+  turnMs?: number
 }): JSX.Element {
   const { t, locale } = useI18n()
   const streaming = item.status === 'streaming' || item.status === 'pending'
@@ -254,6 +264,11 @@ export const FinalReplyCard = memo(function FinalReplyCard({
       {item.detail ? <p className="ark-msg__detail">{item.detail}</p> : null}
       {!streaming && text ? (
         <footer className="ark-reply__foot">
+          {turnMs != null && turnMs > 0 ? (
+            <span className="ark-reply__duration" title={t('canvas.reply.durationTitle')}>
+              {t('canvas.reply.duration', { duration: formatDuration(turnMs) })}
+            </span>
+          ) : null}
           <time className="ark-reply__time">{formatClock(item.created_at, locale)}</time>
           <CopyButton
             text={text}
