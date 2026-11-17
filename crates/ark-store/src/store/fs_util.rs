@@ -66,9 +66,14 @@ fn sync_dir(path: &Path) -> std::io::Result<()> {
 #[cfg(windows)]
 fn sync_dir(path: &Path) -> std::io::Result<()> {
     use std::os::windows::fs::OpenOptionsExt;
+    // FlushFileBuffers requires a handle with GENERIC_WRITE access; opening the
+    // directory read-only makes sync_all() fail with ERROR_ACCESS_DENIED
+    // (os error 5) on every call, which aborted turn persistence before the
+    // model request could run (see docs/modules store design).
     const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
     std::fs::OpenOptions::new()
         .read(true)
+        .write(true)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
         .open(path)?
         .sync_all()
@@ -263,6 +268,16 @@ fn io_error(action: &str, path: &Path, err: std::io::Error) -> ArkError {
 mod tests {
     use super::*;
     use crate::store::tests::TempDir;
+
+    #[test]
+    fn sync_parent_dir_succeeds_on_a_regular_directory() {
+        // Regression: on Windows the read-only directory handle made this fail
+        // with os error 5 on every call, aborting turn persistence.
+        let dir = TempDir::new("fs-util-sync-parent");
+        let file = dir.path().join("events.jsonl");
+        std::fs::write(&file, b"x").unwrap();
+        sync_parent_dir(&file).unwrap();
+    }
 
     #[test]
     fn atomic_write_replaces_content_without_leftovers() {
