@@ -29,7 +29,7 @@ pub struct ToolMeta {
 pub const TOOL_METAS: [ToolMeta; 13] = [
     ToolMeta {
         name: "bash",
-        description: "Run one shell command inside the workspace with a hard timeout",
+        description: "Run one POSIX shell command inside the workspace with a hard timeout (Git Bash on Windows)",
         baseline: SandboxDecision::NeedsApproval,
     },
     ToolMeta {
@@ -44,7 +44,7 @@ pub const TOOL_METAS: [ToolMeta; 13] = [
     },
     ToolMeta {
         name: "bash_session",
-        description: "Run one shell command in the persistent session; a leading cd advances the session directory, and run_in_background detaches the command into a pollable task",
+        description: "Run one POSIX shell command in the persistent session; a leading cd advances the session directory, and run_in_background detaches the command into a pollable task (Git Bash on Windows)",
         baseline: SandboxDecision::NeedsApproval,
     },
     ToolMeta {

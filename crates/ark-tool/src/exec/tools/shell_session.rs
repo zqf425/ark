@@ -331,7 +331,7 @@ impl BashSessionTool {
         parsed: &crate::domain::args::BashSessionArgs,
     ) -> ark_common::Result<ToolOutput> {
         let cwd = self.session.resolve_cwd(&ctx.workspace, &parsed.command);
-        let mut command = std_shell(&parsed.command);
+        let mut command = std_shell(&parsed.command)?;
         command
             .current_dir(&cwd)
             .stdin(std::process::Stdio::null())
@@ -507,21 +507,21 @@ impl BashKillTool {
     }
 }
 
-/// Platform-appropriate shell invocation for **detached** tasks: std Command,
-/// because the collector and reaper run on plain threads and must not be bound
-/// to one async call's runtime.
-fn std_shell(command: &str) -> std::process::Command {
+/// POSIX shell invocation for detached tasks. The foreground and background
+/// variants intentionally use the same shell and argument convention.
+fn std_shell(command: &str) -> ark_common::Result<std::process::Command> {
     #[cfg(windows)]
     {
-        let mut cmd = std::process::Command::new("cmd");
-        cmd.arg("/C").arg(command);
-        cmd
+        let path = super::bash::git_bash_path()?;
+        let mut bash = std::process::Command::new(path);
+        bash.arg("-c").arg(command);
+        Ok(bash)
     }
     #[cfg(not(windows))]
     {
-        let mut cmd = std::process::Command::new("/bin/sh");
-        cmd.arg("-c").arg(command);
-        cmd
+        let mut shell = std::process::Command::new("/bin/sh");
+        shell.arg("-c").arg(command);
+        Ok(shell)
     }
 }
 
@@ -817,11 +817,7 @@ mod tool_tests {
         let session = Arc::new(ShellSessionManager::new());
         let tool = BashSessionTool::new(Arc::clone(&session));
         let kill_tool = BashKillTool::new(Arc::clone(&session));
-        let long = if cfg!(windows) {
-            "ping -n 30 127.0.0.1"
-        } else {
-            "sleep 30"
-        };
+        let long = "sleep 30";
         let started = tool
             .execute(
                 &ctx(&dir),

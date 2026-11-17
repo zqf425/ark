@@ -39,6 +39,11 @@
   （拒绝解析到 loopback/私有/链路本地地址的目标）在工具层，HTTPS-only、超时与大小上限来自
   共享 `HttpPolicy`。父与子工具集都注册它；输出与 bash 同规按 64 KiB 截断，HTML 经内置
   无依赖文本提取，非 2xx/二进制/失败都以结构化工具输出返回，不使回合失败。
+- `bash` 在所有支持的平台执行 POSIX shell 命令：Unix 使用 `/bin/sh -c`，Windows 从 `PATH` 中的
+  Git for Windows `cmd/git.exe` 反查同一安装目录下的 `bin/bash.exe` 并使用 `-c`。不得直接选择
+  `bash.exe`，因为 `C:\Windows\System32\bash.exe` 是 WSL 启动器，既不能保证可用也不能执行
+  Git Bash 命令。这样模型可在各平台使用相同的 `ls`、`grep` 等命令，Git Bash 的 UTF-8 输出也不会
+  被 `cmd` 的本地代码页破坏。找不到 Git Bash 时返回明确的结构化工具错误。
 - `bash` 执行的是一个进程树而不是一个进程。spawn 前用 `ark_common::process::isolate` 把 shell 设为
   进程组组长，spawn 后立即 `ProcessTree::adopt`；超时、回合取消（future 被 drop）都由该句柄发
   `killpg(SIGKILL)` 杀掉整组，`kill_on_drop(true)` 仅作为直接子进程的兜底保留。这样

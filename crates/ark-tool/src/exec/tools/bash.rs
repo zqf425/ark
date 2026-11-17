@@ -43,7 +43,7 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
     }
     let cwd = workspace_path(ctx, parsed.cwd.as_deref().or(Some(".")))?;
     let timeout = clamp_timeout(parsed.timeout_ms, &DEFAULT_LIMITS);
-    let mut command = shell(&parsed.command);
+    let mut command = shell(&parsed.command)?;
     command
         .current_dir(&cwd)
         .stdin(Stdio::null())
@@ -105,27 +105,51 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
     Ok(render(&output, timeout))
 }
 
-/// Platform-appropriate shell invocation.
-pub(super) fn shell(command: &str) -> tokio::process::Command {
+/// POSIX shell invocation for commands passed to the `bash` tool.
+pub(super) fn shell(command: &str) -> ark_common::Result<tokio::process::Command> {
     #[cfg(windows)]
     {
-        let mut cmd = tokio::process::Command::new("cmd");
-        cmd.arg("/C").arg(command);
-        cmd
+        let path = git_bash_path()?;
+        let mut bash = tokio::process::Command::new(path);
+        bash.arg("-c").arg(command);
+        Ok(bash)
     }
     #[cfg(not(windows))]
     {
-        let mut cmd = tokio::process::Command::new("/bin/sh");
-        cmd.arg("-c").arg(command);
-        cmd
+        let mut shell = tokio::process::Command::new("/bin/sh");
+        shell.arg("-c").arg(command);
+        Ok(shell)
     }
+}
+
+/// Locate Git for Windows' POSIX shell without accidentally selecting the WSL
+/// launcher (`C:\Windows\System32\bash.exe`). Git's `cmd` directory is on
+/// PATH whenever `git` is available to normal Windows command prompts.
+#[cfg(windows)]
+pub(super) fn git_bash_path() -> ark_common::Result<std::path::PathBuf> {
+    std::env::var_os("PATH")
+        .and_then(|paths| {
+            std::env::split_paths(&paths).find_map(|entry| {
+                if !entry.join("git.exe").is_file() {
+                    return None;
+                }
+                let candidate = entry.parent()?.join("bin").join("bash.exe");
+                candidate.is_file().then_some(candidate)
+            })
+        })
+        .ok_or_else(|| {
+            ark_common::ArkError::new(
+                ark_common::ArkErrorCode::ToolExecutionFailed,
+                "Git Bash was not found on PATH; install Git for Windows or add its cmd directory to PATH",
+            )
+        })
 }
 
 /// Minimal environment a shell needs to resolve its own executables.
 ///
 /// Values come from the host process (never from the model), and are only
-/// forwarded when present. On Windows `SystemRoot`/`USERPROFILE` keep `cmd`
-/// and the standard utilities usable.
+/// forwarded when present. On Windows `SystemRoot`/`USERPROFILE` keep Git Bash
+/// and standard utilities usable.
 pub(super) fn default_shell_env() -> Vec<(&'static str, String)> {
     const KEYS: &[&str] = &[
         "PATH",
@@ -216,15 +240,34 @@ mod tests {
         assert!(out.detail.unwrap().contains("exit=3"));
     }
 
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn runs_posix_commands_with_git_bash() {
+        let dir = temp_workspace("bash-posix");
+        let out = BashTool
+            .execute(&ctx(&dir), echo("printf posix-shell"))
+            .await
+            .unwrap();
+        assert!(out.ok, "{}", out.content);
+        assert_eq!(out.content, "posix-shell");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn preserves_utf8_output_from_git_bash() {
+        let dir = temp_workspace("bash-utf8");
+        let out = BashTool
+            .execute(&ctx(&dir), echo("printf '\u{4e2d}\u{6587}'"))
+            .await
+            .unwrap();
+        assert!(out.ok, "{}", out.content);
+        assert_eq!(out.content, "\u{4e2d}\u{6587}");
+    }
+
     #[tokio::test]
     async fn timeout_kills_the_child() {
-        // `ping -n` is Windows-only syntax; on Unix a usage-error exit would
-        // bypass the timeout path entirely, so sleep plays the long-running child.
-        let long_running = if cfg!(windows) {
-            "ping -n 30 127.0.0.1"
-        } else {
-            "sleep 30"
-        };
+        // The `bash` tool accepts POSIX commands on every supported platform.
+        let long_running = "sleep 30";
         let dir = temp_workspace("bash-timeout");
         let arg = ToolArgs(serde_json::json!({
             "command": long_running,
@@ -243,10 +286,7 @@ mod tests {
         // `env` command could read the whole arkd process environment.
         std::env::set_var("ARK_TEST_SECRET", "super-secret-value");
         let dir = temp_workspace("bash-env");
-        let out = BashTool
-            .execute(&ctx(&dir), echo(if cfg!(windows) { "set" } else { "env" }))
-            .await
-            .unwrap();
+        let out = BashTool.execute(&ctx(&dir), echo("env")).await.unwrap();
         std::env::remove_var("ARK_TEST_SECRET");
         assert!(
             !out.content.contains("super-secret-value"),

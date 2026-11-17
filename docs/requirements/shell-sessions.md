@@ -23,9 +23,11 @@
 
 `ShellSessionManager`(`std::sync::Mutex` 包住的注册表):
 
-- **会话进程**:工作区根spawn 一个**长驻 shell**(Windows `cmd /Q /K`、Unix `sh -i` 太脆,
-  实际用 `sh` 读 stdin 脚本流不可行,故统一采用「每次后台命令仍 spawn,但由 manager 记录
-  cwd/env 演化」的折衷,见 §2);会话记录 `cwd`(随调用内的 `cd` 推进)。
+- **会话进程**:不启动长驻 shell。每次命令仍独立 spawn，但由 manager 记录 cwd 演化。
+  前台与后台统一执行 POSIX 命令：Unix 用 `/bin/sh -c`，Windows 从 `PATH` 内 Git for Windows
+  的 `cmd/git.exe` 定位同安装目录的 `bin/bash.exe` 后以 `-c` 执行。不得直接调用
+  `C:\Windows\System32\bash.exe`，它是 WSL 启动器而非 Git Bash；会话只记录
+  `cwd`（随调用内的 `cd` 推进）。
 - **后台任务**:模型用 `bash_session` 且 `run_in_background: true` 时,命令脱离当前调用,
   在会话 cwd 下独立 spawn(进程组隔离复用 `ark_common::process`),输出写入容量受限的
   共享缓冲(64 KiB,超限从头丢弃并记录 dropped 标记);立即返回 `task_id`。
