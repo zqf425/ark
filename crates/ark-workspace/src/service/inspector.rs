@@ -50,6 +50,19 @@ fn strip_verbatim_prefix(text: &str) -> String {
         .unwrap_or_else(|| text.to_string())
 }
 
+/// Rejection for a path outside the preview boundary.
+///
+/// The root is part of the message on purpose: the caller's most common mistake
+/// is not a traversal attempt but a *session* whose workspace is not the one the
+/// request was authorized against, and "escapes the workspace root" alone leaves
+/// the user with no way to tell which root was used.
+fn outside_root(path: &str, root: &Path) -> ArkError {
+    ArkError::validation(format!(
+        "file path escapes the workspace root: {path} (workspace root: {})",
+        root.display()
+    ))
+}
+
 /// Stateless-ish inspector. `base` is the anchor for relative candidates and is
 /// captured once so a status call cannot drift when the process changes its
 /// working directory (the Electron host does chdir during startup).
@@ -164,9 +177,7 @@ impl WorkspaceInspector {
         };
         // Fast lexical filter (no `..` may escape) before touching the disk.
         if candidate.components().any(|c| c.as_os_str() == "..") {
-            return Err(ArkError::validation(format!(
-                "file path escapes the workspace root: {path}"
-            )));
+            return Err(outside_root(path, &canonical_root));
         }
         if !candidate.exists() {
             return Err(ArkError::validation(format!("file does not exist: {path}")));
@@ -179,9 +190,7 @@ impl WorkspaceInspector {
         // Real-path containment: symlinks must resolve inside the root too.
         let real = canonical_dir(&candidate)?;
         if !real.starts_with(&canonical_root) {
-            return Err(ArkError::validation(format!(
-                "file path escapes the workspace root: {path}"
-            )));
+            return Err(outside_root(path, &canonical_root));
         }
         let metadata = std::fs::metadata(&real)
             .map_err(|err| ArkError::validation(format!("cannot stat file {path}: {err}")))?;

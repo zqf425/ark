@@ -21,6 +21,8 @@ untracked；不读取 untracked 文件内容。文件数为 200、总 patch 为 
 `WorkspaceInspector::read_file(root, path)` 是工作区内任意文件的**只读**预览宿主,输出
 `WorkspaceFilePreview`。三层 containment:词法(拒绝 `..` 逃逸)、canonicalize、真实路径
 (symlink 指向根外即拒绝)。`~` 刻意不展开——预览边界是工作区根,家目录不在其中。
+拒绝消息必须带出生效的 root(`(workspace root: …)`):调用方最常见的失误不是越权访问,而是
+按了另一个工作区,只报"escapes the workspace root"会让用户无从判断用的是哪个根。
 上限:8 MiB 拒绝读取,文本保留前 256 KiB 并置 `truncated`;非 UTF-8 以 lossy 解码并置
 `binary`(渲染方据此跳过)。纯 `std::fs`,无 git、无 tokio;handler 侧包 `spawn_blocking`
 (`workspace/pick` 先例)。

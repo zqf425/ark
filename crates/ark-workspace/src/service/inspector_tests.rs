@@ -449,6 +449,32 @@ fn read_file_reads_an_absolute_path_inside_the_root() {
     assert_eq!(preview.content, "body");
 }
 
+/// A rejection must name the boundary that was applied, not only the offending
+/// path: a session bound to another project is the common case, and the user
+/// needs to see which root the runtime used.
+#[test]
+fn read_file_escape_names_the_effective_root() {
+    let temp = TempDir::new("ws-preview-named-root");
+    let outside = TempDir::new("ws-preview-named-outside");
+    std::fs::write(outside.path.join("secret.txt"), "s").unwrap();
+    let outside_file = outside.path.join("secret.txt");
+    let err = WorkspaceInspector::new()
+        .read_file(temp.path(), &outside_file.to_string_lossy())
+        .expect_err("an outside absolute path must be rejected");
+    assert!(
+        err.message.contains("escapes the workspace root"),
+        "{}",
+        err.message
+    );
+    let canonical_root = temp.path.canonicalize().expect("canonical root");
+    let shown = strip_verbatim_prefix(&canonical_root.to_string_lossy());
+    assert!(
+        err.message.contains(&shown),
+        "the message must name the effective root `{shown}`: {}",
+        err.message
+    );
+}
+
 #[test]
 fn read_file_rejects_a_dotdot_escape() {
     let temp = TempDir::new("ws-preview-escape");
