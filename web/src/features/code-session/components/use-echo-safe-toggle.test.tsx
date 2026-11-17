@@ -44,12 +44,11 @@ describe('useEchoSafeToggle', () => {
 
   it('pins a toggle that disagrees with the rendered open value', async () => {
     const harness = await mountWithProviders(<Probe live />)
-    // User opened it while already open? No: user CLOSED it (false ≠ true).
     act(() => {
       hook.onToggle({ currentTarget: { open: false } })
     })
     expect(hook.open).toBe(false)
-    // live flips back true — the pin wins.
+    // Still live: the pin keeps it closed.
     await harness.render(<Probe live />)
     await macrotask()
     expect(hook.open).toBe(false)
@@ -71,7 +70,36 @@ describe('useEchoSafeToggle', () => {
       hook.onToggle({ currentTarget: { open: true } })
     })
     expect(hook.open).toBe(true)
-    // Pin holds even when live goes false.
+    // Still the same phase: the pin holds.
+    await harness.render(<Probe live />)
+    await macrotask()
+    expect(hook.open).toBe(true)
+  })
+
+  it('drops the user pin when the turn settles: a settled card folds back', async () => {
+    const harness = await mountWithProviders(<Probe live />)
+    // Close and reopen mid-turn: the pin now says "open" while the turn runs.
+    act(() => {
+      hook.onToggle({ currentTarget: { open: false } })
+    })
+    act(() => {
+      hook.onToggle({ currentTarget: { open: true } })
+    })
+    expect(hook.open).toBe(true)
+
+    // The turn settles: the pin belonged to the live phase only, so the card
+    // must collapse to the settled default instead of staying open.
+    await harness.render(<Probe live={false} />)
+    await macrotask()
+    expect(hook.open).toBe(false)
+  })
+
+  it('keeps a settled-phase pin: reopening a finished card stays open', async () => {
+    const harness = await mountWithProviders(<Probe live={false} />)
+    expect(hook.open).toBe(false)
+    act(() => {
+      hook.onToggle({ currentTarget: { open: true } })
+    })
     await harness.render(<Probe live={false} />)
     await macrotask()
     expect(hook.open).toBe(true)

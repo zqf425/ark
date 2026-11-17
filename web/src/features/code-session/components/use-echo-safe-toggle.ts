@@ -19,6 +19,13 @@
  * That keeps genuine user toggles pinned while mount and controlled-update
  * echoes are ignored.
  *
+ * A pin is scoped to the phase it was made in. While the turn runs the user
+ * may open or close the card freely, but the answer is not final yet; the
+ * moment the turn settles the live-phase pin is dropped, so a finished turn
+ * always folds down to its default and the canvas shows the answer, not a
+ * wall of process rows. Toggles made *after* settling still pin, because
+ * browsing a finished turn's trace is a deliberate, lasting choice.
+ *
  * jsdom implements the spec behavior (async `toggle` on any `open` attribute
  * transition, `summary` activation behavior) so the tests exercise the real
  * event path, not a synthetic one.
@@ -31,10 +38,13 @@ export function useEchoSafeToggle(live: boolean): {
   /** Attach to the same `<details>`; fires only for real user toggles. */
   onToggle: (event: { currentTarget: { open: boolean } }) => void
 } {
-  // `null` = follow the live state; a user toggle pins it either way, for the
-  // life of the block (same contract as before — only the echo is gone).
+  // `null` = follow the live state; a user toggle pins it either way, for as
+  // long as its phase lasts (see the phase reset below).
   const [pinned, setPinned] = useState<boolean | null>(null)
-  const open = pinned ?? live
+  // The phase the current pin belongs to. A pin made while the turn ran must
+  // not survive the turn: settling drops it so the finished card collapses.
+  const [pinnedPhase, setPinnedPhase] = useState(live)
+  const open = (pinnedPhase === live ? pinned : null) ?? live
   // The open value React last rendered onto the DOM. A toggle whose `open`
   // matches this is an echo of our own write (or of mount), not a user action.
   const renderedOpenRef = useRef(open)
@@ -50,8 +60,9 @@ export function useEchoSafeToggle(live: boolean): {
       // against the freshly rendered value and ignores our own echo.
       if (event.currentTarget.open === renderedOpenRef.current) return
       setPinned(event.currentTarget.open)
+      setPinnedPhase(live)
     },
-    []
+    [live]
   )
 
   return { open, onToggle }

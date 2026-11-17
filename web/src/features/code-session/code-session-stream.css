@@ -216,7 +216,7 @@
   background: var(--ark-bg-raised);
 }
 
-/* Folded older-tool-calls summary row inside the process card: quieter than a
+/* Folded earlier-steps summary row inside the process card: quieter than a
    tool card, aligned to the same grid so expanding swaps it for real rows. */
 .ark-foldedtools {
   display: flex;
