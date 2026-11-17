@@ -7,12 +7,21 @@ use tauri_plugin_notification::NotificationExt;
 ///
 /// Resolves `None` when the user cancels. The dialog plugin dispatches to the
 /// platform's main thread internally, so a plain channel handshake is enough.
+/// The calling window must own the dialog: on Windows an unowned modal is
+/// treated as a separate top-level window and can end up behind the main
+/// window / only in the taskbar until the user clicks it.
 #[tauri::command]
-async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+async fn pick_folder(
+    app: tauri::AppHandle,
+    window: tauri::Window,
+) -> Result<Option<String>, String> {
     let (sender, receiver) = std::sync::mpsc::channel();
-    app.dialog().file().pick_folder(move |path| {
-        let _ = sender.send(path);
-    });
+    app.dialog()
+        .file()
+        .set_parent(&window)
+        .pick_folder(move |path| {
+            let _ = sender.send(path);
+        });
     let picked = receiver.recv().map_err(|error| error.to_string())?;
     match picked {
         Some(path) => {
