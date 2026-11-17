@@ -382,16 +382,26 @@ pub async fn workspace_diff(
 #[derive(Debug, Deserialize)]
 pub struct WorkspaceFileQuery {
     pub path: String,
+    /// Session whose effective workspace authorizes this read
+    /// (requirements/workspace-file-preview.md). Absent keeps the process-wide
+    /// active root, which is what the settings and review surfaces use.
+    #[serde(default)]
+    pub thread_id: Option<String>,
 }
 
-/// `GET /v1/workspace/file?path=...` — a bounded, read-only preview of one
-/// file under the active workspace root (requirements/workspace-file-preview.md).
+/// `GET /v1/workspace/file?path=[&thread_id=]` — a bounded, read-only preview
+/// of one file under a workspace root (requirements/workspace-file-preview.md).
+///
+/// The authorization root follows the *same* resolution order as a turn: the
+/// thread's own workspace override first, then the process lease. Using the
+/// lease alone rejected a session's own files whenever that session was bound
+/// to a project other than the process-wide active root.
 ///
 /// The read is disk I/O with canonicalization, so it runs in `spawn_blocking`
-/// (the `workspace/pick` precedent). The root is captured from the current
-/// view before the blocking call: a concurrent switch changes only the *next*
-/// preview, matching the snapshot semantics the renderer already applies to
-/// diff generations. No active workspace is a structured 404, not a guess.
+/// (the `workspace/pick` precedent). The root is captured before the blocking
+/// call: a concurrent switch changes only the *next* preview, matching the
+/// snapshot semantics the renderer already applies to diff generations. No
+/// usable root is a structured 404, not a guess.
 pub async fn workspace_file(
     State(state): State<AppState>,
     Query(query): Query<WorkspaceFileQuery>,
@@ -402,11 +412,14 @@ pub async fn workspace_file(
         .as_ref()
         .ok_or_else(|| missing("workspace"))?
         .clone();
-    let root = service
+    let lease = service
         .view()
         .active
         .map(|active| std::path::PathBuf::from(active.path))
         .ok_or_else(|| missing("active workspace"))?;
+    let root = thread_workspace_root(&state, query.thread_id.as_deref())
+        .await?
+        .unwrap_or(lease);
     tokio::task::spawn_blocking(move || service.read_file(&root, &query.path))
         .await
         .map_err(|error| {
@@ -417,6 +430,32 @@ pub async fn workspace_file(
         })?
         .map_err(ApiError)
         .map(Json)
+}
+
+/// Root a session's tool calls actually run in, when it overrides the lease.
+///
+/// The override is stored already normalized by the create/update boundary, so
+/// this only reads it back; it never re-validates or re-normalizes the path.
+/// A missing thread id stays an error, and a stored override is returned even
+/// when its directory has since disappeared: falling back to the process root
+/// would authorize a *different* project's file under the same name, which is
+/// worse than letting `read_file` report that the root is unusable.
+async fn thread_workspace_root(
+    state: &AppState,
+    raw: Option<&str>,
+) -> Result<Option<std::path::PathBuf>, ApiError> {
+    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let thread = crate::api::handlers::threads::parse_thread(raw)?;
+    let meta = state.store.get_thread(thread).await?;
+    Ok(meta
+        .runtime
+        .workspace
+        .as_deref()
+        .map(str::trim)
+        .filter(|workspace| !workspace.is_empty())
+        .map(std::path::PathBuf::from))
 }
 
 // ---------------------------------------------------------------------------
@@ -560,6 +599,18 @@ mod tests {
     #[derive(Default)]
     struct Workspace {
         generation: AtomicU64,
+        /// Root the last `read_file` call was authorized against.
+        read_root: std::sync::Mutex<Option<PathBuf>>,
+    }
+
+    impl Workspace {
+        /// Root the last `read_file` was authorized against, if any.
+        fn read_root(&self) -> Option<PathBuf> {
+            self.read_root
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        }
     }
 
     impl WorkspaceService for Workspace {
@@ -579,10 +630,23 @@ mod tests {
 
         fn read_file(
             &self,
-            _root: &std::path::Path,
-            _path: &str,
+            root: &std::path::Path,
+            path: &str,
         ) -> ark_common::Result<ark_contract::WorkspaceFilePreview> {
-            unreachable!("not used by this test")
+            // The preview tests assert *which* root the handler authorized, so
+            // the stub records it instead of failing: the authorization
+            // boundary is the behavior under test, not the file contents.
+            *self
+                .read_root
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(root.to_path_buf());
+            Ok(ark_contract::WorkspaceFilePreview {
+                path: path.to_string(),
+                content: format!("read from {}", root.display()),
+                truncated: false,
+                binary: false,
+                size_bytes: 0,
+            })
         }
 
         fn view(&self) -> ark_contract::WorkspaceView {
@@ -670,6 +734,12 @@ mod tests {
             .prefix("ark-workspace-")
             .tempdir()
             .expect("temp dir is creatable")
+    }
+
+    /// `BaseServices` stores the workspace port behind a trait object, so tests
+    /// need the unsizing step spelled out.
+    fn workspace_port(workspace: &Arc<Workspace>) -> Arc<dyn WorkspaceService> {
+        workspace.clone()
     }
 
     fn state(data_dir: &Path) -> AppState {
@@ -818,6 +888,110 @@ mod tests {
             new_index < old_index,
             "most recently active project first: {paths:?}"
         );
+    }
+
+    /// The regression this route exists to prevent: a session bound to another
+    /// project must be previewed against *its* root, not the process lease.
+    #[tokio::test]
+    async fn file_preview_authorizes_against_the_thread_workspace() {
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
+        let mut state = state(&data_dir);
+        let workspace = Arc::new(Workspace::default());
+        state.base.workspace = Some(workspace_port(&workspace));
+        let thread = state.store.create_thread("bound").await.expect("thread");
+        let mut runtime = thread.runtime.clone();
+        runtime.workspace = Some("/w/session".to_string());
+        state
+            .store
+            .set_thread_runtime(thread.thread_id, runtime)
+            .await
+            .expect("bind workspace");
+
+        let preview = workspace_file(
+            State(state),
+            Query(WorkspaceFileQuery {
+                path: "docs/a.md".to_string(),
+                thread_id: Some(thread.thread_id.to_string()),
+            }),
+        )
+        .await
+        .expect("preview");
+
+        assert_eq!(preview.0.path, "docs/a.md");
+        assert_eq!(
+            workspace.read_root(),
+            Some(PathBuf::from("/w/session")),
+            "the session override must authorize the read"
+        );
+    }
+
+    /// Without `thread_id` the process lease stays authoritative: the settings
+    /// and review surfaces read files that belong to no session.
+    #[tokio::test]
+    async fn file_preview_without_a_thread_uses_the_active_root() {
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
+        let mut state = state(&data_dir);
+        let workspace = Arc::new(Workspace::default());
+        state.base.workspace = Some(workspace_port(&workspace));
+
+        let preview = workspace_file(
+            State(state),
+            Query(WorkspaceFileQuery {
+                path: "a.md".to_string(),
+                thread_id: None,
+            }),
+        )
+        .await
+        .expect("preview");
+
+        assert_eq!(preview.0.content, "read from /w/active");
+        assert_eq!(workspace.read_root(), Some(PathBuf::from("/w/active")));
+    }
+
+    /// A thread that does not exist must not fall back to the lease: that would
+    /// answer a request for a deleted session with another project's files.
+    #[tokio::test]
+    async fn file_preview_for_an_unknown_thread_is_not_found() {
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
+        let error = workspace_file(
+            State(state(&data_dir)),
+            Query(WorkspaceFileQuery {
+                path: "a.md".to_string(),
+                thread_id: Some(ThreadId::new().to_string()),
+            }),
+        )
+        .await
+        .expect_err("an unknown thread must not be previewed");
+
+        assert_eq!(error.0.code, ark_common::ArkErrorCode::NotFound);
+    }
+
+    /// A session without its own override inherits the lease, exactly like a
+    /// turn does; the handler must not invent a root of its own.
+    #[tokio::test]
+    async fn file_preview_for_an_unbound_thread_uses_the_active_root() {
+        let dir = test_dir();
+        let data_dir = dir.path().to_path_buf();
+        let mut state = state(&data_dir);
+        let workspace = Arc::new(Workspace::default());
+        state.base.workspace = Some(workspace_port(&workspace));
+        let thread = state.store.create_thread("unbound").await.expect("thread");
+
+        let preview = workspace_file(
+            State(state),
+            Query(WorkspaceFileQuery {
+                path: "a.md".to_string(),
+                thread_id: Some(thread.thread_id.to_string()),
+            }),
+        )
+        .await
+        .expect("preview");
+
+        assert_eq!(preview.0.content, "read from /w/active");
+        assert_eq!(workspace.read_root(), Some(PathBuf::from("/w/active")));
     }
 
     #[tokio::test]

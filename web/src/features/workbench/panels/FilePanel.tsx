@@ -27,7 +27,7 @@ export function FilePanel(): JSX.Element {
       return
     }
     const controller = new AbortController()
-    void getWorkspaceFilePreview(path, controller.signal).then((next) => {
+    void getWorkspaceFilePreview(path, threadId, controller.signal).then((next) => {
       setFile(next)
       setError(null)
     }).catch((reason) => {

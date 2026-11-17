@@ -13,8 +13,13 @@
    "这个文件是什么";
 2. FilePanel 对所有扩展名统一走代码高亮,`.md` 显示带语法着色的原文而非渲染结果。
 
-本需求新增**工作区真实文件预览**:以 active workspace root 为唯一授权边界,只读取该根
+本需求新增**工作区真实文件预览**:以**该会话生效的工作区 root** 为唯一授权边界,只读取该根
 之下的文件;Markdown 渲染复用既有 `<Markdown>` 管线。
+
+> 2026-11-17 修订:初版把边界写成"active workspace root"(进程级 lease)。实测发现会话可以带
+> 自己的 workspace 覆盖(组合器项目选择、rail 的按项目新建),此时工具在 A 项目里写文件,而预览
+> 却按进程 root 授权,点开刚写的文件必然返回 `file path escapes the workspace root`。
+> 预览的授权顺序因此改为与回合一致:**先会话覆盖,后进程 lease**。
 
 非目标:目录树浏览/文件列表 API;写路径(只读);`.md` 之外的渲染格式(HTML/图片);
 工作区之外的任何路径(包括 `~` 展开后的家目录)。
@@ -52,7 +57,19 @@ WorkspaceFilePreview {
 }
 ```
 
-新增 `GET /v1/workspace/file?path=...`(鉴权路由组,与 workspace 其余读面同层)。
+新增 `GET /v1/workspace/file?path=[&thread_id=]`(鉴权路由组,与 workspace 其余读面同层)。
+
+`thread_id` 决定授权 root,解析顺序与回合一致:
+
+| 请求 | 授权 root |
+| --- | --- |
+| `thread_id` 指向带 workspace 覆盖的会话 | 该覆盖路径(权威:工具就在此写文件) |
+| `thread_id` 指向无覆盖的会话 | 进程 active root(会话继承的那一个) |
+| 无 `thread_id` | 进程 active root(设置、Review 等不属于任何会话的读面) |
+| `thread_id` 不存在或非法 | 结构化 `not_found` / `validation_error`,**不回退**到 lease |
+
+`thread_id` 不存在时明确报错而不回退,是因为回退会把"某个已删除会话的请求"答成另一个项目的
+同名文件——静默答错比报错危险。
 既有线程投影端点 `/v1/threads/{id}/files` 不动(它回答的是"线程读过什么",语义不同)。
 
 ### 3. 端口与接线
@@ -65,7 +82,8 @@ WorkspaceFilePreview {
 
 ### 4. 前端分派(FilePanel)
 
-- 数据源从 `GET /v1/threads/{id}/files?path=` 切到 `GET /v1/workspace/file?path=`;
+- 数据源从 `GET /v1/threads/{id}/files?path=` 切到 `GET /v1/workspace/file?path=&thread_id=`
+  (`thread_id` 取当前活动会话,授权 root 因此与会话一致);
 - 扩展名分派:`.md`/`.markdown` 用 `<Markdown>` 富文本渲染,其余走既有
   `highlightSource` 代码视图;`binary: true` 显示"二进制文件不预览"空态;
   `truncated: true` 显示截断提示;
@@ -75,7 +93,8 @@ WorkspaceFilePreview {
 ## 验收
 
 - `ark-workspace` 单测:根内相对/绝对读取、`..` 逃逸拒绝、symlink 指向根外拒绝、
-  256 KiB 截断、非 UTF-8 lossy+binary 标记、8 MiB 拒绝、根外绝对路径拒绝。
+  256 KiB 截断、非 UTF-8 lossy+binary 标记、8 MiB 拒绝、根外绝对路径拒绝、**拒绝消息带出生效 root**。
+- `ark-server` 单测:会话覆盖生效、无 `thread_id` 用 lease、无覆盖会话用 lease、未知会话不回退。
 - 契约导出后 `web/src/generated` 无漂移。
 - 前端:`file-panel-dispatch` 单测(扩展名→渲染模式分派、binary/truncated 文案)。
 - fmt / clippy -D warnings / workspace 测试 / web 三件套全绿。
