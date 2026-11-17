@@ -1,5 +1,5 @@
 import type { StateCreator } from 'zustand'
-import type { ThreadId, ThreadSummary } from '../../../shared/contracts'
+import type { ThreadId, ThreadRuntimeSettings, ThreadSummary } from '../../../shared/contracts'
 import type { LoadStatus } from './types'
 
 export type ThreadsSlice = {
@@ -7,6 +7,20 @@ export type ThreadsSlice = {
   activeThreadId: ThreadId | null
   listStatus: LoadStatus
   listError: string | null
+  /**
+   * Stored runtime overrides per thread, seeded from the authoritative detail
+   * load (`GET /v1/threads/{id}`).
+   *
+   * Every composer pill renders "what this thread's next turn would use", so a
+   * pill-local copy dies with the composer on each switch while three
+   * independent re-reads would fetch the whole transcript three times. Keying
+   * the values by thread makes ownership a property of the data, and the
+   * session detail the stream already loads is their single source. A missing
+   * entry means "not read yet", never "no overrides stored".
+   */
+  threadRuntime: Record<string, ThreadRuntimeSettings>
+  /** Record one thread's stored overrides (detail seed, PATCH echo, reload). */
+  setThreadRuntime: (threadId: ThreadId, runtime: ThreadRuntimeSettings) => void
   setThreads: (threads: ThreadSummary[]) => void
   upsertThread: (thread: ThreadSummary) => void
   /** Monotonically advance one row's durable watermark from the live stream. */
@@ -58,6 +72,13 @@ export const createThreadsSlice: StateCreator<ThreadsSlice, [], [], ThreadsSlice
   activeThreadId: null,
   listStatus: 'idle',
   listError: null,
+  threadRuntime: {},
+
+  setThreadRuntime: (threadId, runtime) => set((state) => ({
+    // Merge, never replace: one snapshot only ever carries one thread's values,
+    // and other threads stay cached across switches.
+    threadRuntime: { ...state.threadRuntime, [threadId]: runtime }
+  })),
 
   setThreads: (threads) => set({ threads: sortByServerOrder(threads), listStatus: 'ready', listError: null }),
 
@@ -168,8 +189,13 @@ export const createThreadsSlice: StateCreator<ThreadsSlice, [], [], ThreadsSlice
   setListStatus: (status, error = null) => set({ listStatus: status, listError: error }),
 
   removeThread: (threadId) =>
-    set((state) => ({
-      threads: state.threads.filter((row) => row.thread_id !== threadId),
-      activeThreadId: state.activeThreadId === threadId ? null : state.activeThreadId
-    }))
+    set((state) => {
+      const threadRuntime = { ...state.threadRuntime }
+      delete threadRuntime[threadId]
+      return {
+        threads: state.threads.filter((row) => row.thread_id !== threadId),
+        activeThreadId: state.activeThreadId === threadId ? null : state.activeThreadId,
+        threadRuntime
+      }
+    })
 })

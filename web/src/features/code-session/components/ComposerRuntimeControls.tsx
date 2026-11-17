@@ -22,15 +22,16 @@ import type { MessageKey } from '../../../shared/i18n'
 import { translateNow } from '../../../shared/i18n/current'
 import { describeError } from '../../../shared/api/error-describe'
 import type { SkillSummary, ThreadRuntimeSettings, WorkspaceView } from '../../../shared/contracts'
-import { compactThread, getThread, updateThread } from '../api/threads-api'
+import { compactThread, updateThread } from '../api/threads-api'
 import { pickWorkspaceFolder } from '../api/workspace-api'
 import { getWorkspaceView, validateWorkspace } from '../../settings/api/workspace-api'
 import { listThreadSkills } from '../api/skills-api'
 import { getRuntimeConfig } from '../../settings/api/settings-api'
 import { useProviders } from '../../settings/hooks/use-providers'
 import { useCodeSessionStore } from '../state/store'
-import { canSaveRuntime, isRuntimeFormStale, type RuntimeOwner } from './session-runtime-guard'
+import { canSaveRuntime } from './session-runtime-guard'
 import { useContextLimit } from '../hooks/use-context-limit'
+import { useThreadRuntime } from '../hooks/use-thread-runtime'
 import { orderedItems } from '../state/selectors'
 import { CONTEXT_CATEGORY_ORDER, contextStructure, type ContextCategoryKey, type ContextStructure } from './context-structure'
 import { workspaceBasename, workspaceOptions } from './workspace-options'
@@ -118,11 +119,6 @@ function useDismiss(open: boolean, rootRef: React.RefObject<HTMLElement | null>,
   }, [open, rootRef, close])
 }
 
-async function fetchRuntime(threadId: string): Promise<ThreadRuntimeSettings> {
-  const detail = await getThread(threadId)
-  return { ...detail.runtime }
-}
-
 /* ---------- left: amber autonomy pill ---------- */
 
 /**
@@ -141,7 +137,11 @@ export type RuntimePickerProps = {
 export function AutonomyPicker({ threadId, stagedRuntime, onStagedChange }: RuntimePickerProps): JSX.Element {
   const { t } = useI18n()
   const setCommandError = useCodeSessionStore((s) => s.setCommandError)
-  const [runtime, setRuntime] = useState<ThreadRuntimeSettings>({})
+  // The pill label is what the next turn would use, so it has to be this
+  // thread's stored override — loaded on selection, not only on menu open.
+  const persisted = useThreadRuntime(threadId, (error: unknown) =>
+    setCommandError(describeError(error, translateNow))
+  )
   const [defaultAutonomy, setDefaultAutonomy] = useState(FALLBACK_AUTONOMY)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -155,14 +155,13 @@ export function AutonomyPicker({ threadId, stagedRuntime, onStagedChange }: Runt
       })
   }, [])
 
-  // Opening the pill loads the stored overrides fresh, so a cached copy can
-  // never write a stale value back over another editor's change.
+  // Opening the pill re-reads the stored overrides, so a copy cached since the
+  // selection can never write a stale value back over another editor's change.
+  const { reload } = persisted
   useEffect(() => {
     if (!open || !threadId) return
-    void fetchRuntime(threadId)
-      .then(setRuntime)
-      .catch((error: unknown) => setCommandError(describeError(error, translateNow)))
-  }, [open, threadId, setCommandError])
+    void reload()
+  }, [open, threadId, reload])
 
   useDismiss(open, rootRef, () => setOpen(false))
 
@@ -171,7 +170,9 @@ export function AutonomyPicker({ threadId, stagedRuntime, onStagedChange }: Runt
     setBusy(true)
     try {
       await updateThread(threadId, { runtime: patch })
-      setRuntime(await fetchRuntime(threadId))
+      // PATCH answers with the thread summary, not the merged overrides, so
+      // re-read to show exactly what the server kept.
+      await persisted.reload()
     } catch (error) {
       setCommandError(describeError(error, translateNow))
     } finally {
@@ -179,7 +180,7 @@ export function AutonomyPicker({ threadId, stagedRuntime, onStagedChange }: Runt
     }
   }
 
-  const autonomyValue = ((stagedRuntime?.autonomy ?? runtime.autonomy) || defaultAutonomy) as AutonomyValue
+  const autonomyValue = ((stagedRuntime?.autonomy ?? persisted.runtime.autonomy) || defaultAutonomy) as AutonomyValue
   const disabled = Boolean(threadId) && busy
   // New-task page: no thread to PATCH, the pick lands in the staged overrides.
   const pick = (value: AutonomyValue): void => {
@@ -244,34 +245,12 @@ export function WorkspacePicker({ threadId, stagedRuntime, onStagedChange }: Run
   const toast = useToast()
   const setCommandError = useCodeSessionStore((s) => s.setCommandError)
   const activeTurnId = useCodeSessionStore((s) => s.activeTurnId)
-  const [runtime, setRuntime] = useState<ThreadRuntimeSettings>({})
+  const persisted = useThreadRuntime(threadId)
   const [view, setView] = useState<WorkspaceView | null>(null)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
-  const [loadedFor, setLoadedFor] = useState<RuntimeOwner>(null)
-  const paintedThreadId = useRef(threadId)
   const rootRef = useRef<HTMLDivElement | null>(null)
-
-  if (isRuntimeFormStale(paintedThreadId.current ?? '', threadId ?? '')) {
-    paintedThreadId.current = threadId
-    setRuntime({})
-    setLoadedFor(null)
-  }
-
-  useEffect(() => {
-    if (!threadId) return
-    let active = true
-    setLoadedFor(null)
-    void fetchRuntime(threadId)
-      .then((value) => {
-        if (!active) return
-        setRuntime(value)
-        setLoadedFor(threadId)
-      })
-      .catch(() => { if (active) setLoadedFor(null) })
-    return () => { active = false }
-  }, [threadId])
 
   useEffect(() => {
     // The pill label falls back to the host's active workspace when this
@@ -299,11 +278,11 @@ export function WorkspacePicker({ threadId, stagedRuntime, onStagedChange }: Run
 
   const { current, options } = useMemo(
     () => workspaceOptions({
-      override: stagedRuntime?.workspace ?? runtime.workspace,
+      override: stagedRuntime?.workspace ?? persisted.runtime.workspace,
       active: view?.active,
       recent: view?.recent ?? []
     }),
-    [stagedRuntime?.workspace, runtime.workspace, view]
+    [stagedRuntime?.workspace, persisted.runtime.workspace, view]
   )
   const needle = query.trim().toLowerCase()
   const filtered = needle
@@ -313,7 +292,7 @@ export function WorkspacePicker({ threadId, stagedRuntime, onStagedChange }: Run
   const staged = stagedRuntime !== undefined && onStagedChange !== undefined
   // On the new-task page nothing blocks the staged pick; on a thread the switch
   // needs the runtime form loaded and no live turn.
-  const canSwitch = staged || (threadId !== null && canSaveRuntime(loadedFor, threadId) && activeTurnId === null)
+  const canSwitch = staged || (threadId !== null && canSaveRuntime(persisted.loadedFor, threadId) && activeTurnId === null)
 
   const commitWorkspace = async (
     path: string,
@@ -339,10 +318,8 @@ export function WorkspacePicker({ threadId, stagedRuntime, onStagedChange }: Run
     // Reflect the switch in the rail right away so the project grouping moves
     // with it; the next list refresh stays authoritative.
     useCodeSessionStore.getState().setThreadWorkspaceRow(threadId, path)
-    const [nextView, nextRuntime] = await Promise.all([getWorkspaceView(), fetchRuntime(threadId)])
+    const [nextView] = await Promise.all([getWorkspaceView(), persisted.reload()])
     setView(nextView)
-    setRuntime(nextRuntime)
-    setLoadedFor(threadId)
     toast.push('success', t(messageKey))
     setOpen(false)
     setQuery('')
@@ -644,23 +621,27 @@ export function ModelPicker({ threadId, stagedRuntime, onStagedChange }: Runtime
   const { t } = useI18n()
   const providers = useProviders()
   const setCommandError = useCodeSessionStore((s) => s.setCommandError)
-  const [runtime, setRuntime] = useState<ThreadRuntimeSettings>({})
+  // Switching sessions remounts the composer (and this pill with it), so the
+  // stored override MUST be reloaded per selection: reading it only when the
+  // menu opens left the label showing the runtime default after every switch.
+  const persisted = useThreadRuntime(threadId, (error: unknown) =>
+    setCommandError(describeError(error, translateNow))
+  )
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
 
+  const { reload } = persisted
   useEffect(() => {
     if (!open || !threadId) return
-    void fetchRuntime(threadId)
-      .then(setRuntime)
-      .catch((error: unknown) => setCommandError(describeError(error, translateNow)))
-  }, [open, threadId, setCommandError])
+    void reload()
+  }, [open, threadId, reload])
 
   const apply = async (patch: ThreadRuntimeSettings): Promise<void> => {
     if (!threadId || busy) return
     setBusy(true)
     try {
       await updateThread(threadId, { runtime: patch })
-      setRuntime(await fetchRuntime(threadId))
+      await persisted.reload()
     } catch (error) {
       setCommandError(describeError(error, translateNow))
     } finally {
@@ -680,8 +661,8 @@ export function ModelPicker({ threadId, stagedRuntime, onStagedChange }: Runtime
   const defaultProvider = providers.providers.find((provider) => provider.is_default) ?? null
   // The provider a turn would actually use: the thread override, else the
   // configured default. The vision warning keys off it.
-  const storedProviderId = stagedRuntime?.provider_id ?? runtime.provider_id
-  const storedModel = stagedRuntime?.model ?? runtime.model
+  const storedProviderId = stagedRuntime?.provider_id ?? persisted.runtime.provider_id
+  const storedModel = stagedRuntime?.model ?? persisted.runtime.model
   const resolvedProvider =
     providers.providers.find((provider) => provider.id === (storedProviderId ?? '')) ??
     defaultProvider ??
@@ -693,7 +674,7 @@ export function ModelPicker({ threadId, stagedRuntime, onStagedChange }: Runtime
 
   const modelValue = storedModel || resolvedProvider?.model || ''
   const providerLabel = resolvedProvider ? resolvedProvider.label ?? resolvedProvider.id : ''
-  const reasoningValue = stagedRuntime?.reasoning_effort ?? runtime.reasoning_effort ?? ''
+  const reasoningValue = stagedRuntime?.reasoning_effort ?? persisted.runtime.reasoning_effort ?? ''
   const reasoningLabel = reasoningValue ? t(reasoningLabelKey(reasoningValue)) : t('canvas.composer.runtime.default')
   const pillLabel = [providerLabel, modelValue].filter(Boolean).join(':') || t('canvas.composer.runtime.default')
   const disabled = Boolean(threadId) && busy
@@ -723,7 +704,7 @@ export function ModelPicker({ threadId, stagedRuntime, onStagedChange }: Runtime
       onSelect={(selection) => {
         // merge_runtime keeps omitted fields, so echoing the stored runtime
         // applies the new pair without clearing autonomy/workspace overrides.
-        const patch = { ...(stagedRuntime ?? runtime), provider_id: selection.providerId, model: selection.model }
+        const patch = { ...(stagedRuntime ?? persisted.runtime), provider_id: selection.providerId, model: selection.model }
         if (staged) stagedApply(patch)
         else void apply(patch)
       }}
@@ -738,7 +719,7 @@ export function ModelPicker({ threadId, stagedRuntime, onStagedChange }: Runtime
               close()
               // Empty string is the documented "unset": the runtime drops it
               // and falls back to the provider's configured reasoning effort.
-              const patch = { ...(stagedRuntime ?? runtime), reasoning_effort: '' }
+              const patch = { ...(stagedRuntime ?? persisted.runtime), reasoning_effort: '' }
               if (staged) stagedApply(patch)
               else void apply(patch)
             }}
@@ -755,7 +736,7 @@ export function ModelPicker({ threadId, stagedRuntime, onStagedChange }: Runtime
               aria-selected={reasoningValue === value}
               onClick={() => {
                 close()
-                const patch = { ...(stagedRuntime ?? runtime), reasoning_effort: value }
+                const patch = { ...(stagedRuntime ?? persisted.runtime), reasoning_effort: value }
                 if (staged) stagedApply(patch)
                 else void apply(patch)
               }}
