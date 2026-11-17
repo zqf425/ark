@@ -12,6 +12,7 @@ export type { ArkErrorPayload } from "./ArkErrorPayload";
 export type { ThreadSummary } from "./ThreadSummary";
 export type { ThreadListQuery } from "./ThreadListQuery";
 export type { ThreadUsageResponse } from "./ThreadUsageResponse";
+export type { TurnUsage } from "./TurnUsage";
 export type { LlmRound } from "./LlmRound";
 export type { LlmRoundError } from "./LlmRoundError";
 export type { LlmRoundsResponse } from "./LlmRoundsResponse";

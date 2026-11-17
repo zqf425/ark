@@ -90,6 +90,11 @@
   把同一耗时交给回复卡标题行（`ark-reply__head` 内的 `ark-reply__duration`），耗时不会因为无可折叠
   步骤而消失；两种情况都不出现在 `ark-reply__foot` 操作行。数值与会话统计条总耗时同源（同一
   `state/rounds.ts` 折叠），因此"各轮次之和 = 统计条总耗时"成立；无已记录轮次时不显示。
+  **数据源是 `GET /v1/threads/{id}/usage` 的 `turn_usage`，不是 `GET /v1/debug/llm-rounds`**：后者是
+  有界诊断分页（`LLM_ROUNDS_MAX_LIMIT`），长会话会把整个回合挤出单页，于是该回合没有任何行可求和，
+  头部把真实十几分钟的回合渲染成「122 步 · 耗时 11 秒」。聚合路由整份日志重放并逐回合折叠，
+  与线程总计同一次折叠，所以回合耗时不再取决于历史有多长。`rounds.ts` 的 `appendRound` 也按回合
+  累加进已有条目（不是一个回合一行地追加），否则实时 `usage` 事件会把同一回合算两遍。
 - 用时文案是**本地化的单位拼接**（`formatDurationWords`，读作“耗时 1时2分3秒”），不是 `m:ss` 时钟：
   时/分/秒的单位词来自 i18n（`canvas.duration.hours|minutes|seconds`），由调用方经
   `hooks/use-duration-words.ts` 的 `useDurationFormat` 注入，因此 `session-stats.ts` 仍保持无 React、

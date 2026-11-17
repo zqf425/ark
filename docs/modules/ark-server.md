@@ -127,11 +127,16 @@
   模态 UI，请求取消不关闭已弹出的对话框）；端口未装配时 `runtime_unavailable`/503，返回
   `FolderPickResponse`，`path` 省略即用户取消。见 [workspace-switch 需求](../requirements/workspace-switch-and-git-diff.md)。
 - `GET /v1/threads/{id}/usage` 与 `GET /v1/debug/llm-rounds` 只从权威 `usage` 事件投影（每轮模型调用
-  恰好一条），不维护第二套用量真源。llm-rounds 每轮的 `usage.duration_ms` 优先采用 agent 循环实测
-  的模型调用耗时（不含工具执行），样本未计时（旧日志）才回退到回合边界窗口；该字段是轮次耗时的唯一
-  wire 载体（随扁平化的 usage 序列化）。llm-rounds 以 `limit`（缺省
-  `LLM_ROUNDS_DEFAULT_LIMIT`，clamp 到 `LLM_ROUNDS_MAX_LIMIT`）与 `offset` 分页，无 `thread_id`
-  时至多扫描最近 `LLM_ROUNDS_MAX_THREADS` 个线程；诊断字段不包含 prompt、API key、header 或用户敏感正文。
+  恰好一条），不维护第二套用量真源。`usage.duration_ms` 优先采用 agent 循环实测的模型调用耗时
+  （不含工具执行），样本未计时（旧日志）才回退到回合边界窗口；该字段是轮次耗时的唯一 wire 载体
+  （随扁平化的 usage 序列化）。
+- **会话内每个回合的耗时读 `GET /v1/threads/{id}/usage` 的 `turn_usage`，不读 llm-rounds**：该聚合
+  路由整份日志重放，逐回合折叠（`TurnUsage`，含 `turn_id`/`samples`/扁平化 `usage`），且与线程总计
+  用同一次折叠，因此「各回合之和 == 线程总计」按构造成立。llm-rounds 是有界诊断分页，长会话会把整个
+  回合挤出单页，用它求和曾让回合头部把真实几分钟显示成几秒（渲染层缺陷已随本次改动消除）。
+  llm-rounds 以 `limit`（缺省 `LLM_ROUNDS_DEFAULT_LIMIT`，clamp 到 `LLM_ROUNDS_MAX_LIMIT`）与
+  `offset` 分页，无 `thread_id` 时至多扫描最近 `LLM_ROUNDS_MAX_THREADS` 个线程；诊断字段不包含
+  prompt、API key、header 或用户敏感正文。
   错误归属依赖回合终态事件闭合：末轮之后、终态之前的 `Error` 事件在 `TurnCompleted/Failed/Aborted`
   到达时归入末轮；仍在运行的回合不产出这部分归属，属预期语义而非丢数据。
 - `POST /v1/sessions/{id}/resume-thread` 把 session id 兼容为 thread id（本运行时只有线程一个持久

@@ -307,6 +307,8 @@ describe('items reducer usage and compaction', () => {
       costUsd: 0.02,
       cacheHitTokens: null,
       cacheMissTokens: null,
+      // Neither sample carried a measured duration: unknown, not `0秒`.
+      durationMs: null,
       lastPromptTokens: 1500,
       // No deltas preceded these samples, so no streaming speed was measured.
       lastRoundTokensPerSec: null
@@ -344,6 +346,7 @@ describe('items reducer usage and compaction', () => {
       thread_id: THREAD_ID,
       turns: 3,
       samples: 9,
+      turn_usage: [],
       prompt_tokens: 9000,
       completion_tokens: 1000,
       total_tokens: 10000
@@ -354,6 +357,7 @@ describe('items reducer usage and compaction', () => {
       thread_id: THREAD_ID,
       turns: 3,
       samples: 9,
+      turn_usage: [],
       prompt_tokens: 9000,
       completion_tokens: 1000,
       total_tokens: 10000
@@ -366,6 +370,8 @@ describe('items reducer usage and compaction', () => {
       costUsd: null,
       cacheHitTokens: null,
       cacheMissTokens: null,
+      // The lifetime seed reports no spanning total here, so nothing is faked.
+      durationMs: null,
       lastPromptTokens: null,
       lastRoundTokensPerSec: null
     })

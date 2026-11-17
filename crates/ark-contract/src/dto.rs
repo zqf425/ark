@@ -533,6 +533,25 @@ pub struct UsageResponse {
     pub usage: Usage,
 }
 
+/// One turn's folded usage inside `GET /v1/threads/{id}/usage`.
+///
+/// The per-turn breakdown exists because the turn header shows *that turn's*
+/// measured model time. Before it existed the renderer re-derived that span
+/// from `GET /v1/debug/llm-rounds`, which is a bounded diagnostics page: a long
+/// session pushed whole turns past the page and their clocks silently collapsed
+/// to a fraction of the real span. This fold is the same one the thread totals
+/// use, so "sum of turns == thread total" holds by construction.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct TurnUsage {
+    pub turn_id: TurnId,
+    /// Completed model rounds folded into this turn.
+    #[ts(as = "f64")]
+    pub samples: u64,
+    #[serde(flatten)]
+    pub usage: Usage,
+}
+
 /// `GET /v1/threads/{id}/usage`.
 ///
 /// Aggregated from the thread's authoritative `usage` events, so it survives
@@ -547,6 +566,11 @@ pub struct ThreadUsageResponse {
     /// Individual model rounds folded in.
     #[ts(as = "f64")]
     pub samples: u64,
+    /// Per-turn breakdown, oldest first: the authoritative source for every
+    /// per-turn readout (the turn header's clock). Not a page — this route
+    /// replays the whole log, so a long session reports all of its turns.
+    #[serde(default)]
+    pub turn_usage: Vec<TurnUsage>,
     #[serde(flatten)]
     pub usage: Usage,
 }

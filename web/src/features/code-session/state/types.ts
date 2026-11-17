@@ -30,6 +30,11 @@ export type UsageAggregate = {
   completionTokens: number
   totalTokens: number
   costUsd: number | null
+  /**
+   * Summed measured model-call wall time of every folded sample, milliseconds.
+   * Null until a sample carries one, so "unknown" never renders as `0秒`.
+   */
+  durationMs: number | null
   lastPromptTokens: number | null
   cacheHitTokens: number | null
   cacheMissTokens: number | null

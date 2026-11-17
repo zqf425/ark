@@ -11,13 +11,20 @@ import { useCodeSessionStore } from '../state/store'
 
 installBrowserStubs()
 
-// The strip seeds its counters over HTTP; the rounds it sums come from the
-// store, which is all this test pins.
+// The strip seeds its counters over HTTP; the total it prints is the
+// aggregate's own `duration_ms`, which is what this test pins.
 vi.mock('../api/threads-api', () => ({
-  getThreadUsage: () => Promise.resolve({ turns: 2, samples: 3, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
-}))
-vi.mock('../api/llm-rounds-api', () => ({
-  listLlmRounds: () => Promise.resolve({ rounds: [{}, {}, {}], truncated: false })
+  getThreadUsage: () =>
+    Promise.resolve({
+      thread_id: '00000000-0000-0000-0000-0000000000ff',
+      turns: 2,
+      samples: 3,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      // 30m 45s: the sum of this session's measured model calls.
+      duration_ms: 1_845_000
+    })
 }))
 
 const { SessionStatsBar } = await import('./SessionStatsBar')
@@ -32,12 +39,25 @@ describe('SessionStatsBar total duration format', () => {
   })
 
   it('spells the session total out in hours, minutes and seconds', async () => {
-    // 10m 45s in one turn plus 20m in another = 30m 45s total.
+    // 10m 45s in one turn plus 20m in another = 30m 45s total. The strip reads
+    // the aggregate, so the same sum arrives as one `duration_ms`.
     useCodeSessionStore.setState({
       rounds: [
         { turnId: T1, durationMs: 645_000 },
         { turnId: T2, durationMs: 1_200_000 }
-      ]
+      ],
+      usage: {
+        samples: 3,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        costUsd: null,
+        durationMs: 1_845_000,
+        cacheHitTokens: null,
+        cacheMissTokens: null,
+        lastPromptTokens: null,
+        lastRoundTokensPerSec: null
+      }
     })
 
     const harness = await mountWithProviders(<SessionStatsBar threadId="00000000-0000-0000-0000-0000000000ff" />)
