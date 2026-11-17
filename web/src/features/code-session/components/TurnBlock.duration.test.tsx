@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 /**
- * The turn's measured model time renders in the **process-card header**, not in
- * the reply card's bottom-right corner: the header is the row describing what
- * the turn did, so its cost belongs there.
+ * The turn's measured model time renders in the **process-card header**, right
+ * after the step count and not pinned to the row's right edge: it reads as
+ * part of the summary line, and the reply card's bottom-right corner stays
+ * free for the copy action.
  *
  * A step-less turn (a single question and answer) renders no process card, so
  * that turn's clock rides the reply card's title row instead — the duration
@@ -59,11 +60,17 @@ describe('TurnBlock renders the turn duration in the process header', () => {
     expect(header).not.toBeNull()
     const headerClock = header!.querySelector('.ark-process__duration')
     expect(headerClock).not.toBeNull()
-    expect(headerClock!.textContent).toContain('1:41')
+    // Spelled-out units, not a `m:ss` clock.
+    expect(headerClock!.textContent).toBe('耗时 1分41秒')
+
+    // It follows the step count directly, so the summary line reads
+    // "执行过程 · 1 步 · 耗时 1分41秒" and the chevron keeps the right edge.
+    const stepCount = header!.querySelector('.ark-process__meta')
+    expect(stepCount).not.toBeNull()
+    expect(stepCount!.nextElementSibling).toBe(headerClock)
 
     // The reply card carries no clock at all when a process card exists.
     expect(harness.host.querySelector('.ark-reply__duration')).toBeNull()
-    expect(harness.host.querySelector('.ark-reply__foot')?.textContent ?? '').not.toContain('1:41')
   })
 
   it('falls back to the reply title row when the turn has no process card', async () => {
@@ -80,7 +87,7 @@ describe('TurnBlock renders the turn duration in the process header', () => {
     expect(titleRow).not.toBeNull()
     const clock = titleRow!.querySelector('.ark-reply__duration')
     expect(clock).not.toBeNull()
-    expect(clock!.textContent).toContain('1:41')
+    expect(clock!.textContent).toBe('耗时 1分41秒')
     // Still not the bottom-right action row.
     expect(harness.host.querySelector('.ark-reply__foot')?.querySelector('.ark-reply__duration')).toBeNull()
   })

@@ -49,7 +49,7 @@ import { RewindControl } from './RewindControl'
 import { executeEditResend, userTextOfTurn } from './rewind-flow'
 import type { RewindAvailability } from './rewind-flow'
 import { useCodeSessionStore } from '../state/store'
-import { formatDuration, turnDurationMs } from './session-stats'
+import { formatElapsed, turnDurationMs } from './session-stats'
 
 /**
  * The server's own message is the only accurate explanation for a refusal
@@ -308,12 +308,19 @@ export const TurnBlock = memo(function TurnBlock({
             <span className={`ark-dot ${live ? 'ark-dot--live' : 'ark-dot--idle'}`} aria-hidden="true" />
             <span className="ark-process__title">{t('canvas.process.title')}</span>
             <span className="ark-process__meta">{t('canvas.process.count', { count: process.length })}</span>
-            {/* Measured model time of this turn, at the row's right edge:
-                the reply card below is where the answer lives, not where
-                the work's cost belongs. */}
+            {/* Measured model time of this turn, right after the step count
+                it qualifies. It reads as part of the header's summary line
+                rather than a right-aligned badge, and the reply card below
+                stays about the answer. */}
             {turnMs > 0 ? (
               <span className="ark-process__duration" title={t('canvas.process.durationTitle')}>
-                {t('canvas.process.duration', { duration: formatDuration(turnMs) })}
+                {t('canvas.process.duration', {
+                  duration: formatElapsed(turnMs, {
+                    hours: (count) => t('canvas.duration.hours', { count }),
+                    minutes: (count) => t('canvas.duration.minutes', { count }),
+                    seconds: (count) => t('canvas.duration.seconds', { count })
+                  })
+                })}
               </span>
             ) : null}
           </summary>

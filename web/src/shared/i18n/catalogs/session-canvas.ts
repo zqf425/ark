@@ -25,8 +25,13 @@ export const SESSION_CANVAS_MESSAGES = {
 
   'canvas.process.title': ['执行过程', 'Work in progress'],
   'canvas.process.count': ['{count} 步', '{count} steps'],
-  'canvas.process.duration': ['用时 {duration}', '{duration} elapsed'],
+  'canvas.process.duration': ['耗时 {duration}', '{duration} elapsed'],
   'canvas.process.durationTitle': ['本回合各次模型调用的实测耗时之和（不含工具执行）', 'Sum of the measured model-call durations in this turn (tool execution excluded)'],
+  // Elapsed-time units: the formatter composes them, so no unit word is
+  // hardcoded in a component or a pure-Rust/TS helper.
+  'canvas.duration.hours': ['{count}时', '{count}h'],
+  'canvas.duration.minutes': ['{count}分', '{count}m'],
+  'canvas.duration.seconds': ['{count}秒', '{count}s'],
   'canvas.process.folded': ['展开较早的 {count} 步', 'Show {count} earlier steps'],
   'canvas.process.unfold': ['收起较早的 {count} 步', 'Hide {count} earlier steps'],
   'canvas.reply.title': ['最终回复', 'Final reply'],

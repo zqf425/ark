@@ -83,14 +83,20 @@
   冗余的作者标签是重复信息——气泡 meta 行退化为底部一行（时间 + 模型标签 + 复制按钮；模型标签
   `ark-msg__model` 渲染 `ThreadItem.model`，即该回合实际使用的 `provider:model`，缺失时省略），
   `canvas.author.you` 与 `canvas.author.youInitial` 键已随行为删除；助手字标 "ark" 是产品名，不进 i18n。
-- 本回合的模型耗时显示在**过程卡头部行**右端（`ark-process__duration`，`TurnBlock` 按回合从 store 的
-  每轮耗时折叠 `turnDurationMs` 求和传入）：实测耗时是描述"本回合做了什么"的那一行的成本，不属于
-  "最终回复"答案卡的内容区，因此不放在回复卡右下角操作行。`ark-process__duration` 用 `margin-left: auto`
-  占据头部右端，头部 `::after` 箭头随之改为 `margin-left: 0`（`-head:has(-duration)::after`），避免箭头被
-  二次右推。**没有过程卡**的回合（单轮问答、无工具/思考行）把同一耗时交给回复卡标题行
-  （`ark-reply__head` 内的 `ark-reply__duration`），耗时不会因为无可折叠步骤而消失；两种情况都不出现在
-  `ark-reply__foot` 操作行。数值与会话统计条总耗时同源（同一 `state/rounds.ts` 折叠），因此"各轮次之和
-  = 统计条总耗时"成立；无已记录轮次时不显示。
+- 本回合的模型耗时显示在**过程卡头部行**、紧跟步数之后（`ark-process__duration` 排在
+  `ark-process__meta` 之后，故整行读作“执行过程 · 47 步 · 耗时 10分45秒”）：实测耗时是描述"本回合
+  做了什么"的那一行的成本，属于摘要行，不贴最右（头部 `::after` 箭头仍由自己的 `margin-left: auto`
+  独占右端），也不放进"最终回复"答案卡的右下角操作行。**没有过程卡**的回合（单轮问答、无工具/思考行）
+  把同一耗时交给回复卡标题行（`ark-reply__head` 内的 `ark-reply__duration`），耗时不会因为无可折叠
+  步骤而消失；两种情况都不出现在 `ark-reply__foot` 操作行。数值与会话统计条总耗时同源（同一
+  `state/rounds.ts` 折叠），因此"各轮次之和 = 统计条总耗时"成立；无已记录轮次时不显示。
+- 用时文案是**本地化的单位拼接**（`formatElapsed`，读作“耗时 1时2分3秒”），不是 `m:ss` 时钟：时/分/秒的
+  单位词来自 i18n（`canvas.duration.hours|minutes|seconds`），由调用方传入 translator，因此
+  `session-stats.ts` 仍保持无 React、无硬编码用户文案（与 `shared/format.ts` 的 `formatRelative`
+  同构）。前导零单位省略（`45秒`、`1时2分3秒`），但一旦出现小时就保留分钟位（`1时0分3秒`；折叠成
+  `1时3秒` 会读成另一段时长）；不足一秒仍显示 `0秒`，负值与非有限值一律钳为 `0秒`，不漏出 `NaN秒`。
+  会话统计条的总耗时仍用 `m:ss` 时钟（`formatDuration`）：头部是读过就懂的自然语言，统计条是等宽
+  紧凑的指标，两者用途不同。
 - 工具卡头部带工具族图标盘（`ark-tool__icon`，22px 圆角方块 + CSS mask 单色图标）：按工具名
   归入 read/write/exec/search 四族，未知名回落 wrench，与主流 agent 的活动行一致让长回合可按
   形状扫读；折叠头部新增单行参数摘要（`ark-tool__digest`，取首个参数 `key=value` 截断省略，

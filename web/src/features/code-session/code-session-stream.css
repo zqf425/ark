@@ -207,19 +207,13 @@
   font-family: var(--ark-mono);
 }
 
-/* Measured model time of the turn, pinned to the header's right edge. The
-   chevron is a `::after` with `margin-left: auto`, so this item takes that
-   job first and the chevron follows it at a fixed gap. */
+/* Measured model time of the turn, inline after the step count: it belongs to
+   the header's summary line, so it takes no auto margin. The chevron's own
+   `margin-left: auto` keeps pushing itself to the row's right edge. */
 .ark-process__duration {
-  margin-left: auto;
   font-size: 11px;
   color: var(--ark-text-dim);
   font-family: var(--ark-mono);
-}
-
-/* With a duration present, the chevron no longer pushes itself right. */
-.ark-process__head:has(.ark-process__duration)::after {
-  margin-left: 0;
 }
 
 .ark-process__body {
