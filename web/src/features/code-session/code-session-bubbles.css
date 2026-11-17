@@ -2,7 +2,7 @@
  * Message rows, ported from mainstream agent canvases: the user speaks in a
  * whale-tinted card hugging the right edge; ark answers in prose on the canvas
  * with a small identity avatar on the meta row. The turn's settled final reply
- * is framed as its own answer card (`ark-reply`, the smart-ark style).
+ * is framed as its own answer card (`ark-reply`).
  *
  * Part of the Code screen stylesheet; split to stay under the 1000-line
  * per-file limit (design §7.10.2). Code-session.css is the entry. Colors come
@@ -19,7 +19,8 @@
   min-width: 0;
 }
 
-/* Meta row: one quiet identity line per message, shared by both roles. */
+/* Meta row: one quiet identity line per message, shared by both roles.
+   On the user bubble it renders after the payload (`order: 2`) as a footer. */
 .ark-msg__head {
   display: flex;
   align-items: center;
@@ -29,8 +30,9 @@
   color: var(--ark-text-faint);
 }
 
-/* Small round identity glyph: "you" is a solid accent disc, "ark" is a
-   hairline-ringed disc with the wordmark inside — no bitmaps, pure CSS. */
+/* Small round identity glyph: the assistant is a hairline-ringed disc with
+   the wordmark inside — no bitmaps, pure CSS. The user bubble carries no
+   avatar: the right-aligned card already says who is speaking. */
 .ark-msg__avatar {
   display: inline-flex;
   align-items: center;
@@ -43,11 +45,6 @@
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.02em;
-}
-
-.ark-msg__avatar--you {
-  background: var(--ark-accent-soft);
-  color: var(--ark-accent);
 }
 
 .ark-msg__avatar--assistant {
@@ -77,7 +74,8 @@
   color: var(--ark-text);
 }
 
-/* Attachment chips: under the bubble text, inside the same card, wrapping. */
+/* Message attachments: thumbnails (images) or filename pills (everything
+   else) under the bubble text, inside the same card, wrapping. */
 .ark-msg__attachments {
   display: flex;
   flex-wrap: wrap;
@@ -86,7 +84,20 @@
   max-width: 100%;
 }
 
-.ark-msg__attachments .ark-chip {
+/* Wrapper around one thumbnail; the warn tone keeps degraded deliveries
+   visible through a ring, not a wall of text. */
+.ark-msg-attachment {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  border-radius: var(--ark-radius);
+}
+
+.ark-msg-attachment--warn {
+  box-shadow: 0 0 0 2px var(--ark-warn-wash);
+}
+
+.ark-msg__attachments .ark-thumb--file {
   font-size: 11px;
   max-width: 100%;
   overflow: hidden;
@@ -136,8 +147,7 @@
 }
 
 .ark-msg--user .ark-msg__head {
-  /* The meta row belongs to the bubble; the bubble itself is the payload. */
-  order: 2;
+  /* The meta row follows the payload as a quiet footer line. */
   padding-right: 2px;
 }
 
@@ -147,7 +157,7 @@
 }
 
 .ark-msg--user .ark-msg__author {
-  color: var(--ark-text-dim);
+  display: none;
 }
 
 .ark-msg__time {
@@ -160,7 +170,15 @@
   word-break: break-word;
 }
 
+/*
+ * Markdown host variant. The shared `.ark-md` grid already owns block spacing,
+ * so the host must not also be `pre-wrap`: marked emits a newline text node
+ * between sibling blocks (`</p>\n<p>`), and pre-wrap would paint each of those
+ * as a rendered blank line on top of the margins — the "one blank line per
+ * paragraph gap" blow-up. User bubbles keep the plain-text variant above.
+ */
 .ark-msg__body--prose {
+  white-space: normal;
   line-height: 1.66;
   font-size: 15px;
 }
@@ -179,7 +197,7 @@
   background: var(--ark-error-wash);
 }
 
-/* ---------- final reply: the turn's settled answer card (smart-ark style) ---------- */
+/* ---------- final reply: the turn's settled answer card ---------- */
 
 /*
  * Only the promoted final reply gets this frame: white card, hairline border,
@@ -234,14 +252,24 @@
 }
 
 /*
- * Footer action row: the copy button sits at the card's bottom-right, outside
- * the prose, instead of the title row's right corner. Hover reveal mirrors the
- * message-level rule; the row collapses entirely while streaming.
+ * Footer action row: the settled time and the copy button sit at the card's
+ * bottom-right, outside the prose, instead of the title row's right corner —
+ * the user bubble's footer carries the same clock, so both roles end with a
+ * quiet timestamp. Hover reveal mirrors the message-level rule; the row
+ * collapses entirely while streaming.
  */
 .ark-reply__foot {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
   margin-top: 2px;
+}
+
+.ark-reply__time {
+  font-family: var(--ark-mono);
+  font-size: 10.5px;
+  color: var(--ark-text-faint);
 }
 
 .ark-reply__copy {
@@ -262,11 +290,16 @@
   }
 }
 
+/*
+ * Same pre-wrap exemption as `.ark-msg__body--prose`: the markdown host must
+ * stay `normal` or the renderer's inter-block newline text nodes paint as
+ * blank lines on top of the block margins.
+ */
 .ark-reply__body {
+  white-space: normal;
   padding-top: 6px;
   line-height: 1.66;
   font-size: 15px;
-  white-space: pre-wrap;
   word-break: break-word;
 }
 

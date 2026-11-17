@@ -229,7 +229,7 @@ async fn list_marks_only_threads_with_an_in_flight_turn_as_running() {
 /// A thread whose newest durable turn event is `turn_started` (no terminal
 /// record yet) reads busy even when the registry forgot it — a restart drops
 /// the process-local registry, and the durable log is the only surviving
-/// evidence of the in-flight turn (smart-ark busy rule).
+/// evidence of the in-flight turn (busy rule).
 #[tokio::test]
 async fn list_falls_back_to_the_durable_log_for_running_after_a_registry_loss() {
     let dir = test_dir("running-durable");

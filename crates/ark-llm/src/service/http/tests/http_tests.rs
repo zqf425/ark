@@ -112,7 +112,7 @@ async fn chat_request_sends_content_type_once() {
 /// A 429 with `Retry-After: 1` must wait ≈1s (the provider-advised delay),
 /// not the ≈1ms exponential fallback — and a `Retry-After: 0` must fall
 /// back to the backoff schedule instead of bypassing `rate_limit_floor`
-/// (same rule as smart-ark's `computeRetryDelay`: only adopt a value > 0).
+/// (same rule as the retry-delay computation: only adopt a value > 0).
 #[tokio::test]
 async fn rate_limited_response_is_retried_honouring_retry_after() {
     use std::io::{Read, Write};

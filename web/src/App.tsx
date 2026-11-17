@@ -6,7 +6,7 @@
  * hook mounted across scene changes. No fetch, no event interpretation, no
  * styling decisions beyond choosing a scene.
  */
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { ErrorBoundary } from './shared/ui'
 import { useI18n } from './shared/i18n'
 import { useCodeSessionStore } from './features/code-session/state/store'
@@ -23,12 +23,37 @@ import { NewTaskPage } from './features/console/components/NewTaskPage'
 import { ReviewPage } from './features/console/components/ReviewPage'
 import { useConsoleMeta } from './features/console/hooks/use-console-meta'
 
+/**
+ * Delegation becomes visible: the first live subagent opens the inspector on
+ * its tab (explicit `openPanel` intent, like selecting a file). Later activity
+ * only bumps the badge — the open/collapsed choice stays with the user, and a
+ * count that returns to zero never closes anything.
+ */
+function useSubagentAutoReveal(): void {
+  const activeCount = useCodeSessionStore((s) => s.childRunActiveCount)
+  const openPanel = useCodeSessionStore((s) => s.openPanel)
+  const rightCollapsed = useCodeSessionStore((s) => s.rightCollapsed)
+  const everActive = useRef(false)
+
+  useEffect(() => {
+    if (activeCount > 0) {
+      if (!everActive.current && rightCollapsed) {
+        everActive.current = true
+        openPanel('subagents')
+      }
+    } else {
+      everActive.current = false
+    }
+  }, [activeCount, rightCollapsed, openPanel])
+}
+
 export function App(): JSX.Element {
   const { t } = useI18n()
   const view = useViewStore((state) => state.view)
   const activeThreadId = useCodeSessionStore((s) => s.activeThreadId)
   const { refresh, create } = useThreadList()
   const meta = useConsoleMeta()
+  useSubagentAutoReveal()
 
   // One bootstrap fetch. The stream hook below owns everything after that.
   useEffect(() => {

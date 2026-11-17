@@ -13,7 +13,7 @@
 //!   persisted user message.
 //! * **Reconcile, don't patch.** Channel CRUD and config changes only notify;
 //!   one `sync` pass diffs desired channels against running handles and
-//!   rebuilds what changed (the `ClawRuntime::sync` shape from smart-ark).
+//!   rebuilds what changed (the sync-reconcile shape).
 //! * **The registry is the only conflict arbiter.** The per-conversation
 //!   queues serialize this service's own dispatch; a turn someone else started
 //!   on the bound thread surfaces as `start_turn`'s `Conflict` and is retried

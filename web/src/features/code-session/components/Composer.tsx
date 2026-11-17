@@ -1,7 +1,7 @@
 /**
  * Composer: attachments, skill mentions, queueing and steering.
  *
- * Layout follows the smart-ark Code composer: a 24px frosted shell whose first
+ * Layout follows the Code composer design: a 24px frosted shell whose first
  * row is the auto-growing textarea, a hairline-separated toolbar underneath
  * (round attach button, quiet runtime pickers on the left; the delivery
  * chooser and the circular gradient send button on the right). Workspace
@@ -10,7 +10,7 @@
  *
  * Enter sends, Shift+Enter inserts a newline. While a turn is live the primary
  * control is the interrupt button — until the user starts a draft, at which
- * point it is replaced by the smart-ark running-action pair: a steer/queue
+ * point it is replaced by the running-action pair: a steer/queue
  * delivery picker plus a submit button for the chosen mode. Queued drafts
  * flush automatically when the turn ends, in order. Message state is local:
  * the runtime owns conversation state, and the user's own message returns as
@@ -27,19 +27,29 @@ import { useTurn } from '../hooks/use-turn'
 import { useRuntimeSkills, useThreadSkills } from '../hooks/use-thread-skills'
 import { associateAttachment, uploadAttachment } from '../api/attachments-api'
 import { canEditComposer, canSendToThread } from './composer-availability'
+import type { ThreadRuntimeSettings } from '../../../shared/contracts'
 import { filterSkills, mentionTokenAt, type MentionToken } from './skill-mention'
 import { AutonomyPicker, WorkspacePicker, ContextRing, ModelPicker } from './ComposerRuntimeControls'
 import { SkillPalette } from './SkillPalette'
 import { DraftHighlight } from './DraftHighlight'
+import { AttachmentThumb } from './AttachmentThumb'
 import { CopyButton } from '../../../shared/ui/copy'
 const MAX_ROWS = 8
 /** Base64 of a file is ~4/3 of its bytes; keep uploads inside the runtime cap. */
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
-type PickedAttachment = { id: string; name: string }
+/** A picked (uploaded, not yet sent) attachment; `mime` drives image previews. */
+type PickedAttachment = { id: string; name: string; mime?: string }
 
 /** Where a draft goes while a turn is live: steer the current turn or hold it. */
 type RunningDeliveryMode = 'steer' | 'queue'
+
+/**
+ * Store key holding the new-task page's unsent draft. It rides the same
+ * `drafts` map (and its localStorage mirror) as per-thread drafts; the id
+ * namespace is UUIDs, so this reserved key can never collide with a thread.
+ */
+export const NEW_TASK_DRAFT_KEY = 'new-task'
 
 function toBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -206,14 +216,34 @@ function DeliveryChooser({
   )
 }
 
-export function Composer({ threadId }: { threadId: string | null }): JSX.Element {
+/**
+ * The composer's deliver action. With a thread it is the ordinary turn start /
+ * steer path; on the new-task page (`threadId = null` + `onPendingStart`) it
+ * creates the thread first and then starts its first turn.
+ */
+export type ComposerSubmit = (text: string, attachmentIds: string[]) => Promise<boolean>
+
+export function Composer({
+  threadId,
+  onPendingStart,
+  stagedRuntime,
+  onStagedChange
+}: {
+  threadId: string | null
+  /** New-task page delivery: create the thread, then start its first turn. */
+  onPendingStart?: ComposerSubmit
+  /** New-task page: staged runtime overrides rendered by the pills. */
+  stagedRuntime?: ThreadRuntimeSettings
+  /** New-task page: merge a patch into the staged overrides. */
+  onStagedChange?: (patch: ThreadRuntimeSettings) => void
+}): JSX.Element {
   const { t } = useI18n()
   // The unsent draft lives in the store keyed by thread, so switching sessions
   // (which remounts this component) restores each thread's own draft instead
   // of dropping it. `draft` below is the boolean send-in-flight flag.
   const draft = useCodeSessionStore((s) => s.sending)
   const set = useCodeSessionStore((s) => s.setSending)
-  const draftText = useCodeSessionStore((s) => (threadId ? (s.drafts[threadId] ?? '') : ''))
+  const draftText = useCodeSessionStore((s) => (threadId ? (s.drafts[threadId] ?? '') : (s.drafts[NEW_TASK_DRAFT_KEY] ?? '')))
   const setDraft = useCodeSessionStore((s) => s.setDraft)
   const clearDraft = useCodeSessionStore((s) => s.clearDraft)
   const streamStatus = useCodeSessionStore((s) => s.streamStatus)
@@ -226,7 +256,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   // Locally queued drafts: filled by 「排队」 during a live turn, flushed in
   // order when the turn ends (the effect below watches the live transition).
   const [queued, setQueued] = useState<string[]>([])
-  // Running-action delivery mode, like the smart-ark composer: choosing a mode
+  // Running-action delivery mode: choosing a mode
   // never submits the draft; it is applied on Enter or the send button. Reset
   // to steer when the draft empties so a fresh draft starts as a steer.
   const [deliveryMode, setDeliveryMode] = useState<RunningDeliveryMode>('steer')
@@ -268,8 +298,12 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     }
   }, [menuOpen])
 
-  const inputDisabled = !canEditComposer(threadId, draft)
-  const sendDisabled = !canSendToThread(threadId, draft, streamStatus)
+  // The new-task composer (no thread + a pendingStart handler) creates its
+  // thread on send, so the stream gate does not apply; the placeholder names
+  // that action. Everywhere else the placeholder follows the live state.
+  const pendingStart = threadId === null && onPendingStart !== undefined
+  const inputDisabled = !pendingStart && !canEditComposer(threadId, draft)
+  const sendDisabled = !canSendToThread(threadId, draft, streamStatus, pendingStart)
   const live = canInterrupt
   // Known skill count for the insert-menu badge; loading state hides it.
   const skillCount = skills?.length ?? 0
@@ -281,7 +315,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     [token, skills]
   )
   // The steer/queue chooser only exists while the user actually has a draft:
-  // an empty running composer is pure stop, matching the smart-ark composer.
+  // an empty running composer is pure stop.
   const showDeliveryChooser = live && !sendDisabled && draftText.trim().length > 0
 
   // Store-backed textarea: writes keep the per-thread draft in sync, and the
@@ -320,7 +354,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   }, [live, queued, send])
 
   // The delivery chooser is bound to the running state: a fresh turn defaults
-  // back to steer, like the smart-ark composer's reset.
+  // back to steer, resetting the delivery picker.
   useEffect(() => {
     if (!live) setDeliveryMode('steer')
   }, [live])
@@ -343,40 +377,56 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
 
   const resetInput = (): void => {
     if (threadId) clearDraft(threadId)
+    else clearDraft(NEW_TASK_DRAFT_KEY)
   }
 
   /**
    * The primary action, shared by Enter and the send button. During a live
-   * turn the delivery picker decides the channel (smart-ark's running-action
+   * turn the delivery picker decides the channel (running-action
    * pair): steer injects into the current turn, queue holds the draft for the
    * automatic end-of-turn drain. Both channels can carry attachments; queueing
    * only takes the text, so attachments stay for the next steer/send.
    */
   const submit = async (): Promise<void> => {
-    if (!canSendToThread(threadId, draft, streamStatus)) return
+    if (!canSendToThread(threadId, draft, streamStatus, pendingStart)) return
     const text = draftText
     if (!text.trim()) return
     if (live && deliveryMode === 'queue') {
       queueDraft()
       return
     }
-    const ids = attachments.map((picked) => picked.id)
-    // The runtime rejects turn starts and steers that carry unassociated
-    // attachment ids, so every picked id is linked to the thread right before
-    // the delivery — same flow for a fresh turn and a live steer.
-    if (ids.length > 0 && threadId) {
-      try {
-        for (const id of ids) await associateAttachment(threadId, id)
-      } catch (error) {
-        setCommandError(describeError(error, translateNow))
-        return
+    // The new-task page has no thread yet: the picked attachments ride the
+    // create+start delivery below (associated after the thread exists).
+    if (!pendingStart) {
+      const ids = attachments.map((picked) => picked.id)
+      // The runtime rejects turn starts and steers that carry unassociated
+      // attachment ids, so every picked id is linked to the thread right before
+      // the delivery — same flow for a fresh turn and a live steer.
+      if (ids.length > 0 && threadId) {
+        try {
+          for (const id of ids) await associateAttachment(threadId, id)
+        } catch (error) {
+          setCommandError(describeError(error, translateNow))
+          return
+        }
       }
+      const ok = live ? await steer(text, ids) : await send(text, ids)
+      if (ok) {
+        // Clear only the text that was actually sent; anything typed during the
+        // request stays in the draft and a failure keeps everything.
+        if (threadId && useCodeSessionStore.getState().drafts[threadId] === text) clearDraft(threadId)
+        setAttachments([])
+        setCommandError(null)
+        set(false)
+      }
+      return
     }
-    const ok = live ? await steer(text, ids) : await send(text, ids)
+    if (!onPendingStart) return
+    const ok = await onPendingStart(text, attachments.map((picked) => picked.id))
     if (ok) {
-      // Clear only the text that was actually sent; anything typed during the
-      // request stays in the draft and a failure keeps everything.
-      if (threadId && useCodeSessionStore.getState().drafts[threadId] === text) clearDraft(threadId)
+      // Same failure rule as the thread path: only a delivered draft is
+      // dropped, so a failed create keeps the text for the next attempt.
+      if (useCodeSessionStore.getState().drafts[NEW_TASK_DRAFT_KEY] === text) clearDraft(NEW_TASK_DRAFT_KEY)
       setAttachments([])
       setCommandError(null)
       set(false)
@@ -408,7 +458,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
         })
         setAttachments((current) => [
           ...current,
-          { id: uploaded.attachment.id, name: file.name }
+          { id: uploaded.attachment.id, name: file.name, mime: file.type || undefined }
         ])
       }
     } catch (error) {
@@ -458,6 +508,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
   const mentionSkill = (id: string): void => {
     const next = draftText ? `${draftText.trimEnd()} /${id} ` : `/${id} `
     if (threadId) setDraft(threadId, next)
+    else setDraft(NEW_TASK_DRAFT_KEY, next)
     inputRef.current?.focus()
     setSkillsOpen(false)
   }
@@ -473,7 +524,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     // replaced, and a stale one would keep the palette open after re-render.
     setToken(null)
     setSkillsOpen(false)
-    if (!node || !threadId) {
+    if (!node) {
       mentionSkill(id)
       return
     }
@@ -485,7 +536,8 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     // A mention is a word: keep one space before it when gluing onto text.
     const lead = before && !/\s$/.test(before) ? ' ' : ''
     const next = `${before}${lead}${mention}${after}`
-    setDraft(threadId, next)
+    if (threadId) setDraft(threadId, next)
+    else setDraft(NEW_TASK_DRAFT_KEY, next)
     const caret = before.length + lead.length + mention.length
     // The value lands through the store → prop cycle, so the caret restore
     // waits one frame; without it the cursor jumps to the end of the draft.
@@ -496,15 +548,19 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
     node.focus()
   }
 
-  const placeholder = threadId
-    ? live
-      ? t('canvas.composer.steerPlaceholder')
-      : t('canvas.composer.sendPlaceholder')
-    : t('canvas.composer.noThreadPlaceholder')
+  const placeholder = pendingStart
+    ? t('canvas.composer.newTaskPlaceholder')
+    : threadId
+      ? live
+        ? t('canvas.composer.steerPlaceholder')
+        : t('canvas.composer.sendPlaceholder')
+      : t('canvas.composer.noThreadPlaceholder')
 
   // Primary-action label follows the delivery mode during a live turn, like
-  // smart-ark: the button and Enter both submit through the chosen channel.
-  const primaryActionLabel = live
+  // The button and Enter both submit through the chosen channel.
+  const primaryActionLabel = pendingStart
+    ? t('canvas.composer.newTaskSend')
+    : live
     ? deliveryMode === 'steer'
       ? t('canvas.composer.steer')
       : t('canvas.composer.queueSend')
@@ -550,8 +606,8 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
         {attachments.length > 0 ? (
           <div className="ark-composer__attachments" role="list" aria-label={t('canvas.composer.attachmentsAria')}>
             {attachments.map((picked) => (
-              <span key={picked.id} className="ark-chip" role="listitem">
-                {picked.name}
+              <span key={picked.id} className="ark-composer__attachment" role="listitem">
+                <AttachmentThumb preview={picked} />
                 <button
                   type="button"
                   className="ark-composer__dismiss"
@@ -596,6 +652,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
             const node = event.currentTarget
             resize(node)
             if (threadId) setDraft(threadId, node.value)
+            else setDraft(NEW_TASK_DRAFT_KEY, node.value)
             // Track the mention token under the caret: typing `/` opens the
             // palette, whitespace/word-boundary changes close it again.
             const nextToken = mentionTokenAt(node.value, node.selectionStart ?? node.value.length)
@@ -683,7 +740,7 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
               aria-hidden="true"
               onChange={(event) => void pickFiles(event.target.files)}
             />
-            {/* Round + trigger with a small insert menu, like the smart-ark
+            {/* Round + trigger with a small insert menu, like the
                 composer menu: attachment and skills live behind one button.
                 Attachments stay available during a live turn: a steer can
                 carry them, so only `sending` (an in-flight command) blocks. */}
@@ -743,13 +800,13 @@ export function Composer({ threadId }: { threadId: string | null }): JSX.Element
                 </div>
               ) : null}
             </div>
-            <AutonomyPicker threadId={threadId} />
+            <AutonomyPicker threadId={threadId} stagedRuntime={stagedRuntime} onStagedChange={onStagedChange} />
           </div>
           <div className="ark-composer__send">
-            <WorkspacePicker threadId={threadId} />
+            <WorkspacePicker threadId={threadId} stagedRuntime={stagedRuntime} onStagedChange={onStagedChange} />
             <ContextRing threadId={threadId} />
-            <ModelPicker threadId={threadId} />
-            {/* Running state, mirroring the smart-ark composer: the rightmost
+            <ModelPicker threadId={threadId} stagedRuntime={stagedRuntime} onStagedChange={onStagedChange} />
+            {/* Running state, mirroring the composer design: the rightmost
                 control has one job at a time — interrupt while the draft is
                 empty, submit (with a steer/queue chooser) once the user types. */}
             {showDeliveryChooser ? <DeliveryChooser mode={deliveryMode} onModeChange={setDeliveryMode} /> : null}

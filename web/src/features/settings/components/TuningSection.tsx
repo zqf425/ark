@@ -1,5 +1,5 @@
 /**
- * Hot turn and SSE limits, grouped the way smart-ark presents its runtime
+ * Hot turn and SSE limits, grouped the way the runtime
  * parameters: turn/token limits, tool protection, context & compaction, and
  * streaming. Values are generated from the Rust `TuningSettings` wire contract;
  * the page deliberately submits the complete typed object: config validation

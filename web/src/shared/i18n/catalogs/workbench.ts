@@ -1,6 +1,6 @@
 /**
  * Workbench shell: view switch, layout controls, right-hand panel slot, and the
- * four panels (changes / plan / file / terminal).
+ * five panels (changes / plan / subagents / file / terminal).
  *
  * Panel tab ids stay English literals; only the visible labels are translated.
  */
@@ -23,6 +23,7 @@ export const WORKBENCH_MESSAGES = {
   'workbench.slot.tabsAria': ['工作台面板', 'Workbench panels'],
   'workbench.panel.changes': ['变更', 'Changes'],
   'workbench.panel.plan': ['计划', 'Plan'],
+  'workbench.panel.subagents': ['子代理', 'Subagents'],
   'workbench.panel.file': ['文件', 'File'],
   'workbench.panel.terminal': ['终端', 'Terminal'],
 
@@ -94,5 +95,7 @@ export const WORKBENCH_MESSAGES = {
   'workbench.boundary.settings': ['设置页崩溃', 'Settings page crashed'],
   'workbench.boundary.threadList': ['会话列表崩溃', 'Thread list crashed'],
   'workbench.boundary.stream': ['会话流崩溃', 'Thread stream crashed'],
-  'workbench.boundary.panel': ['面板崩溃', 'Panel crashed']
+  'workbench.boundary.panel': ['面板崩溃', 'Panel crashed'],
+
+  'workbench.subagents.noThread': ['先选择一个会话，再查看它的子代理。', 'Pick a thread first to see its subagents.'],
 } as const

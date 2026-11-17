@@ -39,7 +39,7 @@ pub const DEFAULT_TIME_OF_DAY: &str = "09:00";
 /// Autonomy applied to unattended scheduled runs when the task names none.
 pub const DEFAULT_SCHEDULE_AUTONOMY: &str = "unattended";
 
-/// Trigger cadence of one task, aligned with smart-ark's five kinds.
+/// Trigger cadence of one task, one of five kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 #[serde(rename_all = "snake_case")]

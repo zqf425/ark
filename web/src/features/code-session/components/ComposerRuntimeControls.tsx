@@ -1,5 +1,5 @@
 /**
- * Composer toolbar pills, laid out like the smart-ark Code composer:
+ * Composer toolbar pills, laid out like the Code composer:
  * left — the amber autonomy pill; right — workspace, context ring and the
  * combined provider:model/reasoning pill. Each picker re-reads the stored
  * overrides when it opens and writes through `PATCH /v1/threads/{id}` on
@@ -8,6 +8,12 @@
  * the PATCH merge keeps the stored value when the patch omits a field, so
  * clearing would be a silent no-op. Empty `reasoning_effort` is the
  * documented "follow default" value.
+ *
+ * The new-task page mounts the same pills before any thread exists. There the
+ * staged overrides live in the page (delivered to `POST /v1/threads` /
+ * `PATCH /v1/threads/{id}` when the task actually starts) instead of a thread
+ * record: the pills read `stagedRuntime` and write through `onStagedChange`,
+ * so workspace / model / permission / reasoning stay selectable on the page.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, useToast } from '../../../shared/ui'
@@ -119,7 +125,20 @@ async function fetchRuntime(threadId: string): Promise<ThreadRuntimeSettings> {
 
 /* ---------- left: amber autonomy pill ---------- */
 
-export function AutonomyPicker({ threadId }: { threadId: string | null }): JSX.Element {
+/**
+ * Shared props for the runtime pills. On a thread the overrides are read and
+ * written through the thread API; on the new-task page (`stagedRuntime` set)
+ * they ride the page's staged state and are committed when the task starts.
+ */
+export type RuntimePickerProps = {
+  threadId: string | null
+  /** New-task page: the staged overrides the pills render. */
+  stagedRuntime?: ThreadRuntimeSettings
+  /** New-task page: merge a patch into the staged overrides. */
+  onStagedChange?: (patch: ThreadRuntimeSettings) => void
+}
+
+export function AutonomyPicker({ threadId, stagedRuntime, onStagedChange }: RuntimePickerProps): JSX.Element {
   const { t } = useI18n()
   const setCommandError = useCodeSessionStore((s) => s.setCommandError)
   const [runtime, setRuntime] = useState<ThreadRuntimeSettings>({})
@@ -160,8 +179,18 @@ export function AutonomyPicker({ threadId }: { threadId: string | null }): JSX.E
     }
   }
 
-  const autonomyValue = (runtime.autonomy ?? defaultAutonomy) as AutonomyValue
-  const disabled = !threadId || busy
+  const autonomyValue = ((stagedRuntime?.autonomy ?? runtime.autonomy) || defaultAutonomy) as AutonomyValue
+  const disabled = Boolean(threadId) && busy
+  // New-task page: no thread to PATCH, the pick lands in the staged overrides.
+  const pick = (value: AutonomyValue): void => {
+    if (stagedRuntime && onStagedChange) {
+      onStagedChange({ autonomy: value })
+      setOpen(false)
+      return
+    }
+    setOpen(false)
+    void apply({ autonomy: value })
+  }
 
   return (
     <div className="ark-composer__pick" ref={rootRef}>
@@ -187,10 +216,7 @@ export function AutonomyPicker({ threadId }: { threadId: string | null }): JSX.E
               className="ark-composer__option"
               role="menuitemradio"
               aria-selected={autonomyValue === value}
-              onClick={() => {
-                setOpen(false)
-                void apply({ autonomy: value })
-              }}
+              onClick={() => pick(value)}
             >
               {t(AUTONOMY_LABEL[value])}
               <span className="ark-composer__option-desc">{t(AUTONOMY_DESC[value])}</span>
@@ -213,7 +239,7 @@ export function AutonomyPicker({ threadId }: { threadId: string | null }): JSX.E
  * other sessions must stay free to run turns against the old default while
  * this session re-points. No path is typed by hand.
  */
-export function WorkspacePicker({ threadId }: { threadId: string | null }): JSX.Element {
+export function WorkspacePicker({ threadId, stagedRuntime, onStagedChange }: RuntimePickerProps): JSX.Element {
   const { t } = useI18n()
   const toast = useToast()
   const setCommandError = useCodeSessionStore((s) => s.setCommandError)
@@ -272,21 +298,38 @@ export function WorkspacePicker({ threadId }: { threadId: string | null }): JSX.
   useDismiss(open, rootRef, () => setOpen(false))
 
   const { current, options } = useMemo(
-    () => workspaceOptions({ override: runtime.workspace, active: view?.active, recent: view?.recent ?? [] }),
-    [runtime.workspace, view]
+    () => workspaceOptions({
+      override: stagedRuntime?.workspace ?? runtime.workspace,
+      active: view?.active,
+      recent: view?.recent ?? []
+    }),
+    [stagedRuntime?.workspace, runtime.workspace, view]
   )
   const needle = query.trim().toLowerCase()
   const filtered = needle
     ? options.filter((option) => option.label.toLowerCase().includes(needle) || option.path.toLowerCase().includes(needle))
     : options
 
-  const canSwitch = threadId !== null && canSaveRuntime(loadedFor, threadId) && activeTurnId === null
+  const staged = stagedRuntime !== undefined && onStagedChange !== undefined
+  // On the new-task page nothing blocks the staged pick; on a thread the switch
+  // needs the runtime form loaded and no live turn.
+  const canSwitch = staged || (threadId !== null && canSaveRuntime(loadedFor, threadId) && activeTurnId === null)
 
   const commitWorkspace = async (
     path: string,
     messageKey: 'canvas.workspace.selected' | 'canvas.workspace.added'
   ): Promise<void> => {
-    if (!threadId || !canSwitch) return
+    if (!canSwitch) return
+    // New-task page: the pick only updates the staged overrides; the path is
+    // committed to a thread when the task actually starts.
+    if (staged) {
+      onStagedChange?.({ workspace: path })
+      toast.push('success', t(messageKey))
+      setOpen(false)
+      setQuery('')
+      return
+    }
+    if (!threadId) return
     // Session-level semantics (matching mainstream coding agents): the pick
     // writes this thread's override and applies to this thread's next turn.
     // Only the model currently streaming in THIS thread blocks the change —
@@ -344,7 +387,7 @@ export function WorkspacePicker({ threadId }: { threadId: string | null }): JSX.
       <button
         type="button"
         className="ark-composer__pill"
-        disabled={!threadId}
+        disabled={!threadId && !staged}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={t('canvas.composer.workspaceAria')}
@@ -597,7 +640,7 @@ export function ContextRing({ threadId }: { threadId: string | null }): JSX.Elem
  * model pins both ids together. Reasoning effort stays in the menu footer.
  * Re-reads stored overrides on open and writes through PATCH /v1/threads/{id}.
  */
-export function ModelPicker({ threadId }: { threadId: string | null }): JSX.Element {
+export function ModelPicker({ threadId, stagedRuntime, onStagedChange }: RuntimePickerProps): JSX.Element {
   const { t } = useI18n()
   const providers = useProviders()
   const setCommandError = useCodeSessionStore((s) => s.setCommandError)
@@ -625,12 +668,22 @@ export function ModelPicker({ threadId }: { threadId: string | null }): JSX.Elem
     }
   }
 
+  // New-task page: the pick merges into the staged overrides; a thread PATCHes
+  // the stored runtime instead.
+  const staged = stagedRuntime !== undefined && onStagedChange !== undefined
+  const stagedApply = (patch: ThreadRuntimeSettings): void => {
+    onStagedChange?.(patch)
+    setOpen(false)
+  }
+
   const groups = toModelProviderGroups(providers.providers)
   const defaultProvider = providers.providers.find((provider) => provider.is_default) ?? null
   // The provider a turn would actually use: the thread override, else the
   // configured default. The vision warning keys off it.
+  const storedProviderId = stagedRuntime?.provider_id ?? runtime.provider_id
+  const storedModel = stagedRuntime?.model ?? runtime.model
   const resolvedProvider =
-    providers.providers.find((provider) => provider.id === (runtime.provider_id ?? '')) ??
+    providers.providers.find((provider) => provider.id === (storedProviderId ?? '')) ??
     defaultProvider ??
     null
   const fallback = defaultProvider
@@ -638,12 +691,12 @@ export function ModelPicker({ threadId }: { threadId: string | null }): JSX.Elem
     : undefined
   const visionUnsupported = resolvedProvider !== null && resolvedProvider.supports_vision !== true
 
-  const modelValue = runtime.model || resolvedProvider?.model || ''
+  const modelValue = storedModel || resolvedProvider?.model || ''
   const providerLabel = resolvedProvider ? resolvedProvider.label ?? resolvedProvider.id : ''
-  const reasoningValue = runtime.reasoning_effort ?? ''
+  const reasoningValue = stagedRuntime?.reasoning_effort ?? runtime.reasoning_effort ?? ''
   const reasoningLabel = reasoningValue ? t(reasoningLabelKey(reasoningValue)) : t('canvas.composer.runtime.default')
   const pillLabel = [providerLabel, modelValue].filter(Boolean).join(':') || t('canvas.composer.runtime.default')
-  const disabled = !threadId || busy
+  const disabled = Boolean(threadId) && busy
 
   return (
     <ModelProviderMenu
@@ -651,7 +704,7 @@ export function ModelPicker({ threadId }: { threadId: string | null }): JSX.Elem
       className="ark-mpm--inline"
       menuClassName="ark-mpm__menu--above-end"
       groups={groups}
-      value={{ providerId: runtime.provider_id ?? '', model: runtime.model ?? '' }}
+      value={{ providerId: storedProviderId ?? '', model: storedModel ?? '' }}
       fallback={fallback}
       open={open}
       onOpenChange={setOpen}
@@ -670,7 +723,9 @@ export function ModelPicker({ threadId }: { threadId: string | null }): JSX.Elem
       onSelect={(selection) => {
         // merge_runtime keeps omitted fields, so echoing the stored runtime
         // applies the new pair without clearing autonomy/workspace overrides.
-        void apply({ ...runtime, provider_id: selection.providerId, model: selection.model })
+        const patch = { ...(stagedRuntime ?? runtime), provider_id: selection.providerId, model: selection.model }
+        if (staged) stagedApply(patch)
+        else void apply(patch)
       }}
       footer={(close) => (
         <div className="ark-composer__reasoning" role="group" aria-label={t('canvas.composer.runtime.reasoningAria')}>
@@ -683,7 +738,9 @@ export function ModelPicker({ threadId }: { threadId: string | null }): JSX.Elem
               close()
               // Empty string is the documented "unset": the runtime drops it
               // and falls back to the provider's configured reasoning effort.
-              void apply({ reasoning_effort: '' })
+              const patch = { ...(stagedRuntime ?? runtime), reasoning_effort: '' }
+              if (staged) stagedApply(patch)
+              else void apply(patch)
             }}
           >
             {t('canvas.composer.runtime.default')}
@@ -698,7 +755,9 @@ export function ModelPicker({ threadId }: { threadId: string | null }): JSX.Elem
               aria-selected={reasoningValue === value}
               onClick={() => {
                 close()
-                void apply({ reasoning_effort: value })
+                const patch = { ...(stagedRuntime ?? runtime), reasoning_effort: value }
+                if (staged) stagedApply(patch)
+                else void apply(patch)
               }}
             >
               {t(REASONING_LABEL[value])}

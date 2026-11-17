@@ -106,8 +106,8 @@ impl ServeArgs {
 
 /// `~/.arkd/data`, resolved from the platform home directory.
 ///
-/// The app owns its own home root (`.arkd`) instead of reusing smart-ark's
-/// `.ark`, so the two runtimes never write into the same data directory.
+/// The app owns its own home root (`.arkd`) instead of reusing a generic
+/// `.ark` directory, so other runtimes never write into the same data root.
 pub fn default_data_dir() -> PathBuf {
     arkd_home().join("data")
 }
@@ -254,7 +254,7 @@ fn parse_serve(args: Vec<String>) -> Result<Command, String> {
 
 /// Usage text printed by `arkd help`.
 pub const USAGE: &str = "\
-arkd - smart-ark runtime
+arkd - ark runtime
 
 USAGE:
     arkd serve [--port <p>] [--data-dir <dir>] [--workspace <dir>] [--auth-token <t>]
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn default_data_dir_stays_inside_the_arkd_home_root() {
         // The default must live under the app-owned `.arkd` home root so it
-        // never collides with smart-ark's `.ark` data directory.
+        // never collides with any other runtime's `.ark` data directory.
         assert_eq!(default_data_dir(), home_dir().join(".arkd").join("data"));
     }
 

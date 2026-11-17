@@ -14,7 +14,6 @@ import type { ItemId, ItemKind, RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot,
 import {
   commitDraft,
   draftApprovals,
-  draftChildCompletions,
   draftItemOrder,
   draftItems,
   draftOf,
@@ -24,7 +23,7 @@ import {
   type ItemsDraft
 } from './items-draft'
 import { foldUsage } from './usage'
-import type { ChildCompletionNotice, CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
+import type { CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
 
 export function emptyItemsState(): ItemsSnapshot {
   return {
@@ -35,8 +34,8 @@ export function emptyItemsState(): ItemsSnapshot {
     lastSeq: 0,
     approvals: {},
     userInputs: {},
-    childCompletions: {},
     childRunRevision: 0,
+    childRunActiveCount: 0,
     workbenchRevision: 0,
     rewindRevision: 0,
     rewoundFromSeq: null,
@@ -51,8 +50,6 @@ const DELTA_ITEM_KIND: Partial<Record<RuntimeEvent['kind'], ItemKind>> = {
   assistant_text_delta: 'assistant_message',
   assistant_reasoning_delta: 'reasoning'
 }
-
-const MAX_CHILD_COMPLETIONS = 50
 
 /**
  * Deterministic `ItemId` for one turn's terminal failure, mirroring the Rust
@@ -87,6 +84,66 @@ function turnFailedItemId(turnId: TurnId): ItemId {
   bytes[8] = (bytes[8]! & 0x3f) | 0x80
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}` as ItemId
+}
+
+/**
+ * Deterministic `ItemId` for a live tool call, mirroring the Rust
+ * `keyed_item_id("tool_call:{call_id}")` (ark-store domain/items.rs). The
+ * realtime SSE channel carries bare `tool_call_started`/`finished` events —
+ * the server folds them into the durable items projection, but nothing on the
+ * wire turns them into `item_created` snapshots — so the renderer must fold
+ * them identically or a turn that just ran vanishes from the live canvas
+ * (tool cards, prose path whitelist, all of it) until a full detail reload.
+ */
+function toolCallItemId(callId: string): ItemId {
+  const namespace = new TextEncoder().encode(`tool_call:${callId}`)
+  const hi = fnv1a(namespace, FNV_BASIS_HI)
+  const lo = fnv1a(namespace, FNV_BASIS_LO)
+  const view = new DataView(new ArrayBuffer(16))
+  view.setBigUint64(0, hi)
+  view.setBigUint64(8, lo)
+  const bytes = new Uint8Array(view.buffer)
+  bytes[6] = (bytes[6]! & 0x0f) | 0x80
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}` as ItemId
+}
+
+/**
+ * Fold a bare `tool_call_started`/`finished` event into the same `tool_call`
+ * item the server's projector would store. Field semantics mirror
+ * `apply_tool_started`/`apply_tool_finished` (ark-store domain/items.rs):
+ * started = streaming + arguments, finished = ok/duration/output + completed.
+ * A `finished` for an unseen call creates the row (the started frame can be
+ * lost to a reconnect window); a `started` after `finished` never downgrades
+ * the settled row.
+ */
+function foldToolCall(
+  draft: ItemsDraft,
+  event: Extract<RuntimeEvent, { kind: 'tool_call_started' | 'tool_call_finished' }>
+): void {
+  const id = toolCallItemId(event.call_id)
+  const existing = currentItem(draft, id)
+  const started = event.kind === 'tool_call_started'
+  const tool = {
+    call_id: event.call_id,
+    tool: event.tool,
+    arguments: 'arguments' in event ? (event.arguments ?? undefined) : existing?.tool?.arguments,
+    output: started ? existing?.tool?.output : (event.output || existing?.tool?.output),
+    ok: started ? existing?.tool?.ok : (event.ok ?? existing?.tool?.ok),
+    duration_ms: started ? existing?.tool?.duration_ms : (event.duration_ms ?? existing?.tool?.duration_ms)
+  }
+  const item: ThreadItem = {
+    item_id: id,
+    turn_id: event.turn_id,
+    kind: 'tool_call',
+    status: started ? (existing?.status ?? 'streaming') : 'completed',
+    created_at: existing?.created_at ?? event.timestamp,
+    text: existing?.text,
+    detail: started ? existing?.detail : (event.detail ?? existing?.detail),
+    tool
+  }
+  upsertItem(draft, item)
 }
 
 /**
@@ -129,10 +186,6 @@ const WORKBENCH_EVENT_KINDS: ReadonlySet<RuntimeEvent['kind']> = new Set([
 /** Draft-first read: a copied channel is authoritative, otherwise use the base. */
 function currentItem(draft: ItemsDraft, itemId: ItemId): ThreadItem | undefined {
   return draft.itemsById ? draft.itemsById[itemId] : draft.base.itemsById[itemId]
-}
-
-function currentChildCompletion(draft: ItemsDraft, id: string): ChildCompletionNotice | undefined {
-  return draft.childCompletions ? draft.childCompletions[id] : draft.base.childCompletions[id]
 }
 
 /**
@@ -196,33 +249,18 @@ function setTurn(draft: ItemsDraft, turnId: TurnId, state: TurnState): void {
   if (terminal && draft.activeTurnId === turnId) draft.activeTurnId = null
 }
 
-/** Keep UI-only completion cards bounded even if a stream is unusually long. */
-function recordChildCompletion(draft: ItemsDraft, notice: ChildCompletionNotice): void {
-  if (currentChildCompletion(draft, notice.notification_id)) return
-  const completions = draftChildCompletions(draft)
-  completions[notice.notification_id] = notice
-  const notificationIds = Object.keys(completions)
-  if (notificationIds.length <= MAX_CHILD_COMPLETIONS) return
-
-  const oldestId = notificationIds.reduce((oldest, id) => {
-    const candidate = completions[id]
-    const current = completions[oldest]
-    return candidate && current && candidate.seq < current.seq ? id : oldest
-  })
-  delete completions[oldestId]
-}
+/** Statuses after which a child run no longer counts as active for the badge. */
+const TERMINAL_CHILD_STATUSES = new Set(['completed', 'failed', 'aborted', 'ended'])
 
 /** Seed history from `GET /v1/threads/{id}`. */
 export function seedFromItems(
   items: ThreadItem[],
   lastSeq: number,
-  childCompletions: ChildCompletionNotice[],
   runtime: ThreadRuntimeSnapshot
 ): ItemsSnapshot {
   const draft = draftOf(emptyItemsState())
   draft.lastSeq = lastSeq
   for (const item of items) upsertItem(draft, item)
-  for (const notice of childCompletions) recordChildCompletion(draft, notice)
   if (runtime.active_turn) {
     draft.activeTurnId = runtime.active_turn.turn_id
     // An active registry entry can only be running or aborting. Keep an
@@ -268,6 +306,14 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
     case 'assistant_reasoning_delta':
       appendDelta(draft, event)
       trackDeltaWindow(draft, event.timestamp)
+      return commitDraft(draft)
+
+    case 'tool_call_started':
+    case 'tool_call_finished':
+      // The realtime channel carries bare tool events (the server folds them
+      // into the durable projection only); without this fold the live canvas
+      // misses every tool row of an in-flight turn.
+      foldToolCall(draft, event)
       return commitDraft(draft)
 
     case 'turn_started':
@@ -319,6 +365,7 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       // the suffix; let those panels refetch. Revisions stay monotonic so a
       // rebuilt projection never looks older than the one it replaced.
       rebuilt.childRunRevision = draft.childRunRevision + 1
+      rebuilt.childRunActiveCount = 0
       rebuilt.workbenchRevision = draft.workbenchRevision + 1
       return rebuilt
     }
@@ -379,26 +426,22 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       return commitDraft(draft)
     }
 
-    case 'child_completed': {
-      const notice: ChildCompletionNotice = {
-        notification_id: event.notification_id,
-        child_id: event.child_id,
-        thread_id: event.thread_id,
-        label: event.label,
-        status: event.status,
-        summary: event.summary,
-        error: event.error,
-        completed_at: event.timestamp,
-        seq: event.seq
-      }
-      recordChildCompletion(draft, notice)
+    case 'child_completed':
+      // The durable summary lives in the subagent panel (fetched from the
+      // registry) and the instant toast (raised in the stream hook); the item
+      // projection keeps no copy of it.
       draft.childRunRevision += 1
+      return commitDraft(draft)
+
+    case 'child_activity': {
+      draft.childRunRevision += 1
+      // The event carries the child's own status, so the badge count tracks it
+      // without a second request. An unknown future wire status counts as
+      // active: a badge that over-reports beats one that hides live work.
+      const active = event.status === 'queued' || event.status === 'running' || !TERMINAL_CHILD_STATUSES.has(event.status)
+      draft.childRunActiveCount = Math.max(0, draft.childRunActiveCount + (active ? 1 : -1))
       return commitDraft(draft)
     }
-
-    case 'child_activity':
-      draft.childRunRevision += 1
-      return commitDraft(draft)
 
     case 'usage': {
       // tok/s pairs the round's provider-reported completion tokens with the

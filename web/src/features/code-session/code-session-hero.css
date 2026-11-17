@@ -1,8 +1,8 @@
 /**
  * Empty-state hero illustration: a CSS-only "desk" window, ported from the
- * smart-ark hero stage. Colours come from the shared tokens only.
+ * The hero stage. Colours come from the shared tokens only.
  */
-/* ---------- empty-state hero: the smart-ark "desk" illustration ---------- */
+/* ---------- empty-state hero: the "desk" illustration ---------- */
 
 .ark-hero-stage {
   margin-bottom: 16px;

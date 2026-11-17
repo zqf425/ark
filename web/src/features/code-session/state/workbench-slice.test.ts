@@ -32,15 +32,18 @@ describe('workbench inspector', () => {
     expect(store.getState().rightCollapsed).toBe(true)
   })
 
-  it('stays closed when a file is selected after a manual collapse', () => {
+  it('expands the inspector when a file is picked while collapsed', () => {
     const store = makeStore()
     store.getState().openPanel('changes')
     store.getState().toggleRight()
+    expect(store.getState().rightCollapsed).toBe(true)
 
+    // Picking a file (Changes row or tool-card chip) is an explicit open
+    // intent: it must surface the inspector, not write invisible state.
     store.getState().selectFile('src/main.ts')
     expect(store.getState().selectedFilePath).toBe('src/main.ts')
     expect(store.getState().activePanel).toBe('file')
-    expect(store.getState().rightCollapsed).toBe(true)
+    expect(store.getState().rightCollapsed).toBe(false)
   })
 
   it('toggles open and closed', () => {

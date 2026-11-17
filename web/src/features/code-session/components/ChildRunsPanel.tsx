@@ -7,13 +7,16 @@ import { useI18n } from '../../../shared/i18n'
 import { abortChildRun, listChildRuns, resumeChildRun, steerChildRun } from '../api/child-runs-api'
 import { childCompletionStatusKey } from '../child-completion-status'
 import { useCodeSessionStore } from '../state/store'
-import { childRunMeta } from './child-run-meta'
+import { childRunDuration, childRunMeta, formatChildRunDuration } from './child-run-meta'
 import { ChildRunViewer } from './ChildRunViewer'
 import { ChildRunStatusDot } from './ChildRunStatusDot'
 
 function describe(error: unknown): string {
   return describeError(error, translateNow)
 }
+
+/** Settled runs collapse into one muted "finished" group after this many. */
+const FINISHED_VISIBLE = 3
 
 /**
  * Lifecycle state of one child run, resolved once per render: the status dot
@@ -24,20 +27,21 @@ function statusOf(child: ChildRunSummary): {
   state: 'queued' | 'running' | 'completed' | 'failed' | 'aborted' | 'ended'
   active: boolean
   resumable: boolean
+  settled: boolean
 } {
   switch (child.status) {
     case 'queued':
-      return { state: 'queued', active: true, resumable: false }
+      return { state: 'queued', active: true, resumable: false, settled: false }
     case 'running':
-      return { state: 'running', active: true, resumable: false }
+      return { state: 'running', active: true, resumable: false, settled: false }
     case 'completed':
-      return { state: 'completed', active: false, resumable: false }
+      return { state: 'completed', active: false, resumable: false, settled: true }
     case 'failed':
-      return { state: 'failed', active: false, resumable: true }
+      return { state: 'failed', active: false, resumable: true, settled: true }
     case 'aborted':
-      return { state: 'aborted', active: false, resumable: true }
+      return { state: 'aborted', active: false, resumable: true, settled: true }
     default:
-      return { state: 'ended', active: false, resumable: false }
+      return { state: 'ended', active: false, resumable: false, settled: true }
   }
 }
 
@@ -66,6 +70,7 @@ function ChildRunRow({
   const active = status.active
   const resumable = status.resumable
   const meta = childRunMeta(child)
+  const durationMs = childRunDuration(child)
 
   const run = async (key: string, action: () => Promise<unknown>): Promise<void> => {
     setBusy(key)
@@ -87,41 +92,43 @@ function ChildRunRow({
   }
 
   return (
-    <div className={`ark-childcard${expanded ? ' is-open' : ''}`}>
+    <div className={`ark-childrow${expanded ? ' is-open' : ''}`}>
       <button
         type="button"
-        className="ark-childcard__head"
+        className="ark-childrow__head"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
       >
-        <span className={`ark-childcard__chevron${expanded ? ' is-open' : ''}`} aria-hidden="true">
+        <span className={`ark-childrow__chevron${expanded ? ' is-open' : ''}`} aria-hidden="true">
           {expanded ? '▾' : '▸'}
         </span>
         <ChildRunStatusDot state={status.state} />
-        <span className="ark-childcard__label" title={child.label}>
+        <span className="ark-childrow__label" title={child.label}>
           {child.label}
         </span>
-        {meta.length > 0 ? (
-          <span className="ark-childcard__meta">{meta.map((part) => t(part.key, part.params)).join(' · ')}</span>
+        {durationMs !== null ? (
+          <span className="ark-childrow__duration">{formatChildRunDuration(durationMs)}</span>
         ) : null}
-        <span className={`ark-chip ${active ? 'ark-chip--live' : status.state === 'completed' ? 'ark-chip--ok' : status.state === 'queued' ? '' : 'ark-chip--error'}`}>
-          {t(childCompletionStatusKey(child.status))}
-        </span>
+        {meta.length > 0 ? (
+          <span className="ark-childrow__meta">{meta.map((part) => t(part.key, part.params)).join(' · ')}</span>
+        ) : null}
+        {!active && !status.settled ? null : (
+          <span className={`ark-chip ${active ? 'ark-chip--live' : status.state === 'failed' || status.state === 'aborted' ? 'ark-chip--error' : ''}`}>
+            {t(childCompletionStatusKey(child.status))}
+          </span>
+        )}
       </button>
-      {child.summary || child.error ? (
-        <p className="ark-childcard__outcome">{child.summary ?? child.error}</p>
-      ) : null}
       {expanded ? (
-        <div className="ark-childcard__viewer">
-          <div className="ark-childcard__viewerHead">
-            <span className="ark-childcard__viewerTitle">{t('canvas.childRuns.viewerTitle')}</span>
+        <div className="ark-childrow__viewer">
+          <div className="ark-childrow__viewerHead">
+            <span className="ark-childrow__viewerTitle">{t('canvas.childRuns.viewerTitle')}</span>
             {active ? <span className="ark-dot ark-dot--live" aria-hidden="true" /> : null}
           </div>
           <ChildRunViewer threadId={threadId} childId={child.id} active={active} />
           {active ? (
-            <div className="ark-childcard__steer">
+            <div className="ark-childrow__steer">
               <textarea
-                className="ark-childcard__steerInput"
+                className="ark-childrow__steerInput"
                 rows={2}
                 value={steerDraft}
                 placeholder={t('canvas.childRuns.steerPlaceholder')}
@@ -173,6 +180,7 @@ export function ChildRunsPanel({ threadId }: { threadId: string }): JSX.Element 
    * rows are per-thread, so "these rows are A's" has to be an explicit fact.
    */
   const [rowsFor, setRowsFor] = useState(threadId)
+  const [showAllFinished, setShowAllFinished] = useState(false)
   const latestLoad = useRef<{ threadId: string; ticket: number }>({ threadId, ticket: 0 })
 
   // Switching threads drops the previous thread's rows in the same commit, and
@@ -181,6 +189,7 @@ export function ChildRunsPanel({ threadId }: { threadId: string }): JSX.Element 
   if (rowsFor !== threadId) {
     setRowsFor(threadId)
     setData(null)
+    setShowAllFinished(false)
     latestLoad.current = { threadId, ticket: latestLoad.current.ticket + 1 }
   }
 
@@ -214,22 +223,47 @@ export function ChildRunsPanel({ threadId }: { threadId: string }): JSX.Element 
     return () => controller.abort()
   }, [threadId, childRunRevision])
 
-  if (!data || data.child_runs.length === 0) return null
+  if (!data || data.child_runs.length === 0) {
+    return (
+      <p className="ark-panel__hint">{t('canvas.childRuns.empty')}</p>
+    )
+  }
+
+  // Claude-style ordering: everything with a pulse sits on top, settled runs
+  // sink below and overflow into one expandable count so old runs stop
+  // crowding the live ones.
+  const rows = [...data.child_runs].sort((a, b) => {
+    const aSettled = statusOf(a).settled ? 1 : 0
+    const bSettled = statusOf(b).settled ? 1 : 0
+    if (aSettled !== bSettled) return aSettled - bSettled
+    return a.created_at < b.created_at ? 1 : -1
+  })
+  const settledRows = rows.filter((child) => statusOf(child).settled)
+  const hiddenFinished = showAllFinished ? 0 : Math.max(0, settledRows.length - FINISHED_VISIBLE)
+  const visibleRows = showAllFinished ? rows : rows.slice(0, rows.length - hiddenFinished)
+
   return (
     <section className="ark-childruns">
+      {/* The inspector tab already carries the "子代理" title, so the header
+          only reports the live/settled split. */}
       <header>
-        <span className="ark-childruns__heading">
-          <span className="ark-childruns__glyph" aria-hidden="true" />
-          <strong>{t('canvas.childRuns.title')}</strong>
-        </span>
         <span className="ark-childruns__count" data-active={data.active > 0 ? 'yes' : 'no'}>
           {data.active > 0 ? t('canvas.childRuns.active', { count: data.active }) : t('canvas.childRuns.idle', { count: data.child_runs.length })}
         </span>
       </header>
       <div className="ark-childruns__list">
-        {data.child_runs.map((child) => (
+        {visibleRows.map((child) => (
           <ChildRunRow key={child.id} threadId={threadId} child={child} onChanged={refresh} />
         ))}
+        {hiddenFinished > 0 ? (
+          <button
+            type="button"
+            className="ark-childruns__more"
+            onClick={() => setShowAllFinished(true)}
+          >
+            {t('canvas.childRuns.showMore', { count: hiddenFinished })}
+          </button>
+        ) : null}
       </div>
     </section>
   )

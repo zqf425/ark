@@ -84,7 +84,7 @@ impl DedupSet {
     }
 }
 
-/// A recognized inbound command. Only `/new` is in scope (the smart-ark
+/// A recognized inbound command. Only `/new` is in scope (the
 /// command set beyond it is a documented non-goal).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {

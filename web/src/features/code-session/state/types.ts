@@ -1,6 +1,5 @@
 import type {
   LoadStatus,
-  ChildCompletionNotice,
   ItemId,
   PendingApprovalView,
   PendingUserInputView,
@@ -12,7 +11,7 @@ import type {
 } from '../../../shared/contracts'
 import type { StreamStatus } from '../api/events-api'
 
-export type { ChildCompletionNotice, LoadStatus } from '../../../shared/contracts'
+export type { LoadStatus } from '../../../shared/contracts'
 
 /**
  * Per-thread usage projection, folded from the runtime's authoritative `usage`
@@ -81,9 +80,14 @@ export type ItemsSnapshot = {
   lastSeq: number
   approvals: Record<string, PendingApproval>
   userInputs: Record<string, PendingUserInput>
-  childCompletions: Record<string, ChildCompletionNotice>
   /** Advances only for child lifecycle events, not every streamed token. */
   childRunRevision: number
+  /**
+   * Child runs the last lifecycle event said are queued/running. UI-only
+   * affordance for the inspector badge; the panel itself always refetches the
+   * authoritative list from the API.
+   */
+  childRunActiveCount: number
   /**
    * Advances only for events that change a server-side workbench projection
    * (plan, changes, file, terminal). Panels subscribe to this instead of

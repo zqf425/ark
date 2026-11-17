@@ -11,6 +11,7 @@ import { Markdown } from '../../../shared/ui/Markdown'
 import { CopyButton } from '../../../shared/ui/copy'
 import { useThreadSkills } from '../hooks/use-thread-skills'
 import { splitSkillMentions } from './skill-mention'
+import { AttachmentThumb } from './AttachmentThumb'
 
 /*
  * Rows are memoized on their `item` object. The reducer keeps the identity of
@@ -18,10 +19,10 @@ import { splitSkillMentions } from './skill-mention'
  * re-renders exactly one row instead of the whole turn.
  */
 
-/** Delivery-state chip color. `image` and `preview_text` are healthy paths. */
+/** Delivery-state dot color. `image` and `preview_text` are healthy paths. */
 function attachmentChipClass(delivered: TurnAttachmentDelivery): string {
-  if (delivered === 'image' || delivered === 'preview_text') return 'ark-chip ark-chip--muted'
-  return 'ark-chip ark-chip--warn'
+  if (delivered === 'image' || delivered === 'preview_text') return 'ark-msg-attachment'
+  return 'ark-msg-attachment ark-msg-attachment--warn'
 }
 
 /** Explicit delivery → label mapping: the wire enum is snake_case, the catalog is not. */
@@ -45,7 +46,19 @@ function attachmentLabelKey(delivered: TurnAttachmentDelivery): MessageKey {
   }
 }
 
-/** One attachment chip per outcome, so a user can see what the model received. */
+/**
+ * One attachment per outcome, so a user can see what the model received.
+ * Images render as clickable thumbnails (the shared lightbox); the delivery
+ * channel shrinks to a corner dot with the channel label as its title, so a
+ * degraded or skipped attachment stays visible without crowding the bubble.
+ *
+ * Image-ness comes from the delivery channel the runtime already resolved:
+ * only an image-shaped file can ride `image`, be `degraded` (no vision) or be
+ * `skipped` (over the image budget). `preview_text` and `unavailable` are text
+ * or unknown, so they stay filename pills.
+ */
+const IMAGE_OUTCOMES: ReadonlySet<TurnAttachmentDelivery> = new Set(['image', 'degraded', 'skipped'])
+
 export function AttachmentChips({ outcomes }: { outcomes: TurnAttachmentOutcome[] }): JSX.Element {
   const { t } = useI18n()
   return (
@@ -54,9 +67,16 @@ export function AttachmentChips({ outcomes }: { outcomes: TurnAttachmentOutcome[
         <span
           key={outcome.attachment_id}
           className={attachmentChipClass(outcome.delivered)}
-          title={outcome.detail ?? undefined}
+          title={t(attachmentLabelKey(outcome.delivered))}
         >
-          {outcome.original_filename ?? outcome.attachment_id} · {t(attachmentLabelKey(outcome.delivered))}
+          <AttachmentThumb
+            preview={{
+              id: outcome.attachment_id,
+              name: outcome.original_filename ?? outcome.attachment_id,
+              image: IMAGE_OUTCOMES.has(outcome.delivered)
+            }}
+            tone={outcome.delivered === 'image' || outcome.delivered === 'preview_text' ? 'quiet' : 'warn'}
+          />
         </span>
       ))}
     </div>
@@ -116,11 +136,13 @@ export const UserBubble = memo(function UserBubble({ item, threadId = null }: { 
   const text = item.text ?? ''
   return (
     <article className="ark-msg ark-msg--user">
-      <header className="ark-msg__head">
-        <span className="ark-msg__avatar ark-msg__avatar--you" aria-hidden="true">
-          {t('canvas.author.youInitial')}
-        </span>
-        <span className="ark-msg__author">{t('canvas.author.you')}</span>
+      <div className="ark-msg__body">
+        <MentionBody text={text} threadId={threadId} />
+      </div>
+      {item.attachments && item.attachments.length > 0 ? (
+        <AttachmentChips outcomes={item.attachments} />
+      ) : null}
+      <footer className="ark-msg__head">
         <time className="ark-msg__time">{formatClock(item.created_at, locale)}</time>
         <CopyButton
           text={text}
@@ -128,13 +150,7 @@ export const UserBubble = memo(function UserBubble({ item, threadId = null }: { 
           copiedLabel={t('canvas.copy.copied')}
           className="ark-msg__copy"
         />
-      </header>
-      <div className="ark-msg__body">
-        <MentionBody text={text} threadId={threadId} />
-      </div>
-      {item.attachments && item.attachments.length > 0 ? (
-        <AttachmentChips outcomes={item.attachments} />
-      ) : null}
+      </footer>
     </article>
   )
 })
@@ -145,7 +161,18 @@ export const UserBubble = memo(function UserBubble({ item, threadId = null }: { 
  * turn stops streaming — mid-stream the text is still growing, so a snapshot
  * copy would mislead.
  */
-export const AssistantBubble = memo(function AssistantBubble({ item }: { item: ThreadItem }): JSX.Element {
+export const AssistantBubble = memo(function AssistantBubble({
+  item,
+  onFileChip,
+  writablePaths
+}: {
+  item: ThreadItem
+  /** Prose path chips (requirements/prose-path-links.md): forwarded to the
+   * shared Markdown; identity instability is absorbed by a ref inside it. */
+  onFileChip?: (path: string) => void
+  /** Whitelist of paths this turn wrote; gates which prose chips render. */
+  writablePaths?: readonly string[]
+}): JSX.Element {
   const { t, locale } = useI18n()
   const streaming = item.status === 'streaming' || item.status === 'pending'
   const failed = item.status === 'failed'
@@ -172,7 +199,7 @@ export const AssistantBubble = memo(function AssistantBubble({ item }: { item: T
         ) : null}
       </header>
       <div className="ark-msg__body ark-msg__body--prose">
-        <Markdown text={text} />
+        <Markdown text={text} onFileChip={onFileChip} writablePaths={writablePaths} />
         {streaming ? <span className="ark-caret" aria-label={t('canvas.generating')} /> : null}
       </div>
       {item.detail ? <p className="ark-msg__detail">{item.detail}</p> : null}
@@ -181,16 +208,27 @@ export const AssistantBubble = memo(function AssistantBubble({ item }: { item: T
 })
 
 /**
- * The turn's settled final reply, framed like smart-ark's answer card: a
+ * The turn's settled final reply, framed as an answer card: a
  * check-marked "final reply" title row above a hairline rule, the prose below,
- * and the copy action on a footer row at the card's bottom-right.
+ * and the settled clock + copy action on a footer row at the card's
+ * bottom-right — the same quiet timestamp the user bubble's footer carries.
  *
  * Kept visually separate from the inline narration bubbles so the turn reads
  * as "process → answer". `AssistantBubble` stays for rows inside the process
  * card, where a card-in-card would double the chrome.
  */
-export const FinalReplyCard = memo(function FinalReplyCard({ item }: { item: ThreadItem }): JSX.Element {
-  const { t } = useI18n()
+export const FinalReplyCard = memo(function FinalReplyCard({
+  item,
+  onFileChip,
+  writablePaths
+}: {
+  item: ThreadItem
+  /** Prose path chips (requirements/prose-path-links.md), same as AssistantBubble. */
+  onFileChip?: (path: string) => void
+  /** Whitelist of paths this turn wrote; gates which prose chips render. */
+  writablePaths?: readonly string[]
+}): JSX.Element {
+  const { t, locale } = useI18n()
   const streaming = item.status === 'streaming' || item.status === 'pending'
   const failed = item.status === 'failed'
   const aborted = item.status === 'aborted'
@@ -210,12 +248,13 @@ export const FinalReplyCard = memo(function FinalReplyCard({ item }: { item: Thr
         {failed ? <span className="ark-chip ark-chip--error">{t('canvas.failed')}</span> : null}
       </header>
       <div className="ark-reply__body">
-        <Markdown text={text} />
+        <Markdown text={text} onFileChip={onFileChip} writablePaths={writablePaths} />
         {streaming ? <span className="ark-caret" aria-label={t('canvas.generating')} /> : null}
       </div>
       {item.detail ? <p className="ark-msg__detail">{item.detail}</p> : null}
       {!streaming && text ? (
         <footer className="ark-reply__foot">
+          <time className="ark-reply__time">{formatClock(item.created_at, locale)}</time>
           <CopyButton
             text={text}
             label={t('canvas.copy.message')}

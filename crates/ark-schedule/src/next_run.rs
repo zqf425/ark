@@ -44,7 +44,7 @@ pub fn compute_next_run_at(task: &ScheduledTask, from: DateTime<Local>) -> Optio
             .filter(|instant| *instant > from)
             .map(|instant| instant.with_timezone(&Local)),
         ScheduleKind::Interval => {
-            // Counted from the completion instant, matching smart-ark: a run
+            // Counted from the completion instant: a run
             // that took 10 minutes does not fire again 5 minutes later.
             let minutes = i64::from(task.schedule.every_minutes.max(1));
             Some(from + Duration::minutes(minutes))

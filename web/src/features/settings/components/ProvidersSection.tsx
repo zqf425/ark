@@ -140,7 +140,7 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
   }
 
   const submit = async (entry: ProviderEntry): Promise<void> => {
-    // 对齐 smart-ark：保存（新增或编辑）只登记条目，绝不隐式切换全局默认。
+    // 保存（新增或编辑）只登记条目，绝不隐式切换全局默认。
     // 默认供应商决定所有未显式覆盖的会话实际用哪个模型，只能在列表行或
     // 「设置 → 通用」里手动切换。
     const outcome = await api.upsert({ ...entry, make_default: false })

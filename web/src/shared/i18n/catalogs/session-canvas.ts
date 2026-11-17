@@ -25,6 +25,8 @@ export const SESSION_CANVAS_MESSAGES = {
 
   'canvas.process.title': ['执行过程', 'Work in progress'],
   'canvas.process.count': ['{count} 步', '{count} steps'],
+  'canvas.process.folded': ['展开较早的 {count} 次工具调用', 'Show {count} earlier tool calls'],
+  'canvas.process.unfold': ['收起较早的 {count} 次工具调用', 'Hide {count} earlier tool calls'],
   'canvas.reply.title': ['最终回复', 'Final reply'],
   'canvas.activity.thinking': ['思考中', 'Thinking'],
   'canvas.activity.tool': ['运行 {tool}', 'Running {tool}'],
@@ -37,10 +39,9 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.header.reviewStarted': ['评审回合已开始', 'Review turn started'],
   'canvas.header.reviewFailed': ['发起评审失败', 'Failed to start review'],
 
-  'canvas.author.you': ['你', 'You'],
-  'canvas.author.youInitial': ['你', 'You'],
   'canvas.attachments.title': ['附件', 'Attachments'],
   'canvas.attachments.image': ['图片', 'Image'],
+  'canvas.attachments.loading': ['加载中…', 'Loading…'],
   'canvas.attachments.previewText': ['文本预览', 'Text preview'],
   'canvas.attachments.degraded': ['未传图（模型无视觉能力）', 'No image (model lacks vision)'],
   'canvas.attachments.skipped': ['超出图片预算', 'Over image budget'],
@@ -61,6 +62,7 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.tool.failed': ['失败', 'Failed'],
   'canvas.tool.arguments': ['参数', 'Arguments'],
   'canvas.tool.output': ['输出', 'Output'],
+  'canvas.tool.openFile': ['在工作台查看 {path}', 'Open {path} in the workbench'],
   'canvas.toolResult.name': ['工具结果', 'tool result'],
 
   'canvas.approval.title': ['需要审批', 'Approval required'],
@@ -86,6 +88,11 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.composer.steerPlaceholder': ['向运行中的回合补充指令（Enter steer）', 'Add instructions to the running turn (Enter to steer)'],
   'canvas.composer.sendPlaceholder': ['发送消息（Enter 发送，Shift+Enter 换行）', 'Send a message (Enter sends, Shift+Enter adds a line)'],
   'canvas.composer.noThreadPlaceholder': ['先新建或选择一个会话', 'Create or select a thread first'],
+  'canvas.composer.newTaskPlaceholder': [
+    '例如：把工具超时重试统一收敛到 ark-agent，并补上回归测试…',
+    'e.g. Consolidate tool timeout retries into ark-agent and add regression tests…'
+  ],
+  'canvas.composer.newTaskSend': ['开始任务', 'Start task'],
   'canvas.composer.steerAria': ['向运行中的回合补充指令', 'Add instructions to the running turn'],
   'canvas.composer.sendAria': ['发送消息', 'Send a message'],
   'canvas.composer.interrupt': ['中断', 'Interrupt'],
@@ -150,6 +157,8 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.childRuns.loadFailed': ['读取子代理失败', 'Failed to read subagents'],
   'canvas.childRuns.actionFailed': ['子代理操作失败', 'The subagent action failed'],
   'canvas.childRuns.completedToast': ['子代理「{label}」{status}', 'Subagent "{label}" {status}'],
+  'canvas.childRuns.showMore': ['更早 {count} 个', '{count} earlier'],
+  'canvas.childRuns.empty': ['本会话还没有子代理运行记录。', 'No subagent runs in this thread yet.'],
 
   'canvas.composer.attach': ['附件', 'Attach'],
   'canvas.composer.runtime.modelLabel': ['模型：{value}', 'Model: {value}'],

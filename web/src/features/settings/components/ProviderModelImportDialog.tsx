@@ -1,5 +1,5 @@
 /**
- * Batch model-import dialog for a provider (adapted from smart-ark).
+ * Batch model-import dialog for a provider.
  *
  * Source rows come from the fetched catalog plus a paste box for endpoints
  * without a `/models` route. Already-present ids are marked and deselected by

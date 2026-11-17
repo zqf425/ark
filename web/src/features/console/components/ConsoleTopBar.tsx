@@ -8,6 +8,10 @@
  * The model chip is deliberately absent: the loop's model is only ever
  * displayed where it is selectable (composer pill / settings), and the top bar
  * shows the runtime's default-provider model, which invites misreads.
+ *
+ * The right-cluster gear is view-aware: from the workbench it opens settings,
+ * from the settings scene it flips back to the code workbench, so the same
+ * button is always an exit, never a no-op self-link.
  */
 import { useI18n } from '../../../shared/i18n'
 import { Icon } from '../../../shared/ui'
@@ -26,17 +30,31 @@ export function ConsoleTopBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
   const sending = useCodeSessionStore((s) => s.sending)
   const activeTurnId = useCodeSessionStore((s) => s.activeTurnId)
   const setView = useViewStore((s) => s.setView)
+  const view = useViewStore((s) => s.view)
   const toggleCommand = useViewStore((s) => s.toggleCommand)
 
   const running = sending || Boolean(activeTurnId)
   const name = workspaceName(meta.workspacePath)
   const nextThemeLabel = theme === 'dark' ? t('console.top.theme') : t('console.top.theme')
+  // The gear becomes the exit: once the settings scene owns the stage the only
+  // same-button affordance is "back to workbench", so the icon never dead-ends
+  // (opening settings from settings would be a no-op and read as broken).
+  const onSettings = view === 'settings'
 
   return (
     <header className="console-topbar">
       <div className="console-topbar__brand">
-        <span className="console-mark">A</span>
-        <span className="console-brand-name">ark</span>
+        {/* The brand is the home control: like a logo link, clicking it lands
+            on the session list no matter which full-screen scene is shown. */}
+        <button
+          type="button"
+          className="console-mark console-mark--word console-mark--home"
+          onClick={() => setView('code')}
+          aria-label={t('console.top.backToWorkbench')}
+          title={t('console.top.backToWorkbench')}
+        >
+          Ark
+        </button>
       </div>
 
       <button
@@ -97,11 +115,11 @@ export function ConsoleTopBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
         <button
           type="button"
           className="console-iconbtn"
-          onClick={() => setView('settings')}
-          aria-label={t('console.top.settings')}
-          title={t('console.top.settings')}
+          onClick={() => setView(onSettings ? 'code' : 'settings')}
+          aria-label={onSettings ? t('console.top.backToWorkbench') : t('console.top.settings')}
+          title={onSettings ? t('console.top.backToWorkbench') : t('console.top.settings')}
         >
-          <Icon name="settings" size={15} />
+          <Icon name={onSettings ? 'undo' : 'settings'} size={15} />
         </button>
       </div>
     </header>

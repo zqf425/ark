@@ -108,7 +108,6 @@ describe('useThreadStream thread ownership', () => {
     useCodeSessionStore.getState().seedItems(
       [item({})],
       7,
-      [],
       {
         pending_approvals: [{
           approval_id: 'approval-a',
@@ -140,7 +139,7 @@ describe('useThreadStream thread ownership', () => {
     getThreadMock.mockImplementation(() => new Promise<ThreadDetail>(() => undefined))
     harness = await mountWithProviders(<Probe threadId={THREAD_A} />)
     await settle()
-    useCodeSessionStore.getState().seedItems([item({})], 7, [], { pending_approvals: [], pending_user_inputs: [] })
+    useCodeSessionStore.getState().seedItems([item({})], 7, { pending_approvals: [], pending_user_inputs: [] })
 
     getThreadMock.mockImplementation(() => Promise.reject(new Error('thread B unavailable')))
     await harness.render(<Probe threadId={THREAD_B} />)

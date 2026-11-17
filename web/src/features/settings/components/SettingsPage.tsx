@@ -5,9 +5,11 @@
  * the shared `useSettings` / `useProviders` instances so the default-model picker
  * and the provider list cannot disagree.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ErrorBoundary } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
+import { useViewStore } from '../../workbench/state/view-slice'
+import { Icon } from '../../../shared/ui'
 import { useSettings } from '../hooks/use-settings'
 import { useProviders } from '../hooks/use-providers'
 import { GeneralSection } from './GeneralSection'
@@ -29,8 +31,20 @@ export function SettingsPage(): JSX.Element {
   const { t } = useI18n()
   const settings = useSettings()
   const providers = useProviders()
+  const setView = useViewStore((state) => state.setView)
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('general')
   const current = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0]
+
+  // A caller that jumps to a specific section (schedule creation → task list)
+  // wins once; without a pending request the page opens on its default
+  // section, exactly as it did before the request channel existed.
+  const consumeSettingsSection = useViewStore((state) => state.consumeSettingsSection)
+  useEffect(() => {
+    const requested = consumeSettingsSection() as SettingsSectionId | null
+    if (requested && SETTINGS_SECTIONS.some((section) => section.id === requested)) {
+      setActiveSection(requested)
+    }
+  }, [consumeSettingsSection])
 
   const body = (() => {
     switch (activeSection) {
@@ -121,9 +135,24 @@ export function SettingsPage(): JSX.Element {
 
       <main className="ark-settings__scroll">
         <div className="ark-settings__body">
-          <header className="ark-settings__hero">
-            <h1>{current ? t(current.labelKey) : ''}</h1>
-            <p>{current ? t(current.detailKey) : ''}</p>
+          <header className="ark-settings__hero ark-settings__hero--row">
+            <div>
+              <h1>{current ? t(current.labelKey) : ''}</h1>
+              <p>{current ? t(current.detailKey) : ''}</p>
+            </div>
+            {/* The scene-level exit back to the code workbench: visible from
+                every section, so leaving settings never depends on the top-bar
+                gear or remembering ⌘K. */}
+            <button
+              type="button"
+              className="ark-btn ark-btn--sm ark-settings__back"
+              onClick={() => setView('code')}
+              aria-label={t('settings.backToWorkbench')}
+              title={t('settings.backToWorkbench')}
+            >
+              <Icon name="undo" size={13} />
+              {t('settings.backToWorkbench')}
+            </button>
           </header>
           {body}
         </div>

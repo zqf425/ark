@@ -35,6 +35,14 @@ function child(label: string): ChildRunSummary {
   }
 }
 
+function settledChild(index: number): ChildRunSummary {
+  return {
+    ...child(`done ${index}`),
+    id: `00000000-0000-0000-0000-0000000000c${index}`,
+    status: 'completed'
+  }
+}
+
 function response(label: string): ChildRunListResponse {
   return {
     enabled: true,
@@ -98,7 +106,6 @@ describe('ChildRunsPanel thread ownership', () => {
   it('drops a late response that belongs to the previous thread', async () => {
     const forA = deferred<ChildRunListResponse>()
     listMock.mockReturnValueOnce(forA.promise)
-
     harness = await mountWithProviders(<ChildRunsPanel threadId={THREAD_A} />)
     await settle()
 
@@ -111,6 +118,36 @@ describe('ChildRunsPanel thread ownership', () => {
     await settle()
 
     expect(harness.text()).not.toContain('late row from thread A')
+  })
+
+  it('collapses settled runs behind one expandable count', async () => {
+    // Five finished runs: three stay visible, two fold into the count line.
+    listMock.mockResolvedValue({
+      enabled: true,
+      active: 0,
+      child_runs: [1, 2, 3, 4, 5].map((index) => settledChild(index)),
+      aggregates: {
+        queued: 0,
+        running: 0,
+        completed: 5,
+        failed: 0,
+        aborted: 0,
+        tool_invocations: 0,
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+      }
+    })
+
+    harness = await mountWithProviders(<ChildRunsPanel threadId={THREAD_A} />)
+    await settle()
+    // Newest first: done 5 stays visible, done 1 folds into the count line.
+    expect(harness.text()).toContain('done 5')
+    expect(harness.text()).not.toContain('done 1')
+    expect(harness.text()).toContain('更早 2 个')
+
+    const more = harness.host.querySelector<HTMLButtonElement>('.ark-childruns__more')!
+    more.click()
+    await settle()
+    expect(harness.text()).toContain('done 1')
   })
 
   it('clears the rows when the load fails', async () => {

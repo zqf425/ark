@@ -3,8 +3,6 @@ import type { ThreadItem } from '../../../shared/contracts'
 import { formatClock } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
 import { CheckpointCard } from './CheckpointCard'
-import { childCompletionStatusKey } from '../child-completion-status'
-import type { ChildCompletionNotice } from '../state/types'
 
 /**
  * Inline error row. `code` comes straight from the runtime error taxonomy
@@ -35,30 +33,6 @@ export const NoticeRow = memo(function NoticeRow({ item }: { item: ThreadItem })
   return (
     <div className="ark-notice">
       <span className="ark-notice__text">{item.text ?? item.detail ?? ''}</span>
-    </div>
-  )
-})
-
-/** Durable parent-thread summary for one finished background child. */
-export const ChildCompletionCard = memo(function ChildCompletionCard({
-  notice
-}: {
-  notice: ChildCompletionNotice
-}): JSX.Element {
-  const { t, locale } = useI18n()
-  const failed = notice.status !== 'completed'
-  const detail = notice.summary ?? notice.error ?? t('canvas.child.noSummary')
-
-  return (
-    <div className={`ark-childcompletion ${failed ? 'is-failed' : ''}`} role="status">
-      <div className="ark-childcompletion__head">
-        <span className={`ark-chip ${failed ? 'ark-chip--error' : 'ark-chip--ok'}`}>
-          {t(childCompletionStatusKey(notice.status))}
-        </span>
-        <strong>{notice.label}</strong>
-        <span className="ark-childcompletion__time">{formatClock(notice.completed_at, locale)}</span>
-      </div>
-      <p className="ark-childcompletion__summary">{detail}</p>
     </div>
   )
 })

@@ -18,6 +18,11 @@
   稳定存活一段时间后重置，不能每收到一帧就清零，否则运行时重启时会形成重连风暴。
   `onError` 写入的传输诊断不能被随后裸 `onStatus('reconnecting')` 抹掉：仅显式传参或恢复到
   `open` 才清除 `streamError`。
+- 实时回合的工具行由前端 reducer 折叠:`tool_call_started`/`tool_call_finished` 在 wire 上是
+  裸事件(服务端只把它们折叠进**持久** items 投影,实时通道不发 item 快照),渲染器按
+  `apply_tool_started/finished` 同语义映射为 `tool_call:{call_id}` 的确定性 item
+  (FNV-1a,与 `turn_failed` 同构),否则回合进行中的画布缺所有工具行——工具卡、
+  正文路径白名单(prose-path-links)全部落空,直到整页 detail 重载才补齐。
 - Plan、Changes、File、Terminal 面板订阅 `workbenchRevision` 而非 `lastSeq`。`lastSeq` 每个事件
   （含每个 text delta token）都递增，作为 effect 依赖会让每个 token 触发约 6 次 HTTP 全量重取；
   只有 `goal/todos` 与 `tool_call_started/finished` 这些会改变服务端投影的事件才递增 revision，
@@ -55,8 +60,13 @@
 - 模型输出的 markdown 渲染集中在 `shared/ui` 的 `Markdown`（marked + DOMPurify 消毒后注入）与
   `code-highlight`（文件预览高亮）：模型输出是不可信输入，任何进入 `dangerouslySetInnerHTML` 的
   HTML 必须先经 DOMPurify；这是展示层能力，不与 Rust 侧业务逻辑双实现。markdown 排版对齐主流
-  agent 画布的阅读节奏（`markdown.css`）：标题带下划线分隔（h2）、块间距 0.75em、表格
+  agent 画布的阅读节奏（`markdown.css`）：标题带下划线分隔（h2）、块间距 0.4em（列表 0.6em，
+  聊天卡片内的紧凑节奏）、表格
   `display: block` 横向滚动不挤压画布、代码块壳带控制阴影、任务列表勾选框用主题强调色。
+  Markdown 宿主（`.ark-md`、`.ark-msg__body--prose`、`.ark-reply__body`）必须是
+  `white-space: normal`：marked 在块级元素之间输出换行文本节点，pre-wrap 会把每个换行画成
+  真实空行、叠加块 margin 后变成"每段之间一行空行"（纯文本宿主如用户气泡仍是 pre-wrap，
+  见 `reply-prose-layout.test.ts` 的钉子）。
 - 一键复制由 `shared/ui/copy` 统一提供：`copyText` 封装异步 Clipboard API 与 `execCommand` 回落，
   `CopyButton` 自带 pressed→copied 反馈并阻断祖先点击；消息气泡（用户/助手）、markdown 代码块与
   输入框（草稿、排队消息）均复用该组件，不各自实现复制。代码块的复制按钮由 markdown 渲染器产出，
@@ -67,15 +77,34 @@
 - Toast 是 `shared/ui/Toast` 独占的表面：组件内用 `useToast().push`；SSE 回调、轮询间隔等非 React
   调用方（回合终态通知）用 `pushToastProgrammatic`——`ToastProvider` 挂载时注册推送句柄，卸载时注销，
   provider 未挂载期间的推送静默丢弃（无表面可渲染），不排队。不得在 feature 内自建浮层通知。
-- 消息行带身份标识（对齐主流 agent 画布）：元信息行前置 18px 圆形头像盘——用户为强调色浅底、
-  助手为 hairline 圆环内嵌 "ark" 字标，均为纯 CSS 无位图（`ark-msg__avatar`）；助手正文
-  `padding-left: 25px` 与头像后的作者名对齐，形成稳定的纵向导轨。头像进入 i18n 的只有
-  `canvas.author.youInitial`；助手字标 "ark" 是产品名，不进 i18n。
+- 消息行带身份标识（对齐主流 agent 画布）：助手元信息行前置 18px 圆形头像盘——hairline 圆环内嵌
+  "ark" 字标，纯 CSS 无位图（`ark-msg__avatar`）；助手正文 `padding-left: 25px` 与头像后的作者名
+  对齐，形成稳定的纵向导轨。用户气泡不渲染头像与「你」作者行：右侧独立气泡卡本身已表明说话者，
+  冗余的作者标签是重复信息——气泡 meta 行退化为底部一行（时间 + 复制按钮），`canvas.author.you` 与
+  `canvas.author.youInitial` 键已随行为删除；助手字标 "ark" 是产品名，不进 i18n。
 - 工具卡头部带工具族图标盘（`ark-tool__icon`，22px 圆角方块 + CSS mask 单色图标）：按工具名
   归入 read/write/exec/search 四族，未知名回落 wrench，与主流 agent 的活动行一致让长回合可按
   形状扫读；折叠头部新增单行参数摘要（`ark-tool__digest`，取首个参数 `key=value` 截断省略，
   只读 `formatToolArguments` 已格式化文本、不新增第二套序列化）；过程卡与工具卡展开体统一
-  `--ark-bg-raised` 微底色，头部 hover 反馈。
+  `--ark-bg-raised` 微底色，头部 hover 反馈。写文件类工具卡（`write`/`edit`）在头部追加
+  文件芯片（`ark-tool__filechip`，需求见
+  [tool-file-preview](../requirements/tool-file-preview.md)）：路径提取的唯一宿主是
+  `code-session/tool-file.ts` 纯函数（只认结构化 `path` 参数，`bash` 等间接写入不猜），
+  点击芯片调用 `selectFile` 把该文件送入检查器 File 面板（`.md` 自动富文本渲染）并阻断
+  折叠切换；`selectFile` 是显式"打开该文件"意图，检查器收起时同时展开（只切 Tab 不展开
+  曾把收起态下的芯片变成死按钮）；因此头部拆为行容器 + 内层折叠按钮（`ark-tool__headtoggle`），
+  避免 button 嵌套 button 的非法 DOM；无路径的工具卡渲染不变。
+  助手**正文**里的文件路径同样可点（需求见
+  [prose-path-links](../requirements/prose-path-links.md)）：`renderMarkdown` 第二参
+  接收本回合 write/edit 的路径白名单（`code-session/tool-file.ts` 的 `threadWritePaths`
+  投影，去重保序），DOM 后处理只把**行内 code** 且经三级解析(精确 → 归一 → 唯一 basename,
+  同名多文件不升级,解析结果还原白名单原路径)命中的片段升级为
+  `ark-md-filechip`（协议前缀/家目录/空格路径不升级，`pre code` 围栏不参与，
+  白名单为空零开销直通）；芯片是 renderer 自产 button（`data-md-file`），
+  `Markdown` 组件的可选 `onFileChip` prop 经委托点击路由到 `selectFile`
+  （同一收起展开语义），`shared/ui` 不反依 feature——白名单与接线都在
+  `TurnBlock`（每回合一次 `useMemo`）与 `MessageBubble` 侧；子代理查看器
+  传空白名单与 no-op 回调，不产生跨线程导航。
 - 设置页的 tuning、provider 与 MCP 都使用生成契约；MCP env/header 值只写不回读，编辑时的空
   secret 字段表示保留，不表示删除。provider 的 api key 分两路：列表、能力与诊断只显示
   `has_api_key` 与掩码 hint，而点「编辑」时单独请求 `GET /v1/runtime/providers/{id}` 取回完整条目，
@@ -89,7 +118,7 @@
   `providers[].context_length` 等别名），识别不出的模型按 256K 兜底并在候选行标注，落表后仍可逐行修改。
 - 组件状态按 feature 拆分，避免重建旧 `Workbench.tsx` 巨型组件；UI 变更应进行实际浏览器验证。
 - 会话流按回合分组渲染：一回合内除最后一条有可见文本的助手消息外的全部行（reasoning、tool_call、
-  tool_result 与中间叙述）收进一张可折叠"执行过程"卡（对齐 smart-ark 的工作卡），**卡内行保持真实
+  tool_result 与中间叙述）收进一张可折叠"执行过程"卡，**卡内行保持真实
   事件顺序**——中间叙述与工具调用按发生顺序穿插，不再把所有工具抽到回复之前；运行中自动展开、结束
   后自动收起，用户开关即固定；用户消息与最终回复留在卡外，运行中所有行都在卡内（尚无"最终回复"）。
   开合状态在 `use-echo-safe-toggle.ts`（`用户固定 ?? 回合是否运行`，对齐主流 UI 的
@@ -98,10 +127,15 @@
   与挂载本身都会产生回声事件；钩子以"上报状态 == React 上次渲染值"识别回声并忽略（等价于 Radix
   trigger 只报用户交互的契约），否则挂载回声会把运行中的卡钉死在展开态，回合结束永不收起。
   回合结束后，被提升的最终回复渲染为独立答案卡（`FinalReplyCard`，`ark-reply`）：对勾圆环图标 +
-  "最终回复"标题行 + 全宽分隔线 + markdown 正文（对齐 smart-ark 的答案卡样式），复制按钮在卡底
-  右下角的操作行（`ark-reply__foot`，hover 显现），流式/中断/失败状态与气泡一致；过程卡内的中间
+  "最终回复"标题行 + 全宽分隔线 + markdown 正文（答案卡样式），卡底右下角的操作行
+  （`ark-reply__foot`，hover 显现复制按钮）带生成时间（`formatClock(item.created_at)`，与用户
+  气泡 footer 的时钟同款），流式/中断/失败状态与气泡一致；过程卡内的中间
   叙述仍是普通助手气泡，避免卡中卡。
   分组规则在 `turn-sections.ts` 纯函数中，可独立单测。回合多于一个时在画布右缘提供逐回合跳转导航条。
+  已结束回合的过程卡默认只完整展示最近 3 次 `tool_call` 行（`RECENT_TOOL_ROW_LIMIT`），更早的调用折叠为
+  一行"展开较早的 N 次工具调用"摘要（纯展示层折叠：`splitProcessTrace` 把 trace 切为折叠点前后的
+  head/tail，非工具行按事件位置留在原侧，不造假 item、不改 store；运行中回合不折叠，保证正在流式的
+  最新行始终可见；用户点摘要行即展开全量 trace，展开态随回合块存活）。
   会话标题行提供「评审改动」
   （`POST /v1/threads/{id}/review`，同一 202 回合信封，进度走线程事件流）；会话列表行提供「导出」
   （`GET /v1/threads/{id}/export` 快照下载，blob 触发浏览器保存）。
@@ -152,7 +186,11 @@
   回合终态（`turn_completed`/`turn_failed`/`turn_aborted`）弹出一次 toast 通知（`turn-end-toast.ts`，
   文案带会话标题）：被订阅线程由 SSE 终态事件即时触发，后台线程与其它窗口的回合由列表轮询的
   busy→idle 边沿触发；两侧用终态事件的 durable `timestamp`（即行上的 `last_event_at`）做同一键去重，
-  同一回合最多提示一次，之后重放/再轮询不再提示。客户端只在**回合边界**推进活动键并随之重排：用户发消息
+  同一回合最多提示一次，之后重放/再轮询不再提示。桌面壳内窗口**失焦**时同一终态边沿还经
+  `shared/desktop.ts` 的 `postSystemNotification`（`notify_session_event` 命令）发一条系统级通知
+  （Windows toast / macOS 横幅），标题用 `thread.notify.os.*` 键、正文复用 toast 文案；焦点在投递时
+  采样而非监听器维护，系统投递失败（返回 `false`）静默回退到已弹出的应用内 toast，点击通知不产生
+  任何路由。浏览器（非桌面壳）中该调用降级为 no-op，行为与原先只有 toast 时一致。客户端只在**回合边界**推进活动键并随之重排：用户发消息
   （`turn_started`/`turn_steered`）与回合终态（`turn_completed`/`turn_failed`/`turn_aborted`）；
   delta、工具调用、gate 等回合内事件只推进行内 `last_seq` 水位，detail 播种（点击会话触发的
   `GET /v1/threads/{id}` 重载）也不同步行内活动键——否则被订阅（即被点开）的运行中会话会持续
@@ -160,9 +198,26 @@
   纠偏。Plan、Changes、File、Terminal 是常驻
   检查器的四个 Tab（收起用 `hidden` 保挂载，面板草稿与服务端读模型不得因折叠丢失），不再使用带
   遮罩的浮动抽屉。`review`、`new`、`settings` 是同一 shell 下的全屏场景，由 `view-slice` 的 `view`
-  选择；`commandOpen` 控制 ⌘K 命令面板。
-- 会话列表按项目分组渲染（`thread-projects.ts`，对齐 smart-ark：先按会话**实际生效**工作空间聚合，
-  无 override 会话回退运行时 active root，active 组置顶）。项目组头部提供两个随 hover/focus 显现的
+  选择；`commandOpen` 控制 ⌘K 命令面板。设置场景的返回不依赖记忆 ⌘K：顶栏右侧齿轮按钮按场景
+  变义——工作台下是「设置」入口，settings 场景下变为「返回工作台」（`console.top.backToWorkbench`，
+  undo 图标）；设置页自身 hero 行右缘还有常驻「返回工作台」按钮（`settings.backToWorkbench`，
+  所有 section 可见），两处都直接 `setView('code')`。顶栏左侧品牌区是单个绿底 “Ark”
+  词标（`.console-mark--word`），它同时是 home 控件：任意场景下点击都 `setView('code')`
+  回到会话列表工作台（复用 `console.top.backToWorkbench` 作为可访问名）。`new` 场景（新任务页）的输入区**就是会话
+  输入框本体**（`Composer`，`threadId = null` + `onPendingStart`）：工作空间 / 模型 / 权限 /
+  推理强度 pill、附件与技能提及在会话存在前全部可用——pill 的选择写入页面的暂存覆盖
+  （`stagedRuntime` / `onStagedChange`），附件仍走 `/v1/attachments` 上传，草稿存于 store 的
+  保留键 `NEW_TASK_DRAFT_KEY`（与线程 UUID 命名空间隔离）。页面不再提供 Code/Plan/Review 模式
+  卡片（变更审查仍从 ⌘K 命令面板进入）。发送是一次完整投递：
+  `POST /v1/threads`（staged workspace 经服务端 validate 种为覆盖）→ `PATCH /v1/threads/{id}`
+  （其余覆盖）→ 逐个关联附件 → `POST /v1/threads/{id}/turns`（首回合），投递成功才清草稿与
+  暂存覆盖并 `setView('code')` 跳入工作台——新线程在 create 返回时即写入 store 并置为 active，
+  因此跳转后左侧会话列表与画布直接打开该会话；失败全保留且**不切场景**（用户留在新任务页重试）；
+  该路径不受 `streamStatus` 闸门约束（尚无流可订阅），仅 `sending` 阻塞。
+- 会话列表按项目分组渲染（`thread-projects.ts`：先按会话**实际生效**工作空间聚合，
+  无 override 会话回退运行时 active root，active 组置顶）。**项目组只在确有归属会话时渲染**：
+  active root 组同样如此，删光某项目下的全部会话（🗑 批量清理或逐条删除）后该项目组随之消失，
+  不留无法操作的空壳组。项目组头部提供两个随 hover/focus 显现的
   动作：➕ 在该项目下新建会话——把项目路径经 `POST /v1/threads` 的 `workspace` 字段提交，服务端经
   `WorkspaceService::validate` 校验后作为该线程的 workspace 覆盖种子，新会话即落在该组；🗑 批量清理
   该项目下已结束的会话——`DELETE /v1/threads?workspace=…` 一次调用，"已结束"由服务端权威判定
@@ -177,13 +232,12 @@
   12px 圆角，实心主行动按钮，用户消息是左对齐引用卡而非右对齐气泡。shell 专用的 `--console-*`
   令牌与 diff 语法色 `--tk-*` 同样在 tokens/theme 两侧定义。设置页沿用同一 shell：分组导航 +
   分区表单，卡片用 hairline 分隔，嵌套列表用微底色"凹井"。
-- 设置页供应商表单用单个「导入模型」入口合并目录查询与批量导入（对齐 smart-ark 的导入对话框、按
+- 设置页供应商表单用单个「导入模型」入口合并目录查询与批量导入（按
   arkd 能力面收敛）：点击即拉取远端目录并弹出选择对话框，候选来自目录与粘贴输入（每行一个 id，服务无
   /models 时使用）；已存在的 id 标记且默认不勾选，确认后并入表单清单。导入时自动嗅探上下文窗口，识别不出
-  用 256K 兜底（对齐 smart-ark 的 `DEFAULT_PROVIDER_CONTEXT_WINDOW_TOKENS`），默认 `model` 为空时由首个
+  用 256K 兜底（`DEFAULT_PROVIDER_CONTEXT_WINDOW_TOKENS`），默认 `model` 为空时由首个
   候选行回填，命中默认模型的行把元数据镜像到条目级字段。
-- 保存（新增或编辑）只登记条目，`make_default` 恒为 false，不提供“保存后设为默认”勾选（对齐 smart-ark
-  的 `commitProviderDraft` 语义）。默认供应商决定所有未显式覆盖的会话实际使用的模型，切默认必须是显式
+- 保存（新增或编辑）只登记条目，`make_default` 恒为 false，不提供“保存后设为默认”勾选。默认供应商决定所有未显式覆盖的会话实际使用的模型，切默认必须是显式
   动作：列表行的「设为默认」或「设置 → 通用」的默认模型选择器；否则新增一个供应商就会把所有跟默认走
   的会话静默切到新通道。
 - 模型清单字段占满设置网格的一整行：一行需要 id、默认标记、上下文窗口与识图开关，挤在半宽列时识图会
@@ -200,6 +254,8 @@
   推理强度是输入框工具条上的即时选择器（`ComposerRuntimeControls`），打开时重读 `GET /v1/threads/{id}`
   再经 `PATCH /v1/threads/{id}` 的 `runtime` 覆盖立即保存；后端按字段合并、无清除语义，因此不可清除的
   字段不提供"未设置"选项，`reasoning_effort` 空串即"跟随默认"（协议映射见 [ark-llm](ark-llm.md)）。
+  同一组 pill 在新任务页（无会话）读写页面的暂存覆盖而非线程记录（见上方 `new` 场景条目），
+  提交时机是任务启动而不是选择动作。
   工作空间、上下文结构和手动压缩也收进同一排工具条，不再有展开式详细面板：工作空间 pill 直接列出
   `GET /v1/workspace` 的 active / recent 项目，点选即 `POST /v1/workspace/switch` 并把同一路径经
   `PATCH /v1/threads/{id}` 写成本会话覆盖；「新增项目空间」调用 `POST /v1/workspace/pick` 与
@@ -218,7 +274,7 @@
   主任务层级，必须退为状态详情或提示信息。
 - 设置页的分类导航是 `web` 内本地状态，只决定既有 section 的可见性；每个 section 仍独立持有既有 hook，
   不把 provider、MCP 或 runtime 配置逻辑回流到 Code 会话状态或 `ark-agent`。
-- 运行调优参数按 smart-ark 的术语分组呈现（回合与 token / 工具保护 / 上下文与压缩 / 流式传输 /
+- 运行调优参数按运行时语义分组呈现（回合与 token / 工具保护 / 上下文与压缩 / 流式传输 /
   权限档位），wire 键保持 `TuningSettings` 不变；子代理文案同样对齐（启用子 Agent 委派、单会话并行
   子 Agent 上限）。设置页新增只读「插件与能力」section：`GET /v1/runtime/capabilities`（能力 pills 与
   页面/面板目录计数）、`GET /v1/runtime/plugins`（插件贡献与失败/跳过警示）、`GET /v1/runtime/tools`
@@ -234,17 +290,28 @@
   `clearDraft`）：Composer 因 `key={threadId}` 在切换会话时重挂载，textarea 不持草稿，挂载时从
   store 恢复本线程草稿，输入即写回（受控 textarea）。发送成功仅清除与已发送文本一致的草稿条目，
   发送失败或被闸门拦截（`sending`、SSE 非 `open`）时草稿原样保留；排队动作把文本移入组件本地
-  队列并清掉对应 store 草稿。草稿只存内存、不进 wire；`state/draft-storage.ts` 把同一映射镜像到
+  队列并清掉对应 store 草稿。新任务页的无会话 Composer 把草稿存在同一条 map 的保留键
+  `NEW_TASK_DRAFT_KEY`（`'new-task'`，与线程 UUID 命名空间隔离），随同一条 localStorage 镜像
+  持久化。草稿只存内存、不进 wire；`state/draft-storage.ts` 把同一映射镜像到
   localStorage（键 `ark.composer.drafts`，≤100 条、单条 ≤100k 字符，读写失败静默降级），`main.tsx`
   渲染前 `hydrateDrafts()` 恢复——渲染器整页重载（arkd 重启拖垮连接后外壳重开窗口、HMR、崩溃）
   对用户即"某个会话完成后其它输入框全被清空"，因此草稿必须跨页面存活；store 仍是运行期唯一真源，
   镜像只服务水合。清空以"删除条目"表示，不会在下次水合时复活旧内容。
 - 附件经 `POST /v1/attachments`（Base64 JSON）上传后以 id 列表随 `TurnRequest.attachment_ids` 提交；
   上传失败走命令错误提示，已传 id 可在发送前移除（服务端无删除路由，孤儿附件由运行时清理策略负责）。
-- 消息画布用 `ThreadItem.attachments`（serde default，可为空）渲染用户消息下的附件 chips：
-  每个投递结果一枚 chip（文件名 + 投递通道 i18n 标签），`image`/`preview_text` 为中性样式，
-  `degraded`/`skipped`/`unavailable` 用警示色并以 `detail` 作 title 提示。字段由后端持久化，
-  历史回放与 live 流渲染一致；运行时未发附件字段的旧 item 保持原样。
+- 附件可视化预览由 `AttachmentThumb`（缩略图）与 `AttachmentLightbox`（全屏查看器）统一提供，消息画布
+  与输入框复用同一组件，不得各自实现第二套预览。字节经 `GET /v1/attachments/{id}/content` 的认证 fetch
+  取回并转 `blob:` URL（api 层按附件 id 缓存，`exportThread` 同款模式）——运行时所有路由在 Bearer
+  Token 之后，`<img>` 的裸 URL 无法通过认证，且生产 CSP 允许 `blob:` 不允许跨源运行时 URL 进 `img-src`。
+  图片渲染为可点击缩略图（cursor zoom-in），点击打开灯箱（scrim/×/Esc 关闭，z-index 在 toast 之下）；
+  非图片与加载失败的记录回落为文件名 pill，不阻塞渲染。图片性判定在 `attachment-preview-model.ts`：
+  画布按投递通道推断（只有图片形文件会走 `image`/`degraded`/`skipped`），输入框用 `File.type`，两者都
+  缺时回落扩展名。降级/跳过/读取失败的投递记录外层加警示环（`--ark-warn-wash`），投递通道标签移入
+  外层 title，不再内联展开。
+- 消息画布用 `ThreadItem.attachments`（serde default，可为空）渲染用户消息下的附件预览：
+  每个投递结果一枚缩略图或文件名 pill，`image`/`preview_text` 为中性样式，`degraded`/`skipped`/
+  `unavailable` 加警示环并以投递通道 i18n 标签作 title 提示。字段由后端持久化，历史回放与 live 流
+  渲染一致；运行时未发附件字段的旧 item 保持原样。
 - 「技能」面板的消费面见上方"输入框「技能」面板"条目：线程级视图 + 全局回落，显式 `/id` 提及即激活
   是 arkd 的技能指定方式；不新增技能运行时字段。用户消息正文里的 `/id` 提及在渲染层识别
   （`skill-mention.ts`，仅当 token 与已加载技能 id 精确匹配时）并渲染成 `.ark-mention` 芯片，
@@ -275,7 +342,9 @@
 
 `apps/ark-desktop` 是已实现的 Tauri 窗口和本地 `arkd` 生命周期宿主。它不会成为 web 的业务 API：生产构建
 仅通过 `VITE_ARK_BASE_URL` 将既有 typed HTTP/SSE client 指向受限 loopback 运行时；开发仍使用 Vite proxy。
-不得在 React 组件中引入 Tauri command、shell/plugin API 或 provider/Agent 分支。
+不得在 React 组件中引入 Tauri command、shell/plugin API 或 provider/Agent 分支。桌面壳的原生能力只经
+`shared/desktop.ts` 的降级桥进入渲染层（当前：文件夹选择、保存文件、系统通知），组件直接 invoke
+Tauri 命令属于检视阻断项；系统通知的发送时机与去重留在 web（`turn-end-toast.ts`），外壳只渲染文本。
 
 独立 `plugin-code-ui` 尚未成为当前 workspace 模块。其未来迁移必须先建立需求设计，不能借桌面外壳绕过
 `ark-ui` 注册总线。
@@ -285,6 +354,10 @@
 设置页「定时任务」section(需求见 [scheduled-tasks](../requirements/scheduled-tasks.md)):
 只消费 `/v1/schedules` 的生成契约类型;节奏编辑、启停、删除、立即运行、最近结果展示与
 "打开会话"跳转运行线程;全部文案走 i18n 消息键。客户端不做 next_run 计算,以后端返回为准。
+表单的工作区不手填:复用 `POST /v1/workspace/pick` 弹出宿主文件夹选择,`POST /v1/workspace/validate`
+归一化后写入草稿,取消与失败都保持原值;"清除"是回到全局默认的唯一入口。线程轨的「定时任务」
+创建弹窗与设置页共用同一 `ScheduleForm`,头部提供"查看全部定时任务"链接,经
+`setView('settings', section)` 一次性落到任务列表 section。
 
 ## 记忆与技能配置
 

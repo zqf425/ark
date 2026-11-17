@@ -77,13 +77,36 @@ test('Tauri configuration owns the window and delegates web development to Vite'
     wait: false
   })
   assert.equal(config.build.frontendDist, '../../../web/dist')
-  assert.equal(config.app.windows[0].label, 'main')
-  assert.equal(config.app.windows[0].title, 'ark')
+  // Since 601334d the window is created by the Rust host after arkd answers
+  // `/health` (runtime.rs), so the config must not declare one; the label
+  // must stay "main" so the `default` capability keeps applying.
+  assert.deepEqual(config.app.windows, [])
+  const runtimeRs = readFileSync(resolve(desktopRoot, 'src-tauri', 'src', 'runtime.rs'), 'utf8')
+  assert.match(runtimeRs, /WebviewWindowBuilder::new\(app, "main"/)
+  assert.match(runtimeRs, /\.title\("ark"\)/)
   assert.match(config.app.security.csp, /connect-src[^;]*http:\/\/127\.0\.0\.1:18791/)
   assert.equal(config.bundle.externalBin, undefined, 'development must not require a release sidecar artifact')
 
   const viteConfig = readFileSync(resolve(repositoryRoot, 'web', 'vite.config.ts'), 'utf8')
   assert.match(viteConfig, /host:\s*'127\.0\.0\.1'/)
+})
+
+test('the shell exposes system notifications for turn ends', () => {
+  const mainRs = readFileSync(resolve(desktopRoot, 'src-tauri', 'src', 'main.rs'), 'utf8')
+  assert.match(mainRs, /tauri_plugin_notification::init\(\)/, 'notification plugin must be registered')
+  assert.match(
+    mainRs,
+    /fn notify_session_event\(app: tauri::AppHandle, title: String, body: String\)/,
+    'system notification command must take display text only'
+  )
+  assert.match(
+    mainRs,
+    /notify_session_event/,
+    'the command must be reachable from the renderer invoke handler'
+  )
+
+  const desktopBridge = readFileSync(resolve(repositoryRoot, 'web', 'src', 'shared', 'desktop.ts'), 'utf8')
+  assert.match(desktopBridge, /notify_session_event/, 'the web bridge must call the shell command')
 })
 
 test('release configuration is the only place that embeds the arkd sidecar', () => {

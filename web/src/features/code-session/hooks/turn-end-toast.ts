@@ -1,5 +1,6 @@
 /**
- * One toast when a session's turn reaches a terminal state.
+ * One toast when a session's turn reaches a terminal state — plus, while the
+ * window is not focused, a system notification for the same end.
  *
  * Two callers share this module because a turn's end is observable from two
  * places: the active thread's SSE stream (instant, carries the terminal event
@@ -11,11 +12,20 @@
  * poll toast suppresses the replayed terminal frame when the user opens the
  * thread afterwards.
  *
+ * The system notification rides the same edge and dedupe: when the user is
+ * reading another app the in-page toast is invisible, so the desktop shell
+ * posts an OS-level one (Windows toast / macOS banner) instead. Focus is read
+ * at delivery time, not via listeners — a focus change between the terminal
+ * event and this call is accounted for by the next call, and one missed edge
+ * costs less than a focus-listener lifecycle around the two entry points.
+ * Outside the desktop shell (plain browser) it degrades to the toast only.
+ *
  * Runs outside React (SSE callbacks, poll intervals), so it resolves the
  * toast sink and the thread title from module state instead of hooks.
  */
 import type { MessageKey } from '../../../shared/i18n'
 import { translateNow } from '../../../shared/i18n/current'
+import { postSystemNotification } from '../../../shared/desktop'
 import { pushToastProgrammatic } from '../../../shared/ui'
 import { useCodeSessionStore } from '../state/store'
 
@@ -33,6 +43,14 @@ const MESSAGE_KEY: Record<TurnEndOutcome, MessageKey> = {
   failed: 'thread.notify.failed',
   aborted: 'thread.notify.aborted',
   ended: 'thread.notify.ended'
+}
+
+/** System-notification title per outcome; the toast text stays the body. */
+const OS_TITLE_KEY: Record<TurnEndOutcome, MessageKey> = {
+  completed: 'thread.notify.os.completed',
+  failed: 'thread.notify.os.failed',
+  aborted: 'thread.notify.os.aborted',
+  ended: 'thread.notify.os.ended'
 }
 
 /** threadId → dedupe key of the last toasted terminal state. */
@@ -71,5 +89,20 @@ export function notifyTurnEnded(payload: {
     TONE_BY_OUTCOME[payload.outcome],
     translateNow(MESSAGE_KEY[payload.outcome], { title: row.title })
   )
+  notifySystem(payload.outcome, row.title)
   return true
+}
+
+/**
+ * Fire-and-forget OS notification for one deduped turn end. Deliberately not
+ * awaited: the toast return value must stay synchronous for the two callers,
+ * and a slow shell round-trip must not delay the stream/poll loop. Failure
+ * resolves inside `postSystemNotification` and simply leaves the toast alone.
+ */
+function notifySystem(outcome: TurnEndOutcome, title: string): void {
+  if (document.hasFocus()) return
+  void postSystemNotification(
+    translateNow(OS_TITLE_KEY[outcome]),
+    translateNow(MESSAGE_KEY[outcome], { title })
+  )
 }

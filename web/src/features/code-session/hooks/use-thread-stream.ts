@@ -79,7 +79,7 @@ export function useThreadStream(threadId: ThreadId | null): void {
         const detail = await getThread(threadId, controller.signal)
         if (cancelled) return
         const watermark = detail.summary.last_seq ?? 0
-        seedItems(detail.items, watermark, detail.child_completions, detail.runtime_snapshot)
+        seedItems(detail.items, watermark, detail.runtime_snapshot)
         // The detail watermark is authoritative; pull the rail row up to it in
         // case the list was loaded before the newest events landed.
         noteThreadSeq(threadId, watermark)
@@ -117,9 +117,8 @@ export function useThreadStream(threadId: ThreadId | null): void {
           onEvent: (event) => {
             if (cancelled) return
             ingestEvent(event)
-            // Event classes (mirrors the server-side projector in smart-ark's
-            // runtime-event-reducer: transport/synthetic frames mutate no
-            // projection field):
+            // Event classes (mirrors the server-side projector:
+            // transport/synthetic frames mutate no projection field):
             // - transport frames (heartbeat, sse_idle_timeout,
             //   transient_retry) carry no thread activity at all: a
             //   subscribe's opening heartbeat is stamped `Utc::now()` by the

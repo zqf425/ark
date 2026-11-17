@@ -1,17 +1,22 @@
 // @vitest-environment jsdom
 /**
  * The user bubble renders what the model actually received. An attachment
- * record on the item must become one chip per outcome — with the file name,
- * not an id — and the chip state must track the delivery channel, so a
- * degraded or skipped attachment is visible instead of silently missing.
- * Items without attachments render exactly as before.
+ * record on the item must become one preview per outcome — image outcomes as
+ * clickable thumbnails (the shared lightbox), everything else as a filename
+ * pill with the delivery channel in its tooltip. Items without attachments
+ * render exactly as before, and the bubble carries no "you" identity row.
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ThreadItem, TurnAttachmentOutcome } from '../../../shared/contracts'
 import { installBrowserStubs, mountWithProviders } from '../../../shared/testing/react-harness'
 import { UserBubble, AssistantBubble, FinalReplyCard } from './MessageBubble'
+import * as attachmentsApi from '../api/attachments-api'
 
 installBrowserStubs()
+
+// jsdom cannot decode image bytes; every preview fetch resolves to a fake
+// object URL. Reaching the lightbox only needs the URL to exist.
+vi.spyOn(attachmentsApi, 'fetchAttachmentObjectUrl').mockResolvedValue('blob:mock')
 
 const TURN = '00000000-0000-0000-0000-0000000000aa'
 
@@ -43,7 +48,7 @@ describe('UserBubble attachments', () => {
     expect(harness.text()).toContain('看看这张图')
   })
 
-  it('每个投递结果渲染一个 chip，显示文件名与投递通道', async () => {
+  it('每个投递结果渲染一个缩略图，图片可点击打开灯箱', async () => {
     const item = userItem({
       attachments: [
         outcome({}),
@@ -55,46 +60,91 @@ describe('UserBubble attachments', () => {
       ]
     })
     const harness = await mountWithProviders(<UserBubble item={item} />)
-    const chips = [...harness.host.querySelectorAll('.ark-msg__attachments .ark-chip')]
-    expect(chips).toHaveLength(2)
-    const first = chips[0]!
-    const second = chips[1]!
-    expect(first.textContent).toContain('pic.png')
-    expect(first.textContent).toContain('图片')
+    const thumbs = [...harness.host.querySelectorAll('.ark-msg__attachments .ark-thumb')]
+    expect(thumbs).toHaveLength(2)
+    const first = thumbs[0]!
+    const second = thumbs[1]!
+    // The image preview is a button (click → lightbox) with the file name.
+    expect(first.className).toContain('ark-thumb--image')
+    expect(first.getAttribute('title')).toBe('pic.png')
+    expect(first.getAttribute('aria-haspopup')).toBe('dialog')
+    expect(first.tagName).toBe('BUTTON')
+    // Non-image previews stay quiet filename pills.
+    expect(second.className).toContain('ark-thumb--file')
     expect(second.textContent).toContain('notes.txt')
-    expect(second.textContent).toContain('文本预览')
+    expect(second.tagName).not.toBe('BUTTON')
   })
 
-  it('降级/跳过/读取失败的 chip 用警示色并带原因提示', async () => {
+  it('点击图片缩略图打开灯箱，Esc/关闭按钮可退出', async () => {
+    const item = userItem({ attachments: [outcome({})] })
+    const harness = await mountWithProviders(<UserBubble item={item} />)
+    const thumb = harness.host.querySelector<HTMLButtonElement>('.ark-thumb--image')
+    expect(thumb).not.toBeNull()
+    await import('react').then(({ act }) =>
+      act(async () => {
+        thumb!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+    )
+    const dialog = harness.host.querySelector('.ark-lightbox')
+    expect(dialog).not.toBeNull()
+    expect(dialog?.getAttribute('aria-label')).toBe('pic.png')
+    // The close button exits.
+    const close = harness.host.querySelector<HTMLButtonElement>('.ark-lightbox__close')
+    expect(close).not.toBeNull()
+    await import('react').then(({ act }) =>
+      act(async () => {
+        close!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+    )
+    expect(harness.host.querySelector('.ark-lightbox')).toBeNull()
+    await harness.unmount()
+  })
+
+  it('降级/跳过的附件带警示环与投递通道提示', async () => {
     const item = userItem({
       attachments: [
         outcome({ delivered: 'degraded', detail: 'model did not declare vision support' }),
         outcome({
           attachment_id: '00000000-0000-0000-0000-100000000003',
-          original_filename: 'big.png',
+          original_filename: 'notes-degraded.txt',
           delivered: 'skipped',
           detail: 'over the per-turn budget'
         })
       ]
     })
     const harness = await mountWithProviders(<UserBubble item={item} />)
-    const chips = [...harness.host.querySelectorAll('.ark-msg__attachments .ark-chip')]
-    expect(chips).toHaveLength(2)
-    for (const chip of chips) {
-      expect(chip.className).toContain('ark-chip--warn')
-      expect(chip.getAttribute('title')).toBeTruthy()
-    }    expect(harness.text()).toContain('未传图（模型无视觉能力）')
-    expect(harness.text()).toContain('超出图片预算')
+    const wrappers = [...harness.host.querySelectorAll('.ark-msg__attachments .ark-msg-attachment')]
+    expect(wrappers).toHaveLength(2)
+    for (const wrapper of wrappers) {
+      expect(wrapper.className).toContain('ark-msg-attachment--warn')
+      // The delivery channel lives in the wrapper's title, not inline text.
+      expect(wrapper.getAttribute('title')).toBeTruthy()
+    }
+    // An image-shaped outcome renders as a thumbnail; the file name lives in
+    // its alt/title (jsdom cannot decode bytes, so no real pixels).
+    const thumb = wrappers[1]!.querySelector('img')
+    expect(thumb?.getAttribute('alt')).toBe('notes-degraded.txt')
   })
 
-  it('元数据缺失时 chip 回退显示附件 id', async () => {
+  it('元数据缺失时回退显示附件 id', async () => {
     const item = userItem({
       attachments: [outcome({ original_filename: undefined, delivered: 'unavailable', detail: 'boom' })]
     })
     const harness = await mountWithProviders(<UserBubble item={item} />)
-    const chip = harness.host.querySelector('.ark-msg__attachments .ark-chip')
-    expect(chip?.textContent).toContain('00000000-0000-0000-0000-100000000001')
-    expect(chip?.className).toContain('ark-chip--warn')
+    const pill = harness.host.querySelector('.ark-msg__attachments .ark-thumb--file')
+    expect(pill?.textContent).toContain('00000000-0000-0000-0000-100000000001')
+    expect(pill?.className).toContain('ark-thumb--warn')
+  })
+
+  it('用户气泡不再渲染「你」身份行，只保留时间与复制', async () => {
+    const harness = await mountWithProviders(<UserBubble item={userItem()} />)
+    expect(harness.text()).not.toContain('你')
+    expect(harness.host.querySelector('.ark-msg__avatar--you')).toBeNull()
+    expect(harness.host.querySelector('.ark-msg__author')).toBeNull()
+    expect(harness.host.querySelector('.ark-msg__time')).not.toBeNull()
+    expect(harness.host.querySelector('.ark-msg__copy')).not.toBeNull()
   })
 })
 
@@ -204,6 +254,16 @@ describe('最终回复卡', () => {
     expect(harness.host.querySelector('.ark-reply__copy')).toBeNull()
     expect(harness.host.querySelector('.ark-caret')).not.toBeNull()
     expect(harness.text()).toContain('结论如下')
+    await harness.unmount()
+  })
+
+  it('完成后 footer 行带生成时间,与用户气泡 footer 同款时钟', async () => {
+    const harness = await mountWithProviders(<FinalReplyCard item={replyItem('completed')} />)
+    const time = harness.host.querySelector('.ark-reply__foot time')
+    expect(time).not.toBeNull()
+    expect(time?.textContent).not.toBe('')
+    // 时钟语义与用户气泡一致：local HH:MM:SS。
+    expect(harness.text()).toMatch(/\d{2}:\d{2}:\d{2}/)
     await harness.unmount()
   })
 

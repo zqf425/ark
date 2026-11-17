@@ -1,6 +1,6 @@
 /**
  * Tool cards, tool results, error and notice rows, restyled after the
- * smart-ark tool entry: soft rounded cards with a floating shadow, mono tool
+ * Tool entry: soft rounded cards with a floating shadow, mono tool
  * names and uppercase section labels. Each card opens with a glyph disc whose
  * icon is picked from the tool family (read / write / exec / search), like
  * mainstream agent activity rows.
@@ -41,21 +41,38 @@
 }
 
 .ark-tool__head,
+.ark-tool__headtoggle,
 .ark-toolresult__head {
   display: flex;
   align-items: center;
   gap: 9px;
+  min-width: 0;
+}
+
+.ark-tool__head,
+.ark-toolresult__head {
   width: 100%;
   border: 0;
   background: none;
   padding: 7px 12px;
-  cursor: pointer;
   text-align: left;
   font: inherit;
   color: inherit;
 }
 
+.ark-tool__headtoggle {
+  flex: 0 1 auto;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  min-width: 0;
+}
+
 .ark-tool__head:hover,
+.ark-tool__headtoggle:hover,
 .ark-toolresult__head:hover {
   background: var(--ark-bg-hover);
 }
@@ -153,6 +170,84 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 26ch;
+}
+
+/* File chip on write-family cards: the basename opens the file in the File
+   panel, the directory hint rides along clipped. A nested interactive control
+   needs its own affordance or it reads as part of the digest text. */
+.ark-tool__filechip {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius-sm);
+  background: var(--ark-bg-inset);
+  padding: 2px 7px;
+  cursor: pointer;
+  font: inherit;
+  max-width: 40%;
+}
+
+.ark-tool__filechip:hover {
+  border-color: var(--ark-border);
+  background: var(--ark-bg-hover);
+}
+
+.ark-tool__filechip-name {
+  font-family: var(--ark-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ark-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-tool__filechip-dir {
+  font-family: var(--ark-mono);
+  font-size: 10px;
+  color: var(--ark-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Prose file chip (requirements/prose-path-links.md): an inline-code fragment
+   the renderer promoted because this turn wrote the file. Reads like inline
+   code but carries a chip border and pointer; the shared Markdown delegate
+   routes the click to the inspector. */
+.ark-md .ark-md-filechip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: 5px;
+  background: var(--ark-bg-inset);
+  padding: 0.1em 0.45em;
+  cursor: pointer;
+  font-family: var(--ark-mono);
+  font-size: 0.86em;
+  color: var(--ark-text);
+  vertical-align: baseline;
+}
+
+.ark-md .ark-md-filechip:hover {
+  border-color: var(--ark-border);
+  background: var(--ark-bg-hover);
+}
+
+.ark-md .ark-md-filechip::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  flex: none;
+  background-color: var(--ark-text-dim);
+  -webkit-mask: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z'/%3E%3Cpath d='M14 3v5h5'/%3E%3C/svg%3E");
+  mask: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z'/%3E%3Cpath d='M14 3v5h5'/%3E%3C/svg%3E");
 }
 
 .ark-tool__body {

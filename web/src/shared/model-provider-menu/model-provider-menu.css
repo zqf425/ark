@@ -226,7 +226,7 @@
   outline-offset: 1px;
 }
 
-/* ---------- flyout variant (session composer, mirrors smart-ark) ----------
+/* ---------- flyout variant (session composer) ----------
  * A single provider column; hovering/focusing a provider floats its models as a
  * separate card beside the menu. That card owns its own scroll container, so a
  * long model inventory is never clipped. `overflow: visible` lets the submenu

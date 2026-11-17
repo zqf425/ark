@@ -5,10 +5,15 @@
  * (`schedule-form.ts` + `ScheduleForm`), and the write goes through the same
  * `useSchedules().create`, so this dialog adds an entry point and nothing else.
  * The runtime stays the authority on cadence normalization and the task cap.
+ *
+ * A created task is only ever re-found in the settings page's task list, so the
+ * header links there instead of leaving creation a dead end; the jump is the
+ * same `setView('settings', section)` request the console shell already uses.
  */
 import { useEffect, useState } from 'react'
 import { useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
+import { useViewStore } from '../../workbench/state/view-slice'
 import { useSchedules } from '../../settings/hooks/use-schedules'
 import { useProviders } from '../../settings/hooks/use-providers'
 import { toModelProviderGroups } from '../../../shared/model-provider-menu'
@@ -31,6 +36,7 @@ export function ScheduleCreateDialog({ onClose }: { onClose: () => void }): JSX.
   const fallback = active ? { providerId: active.id, model: active.model } : undefined
   const [draft, setDraft] = useState<ScheduleDraft>(() => emptyScheduleDraft())
   const [formError, setFormError] = useState<string | null>(null)
+  const setView = useViewStore((state) => state.setView)
 
   // Escape dismisses the dialog, matching the workbench's context drawer.
   useEffect(() => {
@@ -74,15 +80,27 @@ export function ScheduleCreateDialog({ onClose }: { onClose: () => void }): JSX.
       <div className="ark-scheduledialog__panel">
         <header className="ark-scheduledialog__head">
           <strong>{t('settings.schedules.createTitle')}</strong>
-          <button
-            type="button"
-            className="ark-scheduledialog__close"
-            aria-label={t('common.close')}
-            title={t('common.close')}
-            onClick={onClose}
-          >
-            ×
-          </button>
+          <div className="ark-scheduledialog__head-actions">
+            <button
+              type="button"
+              className="ark-linkbtn"
+              onClick={() => {
+                onClose()
+                setView('settings', 'schedules')
+              }}
+            >
+              {t('settings.schedules.openAll')}
+            </button>
+            <button
+              type="button"
+              className="ark-scheduledialog__close"
+              aria-label={t('common.close')}
+              title={t('common.close')}
+              onClick={onClose}
+            >
+              ×
+            </button>
+          </div>
         </header>
         <div className="ark-scheduledialog__body">
           <ScheduleForm

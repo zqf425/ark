@@ -39,3 +39,20 @@ export async function saveFile(path: string, bytes: Uint8Array): Promise<string>
   if (!bridge) throw new Error('save_file requires the ark desktop shell')
   return bridge.invoke<string>('save_file', { path, bytes: Array.from(bytes) })
 }
+
+/**
+ * System-level notification (Windows toast / macOS banner) posted by the
+ * desktop shell's `notify_session_event` command. Resolves `false` when the
+ * shell is absent (plain browser), the OS blocked the notification, or the
+ * delivery failed — callers must keep their in-page surface in that case.
+ * Clicking the notification does nothing: the payload is display text only.
+ */
+export async function postSystemNotification(title: string, body: string): Promise<boolean> {
+  const bridge = internals()
+  if (!bridge) return false
+  try {
+    return await bridge.invoke<boolean>('notify_session_event', { title, body })
+  } catch {
+    return false
+  }
+}

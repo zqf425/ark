@@ -1,5 +1,5 @@
 /**
- * Settings screen components (design §7.10.2), restyled after the smart-ark
+ * Settings screen components (design §7.10.2), restyled after the
  * SettingsCard: 18px cards with a ruled header, 14px controls with an accent
  * focus ring, and recessed wells for nested lists.
  *
@@ -114,7 +114,7 @@
   border-radius: 5px;
 }
 
-/* ---------- fields (smart-ark control: rounded-xl + accent focus ring) ---- */
+/* ---------- fields (rounded-xl + accent focus ring) ---- */
 
 .ark-field {
   display: flex;
@@ -300,7 +300,7 @@
   align-items: center;
 }
 
-/* ---------- grouped fields (smart-ark detail sections) ---------- */
+/* ---------- grouped fields (detail sections) ---------- */
 
 .ark-settings__group {
   display: flex;

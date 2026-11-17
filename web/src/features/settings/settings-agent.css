@@ -1,5 +1,5 @@
 /**
- * Settings layout, ported from the smart-ark SettingsView: a glass nav rail
+ * Settings layout: a glass nav rail
  * beside a narrow content column. Component styles (cards, fields, notices)
  * live in settings.css; this file owns only the shell. Colours come from the
  * shared tokens — a literal hex here is a review blocker.
@@ -14,7 +14,7 @@
   background: var(--ark-bg);
 }
 
-/* ---------- nav rail (smart-ark SettingsSidebar) ---------- */
+/* ---------- nav rail ---------- */
 
 .ark-settings__rail {
   position: relative;
@@ -66,7 +66,7 @@
 }
 
 /* Nav rows: 14px-radius pill rows; active = subtle fill + hairline ring +
-   tiny shadow, the smart-ark sidebar formula (no accent bar). */
+   tiny shadow, the sidebar formula (no accent bar). */
 .ark-settings__nav button {
   display: flex;
   flex-direction: column;
@@ -106,7 +106,7 @@
   color: var(--ark-text-dim);
 }
 
-/* ---------- content column (smart-ark: px-10 py-10, max-w-3xl) ---------- */
+/* ---------- content column (px-10 py-10, max-w-3xl) ---------- */
 
 .ark-settings__scroll {
   flex: 1;
@@ -125,6 +125,20 @@
 
 .ark-settings__hero {
   margin-bottom: 8px;
+}
+
+/* Hero doubles as the page-level exit row: title on the left, the
+   "back to workbench" button pinned to the right edge. */
+.ark-settings__hero--row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ark-settings__back {
+  flex: none;
+  margin-top: 2px;
 }
 
 .ark-settings__hero h1 {

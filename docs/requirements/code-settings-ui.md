@@ -207,7 +207,7 @@ UI 重构混入本需求。
 > 状态：**当前实现**。
 
 设置页供应商表单的保存（新增或编辑）只登记条目：请求恒以 `make_default: false` 提交，表单不再提供
-「保存后设为默认」勾选（对齐 smart-ark 的 `commitProviderDraft`：只新增供应商，不改写默认；默认值只在
+「保存后设为默认」勾选（只新增供应商，不改写默认；默认值只在
 专门入口手动修改）。此前新增供应商时该勾选默认勾上，保存即把 `default_provider_id` 指向新条目——所有
 未显式设置会话覆盖的线程都跟随默认通道解析模型，表现为"新增供应商后正在执行的会话模型被静默切走"。
 
@@ -215,3 +215,32 @@ UI 重构混入本需求。
 「设置 → 通用」的默认模型选择器；后端 `upsert(make_default)` 契约不变，MCP 等其他客户端不受影响。
 回归测试 `ProvidersSection.test.tsx` 钉住三条：新增保存携带 `make_default: false`、表单无该勾选、
 行内「设为默认」仍到达 default 端点。
+
+## 阶段 J：新任务页复用会话输入框
+
+> 状态：**当前实现**。
+
+ARK Console 的 `new` 场景（⌘K「新建任务」）此前是独立的简化 textarea + 静态工作区/权限 chip：
+工作空间无法切换、模型无法选择、附件不能添加，与工作台会话输入框形成两套能力。本阶段把该页的
+输入区替换为会话输入框本体（`Composer`，`threadId = null` + `onPendingStart` + 暂存覆盖
+`stagedRuntime` / `onStagedChange`），不加 wire 字段、不改运行时语义：
+
+- 会话存在前即可用：工作空间 pill（active/recent + 新增项目空间）、供应商/模型二级 pill、
+  权限档位 pill、推理强度、附件（+ 菜单 / 粘贴 / 拖拽）与 `/id` 技能提及。pill 的选择写入页面
+  暂存覆盖，不产生线程请求；附件仍走 `/v1/attachments` 上传。
+- 发送是一次完整投递：`POST /v1/threads`（staged workspace 经服务端 `WorkspaceService::validate`
+  种为覆盖）→ `PATCH /v1/threads/{id}`（provider/model/autonomy/reasoning_effort）→ 逐个
+  `POST /v1/threads/{id}/attachments` 关联 → `POST /v1/threads/{id}/turns`（首回合）。
+  投递成功才清草稿与暂存覆盖，并跳转工作台：新线程在 create 返回时即 `setActiveThread`，
+  随后 `setView('code')`，左侧会话列表与画布直接打开该会话；任一步失败全量保留可重试且不切
+  场景，错误走共享 toast。
+  页面不设模式卡片：新会话一律直接启动首回合，变更审查保留在 ⌘K 命令面板入口。
+- 该路径不受 SSE `streamStatus` 闸门约束（尚无流可订阅），仅 `sending` 阻塞
+  （`canSendToThread` 的 `pendingStart` 语义，单测钉住）。草稿存于 store 保留键
+  `NEW_TASK_DRAFT_KEY`（`'new-task'`，与线程 UUID 命名空间隔离），随既有 localStorage 镜像持久化。
+- 回归测试 `NewTaskPage.test.tsx` 钉住：无会话时输入框/附件菜单可用、投递序列
+  （create→PATCH→associate→start）与成功清空、失败保草稿、附件先关联后随首回合提交。
+- 界面收敛（阶段 J 后续）：页面移除 Code/Plan/Review 三张模式卡片——Plan 语义随卡删除（发送即建
+  会话并启动首回合），Review 不经新任务页进入（⌘K 命令面板的「审查工作区变更」仍是入口）；
+  删除 `console.new.mode*` 6 个失效 i18n 键，页脚提示改为 `console.new.recentHint`。
+  回归测试钉住页面不渲染 `.console-new__modes`。

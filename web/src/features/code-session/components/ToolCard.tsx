@@ -2,6 +2,8 @@ import { memo, useState } from 'react'
 import type { ThreadItem, ToolPayload } from '../../../shared/contracts'
 import { formatToolArguments } from '../../../shared/format'
 import { useI18n, type MessageKey } from '../../../shared/i18n'
+import { useCodeSessionStore } from '../state/store'
+import { toolTargetPath } from '../tool-file'
 
 function statusKey(item: ThreadItem, tool: ToolPayload): MessageKey {
   if (tool.ok === true) return 'canvas.tool.succeeded'
@@ -50,6 +52,31 @@ function argsDigest(formatted: string): string {
 }
 
 /**
+ * File chip for write-family cards (requirements/tool-file-preview.md): shows
+ * the basename of the file the tool wrote and opens it in the inspector's File
+ * panel. A nested button inside the collapsible head must stop propagation, or
+ * clicking the file would also toggle the card open.
+ */
+function FileChip({ path, name, dir }: { path: string; name: string; dir: string }): JSX.Element {
+  const { t } = useI18n()
+  const selectFile = useCodeSessionStore((s) => s.selectFile)
+  return (
+    <button
+      type="button"
+      className="ark-tool__filechip"
+      title={t('canvas.tool.openFile', { path })}
+      onClick={(event) => {
+        event.stopPropagation()
+        selectFile(path)
+      }}
+    >
+      <span className="ark-tool__filechip-name">{name}</span>
+      {dir ? <span className="ark-tool__filechip-dir">{dir}</span> : null}
+    </button>
+  )
+}
+
+/**
  * Foldable tool card. The `tool` payload is the runtime's structured facet, so
  * nothing here infers the tool name from text.
  *
@@ -73,22 +100,29 @@ export const ToolCard = memo(function ToolCard({ item }: { item: ThreadItem }): 
   const args = formatToolArguments(tool.arguments)
   const digest = argsDigest(args)
   const hasBody = Boolean(args || tool.output || item.detail)
+  const target = toolTargetPath(tool)
 
   return (
     <div className={`ark-tool${open ? ' is-open' : ''}`}>
-      <button type="button" className="ark-tool__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        <span className="ark-tool__chevron" aria-hidden="true">
-          {open ? '▾' : '▸'}
-        </span>
-        <span className={`ark-tool__icon ${toolIconClass(tool.tool)}`} aria-hidden="true" />
-        <span className="ark-tool__name">{tool.tool}</span>
+      {/* The head is a row, not a single button: the file chip is an
+          interactive control of its own, and nested <button>s are invalid DOM
+          (validateDOMNesting) and break the outer click semantics. */}
+      <div className="ark-tool__head">
+        <button type="button" className="ark-tool__headtoggle" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+          <span className="ark-tool__chevron" aria-hidden="true">
+            {open ? '▾' : '▸'}
+          </span>
+          <span className={`ark-tool__icon ${toolIconClass(tool.tool)}`} aria-hidden="true" />
+          <span className="ark-tool__name">{tool.tool}</span>
+        </button>
+        {target ? <FileChip path={target.path} name={target.name} dir={target.dir} /> : null}
         {digest ? <span className="ark-tool__digest">{digest}</span> : null}
         <span className={`ark-chip ${statusClass(item, tool)}`}>{t(statusKey(item, tool))}</span>
         {typeof tool.duration_ms === 'number' ? (
           <span className="ark-tool__meta">{tool.duration_ms} ms</span>
         ) : null}
         <span className="ark-tool__callid">{tool.call_id}</span>
-      </button>
+      </div>
 
       {open && hasBody ? (
         <div className="ark-tool__body">

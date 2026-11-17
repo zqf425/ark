@@ -17,6 +17,7 @@ export const CONSOLE_MESSAGES = {
   'console.top.notifications': ['通知', 'Notifications'],
   'console.top.openCommand': ['打开命令面板', 'Open command palette'],
   'console.top.settings': ['设置', 'Settings'],
+  'console.top.backToWorkbench': ['返回工作台', 'Back to workbench'],
   'console.top.refresh': ['重新检查运行时', 'Recheck runtime'],
 
   /* activity rail */
@@ -56,29 +57,8 @@ export const CONSOLE_MESSAGES = {
     '描述目标，ark 会自己读代码、改文件、跑测试。你可以随时接管。',
     'Describe the goal; ark reads code, edits files and runs tests. You can take over anytime.'
   ],
-  'console.new.modeCode': ['Code', 'Code'],
-  'console.new.modeCodeHint': ['直接修改工作区并执行工具，适合明确的实现任务。', 'Edit the workspace and run tools directly.'],
-  'console.new.modePlan': ['Plan', 'Plan'],
-  'console.new.modePlanHint': ['先产出分步计划，确认后再动手。', 'Draft a plan first, then act after approval.'],
-  'console.new.modeReview': ['Review', 'Review'],
-  'console.new.modeReviewHint': ['审查当前分支变更并给出问题清单。', 'Review current changes and report findings.'],
-  'console.new.placeholder': [
-    '例如：把工具超时重试统一收敛到 ark-agent，并补上回归测试…',
-    'e.g. Consolidate tool timeout retries into ark-agent and add regression tests…'
-  ],
-  'console.new.start': ['开始', 'Start'],
-  'console.new.starting': ['正在创建…', 'Creating…'],
-  'console.new.example1': ['解释这个仓库的架构分层', 'Explain this repository architecture'],
-  'console.new.example2': ['修复失败的 CI 检查', 'Fix the failing CI checks'],
-  'console.new.example3': ['为 SSE 看门狗补测试', 'Add tests for the SSE watchdog'],
-  'console.new.example4': ['审查未提交的变更', 'Review uncommitted changes'],
-  'console.new.workspace': ['工作区', 'Workspace'],
-  'console.new.branch': ['分支', 'Branch'],
-  'console.new.permission': ['权限', 'Permission'],
-  'console.new.standard': ['标准权限', 'Standard'],
   'console.new.failed': ['创建任务失败', 'Could not create the task'],
-  'console.new.reviewHint': ['Review 模式会打开变更审查页。', 'Review mode opens the changes review page.'],
-  'console.new.planHint': ['Plan 模式先创建会话，再由你确认计划。', 'Plan mode creates a thread and waits for your confirmation.'],
+  'console.new.recentHint': ['发送后进入会话画布，可随时接管。', 'Sending opens the session canvas; you can take over anytime.'],
 
   /* changes review */
   'console.review.title': ['变更审查', 'Review changes'],

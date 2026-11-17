@@ -143,12 +143,12 @@ docs/
 
 ## 8. kun 检视与修复的模型约定
 
-用 kun（smart-ark 本地运行时，HTTP API）做代码检视或修复时，模型按以下优先级选择。供应商与
+用 kun（本机已运行的 kun 运行时，HTTP API）做代码检视或修复时，模型按以下优先级选择。供应商与
 模型必须在**创建线程时**指定（实测 turn 级 `providerId` 覆盖不生效，turn 会回落到线程默认通道）：
 
 1. 首选 workbuddy 供应商的 DeepSeek：创建线程时带 `providerId: "custom-provider-8"` 与
    `model: "global:deepseek-v4.1-flash"`（workbuddy = `http://172.16.182.73:7863/v1`，
-   即 smart-ark 设置里名为 workbuddy 的供应商）；
+   即应用设置里名为 workbuddy 的供应商）；
 2. workbuddy 的模型池偶发 `no_healthy_account`（网关上游账号池临时不可用，稍后重试即可），
    或 DeepSeek 通道异常时，临时改用同供应商的 `global:glm-5.3-flash`；
 3. 不要依赖 kun 实例默认网关（`t.100credit.cn`）的任何模型通道：该账户额度已耗尽，所有请求

@@ -99,7 +99,7 @@ pub fn normalize_schedule(schedule: &TaskSchedule) -> Result<TaskSchedule> {
     Ok(next)
 }
 
-/// Weekday set, `0` = Sunday; an empty set falls back to Monday (smart-ark).
+/// Weekday set, `0` = Sunday; an empty set falls back to Monday.
 fn normalize_weekdays(days: &[u8]) -> Vec<u8> {
     let mut kept: Vec<u8> = days.iter().copied().filter(|day| *day <= 6).collect();
     kept.sort_unstable();
@@ -110,7 +110,7 @@ fn normalize_weekdays(days: &[u8]) -> Vec<u8> {
     kept
 }
 
-/// Day-of-month set; an empty set falls back to the 1st (smart-ark).
+/// Day-of-month set; an empty set falls back to the 1st.
 fn normalize_month_days(days: &[u8]) -> Vec<u8> {
     let mut kept: Vec<u8> = days
         .iter()

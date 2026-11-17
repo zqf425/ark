@@ -1,5 +1,5 @@
 /**
- * Shared two-level "provider -> model" picker, mirroring smart-ark's
+ * Shared two-level "provider -> model" picker, mirroring the
  * FloatingComposerModelPicker / CaseModelPicker: ONE trigger opens a menu whose
  * left column lists providers (hover/focus switches the active one) and whose
  * right column lists only that provider's models. Picking a model reports the
@@ -56,7 +56,7 @@ export type ModelProviderMenuProps = {
   clearSelection?: ModelProviderClear
   /**
    * `columns` (default) keeps two side-by-side columns for settings forms.
-   * `flyout` mirrors smart-ark's session composer: one provider column, and
+   * `flyout` mirrors the session composer: one provider column, and
    * hovering/focusing a provider floats its models as a separate scrollable
    * submenu card beside the menu.
    */

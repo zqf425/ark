@@ -6,9 +6,13 @@
  * switching between daily and weekly sees exactly the fields that matter and
  * the other cadence values are preserved untouched.
  */
+import { useState } from 'react'
 import { Button } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import type { ScheduleKind } from '../../../shared/contracts'
+import { pickWorkspaceFolder } from '../../code-session/api/workspace-api'
+import { validateWorkspace } from '../api/workspace-api'
+import { describeApiError } from '../api/outcome'
 import { CheckField, Field, SelectField, TextField } from './Field'
 import {
   ModelProviderMenu,
@@ -44,6 +48,66 @@ export type ScheduleFormProps = {
 
 function toggleDay(days: number[], day: number): number[] {
   return days.includes(day) ? days.filter((value) => value !== day) : [...days, day]
+}
+
+/**
+ * Workspace as a picker, not a typed path (the settings default-workspace
+ * precedent). The runtime owns the dialog and the path rules: pick resolves a
+ * real directory, validate canonicalizes it, and cancel keeps the draft as-is.
+ * Clearing stays available because "no override" is a legitimate choice.
+ */
+function WorkspacePicker({
+  value,
+  busy,
+  onChange
+}: {
+  value: string
+  busy: boolean
+  onChange: (value: string) => void
+}): JSX.Element {
+  const { t } = useI18n()
+  const [browsing, setBrowsing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const browse = async (): Promise<void> => {
+    setBrowsing(true)
+    setError(null)
+    try {
+      const picked = await pickWorkspaceFolder()
+      // null = cancelled or headless host (no dialog on the other side of the
+      // wire): keep the draft untouched instead of inventing a value.
+      if (!picked.path) return
+      const validated = await validateWorkspace(picked.path)
+      onChange(validated.path)
+    } catch (thrown) {
+      setError(describeApiError(thrown).message)
+    } finally {
+      setBrowsing(false)
+    }
+  }
+
+  return (
+    <Field label={t('settings.schedules.field.workspace')} hint={t('settings.schedules.field.workspaceHint')}>
+      <div className="ark-field__inline">
+        {value ? (
+          <code className="ark-settings__code ark-settings__code--fill">{value}</code>
+        ) : (
+          <span className="ark-settings__hint ark-settings__code--fill">{t('settings.schedules.workspace.unset')}</span>
+        )}
+        <Button size="sm" disabled={busy || browsing} onClick={() => void browse()}>
+          {browsing ? t('settings.schedules.workspace.browsing') : t('settings.schedules.workspace.pick')}
+        </Button>
+        {value ? (
+          <Button variant="ghost" size="sm" disabled={busy || browsing} onClick={() => onChange('')}>
+            {t('settings.schedules.workspace.clear')}
+          </Button>
+        ) : null}
+      </div>
+      {error ? (
+        <span className="ark-settings__hint ark-settings__hint--error">{error}</span>
+      ) : null}
+    </Field>
+  )
 }
 
 export function ScheduleForm({
@@ -202,13 +266,9 @@ export function ScheduleForm({
             }}
           />
         </Field>
-        <TextField
-          id="schedule-workspace"
-          label={t('settings.schedules.field.workspace')}
-          hint={t('settings.schedules.field.workspaceHint')}
+        <WorkspacePicker
           value={draft.workspace}
-          disabled={busy}
-          mono
+          busy={busy}
           onChange={(value) => set({ workspace: value })}
         />
       </div>

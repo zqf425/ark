@@ -33,7 +33,7 @@
   width: 100%;
   display: flex;
   flex-direction: column;
-  /* Turn-to-turn breathing room, like smart-ark's 1.25rem timeline gap. */
+  /* Turn-to-turn breathing room, a 1.25rem timeline gap. */
   gap: 20px;
   padding: 26px max(24px, calc((100% - var(--ark-canvas-width)) / 2)) 16px;
 }
@@ -117,48 +117,6 @@
   margin-top: 12px;
 }
 
-/* ---------- child completion notices ---------- */
-
-.ark-childcompletion {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 10px 12px;
-  border: 1px solid transparent;
-  border-radius: var(--ark-radius-lg);
-  background: var(--ark-ok-wash);
-  color: var(--ark-ok);
-  max-width: 72ch;
-}
-
-.ark-childcompletion.is-failed {
-  background: var(--ark-error-wash);
-  color: var(--ark-error);
-}
-
-.ark-childcompletion__head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  font-weight: 550;
-}
-
-.ark-childcompletion__time {
-  margin-left: auto;
-  color: var(--ark-text-faint);
-  font-family: var(--ark-mono);
-  font-size: 11px;
-}
-
-.ark-childcompletion__summary {
-  margin: 0;
-  color: var(--ark-text-dim);
-  font-size: 12px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
 /* ---------- jump pill ---------- */
 
 .ark-stream__jump {
@@ -182,7 +140,7 @@
   border-color: var(--ark-accent-dim);
 }
 
-/* ---------- turn process card (smart-ark work card) ---------- */
+/* ---------- turn process card (work card) ---------- */
 
 .ark-process {
   border: 1px solid var(--ark-border-muted);
@@ -256,6 +214,38 @@
   flex-direction: column;
   gap: 8px;
   background: var(--ark-bg-raised);
+}
+
+/* Folded older-tool-calls summary row inside the process card: quieter than a
+   tool card, aligned to the same grid so expanding swaps it for real rows. */
+.ark-foldedtools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px dashed var(--ark-border-muted);
+  border-radius: var(--ark-radius-lg);
+  background: transparent;
+  color: var(--ark-text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ark-foldedtools:hover {
+  border-color: var(--ark-border);
+  background: var(--ark-bg-hover);
+}
+
+.ark-foldedtools.is-open {
+  border-style: solid;
+  color: var(--ark-text);
+}
+
+.ark-foldedtools__chevron {
+  font-size: 10px;
+  color: var(--ark-text-faint);
 }
 
 /* Live status dot, shared by the process card and the header pill. */

@@ -6,11 +6,13 @@ import type { PanelId } from '../../code-session/state/workbench-slice'
 import { ChangesPanel } from './ChangesPanel'
 import { FilePanel } from './FilePanel'
 import { PlanPanel } from './PlanPanel'
+import { SubagentsPanel } from './SubagentsPanel'
 import { TerminalPanel } from './TerminalPanel'
 
 const PANEL_TABS: { id: PanelId; labelKey: MessageKey }[] = [
   { id: 'changes', labelKey: 'workbench.panel.changes' },
   { id: 'plan', labelKey: 'workbench.panel.plan' },
+  { id: 'subagents', labelKey: 'workbench.panel.subagents' },
   { id: 'file', labelKey: 'workbench.panel.file' },
   { id: 'terminal', labelKey: 'workbench.panel.terminal' }
 ]
@@ -21,6 +23,8 @@ function PanelBody({ panel }: { panel: PanelId }): ReactNode {
       return <ChangesPanel />
     case 'plan':
       return <PlanPanel />
+    case 'subagents':
+      return <SubagentsPanel />
     case 'file':
       return <FilePanel />
     case 'terminal':
@@ -41,6 +45,9 @@ export function PanelSlot(): JSX.Element {
   const activePanel = useCodeSessionStore((s) => s.activePanel)
   const setActivePanel = useCodeSessionStore((s) => s.setActivePanel)
   const toggleRight = useCodeSessionStore((s) => s.toggleRight)
+  // Live count for the subagents tab badge. Zero is hidden by the caller, so
+  // the tab strip stays quiet when nothing is delegated.
+  const activeChildRuns = useCodeSessionStore((s) => s.childRunActiveCount)
 
   return (
     <section className="ark-panelslot" aria-label={t('workbench.slot.title')}>
@@ -57,7 +64,14 @@ export function PanelSlot(): JSX.Element {
         </button>
       </header>
       <Tabs
-        items={PANEL_TABS.map((tab) => ({ id: tab.id, label: t(tab.labelKey) }))}
+        items={PANEL_TABS.map((tab) => ({
+          id: tab.id,
+          label: t(tab.labelKey),
+          badge:
+            tab.id === 'subagents' && activeChildRuns > 0 ? (
+              <span className="ark-tabs__badge is-live">{activeChildRuns}</span>
+            ) : undefined
+        }))}
         active={activePanel}
         onChange={setActivePanel}
         label={t('workbench.slot.tabsAria')}

@@ -9,7 +9,7 @@
 
 ## 目标
 
-让根目录的 `npm run dev` 像旧 smart-ark 一样直接启动原生桌面应用，同时保留 Rust 运行时的独立性：
+让根目录的 `npm run dev` 直接启动原生桌面应用，同时保留 Rust 运行时的独立性：
 `arkd` 必须仍可被 CLI、测试和未来远程部署单独使用。
 
 ## 范围
@@ -29,8 +29,8 @@
 2. **`arkd` 保持进程隔离。** 外壳不链接或调用 ark crate，只使用固定参数启动本地进程；这样崩溃隔离、CLI
    可用性和组合根唯一性都不变。
 3. **桌面专属 loopback、共享默认根。** CLI/直接 Web 开发继续用 18790；桌面使用 18791。debug/release 都显式传入 `~/.arkd/data` 和 `~/.arkd/workspace`，不再使用 Tauri 应用数据目录、Documents 或仓库根。
-   已有监听只有 `/health` 确认是 arkd 才复用；未知服务只报冲突、不杀进程、不猜测身份。这既避免旧 smart-ark
-   的端口碰撞，也避免两个 arkd 并发写同一会话目录。
+   已有监听只有 `/health` 确认是 arkd 才复用；未知服务只报冲突、不杀进程、不猜测身份。这既避免
+   端口碰撞，也避免两个 arkd 并发写同一会话目录。
 4. **CORS 白名单而非通配符。** 仅允许 Tauri 自身的跨平台 origin，外部网页不能通过浏览器跨域读取本地 Agent
    API。应用仍仅绑定 loopback。
 
@@ -41,3 +41,6 @@
 - 打包命令产出携带同 target triple `arkd` sidecar 的 NSIS 安装包。
 - 生产 Web 请求指向 loopback，CORS 预检仅接受 Tauri origin、允许的 HTTP 方法和必要 headers。
 - `ark-agent`、`ark-plugin`、Provider、MCP 和现有 HTTP/SSE wire 契约无桌面实现分支。
+- 回合终态在窗口失焦时投递系统级通知（Windows toast / macOS 横幅）：外壳只提供文本进文本出的
+  `notify_session_event` 命令（`tauri-plugin-notification`），发送时机、去重与文案由渲染层决定；
+  浏览器与通知被系统拒绝时静默回退到应用内 toast。
