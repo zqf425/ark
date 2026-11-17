@@ -39,6 +39,13 @@ Documents 或仓库根。已有 18791 监听必须通过健康检查才会复用
 外壳不向 JavaScript 暴露 shell 命令。它只从 Rust 调用 Tauri 的 shell plugin 启动固定的 `arkd` 命令，因此
 Web UI 不能借桌面能力执行任意程序。
 
+### 原生文件夹选择
+
+桌面壳的 `pick_folder` 由 Tauri 命令注入调用窗口（`tauri::Window`），并在创建 `FileDialogBuilder` 时调用
+`set_parent(&window)`。Windows 上未绑定 owner 的模态对话框会被当作独立顶层窗口，可能不随主窗口置前、
+只显示在任务栏，直到用户手动点击；显式 parent 使对话框直接归属当前窗口。web 通过
+`shared/desktop.ts#pickFolder()` 调用该命令，无需传参。
+
 ### 系统通知
 
 外壳注册 `tauri-plugin-notification` 并暴露唯一的 `notify_session_event(title, body)` 命令：渲染器

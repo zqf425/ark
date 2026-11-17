@@ -109,6 +109,21 @@ test('the shell exposes system notifications for turn ends', () => {
   assert.match(desktopBridge, /notify_session_event/, 'the web bridge must call the shell command')
 })
 
+test('the folder picker is owned by the main window', () => {
+  const mainRs = readFileSync(resolve(desktopRoot, 'src-tauri', 'src', 'main.rs'), 'utf8')
+
+  assert.match(
+    mainRs,
+    /async fn pick_folder\([^)]*window: tauri::Window[^)]*\)/,
+    'the command must receive the calling window from Tauri'
+  )
+  assert.match(
+    mainRs,
+    /\.file\(\)[\s\S]*?\.set_parent\(&window\)[\s\S]*?\.pick_folder\(/,
+    'the dialog must set the calling window as its parent so Windows brings it forward'
+  )
+})
+
 test('release configuration is the only place that embeds the arkd sidecar', () => {
   const configPath = resolve(desktopRoot, 'src-tauri', 'tauri.release.conf.json')
   assert.equal(existsSync(configPath), true, 'release sidecar configuration must exist')
