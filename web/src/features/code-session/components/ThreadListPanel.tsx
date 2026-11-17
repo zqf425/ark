@@ -41,14 +41,42 @@ function ThreadRow({
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(thread.title)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 })
+  const [menuPos, setMenuPos] = useState<{ top: number | null; bottom: number | null; left: number }>({
+    top: 0,
+    bottom: null,
+    left: 0
+  })
   const kebabRef = useRef<HTMLButtonElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
-  /** Anchor the menu to the kebab button; fixed positioning avoids row clipping. */
+  /**
+   * Anchor the menu to the kebab button; fixed positioning avoids row clipping.
+   *
+   * Rows near the bottom of the viewport have no room below for the menu, and
+   * the delete item (the menu's last entry) would fall outside the window --
+   * unreachable clicks read as "this session cannot be deleted". When the
+   * estimated menu box would cross the viewport's bottom edge, anchor the
+   * menu to the kebab's top edge via `bottom` and grow it upwards instead.
+   * The left clamp doubles as the right-edge protection on a narrow rail.
+   */
   const openMenu = (): void => {
     const rect = kebabRef.current?.getBoundingClientRect()
-    if (rect) setMenuPos({ top: rect.bottom + 4, left: Math.max(8, rect.right - 168) })
+    if (!rect) {
+      setMenuPos({ top: 0, bottom: null, left: 0 })
+      setMenuOpen(true)
+      return
+    }
+    // 5 entries at ~32px plus padding; text height varies with the locale, so
+    // this stays an estimate -- a few pixels of slack are harmless, an
+    // unclickable delete item is not.
+    const MENU_HEIGHT = 176
+    const left = Math.max(8, rect.right - 168)
+    const viewportFloor = window.innerHeight - 8
+    if (rect.bottom + 4 + MENU_HEIGHT > viewportFloor) {
+      setMenuPos({ top: null, bottom: Math.max(8, viewportFloor - rect.top + 4), left })
+    } else {
+      setMenuPos({ top: rect.bottom + 4, bottom: null, left })
+    }
     setMenuOpen(true)
   }
 
@@ -180,7 +208,16 @@ function ThreadRow({
         </div>
       ) : null}
       {menuOpen ? (
-        <div ref={menuRef} className="ark-threadrow__menu" role="menu" style={{ top: menuPos.top, left: menuPos.left }}>
+        <div
+          ref={menuRef}
+          className="ark-threadrow__menu"
+          role="menu"
+          style={
+            menuPos.top === null
+              ? { bottom: menuPos.bottom ?? 0, left: menuPos.left }
+              : { top: menuPos.top, left: menuPos.left }
+          }
+        >
           <button
             type="button"
             role="menuitem"
