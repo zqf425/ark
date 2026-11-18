@@ -101,6 +101,14 @@ describe('isFoldedProcessRow', () => {
     expect(isFoldedProcessRow(item('e', 'error'))).toBe(false)
     expect(isFoldedProcessRow(item('x', 'notice'))).toBe(false)
   })
+
+  it('never hides a user message behind the fold', () => {
+    // The user's own words are the human side of the conversation: in the
+    // child-run viewer (no turn grouping) delegation texts and steering rows
+    // land inside the trace, and the fold must not swallow them - the same
+    // reason the parent card splits user messages out before folding.
+    expect(isFoldedProcessRow(item('u', 'user_message', 'run the checks'))).toBe(false)
+  })
 })
 
 describe('splitProcessTrace (default fold of earlier activity)', () => {
