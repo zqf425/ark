@@ -16,7 +16,12 @@
   EOF，否则保持连接的服务端会把已完成的流误判为超时并触发重复请求。终止帧之后到达的字节不得
   发布。收尾时 `StreamAccumulator::finish()` 补发的 tool-call chunk 必须同样转发到 sink，使
   `ModelResponse.tool_calls` 与事件流一致；未发终止帧就 EOF 的流也走这条补发路径。
-- `cache_hit_rate` 只能读取原生 hit/miss 后计算，不能由 prompt token 猜测。
+- `cache_hit_rate` 只能读取原生 hit/miss 后计算，不能由 prompt token 猜测。OpenAI 家族在供应商
+  未报原生 miss 字段时，可用 `prompt - hit` 代数补全未命中数（brgroup_bl、Nvidia、openrouter
+  实测均只报 `cached_tokens`）；但同一 usage 对象把 image/audio token 从 prompt 中拆分单独上报
+  时（`prompt_tokens_details` / `input_tokens_details` 内含 `image_tokens` / `audio_tokens`），
+  该余数含不可缓存的计费 token，命中率必须保持 unknown 而非伪造；显式为零的 image/audio
+  计数（如 brgroup_bl 的 `image_tokens: 0`）不构成拆分，推导继续生效。
 - 传输 client 由调用方注入（`HttpModelClient::new` / `ModelCatalogClient::new`）；组合根注入经
   `ark_http::transport_client` 构建的受治理 client（同一代理/TLS 策略），本 crate 不自建传输。
 - model catalog 解析远端显式返回的 context/modalities 元数据，以及 `max_completion_tokens` /
@@ -24,8 +29,9 @@
   （`max_output_tokens`，缺失即 unknown）。上下文窗口按 `context_length` / `context_window` /
   `context_window_tokens` / `max_context_length` / `max_model_len` / `limits.context_length` /
   `top_provider.context_length` / `metadata.context_length`，以及 HuggingFace Router 的
-  `providers[].context_length` 逐项嗅探；识图按 `supports_vision` / `capabilities.vision` /
-  `supports_image_in` 与 `input_modalities` / `modalities.input` 中的 `image` 判定。通用 `/models` 只有 id
+  `providers[].context_length` 逐项嗅探；识图按 `supports_vision` / `supports_images`（workbuddy
+  网关实测形状）/ `capabilities.vision` / `supports_image_in` 与 `input_modalities` /
+  `modalities.input` 中的 `image` 判定。通用 `/models` 只有 id
   时能力字段仍是 unknown（导入对话框另做 256K 兜底，不在本层猜测）。GET 请求 10 秒超时、响应最大 1 MiB、
   模型最多 500 个，错误不得回显可能携带 query secret 的 URL。
 - 目录 URL 与聊天 URL 共用同一版本段规则（`config::url::model_catalog_url`）：已带 `v1`/`v2`/`v4`/`V1` 等
