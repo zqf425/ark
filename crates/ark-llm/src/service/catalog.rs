@@ -226,6 +226,9 @@ fn vision_at(value: &Value) -> Option<bool> {
         value,
         &[
             &["supports_vision"],
+            // workbuddy-style gateway (measured 2026-11-18): per-model
+            // `supports_images`, no modalities array anywhere in the row.
+            &["supports_images"],
             &["capabilities", "vision"],
             &["supports_image_in"],
         ],
@@ -331,6 +334,31 @@ mod tests {
         // A bare /models row still reports unknown, not a guessed window.
         let bare = parse_model_catalog_response(r#"{"data": [{"id": "bare"}]}"#).unwrap();
         assert_eq!(bare.models[0].context_window_tokens, None);
+    }
+
+    #[test]
+    fn workbuddy_supports_images_alias_is_recognized() {
+        // workbuddy's gateway publishes per-model vision as `supports_images`
+        // (measured 2026-11-18: 68 of 75 models carry the flag, no modalities
+        // array), so without this alias every model imports as vision-unknown
+        // and the operator must hand-set it.
+        let catalog = parse_model_catalog_response(
+            r#"{
+                "data": [{
+                    "id": "cn:flash",
+                    "context_length": 1000000,
+                    "supports_images": true
+                }, {
+                    "id": "cn:text-only",
+                    "context_length": 96000,
+                    "supports_images": false
+                }]
+            }"#,
+        )
+        .unwrap();
+        let by_id = |id: &str| catalog.models.iter().find(|m| m.id == id).unwrap();
+        assert_eq!(by_id("cn:flash").supports_vision, Some(true));
+        assert_eq!(by_id("cn:text-only").supports_vision, Some(false));
     }
 
     #[test]
