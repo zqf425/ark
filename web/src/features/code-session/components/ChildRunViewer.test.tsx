@@ -4,6 +4,7 @@
  * from `highest_seq` while active, stop when settled and keep the last good
  * content when a poll fails.
  */
+import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ThreadDetail } from '../../../shared/contracts'
 import { installBrowserStubs, mountWithProviders, settle, type ReactHarness } from '../../../shared/testing/react-harness'
@@ -98,5 +99,106 @@ describe('ChildRunViewer polling', () => {
     await settle()
     // The stale hint names the error; the empty-state line stays replaced.
     expect(harness.text()).toContain('boom')
+  })
+})
+
+/**
+ * The transcript fold: the child viewer renders through the same fold policy
+ * as the parent process card (only the newest `RECENT_ACTIVITY_ROW_LIMIT`
+ * activity rows visible, earlier ones behind the same summary row), so a long
+ * child run scans by its latest activity instead of a wall of cards.
+ */
+describe('ChildRunViewer transcript fold', () => {
+  let harness: ReactHarness | null = null
+
+  beforeEach(() => {
+    installBrowserStubs()
+    detailMock.mockReset()
+    eventsMock.mockReset()
+  })
+
+  afterEach(async () => {
+    await harness?.unmount()
+    harness = null
+    vi.useRealTimers()
+  })
+
+  function detailWithItems(itemCount: number, lastSeq: number): ThreadDetail {
+    const items = Array.from({ length: itemCount }, (_, index) => ({
+      item_id: `00000000-0000-0000-0000-0000000000i${index}`,
+      turn_id: CHILD,
+      kind: 'tool_call' as const,
+      status: 'completed' as const,
+      created_at: '2026-10-28T00:00:00Z'
+    }))
+    return { ...threadDetail(lastSeq), items }
+  }
+
+  async function mountViewer(active: boolean): Promise<ReactHarness> {
+    const mounted = await mountWithProviders(
+      <ChildRunViewer threadId={THREAD} childId={CHILD} active={active} />
+    )
+    await settle()
+    return mounted
+  }
+
+  it('keeps only the newest activity rows visible and folds the rest', async () => {
+    vi.useFakeTimers()
+    detailMock.mockResolvedValue(detailWithItems(5, 5))
+    eventsMock.mockResolvedValue({ events: [], highest_seq: 5 })
+    harness = await mountViewer(false)
+
+    // Five tool calls, three visible: the two earliest fold behind the summary.
+    const summary = harness.host.querySelector('.ark-foldedtools')
+    expect(summary).not.toBeNull()
+    expect(summary!.textContent).toContain('2')
+    expect(harness.host.querySelectorAll('.ark-tool')).toHaveLength(3)
+  })
+
+  it('expands the folded rows on click and folds them back on a second click', async () => {
+    // Real timers: the click assertion needs a genuine macrotask tick for the
+    // re-render, and this suite never schedules poll timers (active=false).
+    detailMock.mockResolvedValue(detailWithItems(5, 5))
+    eventsMock.mockResolvedValue({ events: [], highest_seq: 5 })
+    harness = await mountViewer(false)
+
+    await act(async () => {
+      ;(harness!.host.querySelector('.ark-foldedtools') as HTMLElement).click()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(harness.host.querySelectorAll('.ark-tool')).toHaveLength(5)
+
+    await act(async () => {
+      ;(harness!.host.querySelector('.ark-foldedtools') as HTMLElement).click()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(harness.host.querySelectorAll('.ark-tool')).toHaveLength(3)
+  })
+
+  it('does not fold a transcript with three or fewer activity rows', async () => {
+    detailMock.mockResolvedValue(detailWithItems(3, 3))
+    eventsMock.mockResolvedValue({ events: [], highest_seq: 3 })
+    harness = await mountViewer(false)
+
+    expect(harness.host.querySelector('.ark-foldedtools')).toBeNull()
+    expect(harness.host.querySelectorAll('.ark-tool')).toHaveLength(3)
+  })
+
+  it('renders a folded error row in place while the activity around it folds', async () => {
+    const items = [
+      { item_id: '00000000-0000-0000-0000-0000000000i0', turn_id: CHILD, kind: 'tool_call' as const, status: 'completed' as const, created_at: '2026-10-28T00:00:00Z' },
+      { item_id: '00000000-0000-0000-0000-0000000000e1', turn_id: CHILD, kind: 'error' as const, status: 'completed' as const, created_at: '2026-10-28T00:00:01Z', text: 'early failure' },
+      { item_id: '00000000-0000-0000-0000-0000000000i2', turn_id: CHILD, kind: 'tool_call' as const, status: 'completed' as const, created_at: '2026-10-28T00:00:02Z' },
+      { item_id: '00000000-0000-0000-0000-0000000000i3', turn_id: CHILD, kind: 'tool_call' as const, status: 'completed' as const, created_at: '2026-10-28T00:00:03Z' },
+      { item_id: '00000000-0000-0000-0000-0000000000i4', turn_id: CHILD, kind: 'tool_call' as const, status: 'completed' as const, created_at: '2026-10-28T00:00:04Z' }
+    ]
+    detailMock.mockResolvedValue({ ...threadDetail(9), items })
+    eventsMock.mockResolvedValue({ events: [], highest_seq: 9 })
+    harness = await mountViewer(false)
+
+    // Four activity rows fold; the error between them never folds away.
+    expect(harness.host.querySelector('.ark-foldedtools')).not.toBeNull()
+    expect(harness.host.textContent).toContain('early failure')
+    expect(harness.host.querySelectorAll('.ark-tool')).toHaveLength(3)
   })
 })

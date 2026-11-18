@@ -195,13 +195,14 @@ function EditResendControl({
 
 /**
  * Summary row standing in for the steps older than the default view: one line
- * with how many it holds. It is a pure UI fold owned by `TurnBlock` — the
- * collapsed rows stay in the store and the toggle just switches between the
- * folded and the full trace, so expanding never rebuilds or reorders the
- * newest rows below. The state lives in `TurnBlock` (not here) because the
- * expanded view renders sibling rows this row cannot own.
+ * with how many it holds. It is a pure UI fold — the collapsed rows stay in
+ * the caller's state and the toggle only switches between the folded and the
+ * full view, so expanding never rebuilds or reorders the newest rows below.
+ *
+ * Shared by the parent turn card and the child-run viewer so both surfaces
+ * fold earlier activity behind the same control and the same wording.
  */
-function FoldedProcessRow({
+export function FoldedProcessRow({
   count,
   expanded,
   onToggle
