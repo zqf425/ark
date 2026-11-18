@@ -46,6 +46,13 @@ Web UI 不能借桌面能力执行任意程序。
 只显示在任务栏，直到用户手动点击；显式 parent 使对话框直接归属当前窗口。web 通过
 `shared/desktop.ts#pickFolder()` 调用该命令，无需传参。
 
+### 窗口拖放
+
+`create_main_window` 显式调用 `WebviewWindowBuilder::disable_drag_drop_handler()`。Tauri 默认在原生层
+接管 WebView2 的拖放处理以产生 `DragDropEvent`，Windows 上这会替换 WebView2 的 HTML5 拖放处理器，导致
+页面（composer 的文件拖放附件）收不到任何 drop 事件。壳内没有任何 `DragDropEvent` 消费者，禁用后拖放
+完全交还页面，桌面与纯 Web 行为一致。
+
 ### 系统通知
 
 外壳注册 `tauri-plugin-notification` 并暴露唯一的 `notify_session_event(title, body)` 命令：渲染器

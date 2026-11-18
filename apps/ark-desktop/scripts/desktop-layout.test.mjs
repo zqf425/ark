@@ -84,6 +84,9 @@ test('Tauri configuration owns the window and delegates web development to Vite'
   const runtimeRs = readFileSync(resolve(desktopRoot, 'src-tauri', 'src', 'runtime.rs'), 'utf8')
   assert.match(runtimeRs, /WebviewWindowBuilder::new\(app, "main"/)
   assert.match(runtimeRs, /\.title\("ark"\)/)
+  // HTML5 drag-and-drop (composer file attachments) needs the native drop
+  // handler disabled; on Windows the default handler swallows page drop events.
+  assert.match(runtimeRs, /\.disable_drag_drop_handler\(\)/)
   assert.match(config.app.security.csp, /connect-src[^;]*http:\/\/127\.0\.0\.1:18791/)
   assert.equal(config.bundle.externalBin, undefined, 'development must not require a release sidecar artifact')
 

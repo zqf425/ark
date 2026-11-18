@@ -154,6 +154,11 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .inner_size(1440.0, 920.0)
         .min_inner_size(960.0, 640.0)
         .resizable(true)
+        // The default native drag-drop handler swallows file drops before the
+        // webview sees them (Windows WebView2 replaces the HTML5 handler), so
+        // the composer's drag-drop attachments never fire. Disabling it hands
+        // drops back to the page; no Tauri `DragDropEvent` consumer exists.
+        .disable_drag_drop_handler()
         .build()?;
     let _ = window.set_focus();
     Ok(())

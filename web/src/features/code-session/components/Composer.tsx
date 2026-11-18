@@ -482,10 +482,33 @@ export function Composer({
     void pickFiles(files)
   }
 
-  /** Drag-drop mirrors paste; dragover only enables the drop target. */
-  const onDrop = (event: React.DragEvent<HTMLTextAreaElement>): void => {
-    const files = event.dataTransfer?.files
+  /**
+   * The drop target is the whole composer box: files released on the textarea,
+   * the chip strip or the action rail all land as attachments, so a near-miss
+   * never falls through to the webview (which would open the file). Non-file
+   * drags keep the default so selected text still drags inside the textarea.
+   * The gate mirrors the attach button: without a delivery channel (no thread
+   * and not pendingStart) or while a command is in flight there is nothing to
+   * attach to.
+   */
+  const onDragOver = (event: React.DragEvent<HTMLElement>): void => {
+    if (inputDisabled || !Array.from(event.dataTransfer?.types ?? []).includes('Files')) return
+    // Moving between children re-fires dragleave/dragover; only a pointer
+    // that actually left the box clears the highlight.
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    event.preventDefault()
+    setDragOver(true)
+  }
+
+  const onDragLeave = (event: React.DragEvent<HTMLElement>): void => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
     setDragOver(false)
+  }
+
+  const onDrop = (event: React.DragEvent<HTMLElement>): void => {
+    setDragOver(false)
+    if (inputDisabled) return
+    const files = event.dataTransfer?.files
     if (!files || files.length === 0) return
     event.preventDefault()
     void pickFiles(files)
@@ -602,7 +625,12 @@ export function Composer({
         </div>
       ) : null}
 
-      <div className={dragOver ? 'ark-composer__box is-dragover' : 'ark-composer__box'}>
+      <div
+        className={dragOver ? 'ark-composer__box is-dragover' : 'ark-composer__box'}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
         {attachments.length > 0 ? (
           <div className="ark-composer__attachments" role="list" aria-label={t('canvas.composer.attachmentsAria')}>
             {attachments.map((picked) => (
@@ -639,15 +667,6 @@ export function Composer({
           aria-label={live ? t('canvas.composer.steerAria') : t('canvas.composer.sendAria')}
           disabled={inputDisabled}
           onPaste={onPaste}
-          onDragOver={(event) => {
-            // Files (and only files) turn the composer into a drop target.
-            if (Array.from(event.dataTransfer?.types ?? []).includes('Files')) {
-              event.preventDefault()
-              setDragOver(true)
-            }
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
           onChange={(event) => {
             const node = event.currentTarget
             resize(node)

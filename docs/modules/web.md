@@ -330,7 +330,14 @@
   附件在活跃回合同样可添加（+ 按钮、textarea 粘贴图片、拖拽文件均可用）：steer 与发送共用同一
   「先 `POST /v1/threads/{id}/attachments` 关联、后投递」流程，steer 携带 `TurnRequest.attachment_ids`，
   服务端授权失败走命令错误提示且不清空 chips；「排队」只排文本、附件保留待下一次投递。粘贴/拖入的
-  文件走与 + 按钮相同的上传管线（20 MiB 前端上限），剪贴板图片不内联进草稿文本。
+  文件走与 + 按钮相同的上传管线（20 MiB 前端上限），剪贴板图片不内联进草稿文本。拖放放置目标是整个
+  输入框容器（`.ark-composer__box`，不只 textarea）：`dragover` 仅在拖的是文件（`types` 含 `Files`）
+  且可编辑（与 + 按钮同一 `canEditComposer` 门槛）时 `preventDefault` 并高亮；`dragleave` 用
+  `contains(relatedTarget)` 区分在子元素间移动与真正离开，避免高亮闪烁；无文件的 drop 忽略，
+  文本拖拽保留浏览器默认。桌面壳（ark-desktop）建窗口时调用
+  `WebviewWindowBuilder::disable_drag_drop_handler()`：Windows 上 Tauri 默认以原生层接管 WebView2 的
+  拖放来产生 `DragDropEvent`，会把 drop 事件吞在页面之外，不禁用则 HTML5 拖放（含本输入框）在桌面端
+  完全失效；壳内无 `DragDropEvent` 消费者，禁用无副作用。
 - 未发送草稿按线程保存在 store（`runtime-slice` 的 `drafts: Record<ThreadId, string>`，`setDraft`/
   `clearDraft`）：Composer 因 `key={threadId}` 在切换会话时重挂载，textarea 不持草稿，挂载时从
   store 恢复本线程草稿，输入即写回（受控 textarea）。发送成功仅清除与已发送文本一致的草稿条目，
