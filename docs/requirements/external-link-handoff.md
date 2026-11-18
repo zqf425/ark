@@ -1,8 +1,10 @@
 # 外链交给系统浏览器（桌面窗口导航守卫）
 
 > 状态：**已实现**（2026-11-18）。助手正文里的链接与 `window.open` 不再在 ark 窗口内加载，改由系统默认
-> 浏览器打开；桌面壳在主窗口拒绝一切非应用 origin 的顶层导航。单测与编译已过，真实桌面点击未在本会话
-> 手工验证（需人工在窗口内点一次外链）。
+> 浏览器打开；桌面壳在主窗口拒绝一切非应用 origin 的顶层导航。
+> 验证证据：web 全量 `vitest`（530 项）、`tsc`、`check:rules`、`build` 通过；Rust 侧
+> `cargo check -p ark-desktop` **未能在本机执行**（GNU 工具链缺可用 `dlltool`，且未安装 MSVC Build
+> Tools），守卫判定改为在临时 crate 中以同一份函数跑通同名单测；真实桌面点击仍未手工验证。
 
 ## 背景
 
@@ -55,7 +57,8 @@
   `openExternal`；`#fragment` 不拦截；中键同样转交。
 - `runtime.rs` 单测：`is_internal_url` 接受 dev origin、`tauri://localhost`、`tauri.localhost`；拒绝
   Google、`127.0.0.1:18791` API、异端口、`javascript:`、`file:`；无 `devUrl` 时拒绝 dev origin。
-- web：vitest 全绿、`tsc`、`check:rules`、`build`；Rust：`cargo check -p ark-desktop`。
+  本机 `cargo test -p ark-desktop` 同样被 `dlltool` 缺失阻塞，判定逻辑已用临时 crate 跑通。
+- web：全量 `vitest`、`tsc`、`check:rules`、`build` 通过（已执行）。
 - 真实桌面窗口（手工）：点击正文外链 → 系统浏览器打开，ark 停在原会话；`Alt+←` 不再是唯一退路。
-  本会话未执行（沙箱内无法点击真实窗口）。
+  本会话未执行（沙箱内无法点击真实窗口），需要人工补验。
 - `docs/modules/ark-desktop.md`、`docs/modules/web.md` 与本需求同步。
