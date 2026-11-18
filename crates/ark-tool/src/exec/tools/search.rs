@@ -68,8 +68,16 @@ const REGEX_METACHARS: [char; 14] = [
     '.', '*', '+', '?', '(', ')', '[', ']', '{', '}', '|', '^', '$', '\\',
 ];
 
+/// What a refused regex-looking pattern is told, in one place so the wording a
+/// model reads names the escape hatch the tool actually accepts.
+const REGEX_REFUSAL_MESSAGE: &str = concat!(
+    "grep matches plain text only, and this pattern contains regex metacharacters ",
+    "(. * + ? ( ) [ ] { } | ^ $ and backslash). Pass `literal: true` to search ",
+    "for this exact text, or use `bash` with `grep -E` for a real regex.",
+);
+
 /// Refuse regex-looking patterns: a literal scan of `a|b` searches for the
-/// two-character sequence and reports "no matches", which reads as a fact
+/// three-character sequence and reports "no matches", which reads as a fact
 /// about the codebase rather than about the pattern.
 fn looks_like_regex(pattern: &str) -> bool {
     pattern.chars().any(|c| REGEX_METACHARS.contains(&c))
@@ -81,12 +89,15 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
     if needle.is_empty() {
         return Ok(ToolOutput::err("grep requires a non-empty pattern"));
     }
-    if looks_like_regex(&needle) {
-        return Ok(ToolOutput::err(
-            "grep matches plain text only; the pattern contains regex metacharacters \
-             (. * + ? ( ) [ ] { } | ^ $ \\). Use `bash` with `grep -E`/`-F`, or pass \
-             a literal substring without metacharacters.",
-        ));
+    // `literal: true` is the documented opt-in for a needle that happens to
+    // contain metacharacters (`getExecType()`, `syncFromTemplateBatch(`): the
+    // caller already said it wants a byte-exact match, so refusing it makes the
+    // flag useless and costs a round trip. Ignoring the flag was the observed
+    // defect: 76 of one day's 347 `grep` calls were refused although 22 of them
+    // had passed `literal: true`.
+    let literal = parsed.literal.unwrap_or(false);
+    if !literal && looks_like_regex(&needle) {
+        return Ok(ToolOutput::err(REGEX_REFUSAL_MESSAGE));
     }
     let query = Query {
         needle,
@@ -411,6 +422,53 @@ mod tests {
         assert!(
             out.content.contains("metacharacters"),
             "got {}",
+            out.content
+        );
+    }
+
+    #[tokio::test]
+    async fn literal_true_searches_needles_that_look_like_regex() {
+        // The flag exists exactly for this case. Ignoring it meant a model that
+        // already opted into a byte-exact search still had to rewrite the call
+        // through `bash` (22 such refusals observed in one day).
+        let dir = temp_workspace("grep-literal-accepted");
+        std::fs::write(dir.join("a.java"), "int x = getExecType();\n").unwrap();
+        for pattern in ["getExecType()", "ExecType()|Other("] {
+            let out = GrepTool
+                .execute(
+                    &ctx(&dir),
+                    ToolArgs(serde_json::json!({ "pattern": pattern, "literal": true })),
+                )
+                .await
+                .unwrap();
+            assert!(
+                out.ok,
+                "literal search must not be refused: {}",
+                out.content
+            );
+            if pattern == "getExecType()" {
+                assert!(out.content.contains("a.java:1:"), "got {}", out.content);
+            } else {
+                assert!(out.content.contains("no matches"), "got {}", out.content);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_regex_refusal_names_the_literal_flag() {
+        let dir = temp_workspace("grep-refusal-message");
+        std::fs::write(dir.join("a.txt"), "x\n").unwrap();
+        let out = GrepTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "a.*b" })),
+            )
+            .await
+            .unwrap();
+        assert!(!out.ok);
+        assert!(
+            out.content.contains("literal: true"),
+            "the refusal must name the escape hatch: {}",
             out.content
         );
     }

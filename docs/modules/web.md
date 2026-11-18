@@ -130,6 +130,11 @@
   （同一收起展开语义），`shared/ui` 不反依 feature——白名单与接线都在
   `TurnBlock`（每回合一次 `useMemo`）与 `MessageBubble` 侧；子代理查看器
   传空白名单与 no-op 回调，不产生跨线程导航。
+  正文里的链接**不跟随**：渲染层是单页应用（`useViewStore` 切 scene，无 URL 路由），顶层导航会把工作区
+  替换成没有任何返回入口的页面，因此 `Markdown` 的委托点击（以及中键 `auxclick`）对 `a[href]` 先
+  `preventDefault`，再交 `shared/desktop.ts#openExternal`：相对引用按当前文档解析，只放行 http(s)，
+  `#fragment` 仍由浏览器处理。桌面壳经 `open_external` 交系统默认浏览器、并拒绝异源顶层导航
+  （见 [ark-desktop](ark-desktop.md)）；纯浏览器回落新标签页。桥接失败静默丢弃，绝不回落到窗口内导航。
 - 设置页的 tuning、provider 与 MCP 都使用生成契约；MCP env/header 值只写不回读，编辑时的空
   secret 字段表示保留，不表示删除。provider 的 api key 分两路：列表、能力与诊断只显示
   `has_api_key` 与掩码 hint，而点「编辑」时单独请求 `GET /v1/runtime/providers/{id}` 取回完整条目，
@@ -197,6 +202,11 @@
   `child-runs/{id}/thread|events` 已接入子代理执行过程查看器：展开行先以 `/thread` 快照播种，
   再以 `/events` 按 `since_seq` 增量轮询（活动子代理 1.5s 一跳，终态后停止），行复用父画布的
   StreamRow 组件；该状态是展开行组件的本地状态，不进全局 store，也不随父流 token 重渲染。
+  子代理 transcript 与父画布回合卡应用同一折叠策略（`splitProcessTrace` +
+  `RECENT_ACTIVITY_ROW_LIMIT`，当前 3）：只显示最近 3 条推理/工具行，更早的折叠进与父画布同款
+  的“展开较早的 N 步”摘要行（`FoldedProcessRow`），点击可展开/收起，错误、通知与
+  用户输入（委派文本/补充指令）行永不折叠，折叠只针对模型活动与中途叙述；
+  折叠展开是展开行组件的本地 UI 状态，行展开（remount）后回到默认折叠视图。
 - 子代理面板（`ChildRunsPanel`）按主流 agent 任务卡风格呈现：分组头（分支 glyph + 大写标题 +
   活跃计数）+ 每个子代理一张软卡（`ark-childcard`，与工具卡同视觉体系：chevron + 生命周期状态点
   `ChildRunStatusDot`（running 脉冲 / queued 闪烁 / 终态实色）+ 标签 + mono 元信息 + 状态 chip），

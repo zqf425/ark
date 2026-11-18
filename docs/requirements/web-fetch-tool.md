@@ -33,12 +33,14 @@
    链路本地 / 未指定地址的目标(IP 字面量直接判;域名先经 DNS 解析再判)。`http://` 由
    HttpPolicy 的 `allow_insecure_http=false` 拒绝。已知局限(如实记录):DNS 解析与实际连接
    之间存在 TOCTOU 窗口,与插件路径同级接受;彻底解法(DNS 分层解析/连接时校验)留待后续。
-   **重定向缺口(如实记录)**:工具只对首个 URL 做 SSRF 校验;后续 3xx 由 ark-http 的
-   `deliver_hops` 逐跳跟进(HttpPolicy 默认 `follow_redirects:true`、最多 5 跳),每跳
-   `guard_target` 只校验 scheme 与 allowlist,ark-http 全 crate 没有 loopback/私有/链路本地
-   IP 校验,而 web 身份的 allowlist 是 `allow_all()`——公网页面 302 到
-   `https://169.254.169.254/...` 会被跟随。与 TOCTOU 局限同级接受;彻底解法(每一跳重新做
-   SSRF 校验)留待后续。因此不宣称 SSRF 防线已完整实现。
+   **重定向(已修复)**:工具向出口请求时固定带 `follow_redirects: Some(false)`,然后自己逐跳跟进,
+   每一跳都重新解析主机并重做 SSRF 校验(预算 5 跳,与 `HttpPolicy::max_redirects` 对齐)。不能交给
+   ark-http 的 `deliver_hops`:它每跳的 `guard_target` 只校验 scheme 与 allowlist,全 crate 没有
+   loopback/私有/链路本地 IP 校验,而 web 身份的 allowlist 是 `allow_all()`,公网页面 302 到
+   `https://169.254.169.254/...` 会被跟随。也不能原样返回 3xx:实测一天 12 次 `web_fetch` 死在
+   `request returned status 301`,模型随后用整轮手工推导最终 URL。3xx 缺可用 `Location` 时按终态
+   渲染状态码;超过预算返回结构化错误。仍存在的局限只有 DNS 解析与实际连接之间的 TOCTOU 窗口
+   (与插件路径同级接受)。
 4. **沙箱分类**:`TOOL_METAS` 新增 `web_fetch` 行,baseline `ReadOnly`——它不写工作区;
    Strict 自治下仍需人工批准,Unattended 下随全目录放行。注册表、沙箱策略与
    `GET /v1/runtime/tools` 三方继续读同一张表。
@@ -71,11 +73,12 @@
 - 出口治理:组合根以 `ark_http::HostAllowlist::allow_all()` 注册 egress 授权
   (`apps/arkd/src/wiring/mod.rs`),工具自身不持有 HTTP client,逻辑调用方 id 为
   `ark.builtin.web`;`HostAllowlist::parse(["*"])` 仍拒绝,插件清单不可能声明。
-- SSRF 防线(首个 URL)、HTML 文本提取、64 KiB 截断、非 2xx/二进制/网络错误的结构化失败输出
-  均在工具内实现,单测以假 `HttpCapability` 覆盖私网/loopback/链路本地拒绝、文本提取、非 2xx、
-  二进制拒绝与截断,无真实网络依赖。已知局限(见设计第 3 点):重定向跳转不重做 SSRF 校验
-  (ark-http 无私有/链路本地 IP 校验),TOCTOU 窗口仍在;两者均留待后续。
-- 真实网络抓取的端到端验证由 [发布收尾与真实环境验收](release-readiness.md) 承接;
+- SSRF 防线（首个 URL 与每一跳重定向）、HTML 文本提取、64 KiB 截断、非 2xx/二进制/网络错误的
+  结构化失败输出均在工具内实现，单测以假 `HttpCapability` 覆盖私网/loopback/链路本地拒绝、
+  文本提取、非 2xx、二进制拒绝、截断，以及跳转链路（跟随 301、拒绝跳往私有地址、超预算、
+  缺 `Location`），全部无真实网络依赖。仍存在的局限只有 DNS 解析与实际连接之间的 TOCTOU
+  窗口（见设计第 3 点）。
+- 真实网络抓取的端到端验证由 [发布收尾与真实环境验收](release-readiness.md) 承接；
   2026-11-02 已在真实网关下完成(见其验收记录):SSRF 结构化拒绝、`text/plain` 全文返回、
   `text/html` 状态透传均通过。已知观察:目标站可能对工具 UA 返回仅含脚本的降级页,提取为空,
   工具当前返回空正文;改进项(空提取返回说明文字)记录于发布验收记录,未实施。

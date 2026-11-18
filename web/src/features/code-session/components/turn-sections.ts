@@ -35,12 +35,15 @@ export function isActivityRow(item: ProcessItem): boolean {
 /**
  * Rows the default fold hides behind its summary row: everything in the
  * earlier slice except the rows that must stay visible by contract. Failures
- * and notices render at the interruption point (docs/modules/web.md), so a
- * long turn's earlier steps fold away while its errors and system notices do
- * not. Activity, mid-turn narration and any other descriptive row fold.
+ * and notices render at the interruption point (docs/modules/web.md), and the
+ * user's own words never fold - a user_message inside the trace (the child-run
+ * viewer has no turn grouping, and steering writes user rows mid-trace) is the
+ * human side of the conversation, the same reason the parent card splits user
+ * messages out of the process trace before folding. Activity, mid-turn
+ * narration and any other descriptive row fold.
  */
 export function isFoldedProcessRow(item: ProcessItem): boolean {
-  return item.kind !== 'error' && item.kind !== 'notice'
+  return item.kind !== 'error' && item.kind !== 'notice' && item.kind !== 'user_message'
 }
 
 /**
