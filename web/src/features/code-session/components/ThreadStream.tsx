@@ -20,7 +20,8 @@ import { ApprovalCard } from './ApprovalCard'
 import { UserInputCard } from './UserInputCard'
 import { Composer } from './Composer'
 import { SessionStatsBar } from './SessionStatsBar'
-import { rewindAvailabilityByTurn } from './rewind-flow'
+import { rewindAvailabilityByTurn, userTextOfTurn } from './rewind-flow'
+import { turnLabelPreview } from './jumprail-preview'
 import { startReview } from '../api/turns-api'
 
 /** Pixels of slack that still count as "at the bottom" (caret/last-pixel noise). */
@@ -150,6 +151,14 @@ export function ThreadStream({
     () => rewindAvailabilityByTurn({ activeTurnId, turnState, itemsById, itemOrder }),
     [activeTurnId, turnState, itemsById, itemOrder]
   )
+
+  // One label preview per turn, keyed by group identity: `groups` entries are
+  // reused by `groupByTurn` while a turn's rows do not change, so this map is
+  // not rebuilt per streamed token either.
+  const previewByTurn = useMemo(
+    () => new Map(groups.map((group) => [group.turnId, turnLabelPreview(userTextOfTurn(group))])),
+    [groups]
+  )
   const approvals = useMemo(() => approvalCards({ approvals: approvalsById }), [approvalsById])
   const userInputs = useMemo(() => userInputCards({ userInputs: userInputsById }), [userInputsById])
   const live = useMemo(() => hasLiveItems(visibleItemView), [visibleItemView])
@@ -178,6 +187,20 @@ export function ThreadStream({
   const jumpToTurn = useCallback((turnId: string): void => {
     document.getElementById(`ark-turn-${turnId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
+
+  // Rail entry label: turn number plus the first characters of the user's
+  // input; turns without user text (system/review turns) fall back to the
+  // plain turn number.
+  const turnLabel = useCallback(
+    (index: number): string => {
+      const group = groups[index]
+      const preview = group ? previewByTurn.get(group.turnId) : undefined
+      return preview
+        ? t('canvas.jumpRail.turnWithPreview', { index: index + 1, preview })
+        : t('canvas.jumpRail.turn', { index: index + 1 })
+    },
+    [groups, previewByTurn, t]
+  )
 
   if (!threadId) {
     return (
@@ -294,8 +317,8 @@ export function ThreadStream({
             <button
               key={group.turnId}
               type="button"
-              title={t('canvas.jumpRail.turn', { index: index + 1 })}
-              aria-label={t('canvas.jumpRail.turn', { index: index + 1 })}
+              title={turnLabel(index)}
+              aria-label={turnLabel(index)}
               onClick={() => jumpToTurn(group.turnId)}
             />
           ))}

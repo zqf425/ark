@@ -40,6 +40,7 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.activity.writing': ['正在生成', 'Generating'],
   'canvas.jumpRail.aria': ['回合导航', 'Turn navigation'],
   'canvas.jumpRail.turn': ['第 {index} 个回合', 'Turn {index}'],
+  'canvas.jumpRail.turnWithPreview': ['第 {index} 个回合：{preview}', 'Turn {index}: {preview}'],
 
   'canvas.header.review': ['评审改动', 'Review changes'],
   'canvas.header.reviewBusy': ['正在发起评审…', 'Starting review…'],
