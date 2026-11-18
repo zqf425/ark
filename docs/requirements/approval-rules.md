@@ -7,14 +7,11 @@
 
 ## 背景与目标
 
-当前 sandbox 决策只有三档 autonomy(strict / workspace_write / unattended):
-- 用户无法表达"bash 里的 `cargo *` 直接放行,其他仍要审批";
-- headless `--review` 只能靠"提示词禁止工具调用"防止无人值守回合停在审批 gate
-  (review-preset.md §4 明确记录 auto-deny gate 未实现);IM/定时任务的 `unattended` 覆盖
-  依赖 `AllowAllGates`,一切放行,粒度全有或全无。
+本需求落地前，sandbox 决策只有三档 autonomy(strict / workspace_write / unattended)，用户无法表达
+"bash 里的 `cargo *` 直接放行，其他仍要审批"；headless、IM 和自动回合也没有统一的无人值守审批处置。
 
-本需求新增:**审批规则引擎**(按工具与命令模式允许或拒绝)+ **auto-deny**(无人值守场景
-不再挂死在 gate 上,而是立即以结构化原因拒绝)。
+当前实现包含：**审批规则引擎**（按工具与命令模式允许或拒绝）和 **auto-deny**（无人值守场景在
+`on_unattended=deny` 时立即以结构化原因拒绝，不再等待无人应答的 gate）。
 
 非目标:正则 matcher(首版用前后缀通配)、per-directory 文件授权、审批规则的学习
 ("always allow" 的 UI 回写)、GUI 审批规则编辑界面(先经 config.json / PATCH)。
@@ -36,8 +33,9 @@ ApprovalSettings {
 ```
 
 - `ConfigPatch.approvals: Option<ApprovalSettings>`;`RuntimeConfig.approvals`(serde default)。
-- 分类 **Hot**:回合启动读快照,下一回合生效;校验:规则数 ≤128、pattern ≤4 KiB、
-  tools 每项非空 ≤64 字符、action/on_unattended 仅取枚举值。
+- 分类 **Hot**：每个父/子回合启动时读取当前配置快照；规则表和 `on_unattended` 处置都从下一回合
+  生效，运行中的回合保留其启动快照。校验：规则数 ≤128、pattern ≤4 KiB、tools 每项非空 ≤64 字符、
+  action/on_unattended 仅取枚举值。
 - `pattern` 只有一个通配语义:**尾随 `*` 为前缀匹配**,其余为完整等值。刻意不做 glob/regex:
   审批是安全边界,匹配语义必须能被人一眼验证。
 
@@ -68,15 +66,20 @@ ApprovalSettings {
 
 新 `GateBroker` 装饰器,包装任意内层 broker:
 
-- `prepare_approval`:先查 `on_unattended`——`deny`(默认)时不注册 gate,直接返回已决议的
-  `ApprovalReply::denied("auto-denied: unattended run with approvals.on_unattended=deny")`;
-  `allow` 时透传内层(等价于今天的 `AllowAllGates` 行为)。
-- `prepare_user_input` 照旧透传(用户输入不是审批面)。
+- `prepare_approval`：`deny`（默认）时不注册 gate，直接返回已决议的
+  `ApprovalReply::denied("auto-denied: unattended run with approvals.on_unattended=deny")`；
+  `allow` 时透传内层 `AllowAllGates`，立即批准。两种处置都不会注册交互 gate。
+- `prepare_user_input` 透传内层；无人值守父回合的内层是 `AllowAllGates`，因此会立即返回无用户可用的说明。
 
-组合根:`wiring/build` 用 `AutoDenyGates::deny_unattended(InteractiveGates)` 包一层注入
-runner;headless `arkd run` 的驱动脚本把 config 的 `approvals.on_unattended` 设为默认 deny
-即可让无人值守回合快速失败,而不是把进程挂到 `sse_idle_timeout`。child 路径继续
-`AllowAllGates`(子回合的工具决策已在沙箱层收窄,并且父回合可中断子任务)。
+组合根在**每个父回合入口**同时读取该回合的配置快照和来源，再选择 gate：
+
+- `serve` 收到的显式 `TurnSource::User` 使用裸 `InteractiveGates`，可由 HTTP/UI 决议；
+- headless `arkd run` 的所有回合，以及 `TurnSource::Scheduled`、`TurnSource::Im`、
+  `AutoContinuation`、`AutoRecovery`，使用由当前快照 `approvals.on_unattended` 构造的
+  `AutoDenyGates<AllowAllGates>`；
+- child 回合保持 `AllowAllGates`，但其工具仍受每回合快照构造的 `ApprovalPolicy` 与沙箱约束。
+
+因此规则和无人值守处置都是下一回合 Hot 生效，不在进程启动时缓存，也不改变已经运行的回合。
 
 ### 5. 事件语义
 

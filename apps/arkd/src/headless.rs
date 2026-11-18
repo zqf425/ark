@@ -62,7 +62,7 @@ async fn drive(args: RunArgs) -> Result<(), Failure> {
         auth_token: args.auth_token.clone(),
         workspace: args.workspace.clone(),
     };
-    let wiring = crate::wiring::build(&serve_args)
+    let wiring = crate::wiring::build(&serve_args, true)
         .await
         .map_err(|err| Failure::Startup(format!("cannot start runtime: {err}")))?;
     let handle = ark_server::bind(wiring.state.clone(), port)

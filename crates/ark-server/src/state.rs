@@ -55,8 +55,11 @@ pub enum TurnEnd {
 /// Source that started a parent turn.
 #[derive(Clone)]
 pub enum TurnSource {
-    /// Explicit user input, persisted as a user message.
+    /// Explicit interactive input, persisted as a user message.
     User(String),
+    /// Scheduled task prompt. It is persisted as a user message, but marked
+    /// separately because no interactive client is available to answer gates.
+    Scheduled(String),
     /// Inbound IM message (requirements/im-channels.md). The text is persisted
     /// as a user message exactly like [`TurnSource::User`]; the channel/chat
     /// pair is bookkeeping for tracing, since the authoritative thread record

@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use ark_ports::{SandboxDecision, Tool, ToolArgs, ToolContext, ToolOutput};
 
 use super::bash::{default_shell_env, BashTool};
-use crate::domain::args;
+use crate::domain::args::{self, ShellTaskId};
 use crate::policy::truncate::{cap_bytes, DEFAULT_LIMITS};
 
 /// Capacity of one task's output ring. Beyond it, oldest bytes are dropped and
@@ -34,16 +34,19 @@ pub const MAX_TASKS: usize = 16;
 
 static NEXT_TASK_SEQ: AtomicU64 = AtomicU64::new(1);
 
-fn next_task_id() -> String {
-    format!("task_{}", NEXT_TASK_SEQ.fetch_add(1, Ordering::Relaxed))
+fn next_task_id() -> ShellTaskId {
+    ShellTaskId::new(format!(
+        "task_{}",
+        NEXT_TASK_SEQ.fetch_add(1, Ordering::Relaxed)
+    ))
 }
 
 /// One background task: a detached process tree plus its capped output buffer.
 struct ShellTask {
-    id: String,
+    id: ShellTaskId,
     cwd: PathBuf,
     output: Arc<Mutex<TaskOutput>>,
-    tree: ark_common::process::ProcessTree,
+    tree: ark_common::ProcessTree,
     child: Arc<Mutex<Option<std::process::Child>>>,
 }
 
@@ -54,7 +57,10 @@ struct ShellTask {
 pub(crate) struct TaskOutput {
     buf: VecDeque<u8>,
     dropped_prefix: bool,
-    read_offset: usize,
+    /// Total bytes removed from the front of `buf`.
+    base_offset: u64,
+    /// Absolute byte position returned by the previous poll.
+    read_offset: u64,
     finished: bool,
     exit_code: Option<i32>,
 }
@@ -64,6 +70,7 @@ impl TaskOutput {
         for &byte in bytes {
             if self.buf.len() == TASK_OUTPUT_CAP {
                 self.buf.pop_front();
+                self.base_offset += 1;
                 self.dropped_prefix = true;
             }
             self.buf.push_back(byte);
@@ -127,51 +134,64 @@ impl ShellSessionManager {
         &self,
         cwd: PathBuf,
         child: Arc<Mutex<Option<std::process::Child>>>,
-        tree: ark_common::process::ProcessTree,
+        tree: ark_common::ProcessTree,
         output: Arc<Mutex<TaskOutput>>,
-    ) -> String {
-        let id = next_task_id();
-        if let Ok(mut state) = self.inner.lock() {
-            // Evict finished tasks oldest-first when over capacity; running
-            // tasks stay so polling cannot fail by eviction.
-            while state.tasks.len() >= MAX_TASKS {
-                let Some(pos) = state
-                    .tasks
-                    .iter()
-                    .position(|task| task.output.lock().map(|o| o.finished).unwrap_or(false))
-                else {
-                    break;
-                };
-                state.tasks.remove(pos);
+    ) -> ark_common::Result<ShellTaskId> {
+        let mut state = match self.inner.lock() {
+            Ok(state) => state,
+            Err(_) => {
+                terminate_unregistered(&tree, &child);
+                return Err(ark_common::ArkError::internal(
+                    "shell task registry lock poisoned",
+                ));
             }
-            state.tasks.push(Arc::new(ShellTask {
-                id: id.clone(),
-                cwd,
-                output,
-                tree,
-                child,
-            }));
+        };
+        while state.tasks.len() >= MAX_TASKS {
+            let Some(pos) = state
+                .tasks
+                .iter()
+                .position(|task| task.output.lock().map(|o| o.finished).unwrap_or(false))
+            else {
+                drop(state);
+                terminate_unregistered(&tree, &child);
+                return Err(ark_common::ArkError::new(
+                    ark_common::ArkErrorCode::ToolExecutionFailed,
+                    format!("background task limit reached ({MAX_TASKS})"),
+                ));
+            };
+            state.tasks.remove(pos);
         }
-        id
+        let id = next_task_id();
+        state.tasks.push(Arc::new(ShellTask {
+            id: id.clone(),
+            cwd,
+            output,
+            tree,
+            child,
+        }));
+        Ok(id)
     }
 
     /// Incremental output for one task, plus its lifecycle status.
     ///
     /// `None` for an unknown (never started, evicted or process-restarted) id.
-    pub fn task_output(&self, task_id: &str) -> Option<TaskSnapshot> {
+    pub fn task_output(&self, task_id: &ShellTaskId) -> Option<TaskSnapshot> {
         let state = self.inner.lock().ok()?;
-        let task = state.tasks.iter().find(|task| task.id == task_id)?;
+        let task = state.tasks.iter().find(|task| &task.id == task_id)?;
         let mut output = task.output.lock().ok()?;
         let all = output.text();
         // Incremental read: bytes before the reader's offset are not resent.
         // The offset counts ring-buffer **logical** positions, so dropped
         // prefix bytes simply never reach a reader that was not there.
         let snapshot_bytes: Vec<u8> = output.buf.iter().copied().collect();
-        let new_from = output.read_offset.min(snapshot_bytes.len());
-        let chunk = String::from_utf8_lossy(&snapshot_bytes[new_from..]).into_owned();
-        output.read_offset = snapshot_bytes.len();
+        let retained_start = output.base_offset;
+        let retained_end = retained_start + snapshot_bytes.len() as u64;
+        let new_from = output.read_offset.max(retained_start).min(retained_end);
+        let relative = (new_from - retained_start) as usize;
+        let chunk = String::from_utf8_lossy(&snapshot_bytes[relative..]).into_owned();
+        output.read_offset = retained_end;
         Some(TaskSnapshot {
-            task_id: task_id.to_string(),
+            task_id: task_id.clone(),
             cwd: task.cwd.clone(),
             new_output: chunk,
             full_text: all,
@@ -183,11 +203,11 @@ impl ShellSessionManager {
 
     /// Kill one task's process group. Idempotent: a finished task reports
     /// `false` (nothing to kill) and stays queryable.
-    pub fn kill_task(&self, task_id: &str) -> bool {
+    pub fn kill_task(&self, task_id: &ShellTaskId) -> bool {
         let Ok(state) = self.inner.lock() else {
             return false;
         };
-        let Some(task) = state.tasks.iter().find(|task| task.id == task_id) else {
+        let Some(task) = state.tasks.iter().find(|task| &task.id == task_id) else {
             return false;
         };
         let killed = task.tree.kill_group();
@@ -206,17 +226,63 @@ impl ShellSessionManager {
 
     /// Whether the task is still registered (diagnostics/tests).
     #[cfg(test)]
-    pub fn has_task(&self, task_id: &str) -> bool {
+    pub fn has_task(&self, task_id: &ShellTaskId) -> bool {
         self.inner
             .lock()
-            .map(|state| state.tasks.iter().any(|task| task.id == task_id))
+            .map(|state| state.tasks.iter().any(|task| &task.id == task_id))
             .unwrap_or(false)
     }
 }
 
+fn terminate_unregistered(
+    tree: &ark_common::ProcessTree,
+    child: &Arc<Mutex<Option<std::process::Child>>>,
+) {
+    tree.kill_group();
+    if let Ok(mut guard) = child.lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+fn spawn_output_collector<R>(pipe: Option<R>, output: Arc<Mutex<TaskOutput>>)
+where
+    R: Read + Send + 'static,
+{
+    let Some(mut pipe) = pipe else {
+        return;
+    };
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match pipe.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => {
+                    if let Ok(mut guard) = output.lock() {
+                        guard.push(&buf[..read]);
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn spawn_reaper(child: Arc<Mutex<Option<std::process::Child>>>, output: Arc<Mutex<TaskOutput>>) {
+    std::thread::spawn(move || {
+        let taken = child.lock().ok().and_then(|mut guard| guard.take());
+        let code = taken.and_then(|mut child| child.wait().ok().and_then(|status| status.code()));
+        if let Ok(mut guard) = output.lock() {
+            guard.finished = true;
+            guard.exit_code = code.or(Some(-1));
+        }
+    });
+}
+
 /// Immutable view handed to the `bash_output` tool call.
 pub struct TaskSnapshot {
-    pub task_id: String,
+    pub task_id: ShellTaskId,
     pub cwd: PathBuf,
     /// Bytes appended since the previous poll of this task.
     pub new_output: String,
@@ -320,7 +386,6 @@ impl BashSessionTool {
     }
 
     /// Detach one command: spawn, register, return the task id immediately.
-    /// Detach one command: spawn, register, return the task id immediately.
     ///
     /// Uses the **std** Command on purpose: a detached task must not be bound
     /// to this async call's runtime lifetime, and the collector runs on plain
@@ -342,7 +407,7 @@ impl BashSessionTool {
         for (key, value) in default_shell_env() {
             command.env(key, value);
         }
-        ark_common::process::isolate(&mut command);
+        ark_common::isolate(&mut command);
         let mut child = command.spawn().map_err(|err| {
             ark_common::ArkError::new(
                 ark_common::ArkErrorCode::ToolExecutionFailed,
@@ -351,56 +416,25 @@ impl BashSessionTool {
         })?;
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        let tree = ark_common::process::ProcessTree::adopt(Some(child.id()));
+        let tree = ark_common::ProcessTree::adopt(Some(child.id()));
         // The registry holds a shared handle for a later `bash_kill`; the
         // reaper below owns the single `wait`. Kill after finish is a no-op
         // because the reaper has taken the child out.
         let shared_child = Arc::new(std::sync::Mutex::new(Some(child)));
         let output = Arc::new(std::sync::Mutex::new(TaskOutput::default()));
-        // A plain thread collects pipes until EOF; the tool call returns long
-        // before it finishes. `kill_on_drop` plus the tree handle cover the
-        // teardown paths (process exit, explicit kill).
-        let collector = Arc::clone(&output);
-        std::thread::spawn(move || {
-            let mut sinks: Vec<Box<dyn std::io::Read + Send>> = Vec::new();
-            if let Some(pipe) = stdout {
-                sinks.push(Box::new(pipe));
-            }
-            if let Some(pipe) = stderr {
-                sinks.push(Box::new(pipe));
-            }
-            for mut pipe in sinks {
-                let collector = Arc::clone(&collector);
-                std::thread::spawn(move || {
-                    let mut buf = [0u8; 4096];
-                    loop {
-                        match pipe.read(&mut buf) {
-                            Ok(0) | Err(_) => break,
-                            Ok(read) => {
-                                if let Ok(mut guard) = collector.lock() {
-                                    guard.push(&buf[..read]);
-                                }
-                            }
-                        }
-                    }
-                });
-            }
-        });
-        // Reap the child in the background so the pid stays reserved until the
-        // process is actually gone; also marks the task finished.
-        let status = Arc::clone(&output);
-        let reaper_child = Arc::clone(&shared_child);
-        std::thread::spawn(move || {
-            let taken = reaper_child.lock().ok().and_then(|mut guard| guard.take());
-            let code = taken.and_then(|mut child| child.wait().ok().and_then(|s| s.code()));
-            if let Ok(mut guard) = status.lock() {
-                guard.finished = true;
-                guard.exit_code = code.or(Some(-1));
-            }
-        });
-        let id = self
-            .session
-            .register_task(cwd.clone(), shared_child, tree, Arc::clone(&output));
+        // Plain threads collect both pipes until EOF; the tool call returns
+        // long before either finishes.
+        spawn_output_collector(stdout, Arc::clone(&output));
+        spawn_output_collector(stderr, Arc::clone(&output));
+        let id = self.session.register_task(
+            cwd.clone(),
+            Arc::clone(&shared_child),
+            tree,
+            Arc::clone(&output),
+        )?;
+        // Registration owns the process before the only waiter starts. If the
+        // registry rejected it, register_task already killed and reaped it.
+        spawn_reaper(shared_child, output);
         Ok(ToolOutput::ok(format!(
             "background task started: {id}\ncwd: {}\npoll output with bash_output; terminate with bash_kill",
             cwd.display()
@@ -436,7 +470,7 @@ impl Tool for BashOutputTool {
 }
 
 impl BashOutputTool {
-    fn snapshot(&self, task_id: &str) -> ToolOutput {
+    fn snapshot(&self, task_id: &ShellTaskId) -> ToolOutput {
         let Some(snapshot) = self.session.task_output(task_id) else {
             return ToolOutput::err(format!(
                 "unknown task id `{task_id}`: the task never started, was evicted, or the runtime restarted"
@@ -497,7 +531,7 @@ impl Tool for BashKillTool {
 }
 
 impl BashKillTool {
-    fn kill(&self, task_id: &str) -> ToolOutput {
+    fn kill(&self, task_id: &ShellTaskId) -> ToolOutput {
         if !self.session.kill_task(task_id) {
             return ToolOutput::err(format!(
                 "unknown task id `{task_id}`: the task never started, was evicted, or the runtime restarted"
@@ -603,21 +637,27 @@ mod tests {
         let manager = ShellSessionManager::new();
         let ws = fixture("task-ids");
         let output = Arc::new(Mutex::new(TaskOutput::default()));
-        let id_a = manager.register_task(
-            ws.clone(),
-            shared_child(),
-            orphan_tree(),
-            Arc::clone(&output),
-        );
-        let id_b = manager.register_task(ws, shared_child(), orphan_tree(), output);
+        let id_a = manager
+            .register_task(
+                ws.clone(),
+                shared_child(),
+                orphan_tree(),
+                Arc::clone(&output),
+            )
+            .unwrap();
+        let id_b = manager
+            .register_task(ws, shared_child(), orphan_tree(), output)
+            .unwrap();
         assert_ne!(id_a, id_b);
     }
 
     #[test]
     fn unknown_task_id_is_none() {
         let manager = ShellSessionManager::new();
-        assert!(manager.task_output("task_nope").is_none());
-        assert!(!manager.kill_task("task_nope"));
+        assert!(manager
+            .task_output(&ShellTaskId::new("task_nope"))
+            .is_none());
+        assert!(!manager.kill_task(&ShellTaskId::new("task_nope")));
     }
 
     #[test]
@@ -625,7 +665,9 @@ mod tests {
         let manager = ShellSessionManager::new();
         let ws = fixture("incremental");
         let output = Arc::new(Mutex::new(TaskOutput::default()));
-        let id = manager.register_task(ws, shared_child(), orphan_tree(), Arc::clone(&output));
+        let id = manager
+            .register_task(ws, shared_child(), orphan_tree(), Arc::clone(&output))
+            .unwrap();
         output.lock().unwrap().push(b"first\n");
         let first = manager.task_output(&id).unwrap();
         assert_eq!(first.new_output, "first\n");
@@ -645,11 +687,55 @@ mod tests {
     }
 
     #[test]
+    fn incremental_output_survives_ring_buffer_rotation() {
+        let manager = ShellSessionManager::new();
+        let ws = fixture("incremental-overflow");
+        let output = Arc::new(Mutex::new(TaskOutput::default()));
+        let id = manager
+            .register_task(ws, shared_child(), orphan_tree(), Arc::clone(&output))
+            .unwrap();
+        output.lock().unwrap().push(&vec![b'x'; TASK_OUTPUT_CAP]);
+        let first = manager.task_output(&id).unwrap();
+        assert_eq!(first.new_output.len(), TASK_OUTPUT_CAP);
+        output.lock().unwrap().push(b"new-tail");
+        let second = manager.task_output(&id).unwrap();
+        assert_eq!(second.new_output, "new-tail");
+    }
+
+    #[test]
+    fn registering_a_seventeenth_running_task_is_rejected() {
+        let manager = ShellSessionManager::new();
+        let ws = fixture("task-capacity");
+        let mut outputs = Vec::new();
+        for _ in 0..MAX_TASKS {
+            let output = Arc::new(Mutex::new(TaskOutput::default()));
+            manager
+                .register_task(
+                    ws.clone(),
+                    shared_child(),
+                    orphan_tree(),
+                    Arc::clone(&output),
+                )
+                .expect("task within capacity");
+            outputs.push(output);
+        }
+        let overflow = manager.register_task(
+            ws,
+            shared_child(),
+            orphan_tree(),
+            Arc::new(Mutex::new(TaskOutput::default())),
+        );
+        assert!(overflow.is_err());
+    }
+
+    #[test]
     fn kill_is_idempotent_after_finish() {
         let manager = ShellSessionManager::new();
         let ws = fixture("kill-idempotent");
         let output = Arc::new(Mutex::new(TaskOutput::default()));
-        let id = manager.register_task(ws, shared_child(), orphan_tree(), output);
+        let id = manager
+            .register_task(ws, shared_child(), orphan_tree(), output)
+            .unwrap();
         // The fake child is a real process that exits immediately; either kill
         // result is acceptable, but a second kill must not panic or hang.
         let _ = manager.kill_task(&id);
@@ -674,8 +760,8 @@ mod tests {
 
     /// An un-adopted tree handle: the fake child never ran isolated, so group
     /// signals report false and the direct-kill fallback covers teardown.
-    fn orphan_tree() -> ark_common::process::ProcessTree {
-        ark_common::process::ProcessTree::adopt(None)
+    fn orphan_tree() -> ark_common::ProcessTree {
+        ark_common::ProcessTree::adopt(None)
     }
 }
 

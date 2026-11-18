@@ -9,6 +9,8 @@ pub mod meta;
 pub mod paths;
 pub mod schema;
 
-pub use args::{parse, BashArgs, EditArgs, FindArgs, GrepArgs, LsArgs, ReadArgs, WriteArgs};
+pub use args::{
+    parse, BashArgs, EditArgs, FindArgs, GrepArgs, LsArgs, ReadArgs, ShellTaskId, WriteArgs,
+};
 pub use meta::{meta_of, names, ToolMeta, TOOL_METAS};
 pub use paths::{require_simple_segment, resolve};

@@ -78,7 +78,11 @@ per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启
 走同一路径。
 
 父回合使用 `InteractiveGates`，该实例同时注入 `AppState` 的 HTTP handler 与 `AgentTurnRunner` 的
-`ReactorConfig`；不得回退为 `AllowAllGates`，否则审批和用户输入卡片会变成无法影响执行的装饰。
+`ReactorConfig`。仅 `serve` 的显式 `TurnSource::User` 直接使用它；headless `run` 的所有回合，以及
+`serve` 中的 `TurnSource::Scheduled`、`TurnSource::Im`、`AutoContinuation`、`AutoRecovery`，在每回合
+开始时按当前 `approvals.on_unattended` 快照以 `AllowAllGates` 为内层构造 `AutoDenyGates`。规则与
+无人值守处置都在下一回合 Hot 生效；child 继续使用 `AllowAllGates`。交互父回合不得回退为
+`AllowAllGates`，否则审批和用户输入卡片会变成无法影响执行的装饰。
 
 每个父/子回合在开始时读取同一份 provider 配置：自定义 headers、temperature 和 max_tokens 传入
 `ModelSeed`，不会被设置页静默忽略。在此之上，线程级运行时覆盖（`ThreadRuntimeSettings`，经
@@ -148,13 +152,13 @@ egress 授权（该构造器对插件清单路径不可达），并把同一能�
 的已扫描正文快照，避免 `ark-tool` 反向依赖 skills 实现。
 `request_user_input` 属于内置工具集，随 `ark_tool::builtins()` 在父/子两个注册表中可用；
 其执行由 `ark-agent` 的用户输入 gate 拦截，组合根不为它写任何特例。
-组合根另注册**仅父线程可用**的 `todo_write`（`todo_tool.rs`，与 `load_skill` 同一先例）：它持
-`Arc<dyn SessionStore>`，把模型给出的完整待办清单以权威 `TodosUpdated` 事件写入当前线程事件流。
-校验（条数上限、id/title 非空且 id 唯一、标题字符上限）与 checkbox 渲染（`[ ]`/`[~]`/`[x]`）
-分别以 `ark_server::service::workbench` 的 `validate_todos`/`todo_marker` 为唯一宿主，HTTP
-`POST /v1/threads/{id}/todos` 与本工具共用；可预期失败（校验不过、线程不存在）以 `ToolOutput::err`
-返回给模型，只有意外 I/O 错误才走 `Err` 路径。子注册表刻意不含它：子回合写入的是 child 线程的
-事件流，父侧 Plan 投影读不到，注册只会诱导模型做无效写入。
+组合根只把 `ark_server::TodoWriteTool` 注册到父线程工具表；工具实现位于
+`ark-server::service::todo_tool`，持 `Arc<dyn SessionStore>`，把模型给出的完整待办清单以权威
+`TodosUpdated` 事件写入当前线程事件流。校验（条数上限、id/title 非空且 id 唯一、标题最多 500 个
+Unicode 字符）与 checkbox 渲染（`[ ]`/`[~]`/`[x]`）以 `ark_server` 根精确导出的
+`validate_todos`/`todo_marker` 为唯一宿主，HTTP `POST /v1/threads/{id}/todos` 与本工具共用；可预期失败
+（校验不过、线程不存在）以 `ToolOutput::err` 返回给模型，只有意外 I/O 错误才走 `Err` 路径。子注册表
+刻意不含它：子回合写入的是 child 线程的事件流，父侧 Plan 投影读不到，注册只会诱导模型做无效写入。
 
 生命周期 hooks（[需求设计](../requirements/hooks.md)）的唯一执行宿主是 `apps/arkd/src/hooks.rs`：
 父回合 `ToolRunnerAdapter` 与子回合 `ChildToolRunner` 都经 `run_around` 组合器包住工具派发，
@@ -173,9 +177,9 @@ facts extracted` 与 `: truncated` 两个变体）。判定 gated 在 `Notice` k
 
 审批规则（[需求设计](../requirements/approval-rules.md)）在回合入口接线：父路径与子路径都用
 `ark_tool::ApprovalPolicy` 包装既有 autonomy 策略（每回合用配置快照构造，规则属 Hot）；reactor 侧
-gate 注入 `AutoDenyGates` 包装 `InteractiveGates`——`approvals.on_unattended=deny`（默认）时无人
-值守回合的审批请求立即被结构化拒绝，不再挂死到 `sse_idle_timeout`；`AppState` 仍持裸
-`InteractiveGates`（HTTP handler 按 id resolve，从不等待）。
+gate 按回合来源选择：交互 User 回合注入 `InteractiveGates`；无人值守来源以 `AllowAllGates` 为内层
+构造 `AutoDenyGates`。`approvals.on_unattended=deny`（默认）时审批请求立即被结构化拒绝，`allow` 时
+立即批准，两者都不注册交互 gate；`AppState` 仍持裸 `InteractiveGates` 供交互 HTTP handler resolve。
 
 用户长期 memory 也走动态尾部：`run_turn` 在 skills 目录之后、completion inbox 之前，每回合重新读取
 `<root>/data/memory.json` 并追加**至多一条** `[user memory]` system 消息（按 `created_at` 升序，拼接后
@@ -183,16 +187,16 @@ gate 注入 `AutoDenyGates` 包装 `InteractiveGates`——`approvals.on_unatten
 空 store 不注入，均不影响回合结果。
 
 项目指令文件（[需求设计](../requirements/project-instructions.md)）由
-`apps/arkd/src/instructions.rs`（唯一发现与截断宿主）在回合生效工作区根按
+`ark-workspace::project_instructions_seed`（唯一发现与截断宿主）在回合生效工作区根按
 `AGENTS.md` → `CLAUDE.md` → `README.md` 优先级取第一个命中文件，读为**动态尾部的一条
 `[project instructions]` system 消息**（父路径在 skills 之后、memory 之前；子路径在角色行之后、
 skill tail 之前）。不进入静态前缀（工作区相关文本会破坏 prompt-cache 字节稳定不变量）；
 读取失败、非 UTF-8、空文件按未命中处理并记 warn；UTF-8 字节数限 32 KiB，按字符边界截断。
 
 持久计划（goal + todos）同样走动态尾部：`run_turn` 每回合从线程事件流重投影 `PlanView`
-（`ark_server::service::workbench::plan`），经 `history::plan_seed_message` 以
+（`ark_server::plan`），经 `history::plan_seed_message` 以
 `[thread plan - current objective and progress]` system 消息注入 seed 末尾（最贴近新用户消息）。
-todo 行使用共享的 `[ ]`/`[~]`/`[x]` 词汇（`workbench::todo_marker`），与 `todo_write` 工具的
+todo 行使用共享的 `[ ]`/`[~]`/`[x]` 词汇（`ark_server::todo_marker`），与 `todo_write` 工具的
 回显一致。这使计划面板内容对上下文压缩免疫：压缩只折叠历史消息，seed 每回合从事件流重建，
 非完成待办因此始终留在模型可见的最近尾部；回合内压缩生成的 checkpoint 也将 checkbox 行纳入
 结构化事实（见 ark-agent 设计），双重防遗忘。

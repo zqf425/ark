@@ -19,6 +19,10 @@ re-export，刻意不引入 tokio-util 依赖）与 `select!` 完成；
 gate broker 面（`exec/gate.rs`）包括 `AllowAllGates`、`DenyAllGates` 与 `AutoDenyGates`
 （[审批规则需求](../requirements/approval-rules.md) §4）：后者包装任意内层 broker，
 无人值守处置为 `deny`（默认）时不注册 gate、立即以结构化原因拒绝，`allow` 时透传内层；
+组合根在每个父回合入口选择 broker：`serve` 的显式 User 回合直接使用 `InteractiveGates`；headless、
+Scheduled、IM、`AutoContinuation`、`AutoRecovery` 以 `AllowAllGates` 为内层、按该回合当前配置快照
+构造 `AutoDenyGates`；child 保持
+`AllowAllGates`。因此规则表与 `on_unattended` 的改动都从下一回合 Hot 生效。
 `prepare_user_input` 恒透传（用户输入不是审批面）。规则拒绝（`SandboxDecision::Deny`）
 的调用在 reactor 的 `approval_asks` 阶段就不产生审批 ask——拒绝已是终态，开 gate 等于允许
 HTTP 侧批准一条策略表明确拒绝的调用。

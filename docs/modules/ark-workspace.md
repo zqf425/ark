@@ -27,6 +27,13 @@ untracked；不读取 untracked 文件内容。文件数为 200、总 patch 为 
 `binary`(渲染方据此跳过)。纯 `std::fs`,无 git、无 tokio;handler 侧包 `spawn_blocking`
 (`workspace/pick` 先例)。
 
+## 项目指令发现
+
+`project_instructions_seed(root)` 只在回合生效工作区根按 `AGENTS.md` → `CLAUDE.md` → `README.md`
+读取第一个命中项，拒绝空白或非 UTF-8 内容，并将正文限制为 32 KiB。字符边界截断复用
+`ark_common::truncate_utf8`，超限时追加显式 truncated 标记。该函数每回合由组合根调用，不缓存、不递归，
+也不查找父目录或用户全局目录。
+
 active workspace 与 generation 由 `arkd` 的进程状态持有;recent descriptors 在进程内展示,并在启动时
 从 `<root>/workspace/workspace-recent.json` 可重建缓存恢复。recent 不属于本模块的 Git 检查职责,也不得作为路径 containment 或
 工具授权依据。

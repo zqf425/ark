@@ -9,7 +9,6 @@ ark-common = { workspace = true }
 ark-contract = { workspace = true }
 ark-ports = { workspace = true }
 ark-agent = { workspace = true }
-ark-store = { workspace = true }
 ark-config = { workspace = true }
 ark-schedule = { workspace = true }
 ark-im = { workspace = true }
@@ -29,6 +28,7 @@ base64 = "0.22"
 crc32fast = "1"
 
 [dev-dependencies]
+ark-store = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 async-trait = { workspace = true }
 tempfile = "3"

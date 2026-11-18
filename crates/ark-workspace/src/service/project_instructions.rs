@@ -1,12 +1,11 @@
 //! Project instruction files (`docs/requirements/project-instructions.md`) —
-//! the single discovery and truncation host.
+//! the single workspace discovery and truncation host.
 //!
 //! A repository's own instructions (`AGENTS.md` / `CLAUDE.md` / `README.md`)
 //! are the first context a coding agent needs. They are **workspace facts**,
 //! so discovery is anchored at the turn's effective workspace root: the same
-//! boundary the sandbox authorizes tools against. Nothing here touches the
-//! agent or the tool registry; the composition root calls these functions
-//! while assembling the turn seed.
+//! boundary the sandbox authorizes tools against. The composition root only
+//! appends the returned text while assembling the turn seed.
 
 use std::path::Path;
 
@@ -34,11 +33,16 @@ const TRUNCATED_TAIL: &str = "[project instructions truncated]";
 /// turn proceeds and the failure is only a warning, never an error.
 pub fn seed_for_workspace(workspace: &Path) -> Option<String> {
     let text = read_first_hit(workspace)?;
-    let text = truncate_utf8(&text, MAX_BYTES);
-    if text.trim().is_empty() {
+    let truncated = ark_common::truncate_utf8(&text, MAX_BYTES);
+    if truncated.trim().is_empty() {
         return None;
     }
-    Some(format!("{PROJECT_INSTRUCTIONS_HEADER}\n\n{text}"))
+    let body = if truncated.len() < text.len() {
+        format!("{truncated}\n{TRUNCATED_TAIL}")
+    } else {
+        truncated.to_string()
+    };
+    Some(format!("{PROJECT_INSTRUCTIONS_HEADER}\n\n{body}"))
 }
 
 /// Read the first candidate that exists, in priority order.
@@ -63,19 +67,6 @@ fn read_first_hit(workspace: &Path) -> Option<String> {
         }
     }
     None
-}
-
-/// Cap on a UTF-8 character boundary; a mid-codepoint cut would hand the model
-/// invalid text that later copy/paste or diff round-trips corrupt.
-fn truncate_utf8(text: &str, max_bytes: usize) -> String {
-    if text.len() <= max_bytes {
-        return text.to_string();
-    }
-    let mut end = max_bytes;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}\n{TRUNCATED_TAIL}", &text[..end])
 }
 
 #[cfg(test)]

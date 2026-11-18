@@ -61,6 +61,7 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.copy.message': ['复制消息', 'Copy message'],
   'canvas.copy.copied': ['已复制', 'Copied'],
   'canvas.copy.code': ['复制代码', 'Copy code'],
+  'canvas.code.plainText': ['纯文本', 'Plain text'],
   'canvas.copy.draft': ['复制草稿', 'Copy draft'],
   'canvas.copy.queued': ['复制排队消息', 'Copy queued message'],
 

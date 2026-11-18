@@ -63,10 +63,10 @@ ScheduleSettings { enabled }   # config.schedules,ReloadClass::Hot
    `reconcile` 的崩溃遗留收敛(`running`→`aborted`、misfire→`skipped`)不受开关影响,启动时一律执行。
 2. 到期判定:`enabled && next_run_at <= now`;执行后立刻按节奏计算下一次 `next_run_at`
    (interval 从本次执行完成时刻起算)。
-3. **执行 = 新线程 + 真实回合**:复用 `start_turn` 的注册/冲突/文本上限/workspace_gate 全部
-   校验,提示词为任务 `prompt`,不伪造消息类型;线程 runtime 覆盖 `autonomy`(任务字段)、
-   `provider_id`/`model`(任务字段,空则缺省)。无人值守语义由 `autonomy=unattended` 的
-   sandbox/gate 路径保证——审批与 user-input gate 永不阻塞等待。
+3. **执行 = 新线程 + 真实回合**：经 `start_turn_as(TurnSource::Scheduled)` 复用注册、冲突、
+   文本上限和 `workspace_gate` 校验；提示词仍持久化为用户消息，但来源明确为无人值守定时任务。
+   线程 runtime 覆盖 `autonomy`（任务字段）、`provider_id`/`model`（任务字段，空则缺省）。审批 gate
+   按 `approvals.on_unattended` 立即允许或拒绝，不等待交互客户端；user-input gate 返回无人可用说明。
 4. **停机期间错过的触发不补跑**:启动或 tick 恢复时,`next_run_at` 已过去超过 300 秒宽限
    (`MISFIRE_GRACE_SECS`)的任务才记一条 `skipped` 并推进到下一个未来时点;宽限内(健康循环
    至多晚一个 tick)的触发仍真实执行。`at` 一次性任务过期即标记完成不再触发。落地与批准条文

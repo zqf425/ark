@@ -61,11 +61,13 @@ bash_kill   { task_id: string, required }   # 杀进程组,幂等
 ### 4. 生命周期与安全
 
 - 任务记录在 manager 内,进程退出即消失;`bash_output` 对未知 id 返回结构化错误。
-- 后台任务输出缓冲按 **task 上限 16 个**淘汰最旧已完成任务;运行中任务不被淘汰。
+- 后台任务注册表是 **16 个硬上限**：满额时先淘汰最旧已完成任务；若 16 个任务都仍在运行，
+  新建后台任务返回结构化错误，不插入第 17 个。运行中任务不被淘汰。
 - 终止复用进程组语义:先组信号,再兜底 direct kill;已退出的任务 `bash_kill` 返回 ok 幂等。
 - 路径解析:cwd 推进经既有 `workspace_path`(containment 不变,逃逸仍是错误)。
-- 输出读取是**增量**(按已读 offset),同一 task 重复读不重复返回;每次读取仍受 64 KiB
-  cap 与 UTF-8 字符边界截断。
+- 输出读取是**增量**，offset 是从任务启动起累计写入流的绝对逻辑字节位置，不是当前环形缓冲下标。
+  缓冲维护 `base_offset`；丢弃旧前缀后以保留区间与绝对 reader offset 求交，因此后续追加仍可读取。
+  同一 task 重复读不重复返回；每次读取仍受 64 KiB cap 与 UTF-8 字符边界截断。
 
 ### 5. 组合根
 
@@ -77,6 +79,6 @@ bash_kill   { task_id: string, required }   # 杀进程组,幂等
 
 - `shell_session` 单测:`cd` 推进(含 `cd -`、`pushd`、相对/绝对路径、逃逸拒绝)、
   后台任务 id 返回、增量输出不重复、64 KiB 丢弃标记、kill 幂等、未知 id 结构化错误、
-  任务数上限淘汰。
+  绝对 offset 在环形覆盖后仍推进、任务满额且全在运行时拒绝第 17 个、满额时淘汰已完成任务。
 - `bash_output`/`bash_kill` schema 与 `TOOL_METAS` 一致性(assert catalogue sorted)。
 - registry 注册后 `schemas()` 指纹变化由既有 version 机制覆盖。

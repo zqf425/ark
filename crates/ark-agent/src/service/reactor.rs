@@ -994,12 +994,5 @@ impl Accumulator {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // The inline suite lives in its own file (AGENTS §4 file-size limit);
-    // declared as a descendant so `use super::*` reaches the shared doubles
-    // and the private reactor methods, exactly as the gate/regression files.
-    #[path = "reactor_stream_tests.rs"]
-    mod stream_tests;
-}
+#[path = "reactor/tests/reactor_stream_tests.rs"]
+mod tests;

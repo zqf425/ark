@@ -16,7 +16,7 @@
 ## 目标与边界
 
 交付可独立使用的 Code V1 与设置 V1：用户能管理线程、驱动和控制回合、处理真实的审批/输入闸门、
-查看子代理和工作区产物，并在不暴露密钥的前提下完整管理运行时配置、provider、MCP 与 skills。
+查看子代理和工作区产物，并在受控的本地授权边界内管理运行时配置、provider、MCP 与 skills。
 
 本需求包含：
 
@@ -37,21 +37,28 @@
 2. **服务端投影，前端只渲染**：Changes、Plan、Todo、File 和 Terminal 的领域解释在 Rust 一侧完成；
    web 只保存生成 DTO、渲染和本地交互状态。
 3. **会话日志仍是真源**：目标、待办、gate 决议和工作区产物以事件追加；详情/面板读模型可由事件重建。
-4. **密钥永不回读**：provider API key、MCP env/header 值只作为写入输入。UI 只显示“已配置”，不返回
-   值；当前 V1 中空 secret 字段表示保留，替换必须重新填写。显式删除需要独立 patch 语义，不能把空
-   表单误解为清空。
+4. **密钥读取面最小化**：provider 列表、能力与诊断只返回 `has_api_key` 和掩码提示；设置表单点编辑时
+   可经 `GET /v1/runtime/providers/{id}` 回读完整 `ProviderEntry`，包括已存 API key。该端点位于与其他
+   设置 API 相同的 protected router：配置 bearer token 时必须携带 token；未配置 token 时，安全边界是
+   `arkd` 仅监听 loopback 且访问本机已视为已授权。该边界不是多用户权限隔离，不能把运行时端口暴露给
+   不可信本地进程或代理。MCP env/header 值仍只写不回读。空 secret 字段表示保留，显式删除需要独立
+   patch 语义。
 5. **真实闸门**：审批和用户输入先持久化请求事件，再由内存 broker 等待有身份的 HTTP 决议；重复决议、
    过期 id、跨线程 id 均拒绝，取消/关闭使等待者收敛而不悬挂。
-6. **工作区边界不下放给浏览器**：File 面板只投影同一会话已成功 `read` 的受限工具输出，绝不让 web
-   发起直接文件读取或传绝对路径绕过工具沙箱。
+6. **工作区边界不下放给浏览器**：`GET /v1/threads/{id}/files` 只投影同一会话已成功 `read` 的
+   历史输出；File 面板当前使用 `GET /v1/workspace/file?path=&thread_id=` 预览该线程生效 workspace 内
+   的任意文件。后端按 thread workspace containment、canonical path 与大小上限授权，浏览器不直接
+   接触本地文件系统，也不能读取 workspace 之外的路径。
 
 ## 阶段 A：先行修复
 
 ### A.1 Provider 无损编辑
 
-现有编辑页将未回读的高级字段提交为空，`upsert` 会整体替换条目。当前实现保留空的 API key、headers、
-`max_tokens`、`temperature`，因此普通编辑不会破坏未回读的配置；用户可显式填写新值覆盖。读取视图不
-暴露 key/header 值。删除 secret 的独立 patch 为后续能力，不能由空字段隐式触发。
+provider 列表读取仍为脱敏 `ProviderView`；用户点编辑后，设置页单独调用
+`GET /v1/runtime/providers/{id}` 回读完整条目并回填已存 API key。headers 等高级字段也由完整编辑条目
+播种。`upsert` 对空 API key、headers、`max_tokens`、`temperature` 仍保留旧值，作为非设置客户端和竞态
+下的无损兜底；用户可填写新值覆盖。完整读取端点受 protected router 的 bearer/loopback 本地授权边界
+保护，不得用于列表、诊断、toast 或日志。MCP secret 仍不回读。删除 secret 的独立 patch 为后续能力。
 
 ### A.2 SSE 与 wire 修复
 
@@ -75,8 +82,8 @@ Reactor 在安全轮次边界 drain 后写 `turn_steered` 并把文本作为用�
   持久化 watermark 为唯一 fork 点，不复制活动 turn。历史指定 seq 需要可解释的时间线选择器，暂不暴露
   半成品 API。
 - 线程列表本地搜索只针对已加载列表，归档列表显式切换，避免宣称有尚未实现的全局全文检索。
-- composer 增加 steer 入口；发送、steer、interrupt 的按钮状态均由活跃 turn 和 SSE 状态决定。compact 的
-  HTTP 标记接口已保留，但未在 V1 主界面增加无明确收益的按钮。
+- composer 增加 steer 入口；发送、steer、interrupt 的按钮状态均由活跃 turn 和 SSE 状态决定。输入框
+  context ring 弹层提供手动「压缩上下文」，调用 `POST /v1/threads/{id}/compact`。
 
 ### B.2 审批与用户输入
 
@@ -98,14 +105,16 @@ Reactor 在安全轮次边界 drain 后写 `turn_steered` 并把文本作为用�
 
 - 工具事件持久化结构化参数和已截断输出；服务端从成功的 `write`/`edit` 生命周期投影 workspace change。
   Changes 面板展示相对路径、操作类型和关联 turn，浏览器不解析自由文本。
-- File 预览只返回同一线程已成功 `read` 的结构化工具输出。这样预览与模型实际看到的内容一致，也不会新增
-  绕过工具策略的读取通道；尚未读过的文件返回结构化 not-found，并提示先通过 agent 读取。
+- `/v1/threads/{id}/files` 保留为同一线程已成功 `read` 的结构化历史投影；File 面板的实际预览走
+  `/v1/workspace/file?path=&thread_id=`，可读取该线程生效 workspace 内的任意文件。服务端根据线程覆盖
+  或进程 lease 选定 root，再做 canonical containment、symlink 与大小限制；未知 thread 不回退到别的 root。
 - Terminal 是 bash tool 的只读转录投影（命令、开始/结束、退出状态、截断输出），不提供浏览器直连 shell。
 
 ### C.2 子代理
 
 复用现有 child-runs API，在 Code 侧显示父线程 child 列表、状态、摘要、用量、子会话跳转及
-abort/steer/resume。终态摘要卡片继续按 `notification_id` 去重，且不与控制面混为一处。
+abort/steer/resume。`child_completed` 实时事件只显示一次 toast；持久状态、摘要与跳转由右侧
+`ChildRunsPanel` 重新读取 child-runs API。当前 web 不在主画布保留或恢复 50 张终态摘要卡片。
 
 ## 阶段 D：设置完整闭环
 
@@ -136,9 +145,9 @@ abort/steer/resume。终态摘要卡片继续按 `notification_id` 去重，且�
 本次已实现阶段 A 的四项修复、真实 parent steer 与交互 gate、线程管理及当前 watermark fork、目标/待办
 事件投影、Changes/File/Terminal/子代理控制面板，以及 typed tuning、provider 与 MCP 的安全编辑闭环。
 
-设计复核后的两项收敛决定：一是 File 不增加浏览器直接读盘能力，而是复用现有 `read` 工具的受限且已
-持久化输出；二是 secret 清除不复用空字符串语义，避免无回显表单在普通编辑时破坏凭据。若需要显式删除，
-应另行设计带字段级意图的 patch，而不是扩大全量 upsert 的歧义。
+设计复核后的当前边界：File 保留历史 `read` 投影，同时由后端提供按线程 workspace containment 的
+任意文件预览；浏览器仍不直接读盘。provider 列表脱敏，但设置编辑端点在本地授权边界内回读完整 API key；
+MCP secret 仍只写。secret 清除不复用空字符串语义。若需要显式删除，应另行设计带字段级意图的 patch。
 
 ## 阶段 E：供应商模型目录与实际生效的模型配置
 
@@ -160,12 +169,13 @@ abort/steer/resume。终态摘要卡片继续按 `notification_id` 去重，且�
 
 视觉重构只发生在 `web/`：不增加 wire 字段、不改变 reactor 状态，也不让插件或 provider 实现承担界面职责。
 Code 将已加载会话分为最近/归档两个本地范围，并提供大小写无关的本地标题搜索；搜索不承诺全局全文检索。
-默认结构是任务侧栏和宽会话画布，中栏以当前会话和真实回合数/执行态作为操作焦点，输入区保持现有
-send/steer/interrupt 语义。Changes、Plan、File、Terminal 是按需打开的上下文抽屉，默认收起；通过计划、
-变更或文件选择展开，收起不能卸载或改写其数据。运行时诊断退为低优先级状态，不能压过任务与输入区。
+当前结构是可调宽三列：线程列表、会话画布、常驻检查器。左右侧列各自可在 200–640px 间拖动；检查器
+包含 Changes、Plan、File、Terminal 四个 Tab，收起时用 `hidden` 保持挂载，不能丢失面板草稿或服务端
+读模型。输入区保持现有 send/steer/interrupt 语义，运行时诊断退为低优先级状态。
 
 设置页将既有表单按工作区、运行时、供应商、集成、Skills 分类导航。导航只控制可见内容，各 section 的 hook
-和保存语义不变：Provider/MCP 的 secret 仍只写不回显，模型目录仍需用户显式选择后才进入草稿。
+和保存语义不变：provider 列表脱敏、编辑端点可回读 API key；MCP secret 仍只写不回显。模型目录仍需用户
+显式选择后才进入草稿。
 
 阶段 F 已将 Code 和设置改为面向任务执行的信息结构，并补上已加载线程的本地搜索/归档切换与设置分类导航。
 
@@ -173,8 +183,9 @@ send/steer/interrupt 语义。Changes、Plan、File、Terminal 是按需打开�
 「追加」走既有 steer 路由、「排队」为本地队列并在回合结束按序自动发送；附件走 `/v1/attachments` 上传
 并随回合启动提交 id；技能指定为 `/id` 显式提及（复用激活语义，不新增 wire 字段）。推理强度按
 [ark-llm](../modules/ark-llm.md) 的协议映射生效，线程存储与恢复包含 `runtime.reasoning_effort`。
-在界面复核后，Code 再收敛为会话优先、上下文按需打开的工作台，移除了固定三栏和控制台式诊断视觉。
-这是一层渲染和本地布局状态的变更，未修改 `ark-agent`、HTTP/SSE 契约、插件总线或运行时语义。
+在后续界面复核中，Code 已收敛为会话优先的 ARK Console 三列工作台；右侧检查器可收起但保持挂载，
+两侧宽度可调。这是一层渲染和本地布局状态的变更，未修改 `ark-agent`、HTTP/SSE 契约、插件总线或
+运行时语义。
 
 ## 阶段 G：界面国际化与可读性偏好
 
@@ -199,8 +210,8 @@ UI 重构混入本需求。
 （256K，与设置页模型清单未声明窗口的兜底一致）推导，压缩不被禁用。
 
 阈值经 `GET /v1/runtime/providers` 的 `compaction_threshold_tokens` 发布（仅当完全无有效 provider 时
-字段缺省），会话上下文环以它为分母（footer 曾展示的水位已移除，上下文占用只在上下文环常驻展示）；
-字段缺省时隐藏水位。设置页移除该
+字段缺省）。会话上下文环以所选模型真实 `context_window_tokens` 为分母，以压缩 threshold 为环内刻度/
+警示线；字段缺省时隐藏对应刻度。footer 曾展示的水位已移除，上下文占用只在上下文环常驻展示。设置页移除该
 输入项，模型清单行的「上下文窗口」成为压缩行为的唯一入口；界面文案明确「模型窗口的 80%」语义。
 
 ## 阶段 I：新增供应商不隐式切换全局默认

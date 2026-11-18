@@ -53,7 +53,8 @@ gated 在 `Notice` kind 上）。取消原因词表与自治权词表不在本 c
 
 `Usage.duration_ms`（serde default，省略空值）是该样本关闭的那次模型调用的实测墙钟耗时：只由
 runtime 每轮结算的 usage 事件写入（`ark-llm` 解析的 provider payload 永远不带它，聚合不发明它）；
-`merge` 按 `sum_opt` 语义折叠，任一样本未计时则聚合保持 None（"未知"与 "0" 不混淆）。
+`merge` 对该字段使用严格聚合：仅当全部实际样本都有值时求和，任一样本未计时则聚合保持 None
+（"未知"与 "0" 不混淆）；空的默认累加器不算一个未计时样本。
 
 `TurnStarted.auto_recovery: u32`（serde default `0`，序列化时省略零值）标记 harness 自动恢复
 回合及其尝试序号：前一个回合因瞬态模型请求失败（`model_request_failed = true`）终结后，恢复调度器
@@ -71,8 +72,9 @@ JSON 里。消费方据此区分"用户发的消息"与"harness 重放的上一�
 后台子代理终态使用 `child_completed` 事件传递稳定 `notification_id`、状态、摘要/错误和用量；
 消费者按通知 ID 去重，不得把 child 的完整原始转录复制到父线程。父回合正常完成后以
 `child_completion_acknowledged` 确认已消费的通知；确认失败保留至少一次重投递语义。
-`ThreadDetail.child_completions` 是 `child_completed` 的渲染投影，用于页面重新打开时恢复摘要卡片；它
-不取代事件日志，也不包含完整 child 转录。
+`ThreadDetail.child_completions` 是 `child_completed` 的有界 wire/read model；它不取代事件日志，也不包含
+完整 child 转录。当前 web 不把该字段恢复为主画布摘要卡，持久查看由 child-runs 查询和
+`ChildRunsPanel` 承载。
 `ThreadDetail.runtime` 只携带已持久化的每线程覆盖值（作为 PATCH 合并后的结果）；同一存活 `arkd`
 进程内的短暂控制快照（active turn 与待处理 gate 的最小展示字段）位于 `ThreadDetail.runtime_snapshot`。
 两者以 serde default 保持旧 detail JSON 可读；`runtime_snapshot` 绝不用于重建重启后的 waiter。

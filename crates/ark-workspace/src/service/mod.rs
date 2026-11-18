@@ -7,5 +7,7 @@
 
 pub(crate) mod git_runner;
 pub mod inspector;
+pub mod project_instructions;
 
 pub use inspector::WorkspaceInspector;
+pub use project_instructions::seed_for_workspace as project_instructions_seed;

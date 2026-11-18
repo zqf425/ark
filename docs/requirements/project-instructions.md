@@ -20,7 +20,7 @@ ark 自己的开发规范就是 `AGENTS.md`,但模型看不到它。本需求为
 
 ## 设计
 
-### 1. 发现规则(唯一宿主:`apps/arkd/src/instructions.rs`)
+### 1. 发现规则（唯一宿主：`ark-workspace::project_instructions_seed`）
 
 候选文件名按优先级取**第一个**命中的:`AGENTS.md` → `CLAUDE.md` → `README.md`。
 `README.md` 兜底是刻意的:大量仓库只有 README,而它就是项目说明;前两者命中时不读 README,
@@ -52,9 +52,9 @@ ark 自己的开发规范就是 `AGENTS.md`,但模型看不到它。本需求为
 
 ### 3. 组合根职责边界
 
-`instructions.rs` 只做发现与截断,是纯函数宿主;`wiring` 在构建 seed 时调用并追加消息。
-文件读取发生在回合启动路径上(每回合一次,量级小,无缓存);`ark-agent` 与 `ark-tool`
-不感知该功能,不新增端口——项目指令是组合根的 seed 组装事实,不是运行时能力。
+`ark-workspace::project_instructions_seed` 承担发现、UTF-8 校验与截断；截断字符边界复用
+`ark-common::truncate_utf8`。`wiring` 在构建 seed 时只调用并追加消息。文件读取发生在回合启动路径上
+（每回合一次，量级小，无缓存）；`ark-agent` 与 `ark-tool` 不感知该功能，也不新增端口。
 
 ### 4. 与 skills/memory 的顺序
 
@@ -64,7 +64,7 @@ completion inbox → thread plan。项目指令排在 memory 之前:它是"仓�
 
 ## 验收
 
-- `instructions.rs` 单测:优先级(AGENTS 压过 CLAUDE/README)、无候选不注入、空文件跳过、
+- `ark-workspace` 单测：优先级（AGENTS 压过 CLAUDE/README）、无候选不注入、空文件跳过、
   非 UTF-8 跳过、32 KiB 截断且不破坏字符边界。
 - `wiring` seed 测试:父 seed 与子 seed 在含 AGENTS.md 的工作区都出现同一份指令文本;
   不含时不新增消息。

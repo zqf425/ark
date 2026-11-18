@@ -20,7 +20,7 @@ pub(super) fn build_tools(
     // The durable plan tool is parent-only: a child writes into its own child
     // thread's event log, which the parent plan projection never reads, so a
     // registration there would silently lose every write.
-    registry.register(Arc::new(crate::todo_tool::TodoWriteTool::new(store)))?;
+    registry.register(Arc::new(ark_server::TodoWriteTool::new(store)))?;
     Ok(registry)
 }
 

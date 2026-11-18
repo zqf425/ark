@@ -14,5 +14,8 @@ pub mod state;
 pub use api::{error::ApiError, routes::router};
 pub use gates::InteractiveGates;
 pub use service::serve::{bind, AppHandle};
-pub use service::{ImService, SchedulerService};
+pub use service::{
+    plan, schedule_auto_continuation, sync_auto_continue_policy, todo_marker, validate_todos,
+    ImService, SchedulerService, TodoWriteTool, MAX_TODO_TITLE_CHARS,
+};
 pub use state::{AppState, SharedUsage, TurnEnd, TurnJob, TurnRunner, TurnSource};

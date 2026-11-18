@@ -29,4 +29,5 @@ pub use encoding::{
 pub use error::{ArkError, ArkErrorCode, ArkErrorPayload, Result};
 pub use ids::{AttachmentId, ChildId, ItemId, RunId, ThreadId, TurnId};
 pub use process::{isolate, ProcessTree};
+pub use text::truncate_utf8;
 pub use usage::Usage;

@@ -421,16 +421,21 @@ impl SchedulerService {
         thread_id: ThreadId,
         started_at: DateTime<Utc>,
     ) -> ScheduledTask {
-        let outcome =
-            match crate::service::start_turn(state, thread_id, task.prompt.clone(), Vec::new())
-                .await
-            {
-                Ok(summary) => {
-                    let turn_id = summary.turn_id;
-                    await_turn(state, turn_id).await
-                }
-                Err(error) => Err(error.message),
-            };
+        let outcome = match crate::service::start_turn_as(
+            state,
+            thread_id,
+            crate::TurnSource::Scheduled(task.prompt.clone()),
+            task.prompt.clone(),
+            Vec::new(),
+        )
+        .await
+        {
+            Ok(summary) => {
+                let turn_id = summary.turn_id;
+                await_turn(state, turn_id).await
+            }
+            Err(error) => Err(error.message),
+        };
 
         let record = match outcome {
             Ok(summary) => match summary.state.as_str() {

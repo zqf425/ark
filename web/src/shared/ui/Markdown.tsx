@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { renderMarkdown } from './markdown-render'
 import { copyText, COPIED_FEEDBACK_MS } from './copy'
+import { useI18n } from '../i18n'
 import './markdown.css'
 
 /** Minimum interval between markdown re-parses while text streams in. */
@@ -62,13 +63,17 @@ export const Markdown = memo(function Markdown({
    * passed through to `renderMarkdown`'s promotion pass. Empty = no chips. */
   writablePaths?: readonly string[]
 }): JSX.Element {
+  const { t } = useI18n()
   const throttled = useThrottledValue(text, REPARSE_INTERVAL_MS)
   const writable = writablePaths ?? []
   const writableKey = writable.join('\u0000')
   const html = useMemo(
-    () => renderMarkdown(throttled, writable),
+    () => renderMarkdown(throttled, writable, {
+      copyCode: t('canvas.copy.code'),
+      plainText: t('canvas.code.plainText')
+    }),
     // join() gives useMemo a stable primitive key without sorting the array.
-    [throttled, writableKey]
+    [throttled, writableKey, t]
   )
   const hostRef = useRef<HTMLDivElement | null>(null)
   // Streamed rows re-render wholesale; a per-block "copied" state would be

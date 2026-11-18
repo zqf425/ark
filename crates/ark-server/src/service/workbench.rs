@@ -12,10 +12,10 @@ use ark_contract::{
     TodoStatus, WorkspaceChange, WorkspaceChangesResponse,
 };
 
-/// Maximum todos one plan holds. The same bound guards the HTTP route and the
-/// model-facing `todo_write` tool, so neither path can bloat the event log or
-/// the per-turn seed beyond what the panel can render.
+/// Maximum todos one plan holds. The same bound guards every write path.
 const MAX_TODOS: usize = 200;
+/// Maximum Unicode scalar values in one title, shared by HTTP and model writes.
+pub const MAX_TODO_TITLE_CHARS: usize = 500;
 
 /// Fold the latest goal and todo snapshots from a thread event stream.
 pub fn plan(events: &[RuntimeEvent]) -> PlanView {
@@ -52,6 +52,13 @@ pub fn validate_todos(todos: &[TodoEntry]) -> Result<(), ArkError> {
             return Err(ArkError::validation(
                 "todo ids and titles must be non-empty and ids unique",
             ));
+        }
+        let title_chars = todo.title.chars().count();
+        if title_chars > MAX_TODO_TITLE_CHARS {
+            return Err(ArkError::validation(format!(
+                "todo `{}` title is {title_chars} characters; keep titles at most {MAX_TODO_TITLE_CHARS}",
+                todo.id
+            )));
         }
     }
     Ok(())
@@ -264,6 +271,12 @@ mod tests {
             .map(|index| todo(&format!("t{index}"), "row", TodoStatus::Pending))
             .collect();
         assert!(validate_todos(&exact).is_ok());
+    }
+
+    #[test]
+    fn todo_validation_rejects_titles_over_500_characters() {
+        assert!(validate_todos(&[todo("a", &"x".repeat(501), TodoStatus::Pending)]).is_err());
+        assert!(validate_todos(&[todo("a", &"x".repeat(500), TodoStatus::Pending)]).is_ok());
     }
 
     #[test]

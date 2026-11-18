@@ -130,8 +130,10 @@ Playwright Chromium 驱动真实页面，结论取自真实 HTTP 状态码与真
   答案作为 tool result 回给模型；重复 404。取消路径复用 interrupt 机制（同一 oneshot 语义已验证）；
 - 子代理后台启动与完成通知：后台 delegate 即返、终态 `child_completed` 投影、`auto_continue`
   单子代理场景 1 续跑 + 1 确认收敛；
-- 四面板真实数据：Terminal（bash 转录含命令/退出状态/耗时）、File（已读文件受限预览、未读 404、
-  缺 path 参数 400）、Changes（write 操作投影）、Plan（goal/todos POST+GET 投影）。
+- 四面板真实数据：Terminal（bash 转录含命令/退出状态/耗时）、Changes（write 操作投影）、
+  Plan（goal/todos POST+GET 投影）；当次 File 验收针对历史 `/v1/threads/{id}/files` 投影（已读文件预览、
+  未读 404、缺 path 参数 400）。当前 File 面板已改用按 thread workspace containment 授权的
+  `/v1/workspace/file?path=&thread_id=`；该专项能力的验收以 [工作区文件预览](workspace-file-preview.md) 为准。
 
 验收发现并已闭环的缺陷（均经 DSH 修复、独立复验后合入 master）：
 

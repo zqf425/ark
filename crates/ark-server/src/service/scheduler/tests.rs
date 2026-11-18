@@ -140,7 +140,7 @@ struct RecordingRunner {
 #[async_trait::async_trait]
 impl crate::TurnRunner for RecordingRunner {
     async fn run_turn(&self, job: crate::TurnJob) -> ark_common::Result<crate::TurnEnd> {
-        if let crate::TurnSource::User(text) = &job.source {
+        if let crate::TurnSource::Scheduled(text) = &job.source {
             self.prompts
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)

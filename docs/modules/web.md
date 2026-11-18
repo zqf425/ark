@@ -32,32 +32,31 @@
   空闲线程因此保持同一条连接；只有真正无字节静默超过阈值才 abort 并从最后 `seq` 重连。注释帧不进入
   reducer，也不改变 `lastSeq`。
 - 回合进行中叠加一条“数据帧看门狗”（45s）：字节看门狗只看传输字节，无法发现“订阅者已被 store 按慢客户端丢弃、连接只剩 keep-alive 注释”的僵尸形态——心跳不断喂狗，前端却再也收不到任何事件，正在运行的回合就此在画布上冻结。因此线程处于活跃回合（`turn_started`/`turn_steered` 置位，终态事件清除）时，只有**解析出的数据帧**才重置该看门狗；超时即主动断开并从最后 `seq` 重连，由 replay 补齐缺口。纯空闲线程（无活跃回合）只有心跳，不启用该看门狗，保持原字节判活行为。
-- `child_completed` 按稳定 `notification_id` 去重后显示持久摘要卡片；实时到达时显示一次性提示。摘要仅作
-  父线程状态展示，不能在 web 侧重建或改写模型上下文。
-- `child_completions` 详情与 reducer 内存均限制为最新 50 条；完成、失败和中止状态必须本地化为用户文案，
-  不直接显示内部枚举值。
+- `child_completed` 实时到达时仅按稳定 `notification_id` 去重并显示一次性 toast，同时推进
+  `childRunRevision`；reducer 不在主画布 item 投影保留完成摘要副本，也不维护“最近 50 张”卡片。
+  持久查看统一由右侧 `ChildRunsPanel` 通过 child-runs API 重新读取。wire 中有界的
+  `ThreadDetail.child_completions` 仍可供其他客户端使用，但当前 web 不将其恢复成主画布卡片。
 - 子代理监督只由 `child_activity` 与 `child_completed` 驱动刷新，不能因文本 token delta 重复请求
   child-runs；排队与运行同样必须显示为用户文案。已决审批和用户输入在当前页面会话中保留为历史
   卡片。刷新后的待处理 gate 只可来自服务端的 runtime 快照，web 不得从历史 item 猜测仍可提交的 gate id。
 - detail 返回 `runtime` 时，web 在以 detail watermark 建立 SSE 前将 active turn 和其中的待处理 gate seed
   到本地状态；SSE terminal/resolved 事件仍是后续状态的权威更新。
-- Code 右侧的 Plan、Changes、File、Terminal 均调用服务端投影；File 仅预览本线程已成功 `read` 的工具
-  输出，浏览器不得直接读取工作区。子代理控制请求始终带父线程 query，不能只凭 child id 操作。
+- Code 右侧的 Plan、Changes、File、Terminal 均调用服务端 API。`GET /v1/threads/{id}/files` 仍是
+  “本线程曾成功 `read` 的内容”历史投影；当前 File 面板使用
+  `GET /v1/workspace/file?path=&thread_id=` 预览该线程生效 workspace 内的任意文件。后一个端点由后端
+  按 thread workspace 覆盖优先、进程 lease 回落的顺序做真实路径 containment 与大小限制；浏览器不
+  直接接触本地文件系统。子代理控制请求始终带父线程 query，不能只凭 child id 操作。
 - Changes 同时展示活动工作区的服务端受限 Git 投影（暂存、未暂存、未跟踪）；切换请求仅提交路径给
   `arkd`，运行中存在父回合或子代理时服务端拒绝切换。浏览器不读取目录、Git 或未跟踪文件内容。
   差异文件行默认折叠，展开后渲染服务端 `patch` 字段的行级 diff（解析仅在展开时进行，面板打开
   不全量解析所有 patch）；`patch` 缺失（二进制或超出字节上限）时明确提示，浏览器不自行 diff。
-- 会话流 footer 展示线程用量，不再展示上下文水位与「生成中」标记（上下文占用的常驻展示只有输入框
-  工具条上的上下文环，footer 不重复）：用量由权威 `usage` 事件逐条累加，打开线程时以
-  `GET /v1/threads/{id}/usage` 播种且只填充空通道（避免与实时事件重复计数）；上下文窗口与压缩阈值
-  由 `GET /v1/runtime/providers` 发布（模型窗口的 80%，输出预留后取整；未声明窗口按 256K 默认窗口
-  推导，与运行时压缩行为同源），仅作展示，不参与运行时决策；仅当完全无有效 provider 时阈值缺省。
-  限额缓存带 TTL 并定时重取（上下文环常驻挂载、跨线程不重挂，一次性获取会在设置页修改后永久陈旧）。
-  `compaction_completed` 以摘要形式显示最近一次压缩规模。footer 另展示最近一轮流式速度与会话累计
-  缓存命中率：速度由该轮首个到末个 delta 的实测窗口（短于 0.3s 不显示）折 `usage` 的
-  `completion_tokens`，窗口在回合/轮边界与 `usage` 折叠后清零，不保留陈旧值；命中率只取
-  `cache_hit_tokens / (cache_hit_tokens + cache_miss_tokens)`，两者按 `sum_opt` 语义累加，缺计数时
-  不显示，绝不用 `hit / prompt_tokens` 伪造。
+- 会话标题下方的 `SessionStatsBar` 展示线程级用量；会话流不再有统计 footer。统计条由
+  `GET /v1/threads/{id}/usage` 的整线程聚合播种，并折叠后续 live `usage` 事件，展示调用数、模型调用
+  实测总耗时、tokens、缓存命中率、费用、最近速度、压缩摘要与错误。它不读取有界诊断分页
+  `GET /v1/debug/llm-rounds`，因此调用数和耗时不会因分页截断变成下限。上下文占用只在输入框工具条的
+  context ring 常驻展示：分母取所选模型真实 `context_window_tokens`（未声明时取运行时同源的 256K
+  默认窗口），`compaction_threshold_tokens` 仅画为环内压缩刻度/警示线；两者都只供展示，不参与
+  前端运行时决策。provider 限额缓存带 TTL 并定时重取，避免设置修改后永久陈旧。
 - 模型输出的 markdown 渲染集中在 `shared/ui` 的 `Markdown`（marked + DOMPurify 消毒后注入）与
   `code-highlight`（文件预览高亮）：模型输出是不可信输入，任何进入 `dangerouslySetInnerHTML` 的
   HTML 必须先经 DOMPurify；这是展示层能力，不与 Rust 侧业务逻辑双实现。markdown 排版对齐主流
@@ -161,7 +160,9 @@
   气泡 footer 的时钟同款），流式/中断/失败状态与气泡一致；本回合耗时只在无过程卡时由
   `ark-reply__duration` 出现在标题行（见上文），不会进入 footer；过程卡内的中间
   叙述仍是普通助手气泡，避免卡中卡。
-  分组规则在 `turn-sections.ts` 纯函数中，可独立单测。回合多于一个时在画布右缘提供逐回合跳转导航条。
+  分组规则在 `turn-sections.ts` 纯函数中，可独立单测。回合多于一个时在画布右缘提供逐回合跳转导航条；
+  每个按钮取该回合用户输入，先 trim 并把换行折叠为空格，再显示前 15 个字符，超长追加 `...`。
+  没有用户文本时回退纯回合号；`title` 与 `aria-label` 共用含该预览的本地化标签。
   过程卡内默认只完整展示最近 3 条活动行（`RECENT_ACTIVITY_ROW_LIMIT`，活动行 =
   `reasoning`/`tool_call`/`tool_result`），更早的步骤折叠为一行"展开较早的 N 步"摘要。折叠
   **运行中即生效**（不只在结束后）：长回合按当前活动扫描，而正在流式的那一行按构造必然是最新活动行，
@@ -302,21 +303,22 @@
   同一组 pill 在新任务页（无会话）读写页面的暂存覆盖而非线程记录（见上方 `new` 场景条目），
   提交时机是任务启动而不是选择动作。
   工作空间、上下文结构和手动压缩也收进同一排工具条，不再有展开式详细面板：工作空间 pill 直接列出
-  `GET /v1/workspace` 的 active / recent 项目，点选即 `POST /v1/workspace/switch` 并把同一路径经
-  `PATCH /v1/threads/{id}` 写成本会话覆盖；「新增项目空间」调用 `POST /v1/workspace/pick` 与
-  `POST /v1/workspace/validate` 后走同一切换流程，不需要手填路径。活跃回合时禁用切换，服务端 409 是最终裁决。
-  上下文环弹层展示工具、系统提示、技能、消息、思考、检查点、其他的**结构占比**（渲染行数与字符数），
-  总量仍取最近一次权威 `usage` 事件的 `prompt_tokens` 与 tuning 窗口；token 估算的唯一宿主仍是
-  `ark-agent::TokenEstimator`，前端不重算 token。弹层内「压缩上下文」直接调用
+  `GET /v1/workspace` 的 active / recent 项目，点选只经 `PATCH /v1/threads/{id}` 写成本会话覆盖；
+  「新增项目空间」调用 `POST /v1/workspace/pick` 与 `POST /v1/workspace/validate` 后同样只 PATCH 当前
+  线程，不调用全局 `POST /v1/workspace/switch`。活跃回合时禁用选择。全局 switch 仅由设置页和 Changes
+  面板承载。上下文环弹层展示工具、系统提示、技能、消息、思考、检查点、其他的**结构占比**（渲染行数
+  与字符数）；总量取最近一次权威 `usage` 事件的 `prompt_tokens`，环分母取所选模型真实 context window，
+  压缩 threshold 只作环内刻度。token 估算的唯一宿主仍是 `ark-agent::TokenEstimator`，前端不重算
+  token。弹层内「压缩上下文」直接调用
   `POST /v1/threads/{id}/compact`。共享 `ModelProviderMenu` 提供「供应商 → 模型」二级菜单与搜索，
   会话输入框用 `variant="flyout"`：供应商列表常驻、hover/focus 浮出独立滚动的模型卡，避免长模型
   清单挤占输入框；推理强度留在菜单 footer；所有选择打开时重读线程覆盖、写入仍走 `PATCH`。
   设置页使用生成契约提供同一全局权限，展示“永远询问”“仅工作区修改”“完全访问”三档。
 - 会话标题下方有紧凑统计条（`SessionStatsBar`）：轮次与模型调用数来自 `GET /v1/threads/{id}/usage`，
   耗时是 store 的每轮耗时折叠（`state/rounds.ts`：HTTP 快照播种、live `usage` 事件追加，快照权威覆盖
-  live 估计），即各次模型调用实测耗时之和——只统计模型回复时间，不含工具执行；并展示
-  prompt/completion/total tokens、真实 `cache_hit_rate` 与 `cost_usd`；诊断分页 `truncated` 为真时把调用数
-  标为下限，请求失败保留上次已验证数值而不伪造零。运行时版本、SSE 状态、数据目录等诊断信息不能占据
+  live 估计），即各次模型调用实测耗时之和，只统计模型回复时间，不含工具执行；并展示
+  prompt/completion/total tokens、真实 `cache_hit_rate` 与 `cost_usd`。它不读取诊断分页，调用数不是
+  `truncated` 下限；请求失败保留上次已验证数值而不伪造零。运行时版本、SSE 状态、数据目录等诊断信息不能占据
   主任务层级，必须退为状态详情或提示信息。
 - 设置页的分类导航是 `web` 内本地状态，只决定既有 section 的可见性；每个 section 仍独立持有既有 hook，
   不把 provider、MCP 或 runtime 配置逻辑回流到 Code 会话状态或 `ark-agent`。

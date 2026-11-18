@@ -319,7 +319,7 @@ pub(crate) fn push_project_instructions(
     workspace: &std::path::Path,
     messages: &mut Vec<ModelMessage>,
 ) {
-    if let Some(text) = crate::instructions::seed_for_workspace(workspace) {
+    if let Some(text) = ark_workspace::project_instructions_seed(workspace) {
         messages.push(ModelMessage::system(text));
     }
 }

@@ -39,6 +39,12 @@ pub struct Usage {
     /// sent (design §6.4, P1-8).
     #[serde(skip)]
     cache_counters_incomplete: bool,
+    /// Set once duration folding has seen both a measured and unmeasured sample.
+    #[serde(skip)]
+    duration_incomplete: bool,
+    /// Distinguishes an empty `Usage::default()` accumulator from a real sample.
+    #[serde(skip)]
+    samples_merged: bool,
 }
 
 impl Usage {
@@ -47,6 +53,7 @@ impl Usage {
             prompt_tokens,
             completion_tokens,
             total_tokens: prompt_tokens + completion_tokens,
+            samples_merged: true,
             ..Default::default()
         }
     }
@@ -74,6 +81,11 @@ impl Usage {
     /// `hit / (hit + miss)` for the whole turn. The rate therefore becomes
     /// `None` rather than a number that looks measured but is not.
     pub fn merge(&mut self, other: &Usage) {
+        let self_had_sample = self.samples_merged
+            || self.prompt_tokens != 0
+            || self.completion_tokens != 0
+            || self.total_tokens != 0
+            || self.duration_ms.is_some();
         self.prompt_tokens += other.prompt_tokens;
         self.completion_tokens += other.completion_tokens;
         self.total_tokens += other.total_tokens;
@@ -89,10 +101,16 @@ impl Usage {
             Usage::rate(self.cache_hit_tokens, self.cache_miss_tokens)
         };
         self.cost_usd = sum_opt_f(self.cost_usd, other.cost_usd);
-        // Measured per-round durations fold with `sum_opt`: a sample without
-        // one contributes nothing, so an aggregate stays `None` until every
-        // folded sample was timed. This keeps "unknown" distinct from 0.
-        self.duration_ms = sum_opt(self.duration_ms, other.duration_ms);
+        self.duration_incomplete = self.duration_incomplete
+            || other.duration_incomplete
+            || (self_had_sample && self.duration_ms.is_none())
+            || other.duration_ms.is_none();
+        self.duration_ms = if self.duration_incomplete {
+            None
+        } else {
+            sum_opt(self.duration_ms, other.duration_ms)
+        };
+        self.samples_merged = true;
     }
 }
 
@@ -156,6 +174,17 @@ mod tests {
             next
         });
         assert_eq!(total.duration_ms, Some(2_000));
+
+        let mut partial = Usage::new(10, 5);
+        partial.duration_ms = Some(1_200);
+        partial.merge(&Usage::new(5, 5));
+        assert_eq!(partial.duration_ms, None);
+
+        let mut missing_first = Usage::new(10, 5);
+        let mut measured_later = Usage::new(5, 5);
+        measured_later.duration_ms = Some(800);
+        missing_first.merge(&measured_later);
+        assert_eq!(missing_first.duration_ms, None);
 
         let mut unmeasured = Usage::new(10, 5);
         unmeasured.merge(&Usage::new(5, 5));

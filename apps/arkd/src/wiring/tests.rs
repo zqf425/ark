@@ -3,9 +3,62 @@
 use super::history::conversation_history;
 use super::tools::{build_child_tools, build_tools};
 use super::turns::{
-    abort_interrupted_turns, completion_inbox, finish_parent_turn, user_message_with_attachments,
+    abort_interrupted_turns, completion_inbox, finish_parent_turn, gate_broker_for_turn,
+    gates_for_turn, user_message_with_attachments,
 };
 use super::*;
+
+#[test]
+fn serve_user_turn_keeps_the_interactive_gate() {
+    assert!(!gates_for_turn(false, &TurnSource::User("hello".into())));
+    assert!(gates_for_turn(
+        false,
+        &TurnSource::Im {
+            channel_id: "c".into(),
+            chat_id: "chat".into(),
+            text: "hello".into(),
+        }
+    ));
+    assert!(gates_for_turn(false, &TurnSource::AutoContinuation));
+    assert!(gates_for_turn(
+        false,
+        &TurnSource::Scheduled("nightly review".into())
+    ));
+}
+
+#[test]
+fn headless_user_turn_uses_unattended_gate() {
+    assert!(gates_for_turn(true, &TurnSource::User("review".into())));
+}
+
+#[tokio::test]
+async fn unattended_allow_approves_without_registering_an_interactive_gate() {
+    use ark_agent::{ApprovalRequest, ToolCallRequest};
+    use ark_contract::{ApprovalSettings, UnattendedApproval};
+
+    let interactive = Arc::new(ark_server::InteractiveGates::new());
+    let settings = ApprovalSettings {
+        rules: Vec::new(),
+        on_unattended: UnattendedApproval::Allow,
+    };
+    let broker = gate_broker_for_turn(true, interactive.clone(), &settings);
+    let reply = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        broker
+            .prepare_approval(ApprovalRequest::new(
+                "approval-unattended",
+                ToolCallRequest::new("call-1", "bash", serde_json::json!({})),
+                "run",
+            ))
+            .expect("approval future"),
+    )
+    .await
+    .expect("unattended allow must settle immediately")
+    .expect("approval reply");
+
+    assert!(reply.approved());
+    assert!(interactive.pending_approval_ids().is_empty());
+}
 
 /// Collects formatted log lines so the startup test can assert on the real
 /// warning instead of only on the data behind it.
@@ -857,7 +910,9 @@ async fn build_hands_out_the_schedule_handle_without_starting_the_loop() {
         auth_token: None,
         workspace: workspace.path().to_path_buf(),
     };
-    let wiring = crate::wiring::build(&args).await.expect("runtime build");
+    let wiring = crate::wiring::build(&args, false)
+        .await
+        .expect("runtime build");
     assert!(!wiring.schedules.is_started());
 }
 

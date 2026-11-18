@@ -24,7 +24,7 @@ pub mod exec;
 pub mod policy;
 pub mod service;
 
-pub use domain::{schema, ToolMeta, TOOL_METAS};
+pub use domain::{schema, ShellTaskId, ToolMeta, TOOL_METAS};
 pub use exec::tools::{
     builtins, builtins_with_shell_session, delegation_tools, web_tools, BashTool, DelegateTaskTool,
     EditTool, FindTool, GrepTool, LsTool, ReadTool, RequestUserInputTool, WebFetchTool, WriteTool,

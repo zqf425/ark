@@ -27,6 +27,11 @@ HTTP 配置与子代理配置保存都回写该路径。`AppState::new` 默认�
 `subagents.enabled` 与 `subagents.auto_continue` 同时为 `true` 时，server 才扫描持久 completion inbox
 并调度符合条件的父线程；关闭任一开关会立即取消进程内待调度 continuation，不影响已开始回合。
 
+`approvals` 配置节整体为 `Hot`：规则表和 `on_unattended` 都在每个父回合入口从同一当前快照读取，
+只影响后续回合。`serve` 的显式 User 回合使用交互 gate；headless、Scheduled、IM、自动 continuation 与
+自动 recovery 按 `on_unattended` 处置，child 不经过审批 gate。校验边界为规则数 ≤128、pattern ≤4 KiB、tool 名非空且
+≤64 字符，action 与 on_unattended 只接受契约枚举；非法 patch 事务性拒绝。
+
 `hooks` 配置节（[hooks 需求](../requirements/hooks.md)）整体为 `Hot`：命令清单、匹配规则与
 `timeout_ms` 在快照替换后对下一次工具调用即时生效。校验边界：至多 32 条 hook、单条命令编码后
 不超过 8 KiB、timeout 不超过 60 s，越界 patch 事务性拒绝。`hooks` 整节缺席是合法的常态（多数

@@ -72,11 +72,6 @@ ark-contract   → ark-common
 ark-ports      → ark-common, ark-contract
 ark-config     → ark-common, ark-contract
 ark-store      → ark-common, ark-contract, ark-ports
-ark-common     → （无 ark crate 依赖）
-ark-contract   → ark-common
-ark-ports      → ark-common, ark-contract
-ark-config     → ark-common, ark-contract
-ark-store      → ark-common, ark-contract, ark-ports
 ark-agent      → ark-common, ark-contract, ark-ports
 ark-delegation → ark-common, ark-contract, ark-ports
 ark-llm        → ark-common, ark-contract, ark-ports
@@ -126,10 +121,11 @@ HTTP 路由 + 设置页）。
 - `plugin_id` 由宿主签发且不可伪造；日志、配置、凭据、KV、文件、缓存、MCP 工具和配额按其隔离。
 - 插件不自建 HTTP client、MCP server 或界面容器；跨插件调用经 MCP 总线并接受声明、深度和循环校验。
 - 安全策略、授权、审计与资源上限永远由内核强制，服务实现只能提供能力。
-- 事件与钩子分命名空间：`EventKind`/session log/SSE 只承载已发生的事实；干预型钩子（Decide/Supply）
-  是独立 ABI（`hook_abi`），按点授权、有硬预算与熔断，且不得在持有 workspace_gate 或 registry 锁
-  时回调插件。插件驱动 agent 只能经"开回合"通道（空闲优先），永远是 ark-agent 的同一个决策循环
-  在跑（见 `docs/requirements/plugin-hook-bus.md`）。
+- **当前实现**：`EventKind`/session log/SSE 只承载已发生的事实；组合根装配 `NoHooks`，插件拿不到
+  事件 sink，也没有 Decide/Supply 或插件开回合能力。
+- **已批准计划（未实施）**：干预型钩子使用独立 `hook_abi`，按点授权、有硬预算与熔断，且不得在持有
+  `workspace_gate` 或 registry 锁时回调插件。插件驱动 agent 只能经“开回合”通道（空闲优先），仍由
+  ark-agent 的同一个决策循环执行。完整边界见 `docs/requirements/plugin-hook-bus.md`。
 
 ### 6.4 配置与变更
 

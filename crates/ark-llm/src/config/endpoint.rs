@@ -141,7 +141,7 @@ impl ProviderConfig {
             .effective_context_window()
             .saturating_sub(self.max_tokens.map(u64::from).unwrap_or(0))
             .max(1);
-        Some((usable as f64 * COMPACTION_TRIGGER_RATIO) as u64)
+        Some(((usable as f64 * COMPACTION_TRIGGER_RATIO) as u64).max(1))
     }
 
     /// The context window this provider compacts against.
@@ -236,7 +236,7 @@ mod tests {
         assert_eq!(config.compaction_threshold(), Some(374_400));
         // A reserve at or above the window still yields a positive threshold.
         config.max_tokens = Some(500_000);
-        assert_eq!(config.compaction_threshold(), Some(0));
+        assert_eq!(config.compaction_threshold(), Some(1));
     }
 
     #[test]

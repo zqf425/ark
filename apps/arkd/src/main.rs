@@ -13,13 +13,11 @@ mod child;
 mod cli;
 mod headless;
 mod hooks;
-mod instructions;
 mod load_skill;
 mod memory_seed;
 mod model;
 mod paths;
 mod plugin_host;
-mod todo_tool;
 mod wiring;
 mod workspace;
 
@@ -64,7 +62,7 @@ async fn serve(args: ServeArgs) -> ExitCode {
         eprintln!("arkd: cannot initialize logging: {message}");
         return ExitCode::FAILURE;
     }
-    let wiring = match wiring::build(&args).await {
+    let wiring = match wiring::build(&args, false).await {
         Ok(wiring) => wiring,
         Err(err) => {
             eprintln!("arkd: cannot start runtime: {err}");

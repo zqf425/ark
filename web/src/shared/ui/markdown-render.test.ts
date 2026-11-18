@@ -32,11 +32,18 @@ describe('renderMarkdown', () => {
     expect(host.querySelector('pre code')?.textContent).toContain('<b>&raw')
   })
 
-  it('代码块带语言标签与复制按钮,复制源是原始代码', () => {
-    const html = renderMarkdown('```ts\nconst a = 1\n```\n')
+  it('代码块带本地化复制文案，复制源是原始代码', () => {
+    const html = renderMarkdown(`\`\`\`ts
+const a = 1
+\`\`\`
+`, [], {
+      copyCode: '复制代码',
+      plainText: '纯文本'
+    })
     expect(html).toContain('ark-md-code__bar')
     expect(html).toContain('ark-md-code__lang">ts')
     expect(html).toContain('data-md-copy')
+    expect(html).toContain('aria-label="复制代码"')
     expect(html).toContain('data-copy-source="const a = 1"')
   })
 

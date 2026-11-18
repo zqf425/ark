@@ -26,4 +26,4 @@ pub use domain::{
     base_status, clean_branch, clean_sha, count_status_lines, empty_status, expand_home, home_dir,
     resolve_candidate,
 };
-pub use service::WorkspaceInspector;
+pub use service::{project_instructions_seed, WorkspaceInspector};

@@ -22,16 +22,17 @@ ark 的模型已有能力做代码审查,但缺少一个**明确目标 + 只读�
    均在 `--workspace` 下执行;git 缺失或目标无效(未知分支/空 diff 等)以启动失败(退出码 2)
    返回结构化错误。diff 超过 64 KiB 时按字符边界截断并注明。
 2. **只读约束是运行时的,不是请求的**:建线程后立即 `PATCH /v1/threads/{id}` 将
-   `runtime.autonomy` 设为 `strict`——该自治下所有写路径与 shell 都需要人工批准,而 headless
-   无人应答,因此模型事实上无法修改工作区;审查指令同时明示 findings-only。两者缺一不可。
-3. **审查指令**(模型可见,英文,与工具描述同风格):要求只报告发现,**禁止调用任何工具**
-   (strict 下工具调用会把无人值守回合永久停在审批 gate 上);每条发现按 P0(正确性/安全,
+   `runtime.autonomy` 设为 `strict`，使写路径与 shell 进入审批判定；`arkd run` 属于 headless 来源，
+   当前每回合按 `approvals.on_unattended` 快照使用 `AutoDenyGates`。默认 `deny` 会立即拒绝
+   `NeedsApproval` 调用并把结构化失败交回模型，因此不能修改工作区，也不会永久等待 gate；审查指令
+   同时明示 findings-only。两者共同减少无关调用并提供运行时兜底。
+3. **审查指令**(模型可见,英文,与工具描述同风格):要求只报告发现,**禁止调用任何工具**。
+   即使 runtime 会自动拒绝需审批调用，工具失败仍会消耗轮次并干扰 findings；每条发现按 P0(正确性/安全,
    必须修)/P1(疑似缺陷)/P2(打磨)分级,引用文件与行号;没有发现时明确说明。
-4. **提示词必须自包含**(2026-11-02 补强):strict 下模型的任何工具调用都会把无人值守回合
-   永久停在审批 gate 上(实测模型在审查中调用 `bash git status` 触发)。因此指令显式禁止
-   调用工具,并由 CLI 预取 `git status --porcelain=v1` 与 `git log --oneline -5` 作为
-   「仓库快照」随 diff 一起进入提示词(两条均为 best-effort,取不到不阻断启动),使模型
-   不需要 shell 就能完成审查。工具调用的自动拒绝(auto-deny gate)是后续能力,未实现。
+4. **提示词必须自包含**(2026-11-02 补强):CLI 预取 `git status --porcelain=v1` 与
+   `git log --oneline -5` 作为「仓库快照」随 diff 一起进入提示词(两条均为 best-effort,取不到不阻断启动),
+   使模型不需要 shell 就能完成审查。历史上 strict 工具调用曾永久等待无人应答的 gate；当前
+   auto-deny 已将该路径改为立即拒绝，禁止工具的提示词仍保留为质量与成本约束。
 5. **输出与退出码**:沿用 `arkd run` 既有语义——findings 流式写 stdout,`turn_completed` → 0,
    失败/中止 → 1,启动失败 → 2。
 6. **不做双实现**:diff 计算只依赖 git CLI 与既有的 `arkd run` 回合路径,不新增工具、不改
@@ -60,12 +61,12 @@ ark 的模型已有能力做代码审查,但缺少一个**明确目标 + 只读�
 - 冒烟与真实校验:临时 git 仓库上 `arkd run --review uncommitted` 完成建线程 → strict pin →
   diff → 审查回合 → 流式输出 → exit 0;真实网关模型对预埋缺陷产出 P0/P1 findings(证据见
   release-readiness.md 校验轮记录)。
-- **2026-11-02 自包含提示词补强**:真实模型(DeepSeek)在审查中调用 `bash git status`,
-  strict 无人值守下审批 gate 永挂,回合无法收敛。修复:`review_prompt` 显式禁止工具调用,
+- **2026-11-02 自包含提示词补强（历史）**:当时真实模型(DeepSeek)在审查中调用 `bash git status`,
+  strict 无人值守下审批 gate 永挂,回合无法收敛。该次修复先由 `review_prompt` 显式禁止工具调用,
   CLI 预取仓库快照(`repo_context`)并入提示词;单测同步(禁工具语句、快照段落)。
 - **2026-11-02 复跑证据**:补强后以 workbuddy `global:deepseek-v4.1-flash` 重跑
   `arkd run --review uncommitted`:exit 0,零工具调用,结构化 findings 正常产出
   (对三文件演示仓库正确给出两条 P2 观察并明确「无 P0/P1」)。
-- **2026-11-02 gate 有界退出**:headless 把 `approval_requested`/`user_input_requested`
-  视为不可收敛终态(exit 1,带 gate 摘要)——即使模型仍无视禁令调用工具,无人值守回合
-  也有结构上界,不再依赖提示词约定。快照 8 KiB 截断与失败占位同步落地。
+- **当前 gate 兜底**:后续 auto-deny 已在每个 headless 回合按当前 `on_unattended` 快照接入；默认 deny
+  使 `NeedsApproval` 立即形成结构化拒绝，不注册待决 gate。headless 对 `approval_requested`/
+  `user_input_requested` 的 exit 1 处理仍是防御性收敛。快照 8 KiB 截断与失败占位保持不变。

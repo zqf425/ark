@@ -45,8 +45,9 @@
 以免完成风暴突破上下文预算；每条摘要或错误最多 1,200 UTF-8 字节。只传递 child 的摘要或错误，
 不复制原始转录。
 
-父线程详情只返回最新 50 条不同 `notificationId` 的完成摘要；web 同样只保留 50 个摘要卡片，避免长寿命
-线程的响应或渲染状态无界增长。
+父线程详情只返回最新 50 条不同 `notification_id` 的完成摘要，作为有界 wire/read model。当前 web 不把
+该字段折叠为主画布摘要卡片，也不在 reducer 中保留 50 条副本。实时 `child_completed` 只显示一次 toast；
+持久查看由 `ChildRunsPanel` 重新读取 child-runs API。
 
 `autoContinue` 仅在 `subagents.enabled=true` 且 `subagents.auto_continue=true`、父线程无活动 turn、
 未删除/归档且没有已调度 continuation 时触发。关闭 subagents 会立即取消待调度 continuation；默认值和
@@ -83,10 +84,15 @@ reason，供熔断与审计共用。
 
 ## 交付阶段
 
+当前实现保留 `child_completed` 的父线程持久事件、completion inbox 与自动续跑，但 web 展示边界是
+“实时 toast + 右侧 `ChildRunsPanel`”。以下阶段记录按当前展示宿主描述，不把 wire read model 等同于
+主画布卡片。
+
 - **阶段 1（当前实现）**：`child_completed` 作为父线程持久化 SSE 事件发布，带终态摘要和稳定通知 ID；
   hydrate 在事件缺失时补投递，并避免重复投递。
 - **阶段 2（当前实现）**：将事件投影为主线程 completion inbox，在下一次用户回合前以系统来源上下文提供
-  给模型；正常完成后写入确认事件。`ThreadDetail` 恢复持久摘要卡片，web 对实时完成事件显示一次性提示。
+  给模型；正常完成后写入确认事件。`ThreadDetail.child_completions` 保持有界 read model；web 对实时
+  完成事件只显示一次 toast，持久查看走 `ChildRunsPanel`，不恢复主画布卡片。
 - **阶段 3（当前实现）**：在显式 `subagents.auto_continue` 配置下，由 per-thread supervisor 合并通知并
   启动普通父 continuation；默认关闭，生命周期取消与 shutdown 收敛已实现。
 
@@ -100,7 +106,7 @@ reason，供熔断与审计共用。
 | `ark-delegation` | 终态后发布完成通知，恢复时幂等补发 |
 | `ark-agent` | 将 inbox 结果作为系统来源输入 |
 | `ark-server` | SSE/查询接口、详情摘要上限 50 条、per-thread debounce 与生命周期取消 |
-| `web` | child 完成提示、摘要和跳转动作；摘要卡片上限 50 条 |
+| `web` | `child_completed` 实时 toast；`ChildRunsPanel` 持久摘要与跳转，不在主画布保留 50 卡片 |
 | `arkd` | 配置、supervisor、continuation 装配 |
 
 ## 验收
@@ -116,4 +122,3 @@ reason，供熔断与审计共用。
    连续 2 次因模型请求失败终止的自动续跑暂停该线程的自动续跑并记录诊断，不产生新模型调用；用户回合
    仍可消费未确认通知，且重置两条计数。与「确认失败不自行链式重试」正交：后者指确认写入失败的补偿。
 7. 默认配置不产生自动模型调用；自动 continuation 仍走原审批和沙箱。
-8. 默认配置不产生自动模型调用；自动 continuation 仍走原审批和沙箱。

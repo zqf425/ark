@@ -53,10 +53,12 @@
 - 持久 shell 会话（[需求设计](../requirements/shell-sessions.md)）由
   `exec/tools/shell_session.rs` 承载：`bash_session`（前台复用 `bash` 语义、leading `cd`
   推进会话 cwd；`run_in_background` 以 std Command 派生独立进程组并立即返回 task_id）、
-  `bash_output`（按读者 offset 增量返回输出与 running/finished 状态）、`bash_kill`
+  `bash_output`（按绝对逻辑字节 offset 增量返回输出与 running/finished 状态；环形缓冲丢弃前缀后仍以
+  `base_offset + retained_len` 推进，不能把 offset 当当前 `VecDeque` 下标）、`bash_kill`
   （组信号 + direct kill 兜底，幂等）。`ShellSessionManager` 是进程内运行态（不入盘、不进
   契约）：环境变量**不**跨调用保持（Windows 无可移植 shell 协议，需求 §2 显式记录）；
-  输出环形缓冲 64 KiB 超限丢最旧并打标记；任务数上限 16、仅淘汰已完成任务。
+  输出环形缓冲 64 KiB 超限丢最旧并打标记；任务数是 16 的硬上限，满额时先淘汰最旧已完成任务，
+  若 16 个任务都仍在运行则新建后台任务返回结构化错误，绝不插入第 17 个。
   组合根以 `builtins_with_shell_session()` 装配父/子两个注册表（各自独立 manager 实例）。
 - `find`/`grep` 的递归遍历跳过固定忽略名单（`target`、`node_modules`、`dist`、`.git`、`.tmp`、
   `.worktrees`，见 `exec::common::IGNORED_DIR_NAMES`）。名单在搜索根之下的每一层生效；把 `path`

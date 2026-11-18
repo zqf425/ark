@@ -26,8 +26,8 @@ const renderer = {
     // without re-deriving text from the highlighted DOM.
     return (
       `<div class="ark-md-code">` +
-      `<div class="ark-md-code__bar"><span class="ark-md-code__lang">${language ? escapeHtml(language) : 'text'}</span>` +
-      `<button type="button" class="ark-md-code__copy" data-md-copy data-copy-source="${escapeAttr(text)}" aria-label="copy">` +
+      `<div class="ark-md-code__bar"><span class="ark-md-code__lang">${language ? escapeHtml(language) : ''}</span>` +
+      `<button type="button" class="ark-md-code__copy" data-md-copy data-copy-source="${escapeAttr(text)}">` +
       `<span class="ark-md-code__copy-icon" aria-hidden="true"></span></button></div>` +
       `<pre><code class="hljs"${langClass}>${body}</code></pre></div>`
     )
@@ -148,22 +148,40 @@ function promotePathChips(root: HTMLElement, writable: readonly string[]): void 
   }
 }
 
+
+export type MarkdownLabels = {
+  copyCode: string
+  plainText: string
+}
+
+const DEFAULT_MARKDOWN_LABELS: MarkdownLabels = {
+  copyCode: 'Copy code',
+  plainText: 'text'
+}
+
+function localizeCodeBlocks(root: HTMLElement, labels: MarkdownLabels): void {
+  for (const button of root.querySelectorAll<HTMLElement>('[data-md-copy]')) {
+    button.setAttribute('aria-label', labels.copyCode)
+  }
+  for (const language of root.querySelectorAll<HTMLElement>('.ark-md-code__lang')) {
+    if (!language.textContent) language.textContent = labels.plainText
+  }
+}
+
 /** Parse, highlight and sanitize in one step; always synchronous. */
-export function renderMarkdown(text: string, writable: readonly string[] = []): string {
+export function renderMarkdown(
+  text: string,
+  writable: readonly string[] = [],
+  labels: MarkdownLabels = DEFAULT_MARKDOWN_LABELS
+): string {
   // `async: false` keeps the return type a plain string: the renderer is a
   // synchronous projection step, never an async pipeline.
-  const html = marked.parse(text, { async: false })
-  // Path promotion happens *before* sanitize on renderer-owned markup only;
-  // `data-*` attributes survive DOMPurify's defaults (ALLOW_DATA_ATTR).
-  if (writable.length > 0) {
-    const host = document.createElement('div')
-    host.innerHTML = html
-    promotePathChips(host, writable)
-    // `data-*` attributes survive DOMPurify's defaults (ALLOW_DATA_ATTR), so the
-    // copy button's raw source needs no extra allow-list here.
-    return DOMPurify.sanitize(host.innerHTML)
-  }
+  const host = document.createElement('div')
+  host.innerHTML = marked.parse(text, { async: false })
+  localizeCodeBlocks(host, labels)
+  // Path promotion happens before sanitize on renderer-owned markup only.
+  if (writable.length > 0) promotePathChips(host, writable)
   // `data-*` attributes survive DOMPurify's defaults (ALLOW_DATA_ATTR), so the
   // copy button's raw source needs no extra allow-list here.
-  return DOMPurify.sanitize(html)
+  return DOMPurify.sanitize(host.innerHTML)
 }

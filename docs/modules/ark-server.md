@@ -18,6 +18,10 @@
   契约 DTO 建模的请求体引用类型名而非逐字段抄写（`ark-contract` 是唯一真源）；ark-server 路由
   内部定义的个别请求体（如 `UpsertProviderBody`）如实标注为 server 本地类型，不指向契约生成物。集成测试对目录中每个
   `method+path` 发起真实请求，断言不落入路由级裸 404，防止目录与路由表漂移。
+- provider 读取分为两个受保护出口：`GET /v1/runtime/providers` 返回脱敏 `ProviderView`；
+  `GET /v1/runtime/providers/{id}` 为设置编辑返回完整 `ProviderEntry`，包括已存 API key。两者都位于
+  protected router，配置 bearer token 时必须认证；未配置 token 时依赖仅监听 loopback 的本地授权边界。
+  该边界不隔离不可信本地进程，完整条目不得进入列表、诊断、日志或错误。
 - SSE 订阅调用 `SessionStore::subscribe`，取得同一临界区内的 backlog、水位和 live receiver。
 - 首帧：`GET /v1/threads/{id}/events` 在 backlog 为空时立即发送一个 `heartbeat` 控制帧，`seq` 取该次订阅的
   watermark。它不新增 wire 类型，也不写入 store：既不能声称 writer 尚未发放的序号，也不能让重连的
@@ -75,12 +79,16 @@
 - `GET /v1/threads/{id}` 把 active `TurnRegistry` entry、interaction 窄事件投影和 live gate id 三者取交集
   写入 `ThreadDetail.runtime_snapshot`；`ThreadDetail.runtime` 只携带已持久化的每线程覆盖值。历史 gate 或
   已移除 waiter 不得出现在可操作快照中。
-- workbench 的 Plan、Changes、File、Terminal 投影均在 `service/workbench.rs`，handler 只读取权威事件并
-  调用该纯函数；File 不直接访问磁盘，而是返回已持久化的 `read` 工具输出。workbench 的 goal/todos
+- `service/workbench.rs` 只承载线程历史投影：其中 File 返回已持久化的成功 `read` 工具输出，对应
+  `GET /v1/threads/{id}/files`，不直接访问磁盘。任意文件预览是独立的
+  `GET /v1/workspace/file?path=[&thread_id=]`，由 `WorkspaceService::read_file` 按 thread workspace containment
+  授权，不能与历史投影混写。workbench 的 goal/todos
   读写端点（`GET/POST/DELETE /v1/threads/{id}/goal` 与 `/todos`）不经回合注册，直接向线程事件流追加
   `GoalUpdated`/`GoalCleared`/`TodosUpdated`/`TodosCleared` 权威事件（todos 经 `validate_todos` 校验），
-  空文本 goal 与非法 todos 返回结构化 400；它们是 workbench 唯一的写路径，读侧 Plan 投影消费同一事件流。
-  `validate_todos`（上限 200、id/title 非空且 id 唯一）与 `todo_marker`（`[ ]`/`[~]`/`[x]` 渲染）作为
+  空文本 goal 与非法 todos 返回结构化 400。todos 还可由仅父线程注册的 `todo_write` 工具写入同一事件流；
+  读侧 Plan 投影不区分写入来源。`validate_todos`（上限 200、id/title 非空且 id 唯一、每个标题最多
+  500 个 Unicode 字符）与
+  `todo_marker`（`[ ]`/`[~]`/`[x]` 渲染）作为
   共享纯函数宿主在 `service/workbench.rs`：HTTP 路由与组合根的 `todo_write` 工具（见 arkd 设计）是
   仅有的两个调用方，保证持久计划不会因写入路径不同而形状漂移。
 - `POST /v1/threads/{id}/fork` 以当前持久水位为切点物理复制前缀线程（不接受任意历史 seq：选择历史
@@ -126,13 +134,15 @@
 - `POST /v1/workspace/pick` 在 `spawn_blocking` 中调用 `FolderDialogService::pick_folder`（原生对话框是
   模态 UI，请求取消不关闭已弹出的对话框）；端口未装配时 `runtime_unavailable`/503，返回
   `FolderPickResponse`，`path` 省略即用户取消。见 [workspace-switch 需求](../requirements/workspace-switch-and-git-diff.md)。
-- `GET /v1/threads/{id}/usage` 与 `GET /v1/debug/llm-rounds` 只从权威 `usage` 事件投影（每轮模型调用
-  恰好一条），不维护第二套用量真源。`usage.duration_ms` 优先采用 agent 循环实测的模型调用耗时
-  （不含工具执行），样本未计时（旧日志）才回退到回合边界窗口；该字段是轮次耗时的唯一 wire 载体
-  （随扁平化的 usage 序列化）。
+- `GET /v1/threads/{id}/usage` 与 `GET /v1/debug/llm-rounds` 都只从权威 `usage` 事件投影（每轮模型
+  调用恰好一条），不维护第二套用量真源。`usage.duration_ms` 优先采用 agent 循环实测的模型调用耗时
+  （不含工具执行），并作为轮次耗时的唯一 wire 载体。线程 usage 聚合直接对这些样本做严格折叠，不为
+  旧日志缺失值补时；只有诊断用的 llm-rounds 投影会在单个旧样本缺少耗时时回退到回合边界窗口。
 - **会话内每个回合的耗时读 `GET /v1/threads/{id}/usage` 的 `turn_usage`，不读 llm-rounds**：该聚合
   路由整份日志重放，逐回合折叠（`TurnUsage`，含 `turn_id`/`samples`/扁平化 `usage`），且与线程总计
-  用同一次折叠，因此「各回合之和 == 线程总计」按构造成立。llm-rounds 是有界诊断分页，长会话会把整个
+  用同一次折叠，因此 token、费用等可加字段按构造一致。`duration_ms` 采用 `Usage::merge` 的严格聚合：
+  只有全部实际 usage 样本都有耗时才求和，任一样本缺失则该回合及线程聚合均为 `None`，不会显示部分和。
+  llm-rounds 是有界诊断分页，长会话会把整个
   回合挤出单页，用它求和曾让回合头部把真实几分钟显示成几秒（渲染层缺陷已随本次改动消除）。
   llm-rounds 以 `limit`（缺省 `LLM_ROUNDS_DEFAULT_LIMIT`，clamp 到 `LLM_ROUNDS_MAX_LIMIT`）与
   `offset` 分页，无 `thread_id` 时至多扫描最近 `LLM_ROUNDS_MAX_THREADS` 个线程；诊断字段不包含
@@ -201,9 +211,10 @@
 路由 `/v1/schedules`(CRUD + 立即运行)只解包 HTTP 并调用调度服务;捕获的输入与不存在 id 的错误
 沿用端口的结构化错误码。
 
-turn 启动与线程创建的编排宿主是 `service` 层（`service::turns::start_turn`/`spawn_turn`、
+turn 启动与线程创建的编排宿主是 `service` 层（`service::turns::start_turn`/`start_turn_as`/`spawn_turn`、
 `service::threads::create_thread`、`service::compaction::ensure_checkpoint`）：HTTP handler 只做
-解析与状态码包装，scheduler/continuation 等其他消费者调用同一编排并直接使用 `ArkError`。
+解析与状态码包装。scheduler 以 `TurnSource::Scheduled`、IM 以 `TurnSource::Im` 调用同一编排，
+continuation/recovery 使用各自的系统来源，并直接使用 `ArkError`。
 `service` 层不得引用 `api::handlers` 或 `ApiError`（`serve.rs` 为绑定路由表的结构性豁免）；
 错误到状态码的映射仍集中在 `api::error`。
 

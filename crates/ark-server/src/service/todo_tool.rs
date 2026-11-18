@@ -1,6 +1,8 @@
-//! The model-facing `todo_write` tool belongs in the composition root: it
-//! writes through the concrete `SessionStore` without making `ark-tool` depend
-//! on `ark-store`.
+//! Model-facing durable Plan writer.
+//!
+//! This service owns the Plan write behavior while the composition root only
+//! registers it in the parent tool catalogue. It depends on the `SessionStore`
+//! port, not a concrete storage implementation.
 //!
 //! The tool is the model's only path into the durable plan panel. Because the
 //! panel renders from `TodosUpdated` events and the per-turn seed restates the
@@ -15,12 +17,6 @@ use ark_ports::{SessionStore, Tool, ToolArgs, ToolContext, ToolOutput};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
-
-/// Bounded titles so one verbose model call cannot bloat the panel or the
-/// per-turn seed. Titles beyond the cap are rejected with a message the model
-/// can act on; truncating silently would let the plan claim something the
-/// model never wrote.
-const MAX_TODO_TITLE_CHARS: usize = 500;
 
 static TODO_WRITE_SCHEMA: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| {
     json!({
@@ -87,17 +83,8 @@ impl Tool for TodoWriteTool {
         // cannot be shaped differently by the path that wrote it. Expected
         // failures answer as `ToolOutput::err` so the model can read the
         // reason and correct its next call, like every other builtin.
-        if let Err(err) = ark_server::service::workbench::validate_todos(&parsed.todos) {
+        if let Err(err) = super::workbench::validate_todos(&parsed.todos) {
             return Ok(ToolOutput::err(err.message));
-        }
-        for todo in &parsed.todos {
-            let title_chars = todo.title.chars().count();
-            if title_chars > MAX_TODO_TITLE_CHARS {
-                return Ok(ToolOutput::err(format!(
-                    "todo `{}` title is {title_chars} characters; keep titles at most {MAX_TODO_TITLE_CHARS}",
-                    todo.id
-                )));
-            }
         }
         let thread = ctx.thread_id;
         // The thread must exist before the event lands; an unknown id is a
@@ -120,9 +107,9 @@ impl Tool for TodoWriteTool {
             )
             .await?;
         let events = self.store.replay_events(thread, 0).await?;
-        Ok(ToolOutput::ok(render_plan(
-            &ark_server::service::workbench::plan(&events),
-        )))
+        Ok(ToolOutput::ok(render_plan(&super::workbench::plan(
+            &events,
+        ))))
     }
 }
 
@@ -139,7 +126,7 @@ pub fn render_plan(plan: &ark_contract::PlanView) -> String {
         lines.push(format!("Goal: {}", goal.trim()));
     }
     for todo in &plan.todos {
-        let mark = ark_server::service::workbench::todo_marker(todo.status);
+        let mark = super::workbench::todo_marker(todo.status);
         lines.push(format!("- {mark} {}", todo.title.trim()));
     }
     lines.join("\n")
@@ -234,7 +221,7 @@ mod tests {
             duplicate.content
         );
 
-        let long_title = "x".repeat(MAX_TODO_TITLE_CHARS + 1);
+        let long_title = "x".repeat(crate::service::workbench::MAX_TODO_TITLE_CHARS + 1);
         let overlong = tool
             .execute(
                 &context(thread),

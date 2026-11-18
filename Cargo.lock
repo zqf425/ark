@@ -374,11 +374,10 @@ version = "0.1.0"
 dependencies = [
  "ark-common",
  "ark-contract",
- "async-trait",
  "chrono",
  "serde",
  "serde_json",
- "tokio",
+ "tracing",
 ]
 
 [[package]]

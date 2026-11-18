@@ -29,9 +29,17 @@ pub(super) struct AgentTurnRunner {
     pub(super) attachments: Arc<dyn ark_ports::AttachmentStore>,
     /// Human gate broker shared with the HTTP command surface.
     pub(super) gates: Arc<dyn GateBroker>,
+    /// True for the one-shot `arkd run` host, which has no interactive client.
+    pub(super) unattended: bool,
     /// Hook bus (requirements/plugin-hook-bus.md). Shared with the child
     /// executor and the AppState, so one broker instance owns every decision.
     pub(super) hooks: Arc<dyn ark_ports::HookBroker>,
+}
+
+struct PreparedParentTurn {
+    reactor: Reactor,
+    attachments: crate::attachment_seed::AttachmentSeed,
+    user_text: Option<String>,
 }
 
 impl AgentTurnRunner {
@@ -199,13 +207,30 @@ pub(super) async fn finish_parent_turn(
     }
 }
 
+/// Whether this turn has nobody available to resolve an approval gate.
+pub(super) fn gates_for_turn(runtime_unattended: bool, source: &TurnSource) -> bool {
+    runtime_unattended || !matches!(source, TurnSource::User(_))
+}
+
+/// Select the approval broker for one turn from its source and config snapshot.
+pub(super) fn gate_broker_for_turn(
+    unattended: bool,
+    interactive: Arc<dyn GateBroker>,
+    settings: &ark_contract::ApprovalSettings,
+) -> Arc<dyn GateBroker> {
+    if !unattended {
+        return interactive;
+    }
+    Arc::new(ark_agent::AutoDenyGates::new(
+        Arc::new(ark_agent::AllowAllGates),
+        ark_tool::unattended_forwards(settings),
+    ))
+}
+
 #[async_trait::async_trait]
 impl TurnRunner for AgentTurnRunner {
     async fn run_turn(&self, job: TurnJob) -> Result<TurnEnd> {
         let is_auto = matches!(&job.source, TurnSource::AutoContinuation);
-        // A recovery re-runs the failed request through a fresh reactor; the
-        // request text rides `TurnSource::AutoRecovery` and the attempt number
-        // lands on the durable `turn_started` (and the transcript note below).
         let recovery = match &job.source {
             TurnSource::AutoRecovery { attempt, .. } => Some(*attempt),
             _ => None,
@@ -215,107 +240,18 @@ impl TurnRunner for AgentTurnRunner {
         } else {
             completion_inbox(self.store.as_ref(), job.thread_id).await?
         };
-        let history = conversation_history(&self.store.read_items(job.thread_id).await?);
-        // The durable plan is re-read every turn so restating the goal/todos in
-        // the recent tail cannot drift from what the workbench shows.
-        let plan = ark_server::service::workbench::plan(
-            &self.store.replay_events(job.thread_id, 0).await?,
-        );
-        let thread = self.store.get_thread(job.thread_id).await?;
-        let (source_text, user_text) = turn_source_texts(&job.source);
-        // Capture once before building either the prompt or tool adapter. A
-        // per-session override wins, otherwise the process workspace lease is
-        // used; neither can change during this turn.
-        let workspace = super::turn_common::resolve_workspace(
-            thread
-                .runtime
-                .workspace
-                .as_deref()
-                .map(std::path::Path::new),
-            None,
-            self.roots.lease().canonical_root,
-            "thread",
-        )?;
-        let snapshot = self.config.snapshot();
-        let (attachments, events, writer, steer_image_resolver, steer_outcome_recorder) = self
-            .parent_delivery(
-                &job,
-                thread.runtime.provider_id.as_deref(),
-                thread.runtime.model.as_deref(),
-                recovery,
-            )
-            .await?;
-        // The rule table is a Hot config: each turn snapshots its own policy so
-        // a saved patch applies to the next turn without a restart.
-        let policy: Arc<dyn SandboxPolicy> = Arc::new(ApprovalPolicy::new(
-            BuiltinSandboxPolicy::new(autonomy_from_override_or_default(
-                thread.runtime.autonomy.as_deref(),
-                &snapshot,
-            )?),
-            snapshot.approvals.clone(),
-        ));
-        // Plugin decide first, then the shell `pre_tool_use` hook, then
-        // dispatch (requirements/plugin-hook-bus.md, pinned order).
-        let tools: Arc<dyn AgentToolRunner> = Arc::new(super::turn_common::HookToolRunner::new(
-            Arc::clone(&self.hooks),
-            job.thread_id,
-            job.turn_id,
-            super::turn_common::HookedToolRunner::new(
-                Arc::clone(&self.tools),
-                Arc::clone(&self.config),
-                workspace.clone(),
-                job.thread_id,
-                job.turn_id,
-            ),
-        ));
-        let seed_messages = self.parent_seed(&workspace, history, &source_text, &inbox, &plan);
-        // One snapshot per turn: every value below is derived from the same
-        // config state, so a turn cannot mix a new model with old limits.
-        let provider = resolve_thread_provider(
-            &self.providers,
-            thread.runtime.provider_id.as_deref(),
-            thread.runtime.model,
-            thread.runtime.reasoning_effort,
-        )?;
-        let model = self.model_for_turn(&snapshot, provider.clone(), job.thread_id, job.turn_id);
-        let mut reactor = super::turn_common::build_reactor(super::turn_common::ReactorSpec {
-            model,
-            tools,
-            writer,
-            gates: Arc::clone(&self.gates),
-            sandbox: policy,
-            events,
-            cancel: job.cancel,
-            seed: ModelSeed {
-                messages: seed_messages,
-                tools: self.tool_registry.schemas(),
-                temperature: provider.as_ref().and_then(|provider| provider.temperature),
-                max_tokens: provider.as_ref().and_then(|provider| provider.max_tokens),
-                reasoning_effort: provider
-                    .as_ref()
-                    .and_then(|provider| provider.reasoning_effort.clone()),
-            },
-            machine: TurnMachine::new(super::turn_common::limits_for_turn(
-                &snapshot,
-                provider.as_ref(),
-            )),
-            chunk_buffer: super::turn_common::chunk_buffer_for_turn(&snapshot),
-            steering: job.steering,
-            steer_image_resolver: Some(steer_image_resolver),
-            steer_outcome_recorder: Some(steer_outcome_recorder),
-        });
-        if let Some(text) = user_text {
-            reactor.push_user_message(user_message_with_attachments(text, &attachments));
+        let mut prepared = self.prepare_parent_turn(&job, &inbox, recovery).await?;
+        if let Some(text) = prepared.user_text {
+            prepared
+                .reactor
+                .push_user_message(user_message_with_attachments(text, &prepared.attachments));
         }
-        // A recovery turn announces itself in the transcript: the durable log
-        // already shows the failed predecessor, but the live transcript needs
-        // the row explaining why a new turn started without user input.
         if let Some(attempt) = recovery {
             let reason = self.last_model_failure(job.thread_id).await;
-            reactor.note_auto_recovery(attempt, &reason).await;
+            prepared.reactor.note_auto_recovery(attempt, &reason).await;
         }
-        let outcome = reactor.run().await?;
-        let end = finish_parent_turn(
+        let outcome = prepared.reactor.run().await?;
+        Ok(finish_parent_turn(
             outcome,
             self.store.as_ref(),
             self.sink.as_ref(),
@@ -323,8 +259,122 @@ impl TurnRunner for AgentTurnRunner {
             job.turn_id,
             &inbox,
         )
-        .await;
-        Ok(end)
+        .await)
+    }
+}
+
+impl AgentTurnRunner {
+    async fn prepare_parent_turn(
+        &self,
+        job: &TurnJob,
+        inbox: &CompletionInbox,
+        recovery: Option<u32>,
+    ) -> Result<PreparedParentTurn> {
+        let history = conversation_history(&self.store.read_items(job.thread_id).await?);
+        let plan = ark_server::plan(&self.store.replay_events(job.thread_id, 0).await?);
+        let thread = self.store.get_thread(job.thread_id).await?;
+        let (source_text, user_text) = turn_source_texts(&job.source);
+        let workspace = self.workspace_for_runtime(&thread.runtime)?;
+        let snapshot = self.config.snapshot();
+        let gates = gate_broker_for_turn(
+            gates_for_turn(self.unattended, &job.source),
+            Arc::clone(&self.gates),
+            &snapshot.approvals,
+        );
+        let (attachments, events, writer, image_resolver, outcome_recorder) = self
+            .parent_delivery(
+                job,
+                thread.runtime.provider_id.as_deref(),
+                thread.runtime.model.as_deref(),
+                recovery,
+            )
+            .await?;
+        let sandbox = self.sandbox_for_runtime(&thread.runtime, &snapshot)?;
+        let tools = self.tools_for_job(job, &workspace);
+        let seed = self.parent_seed(&workspace, history, &source_text, inbox, &plan);
+        let provider = resolve_thread_provider(
+            &self.providers,
+            thread.runtime.provider_id.as_deref(),
+            thread.runtime.model,
+            thread.runtime.reasoning_effort,
+        )?;
+        let model = self.model_for_turn(&snapshot, provider.clone(), job.thread_id, job.turn_id);
+        let reactor = super::turn_common::build_reactor(super::turn_common::ReactorSpec {
+            model,
+            tools,
+            writer,
+            gates,
+            sandbox,
+            events,
+            cancel: job.cancel.clone(),
+            seed: ModelSeed {
+                messages: seed,
+                tools: self.tool_registry.schemas(),
+                temperature: provider.as_ref().and_then(|item| item.temperature),
+                max_tokens: provider.as_ref().and_then(|item| item.max_tokens),
+                reasoning_effort: provider
+                    .as_ref()
+                    .and_then(|item| item.reasoning_effort.clone()),
+            },
+            machine: TurnMachine::new(super::turn_common::limits_for_turn(
+                &snapshot,
+                provider.as_ref(),
+            )),
+            chunk_buffer: super::turn_common::chunk_buffer_for_turn(&snapshot),
+            steering: Arc::clone(&job.steering),
+            steer_image_resolver: Some(image_resolver),
+            steer_outcome_recorder: Some(outcome_recorder),
+        });
+        Ok(PreparedParentTurn {
+            reactor,
+            attachments,
+            user_text,
+        })
+    }
+
+    fn workspace_for_runtime(
+        &self,
+        runtime: &ark_contract::ThreadRuntimeSettings,
+    ) -> Result<std::path::PathBuf> {
+        super::turn_common::resolve_workspace(
+            runtime.workspace.as_deref().map(std::path::Path::new),
+            None,
+            self.roots.lease().canonical_root,
+            "thread",
+        )
+    }
+
+    fn sandbox_for_runtime(
+        &self,
+        runtime: &ark_contract::ThreadRuntimeSettings,
+        snapshot: &RuntimeConfig,
+    ) -> Result<Arc<dyn SandboxPolicy>> {
+        Ok(Arc::new(ApprovalPolicy::new(
+            BuiltinSandboxPolicy::new(autonomy_from_override_or_default(
+                runtime.autonomy.as_deref(),
+                snapshot,
+            )?),
+            snapshot.approvals.clone(),
+        )))
+    }
+
+    fn tools_for_job(
+        &self,
+        job: &TurnJob,
+        workspace: &std::path::Path,
+    ) -> Arc<dyn AgentToolRunner> {
+        Arc::new(super::turn_common::HookToolRunner::new(
+            Arc::clone(&self.hooks),
+            job.thread_id,
+            job.turn_id,
+            super::turn_common::HookedToolRunner::new(
+                Arc::clone(&self.tools),
+                Arc::clone(&self.config),
+                workspace.to_path_buf(),
+                job.thread_id,
+                job.turn_id,
+            ),
+        ))
     }
 }
 
@@ -451,7 +501,7 @@ impl AgentTurnRunner {
 /// failed request's text, so it behaves like explicit user input.
 fn turn_source_texts(source: &TurnSource) -> (String, Option<String>) {
     match source {
-        TurnSource::User(text) => (text.clone(), Some(text.clone())),
+        TurnSource::User(text) | TurnSource::Scheduled(text) => (text.clone(), Some(text.clone())),
         TurnSource::Im { text, .. } => (text.clone(), Some(text.clone())),
         TurnSource::AutoRecovery { text, .. } => (text.clone(), Some(text.clone())),
         TurnSource::AutoContinuation => (String::new(), None),

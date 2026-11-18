@@ -102,7 +102,7 @@ struct Assembly {
 /// stays "explicit wiring only" while keeping every function inside the
 /// AGENTS §4 length budget. Step order matters where a comment marks it —
 /// e.g. the completion listener subscribes before hydration (§7.4.1).
-pub async fn build(args: &ServeArgs) -> Result<Wiring> {
+pub async fn build(args: &ServeArgs, unattended: bool) -> Result<Wiring> {
     let paths = RuntimePaths::from_data_dir(&args.data_dir);
     paths.ensure()?;
     let ctx = prepare_runtime(args, &paths).await?;
@@ -133,6 +133,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
         &hooks,
         tool_runner,
         &plugin_mcp,
+        unattended,
     );
     let state = assemble_app_state(
         args,
@@ -150,7 +151,7 @@ pub async fn build(args: &ServeArgs) -> Result<Wiring> {
     spawn_completion_listener(state.clone(), agent.completion_notifications);
     // Recover unacknowledged completions that were durable before this process
     // started (for example, a crash after `child_completed` but before debounce).
-    ark_server::service::sync_auto_continue_policy(state.clone()).await;
+    ark_server::sync_auto_continue_policy(state.clone()).await;
     // The loop is NOT started here: a one-shot headless `run` reuses this
     // assembly and must not fire due schedules (or spend model budget) while
     // executing a single turn. `serve` calls `Wiring::schedules.spawn(...)`
@@ -228,17 +229,14 @@ fn assemble_turn_pipeline(
     hooks: &Arc<dyn ark_ports::HookBroker>,
     tool_runner: Arc<RegistryToolRunner>,
     plugin_mcp: &Arc<ark_mcp::McpBus>,
+    unattended: bool,
 ) -> (
     Arc<ark_server::InteractiveGates>,
     Arc<AgentTurnRunner>,
     Arc<McpServerAdapter>,
 ) {
     let interactive = Arc::new(ark_server::InteractiveGates::new());
-    let reactor_gates = Arc::new(ark_agent::AutoDenyGates::new(
-        interactive.clone(),
-        ark_tool::unattended_forwards(&ctx.config.snapshot().approvals),
-    ));
-    let gate_broker: Arc<dyn GateBroker> = reactor_gates;
+    let gate_broker: Arc<dyn GateBroker> = interactive.clone();
 
     let mcp_adapter = Arc::new(McpServerAdapter::new(
         Arc::clone(&platform.mcp),
@@ -267,6 +265,7 @@ fn assemble_turn_pipeline(
         memory: Arc::clone(&platform.memory),
         attachments: Arc::clone(&platform.attachments),
         gates: gate_broker,
+        unattended,
         hooks: Arc::clone(hooks),
     });
     (interactive, runner, mcp_adapter)
@@ -607,12 +606,12 @@ fn spawn_completion_listener(
         loop {
             match notifications.recv().await {
                 Ok(thread_id) => {
-                    ark_server::service::schedule_auto_continuation(state.clone(), thread_id).await;
+                    ark_server::schedule_auto_continuation(state.clone(), thread_id).await;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                     // Recover from the durable inbox through the same safe scan
                     // used at startup, including persisted interrupt suppression.
-                    ark_server::service::sync_auto_continue_policy(state.clone()).await;
+                    ark_server::sync_auto_continue_policy(state.clone()).await;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }

@@ -53,12 +53,35 @@ pub async fn start_turn_as(
     raw_text: String,
     requested_attachments: Vec<ark_common::AttachmentId>,
 ) -> ark_common::Result<TurnSummary> {
-    // A recovery re-persists the failed request's text; its copy rides the
-    // source, not the caller argument.
-    let raw_text = match &source {
-        TurnSource::AutoRecovery { text, .. } => text.clone(),
-        _ => raw_text,
+    let raw_text = source_text(&source, raw_text);
+    validate_turn_text(&raw_text)?;
+    let turn_id = TurnId::new();
+    let cancel = CancelToken::new();
+    run_pre_start_hook(state, thread_id, turn_id, &source).await?;
+    let attachment_ids =
+        crate::service::authorize_turn_attachments(state, thread_id, requested_attachments).await?;
+    let registration = register_turn(state, thread_id, turn_id, &cancel).await?;
+    name_user_thread(state, thread_id, &source, &raw_text).await;
+    let job = TurnJob {
+        thread_id,
+        turn_id,
+        source,
+        cancel,
+        steering: registration.steering,
+        attachment_ids,
     };
+    spawn_turn(state.clone(), job);
+    Ok(registration.summary)
+}
+
+fn source_text(source: &TurnSource, raw_text: String) -> String {
+    match source {
+        TurnSource::AutoRecovery { text, .. } | TurnSource::Scheduled(text) => text.clone(),
+        _ => raw_text,
+    }
+}
+
+fn validate_turn_text(raw_text: &str) -> ark_common::Result<()> {
     if raw_text.len() > MAX_TURN_TEXT_BYTES {
         return Err(ark_common::ArkError::validation(format!(
             "turn text exceeds the {MAX_TURN_TEXT_BYTES}-byte UTF-8 limit"
@@ -69,13 +92,17 @@ pub async fn start_turn_as(
             "turn text must not be empty",
         ));
     }
-    let turn_id = TurnId::new();
-    let cancel = CancelToken::new();
-    // The turn.pre_start hook fires before the workspace gate is acquired:
-    // a denial must not leave a half-registered turn behind, and a hook
-    // callback that re-entered the host through a gate-protected route would
-    // self-deadlock the global gate (requirements/plugin-hook-bus.md,
-    // Decide 调用纪律). With NoHooks installed this call is a no-op.
+    Ok(())
+}
+
+async fn run_pre_start_hook(
+    state: &AppState,
+    thread_id: ThreadId,
+    turn_id: TurnId,
+    source: &TurnSource,
+) -> ark_common::Result<()> {
+    // The hook runs before workspace_gate, so re-entry cannot deadlock it and
+    // a denial cannot leave a half-registered turn behind.
     state
         .hooks
         .on_turn_pre_start(
@@ -83,21 +110,17 @@ pub async fn start_turn_as(
                 thread_id: &thread_id,
                 turn_id: &turn_id,
             },
-            turn_source_label(&source),
+            turn_source_label(source),
         )
-        .await?;
-    // Authorize attachments before taking the global workspace gate: this
-    // replays the thread's whole event log, and a slow disk must not stall turn
-    // starts for every other thread (AGENTS.md §7.5). A rejected attachment
-    // still leaves no registered turn behind, and the check compares against
-    // this thread's own association events only.
-    let attachment_ids =
-        crate::service::authorize_turn_attachments(state, thread_id, requested_attachments).await?;
-    // Serialize explicit input with auto-continuation eligibility. User intent
-    // wins by cancelling a pending debounce before registering this turn.
-    // The gate covers only the registry mutation plus one lightweight thread
-    // existence check; that check is shared with the delete route so a
-    // concurrent delete cannot register a turn for a thread already gone.
+        .await
+}
+
+async fn register_turn(
+    state: &AppState,
+    thread_id: ThreadId,
+    turn_id: TurnId,
+    cancel: &CancelToken,
+) -> ark_common::Result<crate::state::TurnRegistration> {
     let _workspace_guard = state.workspace_gate.lock().await;
     state.store.get_thread(thread_id).await?;
     let Some(registration) = state.turns.try_register(thread_id, turn_id, cancel.clone()) else {
@@ -112,175 +135,159 @@ pub async fn start_turn_as(
         ));
     };
     state.continuations.allow(thread_id);
-    // A turn that just failed on the model must not keep the continuation
-    // breaker's "user interrupt" suppression: an auto-recovery is supervisor
-    // work, not explicit input, but it legitimately follows a failure and
-    // should lift the pause so the recovery can run. (The breaker is
-    // re-checked inside the recovery path with the failure-streak rule.)
-    // First explicit user turn on a still-placeholder thread: name the thread
-    // from the message head before the worker runs, so the rename and its
-    // `ThreadUpdated` event are durable before any model token streams (design
-    // §7.9). Only `TurnSource::User` names: IM threads already derive a title
-    // from the first inbound message, auto-continuations and recoveries carry
-    // no composer text, and the review/scheduler prompts are system text, not
-    // a user-chosen name. Naming is best effort: a failure here keeps the
-    // placeholder and must never fail the turn that was already accepted.
+    Ok(registration)
+}
+
+async fn name_user_thread(
+    state: &AppState,
+    thread_id: ThreadId,
+    source: &TurnSource,
+    raw_text: &str,
+) {
     if matches!(source, TurnSource::User(_)) {
         crate::service::thread_titles::name_thread_on_first_turn(
             state.store.as_ref(),
             thread_id,
-            &raw_text,
+            raw_text,
         )
         .await;
     }
-    let job = TurnJob {
-        thread_id,
-        turn_id,
-        source,
-        cancel,
-        steering: registration.steering,
-        attachment_ids,
-    };
-    spawn_turn(state.clone(), job);
-    Ok(registration.summary)
+}
+
+/// Metadata retained while the detached worker owns the turn job.
+struct TurnSupervisor {
+    turn_id: TurnId,
+    thread_id: ThreadId,
+    is_auto_continuation: bool,
+    recovery: Option<(String, u32)>,
+}
+
+impl TurnSupervisor {
+    fn from_job(job: &TurnJob) -> Self {
+        let recovery = match &job.source {
+            TurnSource::AutoRecovery { text, attempt } => Some((text.clone(), *attempt)),
+            TurnSource::User(text) | TurnSource::Scheduled(text) | TurnSource::Im { text, .. } => {
+                Some((text.clone(), 0))
+            }
+            TurnSource::AutoContinuation => None,
+        };
+        Self {
+            turn_id: job.turn_id,
+            thread_id: job.thread_id,
+            is_auto_continuation: matches!(&job.source, TurnSource::AutoContinuation),
+            recovery,
+        }
+    }
 }
 
 /// Run the turn in the background and fold the outcome back into the registry.
-///
-/// Detached on purpose: the HTTP response is the `202`, and the turn's progress
-/// reaches the client through the event stream. Detached does **not** mean
-/// unsupervised: the outer task owns the worker's `JoinHandle`, so a panic or an
-/// aborted task still lands on a terminal state (design §3 / §7.1). Without this,
-/// one panicking turn would leave the registry reporting `running` forever and
-/// every later turn on that thread would answer 409.
 pub fn spawn_turn(state: AppState, job: TurnJob) {
-    let turn_id = job.turn_id;
-    let thread_id = job.thread_id;
-    let is_auto_continuation = matches!(&job.source, TurnSource::AutoContinuation);
-    // Recovery bookkeeping survives the move of `job` into the worker: the
-    // failed attempt's origin decides whether the supervisor schedules the
-    // next attempt and with which text/attempt number.
-    let recovery = match &job.source {
-        TurnSource::AutoRecovery { text, attempt } => Some((text.clone(), *attempt)),
-        TurnSource::User(text) | TurnSource::Im { text, .. } => Some((text.clone(), 0)),
-        TurnSource::AutoContinuation => None,
-    };
-    let turns = Arc::clone(&state.turns);
+    let supervisor = TurnSupervisor::from_job(&job);
     let runner = Arc::clone(&state.runner);
-    let supervisor_state = state.clone();
     tokio::spawn(async move {
-        // The worker owns the reactor; the supervisor only observes it.
-        let worker = tokio::spawn(async move { runner.run_turn(job).await });
-        let end = match worker.await {
-            Ok(Ok(end)) => end,
-            Ok(Err(err)) => TurnEnd::Failed {
-                message: err.message.clone(),
-                model_request_failed: err.code == ark_common::ArkErrorCode::ModelRequestFailed,
-            },
-            Err(join) => {
-                let message = if join.is_panic() {
-                    "turn executor panicked"
-                } else {
-                    "turn was cancelled before it finished"
-                };
-                TurnEnd::Failed {
-                    message: message.to_string(),
-                    model_request_failed: false,
-                }
+        let end = run_worker(runner, job).await;
+        state.turns.finish(supervisor.turn_id, &end);
+        observe_turn_end(&state, &supervisor, &end).await;
+        schedule_after_turn(state, supervisor, end).await;
+    });
+}
+
+async fn run_worker(runner: Arc<dyn crate::state::TurnRunner>, job: TurnJob) -> TurnEnd {
+    match tokio::spawn(async move { runner.run_turn(job).await }).await {
+        Ok(Ok(end)) => end,
+        Ok(Err(error)) => TurnEnd::Failed {
+            model_request_failed: error.code == ark_common::ArkErrorCode::ModelRequestFailed,
+            message: error.message,
+        },
+        Err(join) => TurnEnd::Failed {
+            message: if join.is_panic() {
+                "turn executor panicked"
+            } else {
+                "turn was cancelled before it finished"
             }
-        };
-        turns.finish(turn_id, &end);
-        // turn.completed/.failed/.aborted observation (requirements/
-        // plugin-hook-bus.md): the supervisor is the single turn-level seam, so
-        // both registration paths report here and the hook call holds no lock.
-        supervisor_state
-            .hooks
-            .observe_turn_end(
-                ark_ports::HookScope {
-                    thread_id: &thread_id,
-                    turn_id: &turn_id,
-                },
-                &match &end {
-                    TurnEnd::Completed | TurnEnd::CompletedWithPendingCompletions => {
-                        TurnOutcomeFact::Completed
-                    }
-                    TurnEnd::Failed { message, .. } => TurnOutcomeFact::Failed {
-                        message: message.clone(),
-                    },
-                    TurnEnd::Aborted(reason) => TurnOutcomeFact::Aborted {
-                        reason: reason.clone(),
-                    },
-                },
+            .to_string(),
+            model_request_failed: false,
+        },
+    }
+}
+
+async fn observe_turn_end(state: &AppState, supervisor: &TurnSupervisor, end: &TurnEnd) {
+    let fact = match end {
+        TurnEnd::Completed | TurnEnd::CompletedWithPendingCompletions => TurnOutcomeFact::Completed,
+        TurnEnd::Failed { message, .. } => TurnOutcomeFact::Failed {
+            message: message.clone(),
+        },
+        TurnEnd::Aborted(reason) => TurnOutcomeFact::Aborted {
+            reason: reason.clone(),
+        },
+    };
+    state
+        .hooks
+        .observe_turn_end(
+            ark_ports::HookScope {
+                thread_id: &supervisor.thread_id,
+                turn_id: &supervisor.turn_id,
+            },
+            &fact,
+        )
+        .await;
+    if let TurnEnd::Failed { message, .. } = end {
+        state
+            .record_turn_terminal(
+                supervisor.thread_id,
+                supervisor.turn_id,
+                supervisor.is_auto_continuation,
+                end,
             )
             .await;
-        if let TurnEnd::Failed { message, .. } = &end {
-            // A turn that dies outside the reactor still needs a complete
-            // lifecycle record: either the log stops at `turn_started` and a
-            // reconnect replays a turn that will never finish, or a terminal
-            // record appears for a turn the log never shows starting.
-            supervisor_state
-                .record_turn_terminal(thread_id, turn_id, is_auto_continuation, &end)
-                .await;
-            tracing::warn!(turn = %turn_id, %message, "turn ended without a terminal event");
+        tracing::warn!(turn = %supervisor.turn_id, %message, "turn ended without a terminal event");
+    }
+}
+
+async fn schedule_after_turn(state: AppState, supervisor: TurnSupervisor, end: TurnEnd) {
+    match end {
+        TurnEnd::CompletedWithPendingCompletions => {
+            state.note_turn_completed();
+            crate::service::schedule_auto_continuation(state, supervisor.thread_id).await;
         }
-        match end {
-            TurnEnd::CompletedWithPendingCompletions => {
-                supervisor_state.note_turn_completed();
-                // The previous batch was fully acknowledged, so another bounded
-                // turn can safely drain the next inbox page without retrying the
-                // same notification forever.
-                crate::service::schedule_auto_continuation(supervisor_state, thread_id).await;
+        TurnEnd::Completed => {
+            state.note_turn_completed();
+            if !supervisor.is_auto_continuation {
+                crate::service::schedule_auto_continuation(state, supervisor.thread_id).await;
             }
-            TurnEnd::Completed => {
-                supervisor_state.note_turn_completed();
-                // A completion may have arrived while an explicit turn was active.
-                // Automatic turns only chain through the explicit pending variant
-                // above, which requires every acknowledgement to have succeeded.
-                if !is_auto_continuation {
-                    crate::service::schedule_auto_continuation(supervisor_state.clone(), thread_id)
-                        .await;
-                }
-            }
-            TurnEnd::Failed {
-                message,
-                model_request_failed: true,
-            } => {
-                // A model-request failure is usually transient (gateway
-                // blip, broken stream): without automatic recovery every
-                // outage pushed the user into manually retyping "继续" (17
-                // historical turn_failed produced 17 manual retries, 12 of
-                // which succeeded unchanged). The supervisor retries the same
-                // request with backoff; the circuit breaker in
-                // `schedule_recovery` bounds both the per-request attempts
-                // and the provider-outage hammering, so a dead gateway can
-                // neither loop forever nor restart its own retry chain.
-                if let Some((text, previous)) = recovery {
-                    let attempt = if previous == 0 { 1 } else { previous + 1 };
-                    crate::service::schedule_recovery(
-                        supervisor_state,
-                        thread_id,
-                        Some(text),
-                        attempt,
-                        message,
-                    )
-                    .await;
-                } else {
-                    tracing::warn!(
-                        thread = %thread_id,
-                        %message,
-                        "model-request failure on a continuation turn; awaiting explicit input or a new child completion"
-                    );
-                }
-            }
-            TurnEnd::Failed { .. } | TurnEnd::Aborted(_) if is_auto_continuation => {
-                tracing::warn!(
-                    turn = %turn_id,
-                    "automatic continuation failed or was aborted; awaiting explicit input or a new child completion"
-                );
-            }
-            TurnEnd::Failed { .. } | TurnEnd::Aborted(_) => {}
         }
-    });
+        TurnEnd::Failed {
+            message,
+            model_request_failed: true,
+        } => schedule_model_recovery(state, supervisor, message).await,
+        TurnEnd::Failed { .. } | TurnEnd::Aborted(_) if supervisor.is_auto_continuation => {
+            tracing::warn!(
+                turn = %supervisor.turn_id,
+                "automatic continuation failed or was aborted; awaiting explicit input or a new child completion"
+            );
+        }
+        TurnEnd::Failed { .. } | TurnEnd::Aborted(_) => {}
+    }
+}
+
+async fn schedule_model_recovery(state: AppState, supervisor: TurnSupervisor, message: String) {
+    if let Some((text, previous)) = supervisor.recovery {
+        let attempt = if previous == 0 { 1 } else { previous + 1 };
+        crate::service::schedule_recovery(
+            state,
+            supervisor.thread_id,
+            Some(text),
+            attempt,
+            message,
+        )
+        .await;
+    } else {
+        tracing::warn!(
+            thread = %supervisor.thread_id,
+            %message,
+            "model-request failure on a continuation turn; awaiting explicit input or a new child completion"
+        );
+    }
 }
 
 /// Hook-payload label for the turn source (design: `turn.*` payloads carry
@@ -289,6 +296,7 @@ pub fn spawn_turn(state: AppState, job: TurnJob) {
 pub(crate) fn turn_source_label(source: &TurnSource) -> &'static str {
     match source {
         TurnSource::User(_) => "user",
+        TurnSource::Scheduled(_) => "scheduled",
         TurnSource::Im { .. } => "im",
         TurnSource::AutoContinuation => "auto_continuation",
         TurnSource::AutoRecovery { .. } => "auto_recovery",

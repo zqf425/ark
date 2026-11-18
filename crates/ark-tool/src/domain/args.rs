@@ -7,6 +7,7 @@
 use ark_common::{ArkError, ChildId, Result};
 use ark_ports::ToolArgs;
 use serde::Deserialize;
+use std::fmt;
 
 /// Decode `args` into `T`, reporting the tool name on failure.
 pub fn parse<T>(tool: &str, args: &ToolArgs) -> Result<T>
@@ -111,16 +112,37 @@ pub struct BashSessionArgs {
     pub run_in_background: bool,
 }
 
+/// Process-local identifier for one detached shell task.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(transparent)]
+pub struct ShellTaskId(String);
+
+impl ShellTaskId {
+    pub(crate) fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ShellTaskId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
 /// `bash_output` — incremental output of one background task.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BashOutputArgs {
-    pub task_id: String,
+    pub task_id: ShellTaskId,
 }
 
 /// `bash_kill` — terminate one background task.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BashKillArgs {
-    pub task_id: String,
+    pub task_id: ShellTaskId,
 }
 
 /// `delegate_task` — hand one bounded sub-task to a child run.
@@ -178,6 +200,17 @@ mod tests {
         let parsed: BashArgs = parse("bash", &args).unwrap();
         assert_eq!(parsed.command, "echo \"hi\"");
         assert!(parsed.timeout_ms.is_none());
+    }
+
+    #[test]
+    fn shell_task_args_decode_the_string_id_into_a_newtype() {
+        let raw = ToolArgs(serde_json::json!({ "task_id": "task_42" }));
+        let output: BashOutputArgs = parse("bash_output", &raw).unwrap();
+        let kill: BashKillArgs = parse("bash_kill", &raw).unwrap();
+        fn assert_task_id(_: &ShellTaskId) {}
+        assert_task_id(&output.task_id);
+        assert_task_id(&kill.task_id);
+        assert_eq!(output.task_id.as_str(), "task_42");
     }
 
     #[test]
