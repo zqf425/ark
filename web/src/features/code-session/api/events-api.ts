@@ -22,6 +22,13 @@ export type ThreadStreamOptions = {
 
 const MAX_BACKOFF_MS = 10_000
 const IDLE_WATCHDOG_MS = 75_000
+/**
+ * While a turn is running, this connection must keep delivering data frames;
+ * only transport keep-alive comments arriving past this bound means the
+ * subscription is a zombie (the store dropped it as a slow subscriber) and is
+ * torn down deliberately so the resume handshake replays the missed events.
+ */
+const DATA_WATCHDOG_MS = 45_000
 /** A connection that delivered frames and stayed up this long resets the backoff. */
 const STABLE_CONNECTION_MS = 5_000
 
@@ -74,6 +81,11 @@ export async function subscribeThreadEvents(options: ThreadStreamOptions): Promi
   // Only used to label the next attempt as `reconnecting` rather than
   // `connecting`. It must not gate per-connection `open` reporting.
   let hasEverOpened = false
+  // Set while the thread has an in-flight turn and cleared on its terminal
+  // event. Only a running turn arms the data-frame watchdog below: a quiet
+  // thread legitimately goes minutes without any frame, while a running turn
+  // must keep producing them.
+  let turnActive = false
 
   while (!options.signal.aborted) {
     options.onStatus(hasEverOpened ? 'reconnecting' : 'connecting')
@@ -86,6 +98,25 @@ export async function subscribeThreadEvents(options: ThreadStreamOptions): Promi
     const armWatchdog = (): void => {
       if (idleTimer) clearTimeout(idleTimer)
       idleTimer = setTimeout(() => controller.abort(), IDLE_WATCHDOG_MS)
+    }
+
+    // Data-frame watchdog. Byte liveness cannot see a connection whose
+    // subscriber entry was dropped server-side: keep-alive comments keep
+    // feeding `armWatchdog` while no event ever arrives again, and a running
+    // turn would stay invisible until the next page load. While the turn is
+    // active this timer only resets on parsed frames, so a comments-only
+    // stream aborts and resumes from the last seq (replay fills the gap).
+    let dataTimer: ReturnType<typeof setTimeout> | null = null
+    const disarmDataFrameWatchdog = (): void => {
+      if (dataTimer) {
+        clearTimeout(dataTimer)
+        dataTimer = null
+      }
+    }
+    const armDataFrameWatchdog = (): void => {
+      if (!turnActive || options.signal.aborted) return
+      disarmDataFrameWatchdog()
+      dataTimer = setTimeout(() => controller.abort(), DATA_WATCHDOG_MS)
     }
 
     const connectedAt = Date.now()
@@ -118,6 +149,10 @@ export async function subscribeThreadEvents(options: ThreadStreamOptions): Promi
 
         const parsed = parseEventFrame(frame)
         if (!parsed) continue
+        // A parsed frame is proof of data liveness; comment-only chunks are
+        // not and never reset this timer (they keep feeding the byte
+        // watchdog above).
+        armDataFrameWatchdog()
 
         // Heartbeats carry a seq and must advance the resume point, but they are
         // not display events; `sse_idle_timeout` asks us to resume deliberately.
@@ -128,12 +163,24 @@ export async function subscribeThreadEvents(options: ThreadStreamOptions): Promi
         }
 
         if (parsed.seq > lastSeq) lastSeq = parsed.seq
+        if (parsed.event.kind === 'turn_started' || parsed.event.kind === 'turn_steered') {
+          turnActive = true
+          armDataFrameWatchdog()
+        } else if (
+          parsed.event.kind === 'turn_completed' ||
+          parsed.event.kind === 'turn_failed' ||
+          parsed.event.kind === 'turn_aborted'
+        ) {
+          turnActive = false
+          disarmDataFrameWatchdog()
+        }
         options.onEvent(parsed.event)
       }
     } catch (error) {
       if (!options.signal.aborted) options.onError?.(error)
     } finally {
       if (idleTimer) clearTimeout(idleTimer)
+      disarmDataFrameWatchdog()
       options.signal.removeEventListener('abort', forwardAbort)
     }
 

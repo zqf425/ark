@@ -5,6 +5,7 @@ const THREAD_ID = '00000000-0000-0000-0000-000000000001'
 const IDLE_WATCHDOG_MS = 75_000
 const KEEP_ALIVE_INTERVAL_MS = 15_000
 const SINCE_SEQ = 13
+const DATA_WATCHDOG_MS = 45_000
 
 type FakeStream = {
   push: (chunk: string) => void
@@ -75,6 +76,19 @@ function heartbeatFrame(seq: number): string {
     seq,
     thread_id: THREAD_ID,
     timestamp: '2026-10-28T00:00:00Z'
+  })}\n\n`
+}
+
+/** Any display event the transport can carry; the watchdog only sees frames. */
+function deltaFrame(seq: number): string {
+  return `id: ${seq}\nevent: assistant_text_delta\ndata: ${JSON.stringify({
+    kind: 'assistant_text_delta',
+    seq,
+    thread_id: THREAD_ID,
+    turn_id: '00000000-0000-0000-0000-000000000002',
+    item_id: '00000000-0000-0000-0000-000000000003',
+    timestamp: '2026-10-28T00:00:00Z',
+    delta: 'x'
   })}\n\n`
 }
 
@@ -252,6 +266,133 @@ describe('subscribeThreadEvents idle watchdog', () => {
     expect(secondGap).toBeGreaterThan(firstGap)
 
     random.mockRestore()
+    await stop(harness)
+  })
+})
+
+describe('subscribeThreadEvents data-frame watchdog', () => {
+  function turnFrame(seq: number, turnId: string): string {
+    return `id: ${seq}` + `\nevent: turn_started\ndata: ${JSON.stringify({
+      kind: 'turn_started',
+      seq,
+      thread_id: THREAD_ID,
+      turn_id: turnId,
+      timestamp: '2026-10-28T00:00:00Z'
+    })}\n\n`
+  }
+
+  function commentChunk(): string {
+    return ': keep-alive'+`\n\n`
+  }
+
+  it('reconnects when a running turn only receives keep-alive comments', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const fetchStub = stubSseFetch()
+    const harness = start()
+    await flush()
+
+    fetchStub.latest()?.push(heartbeatFrame(SINCE_SEQ))
+    await flush()
+    // A running turn exists, then the connection goes comments-only: the
+    // exact zombie shape after the store dropped the slow subscriber.
+    fetchStub.latest()?.push(deltaFrame(SINCE_SEQ + 1))
+    fetchStub.latest()?.push(turnFrame(SINCE_SEQ + 2, '00000000-0000-0000-0000-000000000002'))
+    await flush()
+
+    // Two comment rounds (30s) stay under the data watchdog; the timer
+    // must not be reset by them.
+    for (let round = 0; round < 2; round += 1) {
+      fetchStub.latest()?.push(commentChunk())
+      await flush()
+      await vi.advanceTimersByTimeAsync(KEEP_ALIVE_INTERVAL_MS)
+      await flush()
+      expect(fetchStub.calls).toHaveLength(1)
+    }
+
+    // Crossing the data threshold tears the zombie connection down and
+    // resumes from the highest seq seen so far.
+    await vi.advanceTimersByTimeAsync(DATA_WATCHDOG_MS)
+    await flush()
+    await vi.advanceTimersByTimeAsync(2_000)
+    await flush()
+
+    expect(fetchStub.calls).toHaveLength(2)
+    expect(fetchStub.calls[1]).toContain(`since_seq=${SINCE_SEQ + 2}`)
+    expect(harness.statuses).toContain('reconnecting')
+
+    await stop(harness)
+  })
+
+  it('keeps a quiet idle thread connected without any data frames', async () => {
+    const fetchStub = stubSseFetch()
+    const harness = start()
+    await flush()
+
+    fetchStub.latest()?.push(heartbeatFrame(SINCE_SEQ))
+    await flush()
+    const eventsAfterOpen = harness.events.length
+
+    for (let round = 0; round < 4; round += 1) {
+      fetchStub.latest()?.push(commentChunk())
+      await flush()
+      await vi.advanceTimersByTimeAsync(KEEP_ALIVE_INTERVAL_MS)
+      await flush()
+      expect(fetchStub.calls).toHaveLength(1)
+    }
+
+    expect(harness.events).toHaveLength(eventsAfterOpen)
+    expect(harness.errors).toEqual([])
+
+    await stop(harness)
+  })
+
+  it('disarms at the terminal event and re-arms for the next turn', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const fetchStub = stubSseFetch()
+    const harness = start()
+    await flush()
+
+    fetchStub.latest()?.push(heartbeatFrame(SINCE_SEQ))
+    await flush()
+    fetchStub.latest()?.push(turnFrame(SINCE_SEQ + 1, '00000000-0000-0000-0000-000000000002'))
+    await flush()
+    fetchStub.latest()?.push(`id: ${SINCE_SEQ + 2}` + `\nevent: turn_completed\ndata: ${JSON.stringify({
+      kind: 'turn_completed',
+      seq: SINCE_SEQ + 2,
+      thread_id: THREAD_ID,
+      turn_id: '00000000-0000-0000-0000-000000000002',
+      timestamp: '2026-10-28T00:00:01Z'
+    })}\n\n`)
+    await flush()
+
+    // Post-terminal comments must not recycle the connection.
+    for (let round = 0; round < 3; round += 1) {
+      fetchStub.latest()?.push(commentChunk())
+      await flush()
+      await vi.advanceTimersByTimeAsync(KEEP_ALIVE_INTERVAL_MS)
+      await flush()
+      expect(fetchStub.calls).toHaveLength(1)
+    }
+
+    // The next turn arms the watchdog again: comments past the threshold
+    // now trigger a resume from the latest seq.
+    fetchStub.latest()?.push(turnFrame(SINCE_SEQ + 3, '00000000-0000-0000-0000-000000000004'))
+    await flush()
+    for (let round = 0; round < 2; round += 1) {
+      fetchStub.latest()?.push(commentChunk())
+      await flush()
+      await vi.advanceTimersByTimeAsync(KEEP_ALIVE_INTERVAL_MS)
+      await flush()
+      expect(fetchStub.calls).toHaveLength(1)
+    }
+    await vi.advanceTimersByTimeAsync(DATA_WATCHDOG_MS)
+    await flush()
+    await vi.advanceTimersByTimeAsync(2_000)
+    await flush()
+
+    expect(fetchStub.calls).toHaveLength(2)
+    expect(fetchStub.calls[1]).toContain(`since_seq=${SINCE_SEQ + 3}`)
+
     await stop(harness)
   })
 })
