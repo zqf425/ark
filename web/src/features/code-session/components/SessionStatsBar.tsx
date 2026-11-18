@@ -2,7 +2,7 @@
  * Session statistics strip under the thread header.
  *
  * Single home for the canvas meta strip: authoritative session counters and
- * the live segments that used to sit above the composer (tok/s, context fill,
+ * the live segments that used to sit above the composer (tok/s,
  * compaction notice). Everything numeric comes from the store's fold of the
  * authoritative `usage` events, seeded once from
  * `GET /v1/threads/{id}/usage` and extended live per sample, so the strip
@@ -12,13 +12,11 @@
  * `GET /v1/debug/llm-rounds` is deliberately not read here: it is a bounded
  * diagnostics page, and summing it understated long sessions.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useI18n } from '../../../shared/i18n'
 import { formatTokens, formatUsd } from '../../../shared/format'
 import { getThreadUsage } from '../api/threads-api'
 import { useCodeSessionStore } from '../state/store'
-import { hasLiveItems, type ItemView } from '../state/selectors'
-import { useContextLimit } from '../hooks/use-context-limit'
 import { useDurationFormat } from '../hooks/use-duration-words'
 
 type Stats = {
@@ -37,10 +35,6 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
   const samples = usage?.samples ?? 0
   const streamError = useCodeSessionStore((s) => s.streamError)
   const lastCompaction = useCodeSessionStore((s) => s.lastCompaction)
-  const itemOrder = useCodeSessionStore((s) => s.itemOrder)
-  const itemsById = useCodeSessionStore((s) => s.itemsById)
-  const live = useMemo(() => hasLiveItems({ itemOrder, itemsById } satisfies ItemView), [itemOrder, itemsById])
-  const reading = useContextLimit()
   const [stats, setStats] = useState<Stats>(EMPTY_STATS)
 
   useEffect(() => {
@@ -81,16 +75,6 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
   const cacheRate =
     usage?.cacheHitTokens != null && usage.cacheMissTokens != null && usage.cacheHitTokens + usage.cacheMissTokens > 0
       ? usage.cacheHitTokens / (usage.cacheHitTokens + usage.cacheMissTokens)
-      : null
-  // Fill against the model's real window; the warning tone starts at the
-  // runtime's compaction threshold, not at a hardcoded fraction.
-  const contextRatio =
-    usage && reading.window && reading.window > 0 && usage.lastPromptTokens != null
-      ? usage.lastPromptTokens / reading.window
-      : null
-  const contextThreshold =
-    reading.window && reading.window > 0 && reading.threshold != null
-      ? reading.threshold / reading.window
       : null
 
   return (
@@ -135,24 +119,12 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
         </>
       ) : null}
 
-      {/* Stream health (formerly the strip above the composer): tok/s, context
-          fill, compaction and errors only — connection state and the seq
-          watermark are plumbing, not session stats, so they stay hidden. */}
+      {/* Stream health (formerly the strip above the composer): tok/s,
+          compaction and errors only — connection state and the seq watermark
+          are plumbing, not session stats, so they stay hidden. */}
       {usage?.lastRoundTokensPerSec != null ? (
         <span className="ark-stats-bar__item is-mono" title={t('canvas.usage.speedTitle')}>
           {t('canvas.usage.speed', { rate: number(Math.round(usage.lastRoundTokensPerSec)) })}
-        </span>
-      ) : null}
-      {contextRatio != null ? (
-        <span
-          className={`ark-stats-bar__item is-mono${contextThreshold != null && contextRatio >= contextThreshold ? ' is-warning' : ''}`}
-          title={t('canvas.usage.contextTitle')}
-        >
-          {t('canvas.usage.context', {
-            used: formatTokens(usage?.lastPromptTokens ?? 0),
-            limit: formatTokens(reading.window ?? 0),
-            percent: number(Math.round(contextRatio * 100))
-          })}
         </span>
       ) : null}
       {lastCompaction ? (
@@ -163,7 +135,6 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
           })}
         </span>
       ) : null}
-      {live ? <span className="ark-stats-bar__item is-live">{t('canvas.footer.generating')}</span> : null}
       {streamError ? <span className="ark-stats-bar__item is-error">{streamError}</span> : null}
     </div>
   )

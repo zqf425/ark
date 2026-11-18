@@ -114,10 +114,8 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.footer.open': ['已连接', 'Connected'],
   'canvas.footer.reconnecting': ['重连中', 'Reconnecting'],
   'canvas.footer.closed': ['未连接', 'Disconnected'],
-  'canvas.footer.generating': ['生成中', 'Generating'],
 
   'canvas.usage.title': ['模型用量（来自权威 usage 事件）', 'Model usage (from authoritative usage events)'],
-  'canvas.usage.contextTitle': ['最近一次模型请求的上下文占用', 'Context fill of the most recent model request'],
   'canvas.usage.context': ['上下文 {used}/{limit}（{percent}%）', 'Context {used}/{limit} ({percent}%)'],
   'canvas.usage.speed': ['{rate} tok/s', '{rate} tok/s'],
   'canvas.usage.speedTitle': ['最近一个模型轮的流式输出速度（按本轮 delta 实测窗口折算）', 'Streaming output speed of the latest model round (measured over its delta window)'],

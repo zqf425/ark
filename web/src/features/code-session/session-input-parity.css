@@ -34,14 +34,6 @@
   font-family: var(--ark-mono);
 }
 
-.ark-stats-bar__item.is-live {
-  color: var(--ark-accent);
-}
-
-.ark-stats-bar__item.is-warning {
-  color: var(--ark-warn);
-}
-
 .ark-stats-bar__item.is-error {
   color: var(--ark-error);
   overflow: hidden;
