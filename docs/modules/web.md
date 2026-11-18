@@ -203,7 +203,8 @@
   StreamRow 组件；该状态是展开行组件的本地状态，不进全局 store，也不随父流 token 重渲染。
   子代理 transcript 与父画布回合卡应用同一折叠策略（`splitProcessTrace` +
   `RECENT_ACTIVITY_ROW_LIMIT`，当前 3）：只显示最近 3 条推理/工具行，更早的折叠进与父画布同款
-  的“展开较早的 N 步”摘要行（`FoldedProcessRow`），点击可展开/收起，错误与通知行永不折叠；
+  的“展开较早的 N 步”摘要行（`FoldedProcessRow`），点击可展开/收起，错误、通知与
+  用户输入（委派文本/补充指令）行永不折叠，折叠只针对模型活动与中途叙述；
   折叠展开是展开行组件的本地 UI 状态，行展开（remount）后回到默认折叠视图。
 - 子代理面板（`ChildRunsPanel`）按主流 agent 任务卡风格呈现：分组头（分支 glyph + 大写标题 +
   活跃计数）+ 每个子代理一张软卡（`ark-childcard`，与工具卡同视觉体系：chevron + 生命周期状态点

@@ -201,4 +201,26 @@ describe('ChildRunViewer transcript fold', () => {
     expect(harness.host.textContent).toContain('early failure')
     expect(harness.host.querySelectorAll('.ark-tool')).toHaveLength(3)
   })
+
+  it('keeps a user input row visible while the activity around it folds', async () => {
+    // The child run's transcript carries the delegation text and steered
+    // instructions as user_message rows; they are the human side of the
+    // conversation and must stay visible even when they sit inside the folded
+    // earlier slice - only model activity folds.
+    const items = [
+      { item_id: '00000000-0000-0000-0000-0000000000i0', turn_id: CHILD, kind: 'tool_call' as const, status: 'completed' as const, created_at: '2026-10-28T00:00:00Z' },
+      { item_id: '00000000-0000-0000-0000-0000000000u1', turn_id: CHILD, kind: 'user_message' as const, status: 'completed' as const, created_at: '2026-10-28T00:00:01Z', text: '先跑测试再改' },
+      { item_id: '00000000-0000-0000-0000-0000000000i2', turn_id: CHILD, kind: 'tool_call' as const, status: 'completed' as const, created_at: '2026-10-28T00:00:02Z' },
+      { item_id: '00000000-0000-0000-0000-0000000000i3', turn_id: CHILD, kind: 'tool_call' as const, status: 'completed' as const, created_at: '2026-10-28T00:00:03Z' },
+      { item_id: '00000000-0000-0000-0000-0000000000i4', turn_id: CHILD, kind: 'tool_call' as const, status: 'completed' as const, created_at: '2026-10-28T00:00:04Z' }
+    ]
+    detailMock.mockResolvedValue({ ...threadDetail(9), items })
+    eventsMock.mockResolvedValue({ events: [], highest_seq: 9 })
+    harness = await mountViewer(false)
+
+    expect(harness.host.querySelector('.ark-foldedtools')).not.toBeNull()
+    // The steered user input inside the folded slice stays on screen.
+    expect(harness.host.textContent).toContain('先跑测试再改')
+    expect(harness.host.querySelectorAll('.ark-tool')).toHaveLength(3)
+  })
 })
