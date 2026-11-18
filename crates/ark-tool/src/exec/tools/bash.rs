@@ -10,7 +10,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use crate::domain::{args, schema};
-use crate::exec::common::{as_output, with_detail, workspace_path};
+use crate::exec::common::{as_output, decode_shell_output, with_detail, workspace_path};
 use crate::policy::truncate::{cap_bytes, clamp_timeout};
 use crate::policy::DEFAULT_LIMITS;
 
@@ -42,6 +42,7 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
         return Ok(ToolOutput::err("bash requires a non-empty command"));
     }
     let cwd = workspace_path(ctx, parsed.cwd.as_deref().or(Some(".")))?;
+    ensure_cwd(&cwd)?;
     let timeout = clamp_timeout(parsed.timeout_ms, &DEFAULT_LIMITS);
     let mut command = shell(&parsed.command)?;
     command
@@ -103,6 +104,29 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
         }
     };
     Ok(render(&output, timeout))
+}
+
+/// Refuse a working directory that cannot be entered, before spawning.
+///
+/// `current_dir` on a path that does not exist surfaces as a raw OS error from
+/// `spawn` — on Windows 267 "the directory name is invalid", which names
+/// neither the directory nor the reason. The model then has no way to tell a
+/// stale worktree path from a missing permission bit; three calls in one day's
+/// sessions died on that message alone. The check is not a substitute for the
+/// spawn: it only turns the common "the path is gone" case into a message that
+/// names the path.
+pub(super) fn ensure_cwd(cwd: &std::path::Path) -> ark_common::Result<()> {
+    match std::fs::metadata(cwd) {
+        Ok(meta) if meta.is_dir() => Ok(()),
+        Ok(_) => Err(ark_common::ArkError::validation(format!(
+            "working directory `{}` is not a directory",
+            cwd.display()
+        ))),
+        Err(err) => Err(ark_common::ArkError::validation(format!(
+            "working directory `{}` is not accessible: {err}",
+            cwd.display()
+        ))),
+    }
 }
 
 /// POSIX shell invocation for commands passed to the `bash` tool.
@@ -181,8 +205,8 @@ fn sanitize_env(command: &mut tokio::process::Command, ctx: &ToolContext) {
 
 /// Build the model-visible output and the on-the-side detail.
 fn render(output: &std::process::Output, timeout_ms: u64) -> ToolOutput {
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let stdout = decode_shell_output(&output.stdout);
+    let stderr = decode_shell_output(&output.stderr);
     let mut body = String::new();
     if !stdout.is_empty() {
         body.push_str(&stdout);
@@ -301,6 +325,43 @@ mod tests {
         let dir = temp_workspace("bash-empty");
         let out = BashTool.execute(&ctx(&dir), echo("   ")).await.unwrap();
         assert!(!out.ok);
+    }
+
+    #[tokio::test]
+    async fn a_missing_working_directory_is_named_in_the_error() {
+        // The raw OS failure here is Windows 267 "the directory name is
+        // invalid", which names neither the path nor the reason; three calls in
+        // one day's sessions ended there.
+        let dir = temp_workspace("bash-missing-cwd");
+        let missing = dir.join("gone").join("deeper");
+        let arg = ToolArgs(serde_json::json!({
+            "command": "echo x",
+            "cwd": missing.to_string_lossy()
+        }));
+        let mut context = ctx(&dir);
+        context.sandbox = ark_ports::SandboxDecision::Unrestricted;
+        let out = BashTool.execute(&context, arg).await.unwrap();
+        assert!(!out.ok);
+        assert!(
+            out.content.contains("working directory") && out.content.contains("gone"),
+            "the error must name the directory: {}",
+            out.content
+        );
+    }
+
+    #[test]
+    fn a_legacy_codepage_child_stream_decodes_instead_of_degrading() {
+        // `decode_shell_output` is the one decoder both shell tools use; assert
+        // the policy it delegates to, so a refactor cannot quietly restore
+        // `from_utf8_lossy`, which turned every GBK line into a replacement
+        // character and made the resulting diagnostics unreadable.
+        let gbk = [0xC4u8, 0xE3, 0xBA, 0xC3]; // CP936 bytes for "你好"
+        let decoded = decode_shell_output(&gbk);
+        assert_eq!(decoded, "你好");
+        assert!(
+            !decoded.contains('�'),
+            "a legacy-codepage stream must decode, not degrade"
+        );
     }
 
     #[tokio::test]

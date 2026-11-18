@@ -116,7 +116,7 @@ fn grep_schema() -> serde_json::Value {
             "path": { "type": "string", "description": "Directory or file to search" },
             "glob": { "type": "string", "description": "Only search files matching this glob" },
             "ignore_case": { "type": "boolean", "description": "Case-insensitive match" },
-            "literal": { "type": "boolean", "description": "Treat the pattern as plain text" },
+            "literal": { "type": "boolean", "description": "Search for the pattern as exact text; required to search needles that contain regex metacharacters" },
             "context": { "type": "integer", "minimum": 0, "description": "Context lines around a match" },
             "limit": { "type": "integer", "minimum": 1, "description": "Maximum matching lines" },
         }),

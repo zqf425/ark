@@ -98,7 +98,18 @@ fn edit(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
     }
     let path = workspace_path(ctx, Some(&parsed.path))?;
     let original = read_text(&path)?;
-    let occurrences = original.matches(&parsed.old_string).count();
+    // Models emit `\n` in their arguments regardless of how the file is
+    // stored, while this repository's working tree is CRLF (`core.autocrlf=true`
+    // on Windows). A byte-exact match then fails on every multi-line anchor even
+    // though the text is visibly there: 21 of one day's `edit` calls died on
+    // "old_string not found" for that reason alone, and the model's only
+    // recovery was to re-send the anchor with explicit `\r`. Normalize
+    // the comparison to LF, and restore CRLF on write when the file was CRLF, so
+    // a successful edit never rewrites the whole file's line endings.
+    let crlf = original.contains("\r\n");
+    let original_lf = to_lf(&original);
+    let needle = to_lf(&parsed.old_string);
+    let occurrences = original_lf.matches(&needle).count();
     if occurrences == 0 {
         return Ok(ToolOutput::err(format!(
             "old_string not found in {}",
@@ -112,13 +123,21 @@ fn edit(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
             path.display()
         )));
     }
-    let updated = if replace_all {
-        original.replace(&parsed.old_string, &parsed.new_string)
+    // The replacement text arrives in the same LF-only shape, so it is joined
+    // into the LF view and the file's own endings are restored afterwards.
+    let replacement = to_lf(&parsed.new_string);
+    let updated_lf = if replace_all {
+        original_lf.replace(&needle, &replacement)
     } else {
-        original.replacen(&parsed.old_string, &parsed.new_string, 1)
+        original_lf.replacen(&needle, &replacement, 1)
+    };
+    let updated = if crlf {
+        to_crlf(&updated_lf)
+    } else {
+        updated_lf
     };
     std::fs::write(&path, updated.as_bytes())?;
-    // A bare "replaced N occurrence(s)" gave the model no signal about *what
+    // A bare "replaced N occurrence(s)" gave the model no signal about *what*
     // changed*, so an edit that undid its own previous edit looked identical
     // to progress. The delta summary makes oscillation visible in the receipt.
     let delta = diff_summary(&original, &updated);
@@ -127,6 +146,16 @@ fn edit(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
         receipt.push_str(&format!("; {delta}"));
     }
     Ok(ToolOutput::ok(receipt))
+}
+
+/// Normalize every line ending to LF for anchor matching.
+fn to_lf(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
+/// Restore CRLF line endings on an LF-normalized text.
+fn to_crlf(text: &str) -> String {
+    text.replace('\n', "\r\n")
 }
 
 #[cfg(test)]
@@ -222,6 +251,63 @@ mod tests {
         let out = EditTool.execute(&ctx(&dir), raw).await.unwrap();
         assert!(out.ok, "{}", out.content);
         assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "bb");
+    }
+
+    #[tokio::test]
+    async fn an_lf_anchor_matches_a_crlf_file() {
+        // A model sends `\n` between anchor lines; a Windows checkout
+        // stores `\r\n`. Byte-exact matching refused every such edit.
+        let dir = temp_workspace("edit-crlf-anchor");
+        let target = dir.join("a.txt");
+        std::fs::write(&target, "one\r\ntwo\r\nthree\r\n").unwrap();
+        let raw = ToolArgs(serde_json::json!({
+            "path": "a.txt",
+            "old_string": "one\ntwo",
+            "new_string": "ONE\nTWO"
+        }));
+        let out = EditTool.execute(&ctx(&dir), raw).await.unwrap();
+        assert!(out.ok, "{}", out.content);
+        // The file keeps its own CRLF endings; only the matched text changed.
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "ONE\r\nTWO\r\nthree\r\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_lf_file_stays_lf_after_an_edit() {
+        let dir = temp_workspace("edit-lf-stays-lf");
+        let target = dir.join("a.txt");
+        std::fs::write(&target, "one\ntwo\n").unwrap();
+        let raw = ToolArgs(serde_json::json!({
+            "path": "a.txt",
+            "old_string": "one\ntwo",
+            "new_string": "ONE\nTWO"
+        }));
+        let out = EditTool.execute(&ctx(&dir), raw).await.unwrap();
+        assert!(out.ok, "{}", out.content);
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "ONE\nTWO\n",
+            "an LF file must not gain CRLF endings"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_crlf_anchor_also_matches_a_crlf_file() {
+        // The model may echo the file's real endings back; that must not be
+        // counted as a second, different needle.
+        let dir = temp_workspace("edit-crlf-anchor-native");
+        let target = dir.join("a.txt");
+        std::fs::write(&target, "one\r\ntwo\r\n").unwrap();
+        let raw = ToolArgs(serde_json::json!({
+            "path": "a.txt",
+            "old_string": "one\r\ntwo",
+            "new_string": "ONE\r\nTWO"
+        }));
+        let out = EditTool.execute(&ctx(&dir), raw).await.unwrap();
+        assert!(out.ok, "{}", out.content);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "ONE\r\nTWO\r\n");
     }
 
     #[tokio::test]

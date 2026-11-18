@@ -89,6 +89,25 @@ pub fn write_text(path: &std::path::Path, text: &str) -> Result<()> {
     ark_common::write_text(path, text)
 }
 
+/// Decode one child process' captured output stream as text.
+///
+/// Child output is bytes, not UTF-8: a Chinese Windows host runs `cmd`,
+/// `mvn`, `python`, `tasklist` and friends under the active ANSI code page
+/// (GBK/CP936), and those bytes are not valid UTF-8. `String::from_utf8_lossy`
+/// turned every such line into U+FFFD, so a "command not found" report arrived
+/// as unreadable replacement characters and the reason was lost — 19 of 111
+/// failed `bash` calls in one day's sessions carried replacement characters, and
+/// 99 more "successful" ones were silently garbled. Decoding goes through the
+/// project's single encoding policy (`ark_common::decode`: strict UTF-8 first,
+/// then GB18030/Big5/Shift-JIS/EUC-KR, Latin-1 as the always-succeeds last
+/// resort), so shell output and file reads share one rule instead of drifting.
+///
+/// NUL bytes are kept as-is: a command that emits them is reporting binary
+/// data, and silently stripping the terminator would misreport the content.
+pub fn decode_shell_output(bytes: &[u8]) -> String {
+    ark_common::decode_to_string(bytes)
+}
+
 /// Attach a detail string to an output.
 ///
 /// `ark-ports` is frozen and `ToolOutput` has no builder, so the helper lives
