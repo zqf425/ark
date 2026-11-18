@@ -41,6 +41,48 @@ export async function saveFile(path: string, bytes: Uint8Array): Promise<string>
 }
 
 /**
+ * Hand a web link to the OS default browser instead of letting the renderer
+ * navigate its own document.
+ *
+ * The renderer is a single-page app without a router or history UI, and the
+ * desktop window is the only way back to the workspace: an in-place navigation
+ * to a foreign document replaces the app with a page nothing can leave. The
+ * shell therefore refuses such navigations and this helper is how a link
+ * leaves the app at all. In a plain browser the same intent is a new tab, which
+ * also keeps the app document alive.
+ *
+ * Only `http(s)` targets are handed out: `javascript:`/`data:`/`file:` links in
+ * model prose are not navigation. Scheme policy is re-checked by the shell —
+ * this side only resolves the reference, because prose links may be relative.
+ * A failed bridge call is deliberately silent: falling back to an in-webview
+ * navigation would reintroduce exactly the trap this path exists to prevent.
+ */
+export async function openExternal(href: string): Promise<void> {
+  const url = webUrl(href)
+  if (!url) return
+  const bridge = internals()
+  if (!bridge) {
+    window.open(url, '_blank', 'noopener,noreferrer')
+    return
+  }
+  try {
+    await bridge.invoke<null>('open_external', { url })
+  } catch {
+    // The shell owns the policy and its failure mode; swallow here.
+  }
+}
+
+/** Absolute `http(s)` form of a prose link, or null when it is not one. */
+function webUrl(href: string): string | null {
+  try {
+    const url = new URL(href, window.location.href)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * System-level notification (Windows toast / macOS banner) posted by the
  * desktop shell's `notify_session_event` command. Resolves `false` when the
  * shell is absent (plain browser), the OS blocked the notification, or the

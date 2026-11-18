@@ -37,7 +37,25 @@ Documents 或仓库根。已有 18791 监听必须通过健康检查才会复用
 开发仍经同源 proxy。Tauri CSP 也只允许连接 `http://127.0.0.1:18791`。
 
 外壳不向 JavaScript 暴露 shell 命令。它只从 Rust 调用 Tauri 的 shell plugin 启动固定的 `arkd` 命令，因此
-Web UI 不能借桌面能力执行任意程序。
+Web UI 不能借桌面能力执行任意程序。唯一向渲染器暴露的进程能力是 `open_external`（见下）：它只接收一个
+URL，校验 scheme 后交系统默认处理器，不执行程序、不接受 shell 参数。
+
+### 外部链接与导航守卫
+
+渲染层是单页应用（`useViewStore` 切 scene，没有 URL 路由），窗口标题固定、没有地址栏或后退按钮，
+**主窗口是唯一能回到工作区的表面**。因此主窗口只允许加载应用自身文档：
+
+- 打包态：`tauri://localhost`（macOS/Linux）与 `http(s)://tauri.localhost`（Windows）；
+- 开发态：`build.devUrl` 声明的 origin（`app.config()` 读取，不在 Rust 里硬编码 Vite 端口）。
+
+`create_main_window` 的 `on_navigation` 拒绝其余顶层导航，`on_new_window` 拒绝 `window.open`/`target=_blank`
+（否则会得到第二个没有 capability、也回不到应用的 webview），两者都先经 `open_in_browser` 把目标交给系统
+默认浏览器再返回拒绝。对外抛出的目标同样只放行 http(s)：`javascript:`/`file:`/`data:` 既不加载也不外抛。
+拒绝是终态，窗口停在原页面，不会出现白屏或半加载。
+
+`open_external(url)` 是渲染器侧唯一入口：助手正文里的链接经 `shared/desktop.ts#openExternal` 调用它。
+scheme 策略的宿主在 Rust（渲染层不可信：`<a href>` 来自模型正文），`javascript:` 等一律返回错误而不是
+交给 OS 处理器。纯浏览器运行没有这个命令，`openExternal` 回落到新标签页；该回落只存在于无壳环境。
 
 ### 原生文件夹选择
 
@@ -72,6 +90,8 @@ target 会按 `bundle.icon` 找第一个 `.png` 条目（找不到就回退硬�
 
 - `node --test apps/ark-desktop/scripts/desktop-layout.test.mjs` 验证根 `npm run dev`、Tauri 与 Vite 编排配置
   （含系统通知命令的桥接断言）。
+- `cargo test -p ark-desktop` 覆盖健康探针、就绪等待与导航守卫的 origin 判定
+  （`navigation_guard_accepts_only_the_app_origins`、`release_window_refuses_the_dev_origin_when_no_dev_url_is_configured`）。
 - `npm --prefix apps/ark-desktop run build:web` 验证生产 Web 构建把 API origin 指向桌面专属 loopback。
 - `cargo check -p ark-desktop`、`npm run dev` 验证 Rust 宿主与真实窗口/sidecar；Windows GNU 工具链必须提供
   `dlltool.exe`，否则这是环境失败，不得将其表述为代码通过。
