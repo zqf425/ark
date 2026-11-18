@@ -2,6 +2,7 @@ mod runtime;
 
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_shell::ShellExt;
 
 /// Native folder picker for the settings workspace field.
 ///
@@ -63,6 +64,25 @@ fn notify_session_event(app: tauri::AppHandle, title: String, body: String) -> b
         .is_ok()
 }
 
+/// Open an `http(s)` URL in the OS default browser.
+///
+/// Prose links are model-authored text, so the scheme is re-validated here
+/// rather than trusted from the renderer: `javascript:`, `data:` and `file:`
+/// must never reach the OS handler, which would launch a program or read a
+/// local file on the model's behalf. Handing the target to the OS is also the
+/// only way a link can leave the window: an in-place navigation would replace
+/// the app document with a page that has no route back (see `runtime.rs`).
+#[tauri::command]
+fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let parsed = tauri::Url::parse(&url).map_err(|error| error.to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!("refusing to open a {} url", parsed.scheme()));
+    }
+    app.shell()
+        .open(parsed.as_str(), None)
+        .map_err(|error| error.to_string())
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -72,7 +92,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             pick_folder,
             save_file,
-            notify_session_event
+            notify_session_event,
+            open_external
         ])
         .setup(|app| {
             runtime::launch(app.handle())

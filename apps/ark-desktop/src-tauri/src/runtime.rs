@@ -149,11 +149,40 @@ fn ready_timeout() -> Duration {
 /// `tauri.conf.json` (`windows[0]`); the label must stay `"main"` so the
 /// `default` capability keeps applying.
 fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
+    // Only a dev build trusts `build.devUrl`: a release binary must not
+    // whitelist a local Vite origin just because the key survived in the
+    // generated config (`is_dev` is false once `custom-protocol` is on).
+    let dev_origin = if tauri::is_dev() {
+        app.config().build.dev_url.clone()
+    } else {
+        None
+    };
+    let navigator = app.clone();
+    let popup = app.clone();
     let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
         .title("ark")
         .inner_size(1440.0, 920.0)
         .min_inner_size(960.0, 640.0)
         .resizable(true)
+        // The window owns the only surface that can show the workspace again:
+        // the renderer is a single-page app with no router or history UI, and
+        // model prose can carry arbitrary links. A foreign document must
+        // therefore never replace it in place — the refused navigation is
+        // handed to the OS browser instead.
+        .on_navigation(move |url| {
+            if is_internal_url(url, dev_origin.as_ref()) {
+                return true;
+            }
+            log::info!("opening external navigation in the system browser: {url}");
+            open_in_browser(&navigator, url);
+            false
+        })
+        // `window.open`/`target=_blank` would spawn a second webview with no
+        // capability and no route back into the app; treat it as a link too.
+        .on_new_window(move |url, _features| {
+            open_in_browser(&popup, &url);
+            tauri::webview::NewWindowResponse::Deny
+        })
         // The default native drag-drop handler swallows file drops before the
         // webview sees them (Windows WebView2 replaces the HTML5 handler), so
         // the composer's drag-drop attachments never fire. Disabling it hands
@@ -162,6 +191,42 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .build()?;
     let _ = window.set_focus();
     Ok(())
+}
+
+/// Whether a top-level navigation may load inside the app window.
+///
+/// Allowed: the bundled asset origins (`tauri://localhost` on macOS/Linux,
+/// `http(s)://tauri.localhost` on Windows) and, in development, the Vite
+/// origin declared by `build.devUrl`. Everything else is a foreign document.
+fn is_internal_url(url: &tauri::Url, dev_origin: Option<&tauri::Url>) -> bool {
+    if url.scheme() == "tauri" {
+        return url.host_str() == Some("localhost");
+    }
+    if url.host_str() == Some("tauri.localhost") {
+        return matches!(url.scheme(), "http" | "https");
+    }
+    dev_origin.is_some_and(|dev| same_origin(dev, url))
+}
+
+/// Origin comparison that ignores path/query and treats default ports as equal.
+fn same_origin(left: &tauri::Url, right: &tauri::Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.host_str() == right.host_str()
+        && left.port_or_known_default() == right.port_or_known_default()
+}
+
+/// Hand a web URL to the OS default handler.
+///
+/// A missing handler or a refused scheme must never fail the navigation
+/// decision: the window simply stays where it was, which is the safe outcome.
+fn open_in_browser(app: &AppHandle, url: &tauri::Url) {
+    if !matches!(url.scheme(), "http" | "https") {
+        log::warn!("refusing to open a non-web url externally: {url}");
+        return;
+    }
+    if let Err(error) = app.shell().open(url.as_str(), None) {
+        log::warn!("failed to open {url} in the system browser: {error}");
+    }
 }
 
 /// `None` means the port is currently free; `Some(false)` is an unknown service.
@@ -377,6 +442,38 @@ mod tests {
             probes.count() >= 2,
             "the probe must be retried, not fired once"
         );
+    }
+
+    #[test]
+    fn navigation_guard_accepts_only_the_app_origins() {
+        let dev = tauri::Url::parse("http://127.0.0.1:5273").expect("dev origin parses");
+        let guarded = |raw: &str| is_internal_url(&tauri::Url::parse(raw).unwrap(), Some(&dev));
+
+        for allowed in [
+            "http://127.0.0.1:5273/",
+            "http://127.0.0.1:5273/index.html?thread=1",
+            "tauri://localhost/",
+            "http://tauri.localhost/",
+            "https://tauri.localhost/assets/index.js",
+        ] {
+            assert!(guarded(allowed), "{allowed} must load in place");
+        }
+        for refused in [
+            "https://accounts.google.com/signin",
+            "http://127.0.0.1:18791/v1/threads",
+            "http://127.0.0.1:5274/",
+            "javascript:alert(1)",
+            "file:///C:/Windows/win.ini",
+        ] {
+            assert!(!guarded(refused), "{refused} must leave the window");
+        }
+    }
+
+    #[test]
+    fn release_window_refuses_the_dev_origin_when_no_dev_url_is_configured() {
+        let url = |raw: &str| tauri::Url::parse(raw).unwrap();
+        assert!(is_internal_url(&url("tauri://localhost/"), None));
+        assert!(!is_internal_url(&url("http://127.0.0.1:5273/"), None));
     }
 
     /// Tiny shared counter so the injected probe can report how often it ran.

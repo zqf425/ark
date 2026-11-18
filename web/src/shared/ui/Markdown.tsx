@@ -1,7 +1,19 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { renderMarkdown } from './markdown-render'
 import { copyText, COPIED_FEEDBACK_MS } from './copy'
+import { openExternal } from '../desktop'
 import './markdown.css'
+
+/**
+ * External href of a prose link, or null when the click is not a link that
+ * must leave the app. In-page fragments (`#…`) keep their default behavior:
+ * they never replace the document, so the renderer can own them.
+ */
+function externalHref(target: EventTarget | null): string | null {
+  const anchor = target instanceof Element ? target.closest('a[href]') : null
+  const href = anchor?.getAttribute('href') ?? ''
+  return href.length > 0 && !href.startsWith('#') ? href : null
+}
 
 /** Minimum interval between markdown re-parses while text streams in. */
 export const REPARSE_INTERVAL_MS = 120
@@ -46,6 +58,10 @@ export function useThrottledValue<T>(value: T, intervalMs: number): T {
  * Code blocks carry their own copy button (emitted by the renderer). One
  * delegated click handler serves every block of this message — streaming
  * replaces the DOM wholesale, so per-block listeners would leak or churn.
+ *
+ * The same handler owns prose links: they are handed to `desktop#openExternal`
+ * rather than followed in place, because the app document is the only surface
+ * that can show the workspace again (see `desktop.ts`).
  */
 export const Markdown = memo(function Markdown({
   text,
@@ -86,7 +102,18 @@ export const Markdown = memo(function Markdown({
     []
   )
 
+  const followLink = (event: React.MouseEvent<HTMLDivElement>): boolean => {
+    const href = externalHref(event.target)
+    if (!href) return false
+    event.preventDefault()
+    // The link owns the click: ancestors must not read it as a fold/toggle.
+    event.stopPropagation()
+    void openExternal(href)
+    return true
+  }
+
   const onClick = (event: React.MouseEvent<HTMLDivElement>): void => {
+    if (followLink(event)) return
     const fileChip = (event.target as HTMLElement).closest('[data-md-file]')
     if (fileChip) {
       event.stopPropagation()
@@ -105,11 +132,19 @@ export const Markdown = memo(function Markdown({
     })
   }
 
+  // Middle click is the browser's "open in a new tab": same hand-off, so the
+  // webview never spawns a second window for a prose link.
+  const onAuxClick = (event: React.MouseEvent<HTMLDivElement>): void => {
+    if (event.button !== 1) return
+    followLink(event)
+  }
+
   return (
     <div
       ref={hostRef}
       className={className ? `ark-md ${className}` : 'ark-md'}
       onClick={onClick}
+      onAuxClick={onAuxClick}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   )

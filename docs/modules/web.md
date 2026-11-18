@@ -131,6 +131,11 @@
   （同一收起展开语义），`shared/ui` 不反依 feature——白名单与接线都在
   `TurnBlock`（每回合一次 `useMemo`）与 `MessageBubble` 侧；子代理查看器
   传空白名单与 no-op 回调，不产生跨线程导航。
+  正文里的链接**不跟随**：渲染层是单页应用（`useViewStore` 切 scene，无 URL 路由），顶层导航会把工作区
+  替换成没有任何返回入口的页面，因此 `Markdown` 的委托点击（以及中键 `auxclick`）对 `a[href]` 先
+  `preventDefault`，再交 `shared/desktop.ts#openExternal`：相对引用按当前文档解析，只放行 http(s)，
+  `#fragment` 仍由浏览器处理。桌面壳经 `open_external` 交系统默认浏览器、并拒绝异源顶层导航
+  （见 [ark-desktop](ark-desktop.md)）；纯浏览器回落新标签页。桥接失败静默丢弃，绝不回落到窗口内导航。
 - 设置页的 tuning、provider 与 MCP 都使用生成契约；MCP env/header 值只写不回读，编辑时的空
   secret 字段表示保留，不表示删除。provider 的 api key 分两路：列表、能力与诊断只显示
   `has_api_key` 与掩码 hint，而点「编辑」时单独请求 `GET /v1/runtime/providers/{id}` 取回完整条目，
