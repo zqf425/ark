@@ -10,6 +10,7 @@ export type WorkbenchSlice = {
   activePanel: PanelId
   leftWidth: number
   leftCollapsed: boolean
+  rightWidth: number
   rightCollapsed: boolean
   selectedFilePath: string | null
   setActivePanel: (panel: PanelId) => void
@@ -17,6 +18,7 @@ export type WorkbenchSlice = {
   openPanel: (panel: PanelId) => void
   setLeftWidth: (width: number) => void
   toggleLeft: () => void
+  setRightWidth: (width: number) => void
   toggleRight: () => void
   selectFile: (path: string | null) => void
 }
@@ -24,6 +26,7 @@ export type WorkbenchSlice = {
 const MIN_SIDE = 200
 const MAX_SIDE = 640
 const DEFAULT_LEFT = 272
+const DEFAULT_RIGHT = 392
 
 export function clampSideWidth(width: number): number {
   if (!Number.isFinite(width)) return DEFAULT_LEFT
@@ -34,6 +37,7 @@ export const createWorkbenchSlice: StateCreator<WorkbenchSlice, [], [], Workbenc
   activePanel: 'changes',
   leftWidth: DEFAULT_LEFT,
   leftCollapsed: false,
+  rightWidth: DEFAULT_RIGHT,
   // The inspector starts closed: it is an on-demand context column, so the
   // conversation gets the full canvas until the user asks for the panels.
   rightCollapsed: true,
@@ -45,6 +49,7 @@ export const createWorkbenchSlice: StateCreator<WorkbenchSlice, [], [], Workbenc
   openPanel: (panel) => set({ activePanel: panel, rightCollapsed: false }),
   setLeftWidth: (width) => set({ leftWidth: clampSideWidth(width) }),
   toggleLeft: () => set((state) => ({ leftCollapsed: !state.leftCollapsed })),
+  setRightWidth: (width) => set({ rightWidth: clampSideWidth(width) }),
   toggleRight: () => set((state) => ({ rightCollapsed: !state.rightCollapsed })),
   // Picking a file is an explicit "open this file" intent, from the Changes
   // diff rows and the tool-card file chip alike: switch to the File panel AND

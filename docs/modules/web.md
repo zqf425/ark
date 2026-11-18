@@ -203,7 +203,12 @@
   恢复按钮。加载/实时页脚用同一状态点词汇。列表仍由 `child_activity`/`child_completed` 驱动的
   `childRunRevision` 刷新。
 - Code 使用 ARK Console shell（方案 A，当前实现）：46px 全局顶栏 + 26px 状态栏，主舞台在
-  `code` 场景下是"线程列表 / 会话画布 / 常驻检查器"三列；顶栏承载工作区、Git head、运行态、
+  `code` 场景下是"线程列表 / 会话画布 / 常驻检查器"三列；两根侧列都可用键盘可操作的
+  `ark-resizer` 拖宽（同一 `usePanelResizer` 原语按 `anchor` 分左/右锚定，右列拖其左缘、
+  向左拖变宽；宽度存 `workbench-slice` 的 `leftWidth`/`rightWidth`，上下限 200–640px，
+  默认 272/392px，检查器收起时不渲染 resizer；响应式断点只设 `max-width` 上限不覆盖拖后的
+  宽度）；左列展开态右下角有「隐藏会话」收起按钮（`toggleLeft`），收起后经 26px 边轨按钮
+  （`console-sidebar-tab`）恢复；顶栏承载工作区、Git head、运行态、
   主题切换、设置与 ⌘K 入口，状态栏承载连接、工作区、变更数与
   版本（上下文占用唯一的常驻展示是输入框工具条上的上下文环，状态栏不重复）。曾有的 52px 活动栏已
   删除：其场景切换全部有就近入口（会话列表新建、会话标题评审、⌘K、检查器 Tab），唯一独占的设置

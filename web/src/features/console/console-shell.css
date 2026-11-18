@@ -285,6 +285,33 @@ button.console-chip:hover {
   flex: none;
   border-right: 1px solid var(--console-line);
   background: var(--ark-bg-canvas);
+  /* Anchors the in-column collapse button without affecting list layout. */
+  position: relative;
+}
+
+/* Collapse affordance for the thread list: same visual language as the
+   inspector's header button, docked to the column's bottom-right corner so it
+   never competes with the header actions or row menus. */
+.console-sidebar-collapse {
+  position: absolute;
+  right: 8px;
+  bottom: 10px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--console-line);
+  border-radius: var(--ark-radius-sm);
+  background: var(--ark-bg-canvas);
+  color: var(--ark-text-faint);
+  cursor: pointer;
+  z-index: 2;
+}
+
+.console-sidebar-collapse:hover {
+  background: var(--ark-bg-hover);
+  color: var(--ark-text);
 }
 
 .console-col--center {

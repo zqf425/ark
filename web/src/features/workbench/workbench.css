@@ -34,6 +34,12 @@
   outline: none;
 }
 
+/* The inspector's left-edge resizer reuses the same hit area; hover feedback
+   mirrors the sidebar one so both edges read as draggable. */
+.console-inspector-resizer::after {
+  inset: 0 1px;
+}
+
 /* Collapsed thread list: a slim rail button to bring it back. */
 .console-sidebar-tab {
   width: 26px;

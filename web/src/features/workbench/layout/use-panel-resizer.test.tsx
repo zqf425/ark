@@ -8,9 +8,9 @@ import {
 } from '../../../shared/testing/react-harness'
 import { resizerKeyDelta, usePanelResizer } from './use-panel-resizer'
 
-function Probe({ initialWidth }: { initialWidth: number }): JSX.Element {
+function Probe({ initialWidth, anchor }: { initialWidth: number; anchor?: 'left' | 'right' }): JSX.Element {
   const [width, setWidth] = useState(initialWidth)
-  const { onPointerDown } = usePanelResizer(width, setWidth)
+  const { onPointerDown } = usePanelResizer(width, setWidth, anchor)
   return (
     <div data-testid="resizer" onPointerDown={onPointerDown}>
       {width}
@@ -162,5 +162,33 @@ describe('usePanelResizer', () => {
     expect(resizerKeyDelta('ArrowRight')).toBe(16)
     expect(resizerKeyDelta('ArrowLeft')).toBe(-16)
     expect(resizerKeyDelta('Home')).toBeNull()
+  })
+})
+
+describe('usePanelResizer（右锚定：检查器左缘）', () => {
+  let harness: ReactHarness | null = null
+
+  beforeEach(() => {
+    installBrowserStubs()
+    stubPointerCapture()
+  })
+
+  afterEach(async () => {
+    await harness?.unmount()
+    harness = null
+    vi.restoreAllMocks()
+  })
+
+  it('向左拖动变宽、向右拖动变窄，并按上下限截断', async () => {
+    harness = await mountWithProviders(<Probe initialWidth={392} anchor='right' />)
+    const element = harness.host.querySelector<HTMLElement>('[data-testid="resizer"]')
+    if (!element) throw new Error('resizer element missing')
+    await act(async () => firePointer(element, 'pointerdown', 800))
+    await act(async () => firePointer(window, 'pointermove', 700))
+    expect(harness.text()).toContain('492')
+    await act(async () => firePointer(window, 'pointermove', 900))
+    expect(harness.text()).toContain('292')
+    await act(async () => firePointer(window, 'pointermove', 0))
+    expect(harness.text()).toContain('640')
   })
 })

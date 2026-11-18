@@ -584,13 +584,15 @@
 
 @media (max-width: 1400px) {
   .console-search { width: min(28vw, 320px); }
-  .console-inspector { width: 332px; }
+  /* The inspector is user-resizable now: breakpoints cap it instead of
+     overwriting the width, so a dragged width survives window shrinking. */
+  .console-inspector { max-width: 332px; }
 }
 
 @media (max-width: 1180px) {
   .console-topbar__right .console-chip,
   .console-chip__path { display: none; }
-  .console-inspector { width: 300px; }
+  .console-inspector { max-width: 300px; }
 }
 
 @media (max-width: 1000px) {

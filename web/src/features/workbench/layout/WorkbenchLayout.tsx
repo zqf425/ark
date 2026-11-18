@@ -1,22 +1,32 @@
 import { type KeyboardEvent, type ReactNode } from 'react'
-import { useI18n } from '../../../shared/i18n'
+import { useI18n, type MessageKey } from '../../../shared/i18n'
 import { Icon } from '../../../shared/ui'
 import { useCodeSessionStore } from '../../code-session/state/store'
-import { resizerKeyDelta, usePanelResizer } from './use-panel-resizer'
+import { resizerKeyDelta, usePanelResizer, type ResizerAnchor } from './use-panel-resizer'
 import '../workbench.css'
 
-/** A draggable 1px gutter that is also keyboard operable. */
+/**
+ * A draggable 1px gutter that is also keyboard operable. `anchor` decides
+ * which direction "wider" is: a right-anchored panel (the inspector) grows
+ * when the user drags its left edge toward the left.
+ */
 function Resizer({
   width,
-  setWidth
+  setWidth,
+  anchor,
+  label,
+  className
 }: {
   width: number
   setWidth: (width: number) => void
+  anchor: ResizerAnchor
+  label: MessageKey
+  className: string
 }): JSX.Element {
   const { t } = useI18n()
-  const { onPointerDown } = usePanelResizer(width, setWidth)
+  const { onPointerDown } = usePanelResizer(width, setWidth, anchor)
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    const delta = resizerKeyDelta(event.key)
+    const delta = resizerKeyDelta(event.key, anchor)
     if (delta === null) return
     event.preventDefault()
     setWidth(width + delta)
@@ -24,10 +34,10 @@ function Resizer({
 
   return (
     <div
-      className="ark-resizer"
+      className={`ark-resizer${className ? ` ${className}` : ''}`}
       role="separator"
       aria-orientation="vertical"
-      aria-label={t('workbench.layout.resizeLeft')}
+      aria-label={t(label)}
       tabIndex={0}
       onPointerDown={onPointerDown}
       onKeyDown={onKeyDown}
@@ -50,16 +60,18 @@ export type WorkbenchLayoutProps = {
 export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): JSX.Element {
   const { t } = useI18n()
   const leftWidth = useCodeSessionStore((s) => s.leftWidth)
+  const rightWidth = useCodeSessionStore((s) => s.rightWidth)
   const rightCollapsed = useCodeSessionStore((s) => s.rightCollapsed)
   const leftCollapsed = useCodeSessionStore((s) => s.leftCollapsed)
   const setLeftWidth = useCodeSessionStore((s) => s.setLeftWidth)
+  const setRightWidth = useCodeSessionStore((s) => s.setRightWidth)
   const toggleLeft = useCodeSessionStore((s) => s.toggleLeft)
   const toggleRight = useCodeSessionStore((s) => s.toggleRight)
 
   return (
     <div
       className="console-workbench"
-      style={{ '--ark-left': `${leftWidth}px` } as React.CSSProperties}
+      style={{ '--ark-left': `${leftWidth}px`, '--ark-right': `${rightWidth}px` } as React.CSSProperties}
     >
       {leftCollapsed ? (
         <button
@@ -73,8 +85,28 @@ export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): 
         </button>
       ) : (
         <>
-          <div className="console-col console-col--left">{left}</div>
-          <Resizer width={leftWidth} setWidth={setLeftWidth} />
+          <div className="console-col console-col--left">
+            {left}
+            {/* 收起入口放在列内右下角：与检查器折叠按钮同视觉语言，避开列表头部的
+                定时任务/新建动作，也不与行级 kebab 菜单争位。 */}
+            <button
+              type="button"
+              className="console-sidebar-collapse"
+              title={t('workbench.layout.hideThreads')}
+              aria-label={t('workbench.layout.hideThreads')}
+              aria-expanded
+              onClick={toggleLeft}
+            >
+              ‹
+            </button>
+          </div>
+          <Resizer
+            width={leftWidth}
+            setWidth={setLeftWidth}
+            anchor="left"
+            label="workbench.layout.resizeLeft"
+            className="console-left-resizer"
+          />
         </>
       )}
 
@@ -94,6 +126,15 @@ export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): 
         {center}
       </div>
 
+      {!rightCollapsed ? (
+        <Resizer
+          width={rightWidth}
+          setWidth={setRightWidth}
+          anchor="right"
+          label="workbench.layout.resizeRight"
+          className="console-inspector-resizer"
+        />
+      ) : null}
       <aside
         id="ark-context-drawer"
         className="console-inspector"
