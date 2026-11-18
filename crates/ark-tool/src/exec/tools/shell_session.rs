@@ -23,6 +23,7 @@ use ark_ports::{SandboxDecision, Tool, ToolArgs, ToolContext, ToolOutput};
 
 use super::bash::{default_shell_env, BashTool};
 use crate::domain::args;
+use crate::exec::common::decode_shell_output;
 use crate::policy::truncate::{cap_bytes, DEFAULT_LIMITS};
 
 /// Capacity of one task's output ring. Beyond it, oldest bytes are dropped and
@@ -72,7 +73,7 @@ impl TaskOutput {
 
     fn text(&self) -> String {
         let bytes: Vec<u8> = self.buf.iter().copied().collect();
-        String::from_utf8_lossy(&bytes).into_owned()
+        decode_shell_output(&bytes)
     }
 }
 
@@ -168,7 +169,7 @@ impl ShellSessionManager {
         // prefix bytes simply never reach a reader that was not there.
         let snapshot_bytes: Vec<u8> = output.buf.iter().copied().collect();
         let new_from = output.read_offset.min(snapshot_bytes.len());
-        let chunk = String::from_utf8_lossy(&snapshot_bytes[new_from..]).into_owned();
+        let chunk = decode_shell_output(&snapshot_bytes[new_from..]);
         output.read_offset = snapshot_bytes.len();
         Some(TaskSnapshot {
             task_id: task_id.to_string(),
@@ -331,6 +332,7 @@ impl BashSessionTool {
         parsed: &crate::domain::args::BashSessionArgs,
     ) -> ark_common::Result<ToolOutput> {
         let cwd = self.session.resolve_cwd(&ctx.workspace, &parsed.command);
+        super::bash::ensure_cwd(&cwd)?;
         let mut command = std_shell(&parsed.command)?;
         command
             .current_dir(&cwd)

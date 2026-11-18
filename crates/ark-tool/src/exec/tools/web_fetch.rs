@@ -54,41 +54,92 @@ impl Tool for WebFetchTool {
             Ok(parsed) => parsed,
             Err(err) => return Ok(ToolOutput::err(err.message)),
         };
-        let url = match Url::parse(parsed.url.trim()) {
-            Ok(url) => url,
-            Err(err) => {
-                return Ok(ToolOutput::err(format!("invalid url: {err}")));
-            }
-        };
-        let Some(host) = url.host_str() else {
-            return Ok(ToolOutput::err("url has no host"));
-        };
-        if let Err(reason) = ensure_public_host(host).await {
-            // Structured refusal, not a turn failure: the model can react.
-            return Ok(ToolOutput::err(format!(
-                "target refused by the SSRF guard: {reason}"
-            )));
-        }
-        let response = self
-            .http
-            .request(
-                EGRESS_ID,
-                OutboundRequest {
-                    method: "GET".into(),
-                    url: parsed.url.trim().to_string(),
-                    // Only the first hop is SSRF-checked. Do not let the bus
-                    // follow a 3xx to a private/loopback host (T-01).
-                    follow_redirects: Some(false),
-                    ..Default::default()
-                },
-            )
-            .await;
-        let response = match response {
-            Ok(response) => response,
-            Err(err) => return Ok(ToolOutput::err(err.message)),
-        };
-        Ok(render(response.status, &response.headers, &response.body))
+        Ok(self.fetch(parsed.url.trim()).await)
     }
+}
+
+impl WebFetchTool {
+    /// Fetch one URL, following 3xx hops ourselves.
+    ///
+    /// The bus is asked with `follow_redirects: false` on purpose: its own hop
+    /// walk re-checks only scheme and allowlist, and this tool's egress
+    /// identity is `allow_all()`, so a page redirecting to `169.254.169.254`
+    /// would be followed. Walking the hops here is what lets every hop go back
+    /// through the SSRF guard. Returning the raw 3xx instead (the previous
+    /// behaviour) made ordinary `http`→`https` and trailing-slash redirects
+    /// look like failures: twelve `web_fetch` calls in one day's sessions died
+    /// on `request returned status 301`, and the model spent a whole turn
+    /// re-deriving the final URL by hand.
+    async fn fetch(&self, raw_url: &str) -> ToolOutput {
+        let mut url = match Url::parse(raw_url) {
+            Ok(url) => url,
+            Err(err) => return ToolOutput::err(format!("invalid url: {err}")),
+        };
+        let mut hops = 0_u8;
+        loop {
+            if let Err(reason) = ensure_public_host_for(&url).await {
+                // Structured refusal, not a turn failure: the model can react.
+                return ToolOutput::err(format!("target refused by the SSRF guard: {reason}"));
+            }
+            let response = self
+                .http
+                .request(
+                    EGRESS_ID,
+                    OutboundRequest {
+                        method: "GET".into(),
+                        url: url.to_string(),
+                        follow_redirects: Some(false),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            let response = match response {
+                Ok(response) => response,
+                Err(err) => return ToolOutput::err(err.message),
+            };
+            let Some(target) = redirect_target(&url, &response) else {
+                return render(response.status, &response.headers, &response.body);
+            };
+            hops += 1;
+            if hops > MAX_REDIRECTS {
+                return ToolOutput::err(format!(
+                    "stopped after {MAX_REDIRECTS} redirects; the last target was `{target}`"
+                ));
+            }
+            url = target;
+        }
+    }
+}
+
+/// Redirect budget for one `web_fetch` call, matching the bus policy default
+/// (`HttpPolicy::max_redirects`) so a fetch that the bus would have followed
+/// is not refused here.
+const MAX_REDIRECTS: u8 = 5;
+
+/// The next hop for a 3xx response, or `None` when this is a final response.
+///
+/// Mirrors `ark_http::domain::redirect::next_hop` for the GET-only case this
+/// tool uses: `Location` is resolved against the current URL, so a relative
+/// redirect works. A 3xx without a usable `Location` is final, and `render`
+/// reports its status — guessing a target would hide the server's answer.
+fn redirect_target(current: &Url, response: &ark_ports::OutboundResponse) -> Option<Url> {
+    if !matches!(response.status, 301 | 302 | 303 | 307 | 308) {
+        return None;
+    }
+    let location = response
+        .headers
+        .get("location")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())?;
+    current.join(location).ok()
+}
+
+/// SSRF guard for one URL, naming the offending host.
+async fn ensure_public_host_for(url: &Url) -> std::result::Result<(), String> {
+    let Some(host) = url.host_str() else {
+        return Err(format!("`{url}` has no host"));
+    };
+    ensure_public_host(host).await
 }
 
 /// Render one completed response as model-visible output.
@@ -480,6 +531,145 @@ mod tests {
             Some(false),
             "web_fetch must opt out of bus-level redirects"
         );
+    }
+
+    /// Replays a fixed script of responses and records every requested URL, so
+    /// a redirect chain is testable end to end without a network.
+    struct ScriptedHttp {
+        responses: std::sync::Mutex<Vec<OutboundResponse>>,
+        urls: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl ScriptedHttp {
+        fn new(responses: Vec<(u16, Option<&str>, &str)>) -> Self {
+            let responses = responses
+                .into_iter()
+                .map(|(status, location, body)| {
+                    let mut headers = BTreeMap::new();
+                    headers.insert("content-type".to_string(), "text/html".to_string());
+                    if let Some(location) = location {
+                        headers.insert("location".to_string(), location.to_string());
+                    }
+                    OutboundResponse {
+                        status,
+                        headers,
+                        body: body.to_string(),
+                    }
+                })
+                .collect();
+            Self {
+                responses: std::sync::Mutex::new(responses),
+                urls: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn urls(&self) -> Vec<String> {
+            self.urls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl HttpCapability for ScriptedHttp {
+        async fn request(
+            &self,
+            _plugin_id: &str,
+            req: OutboundRequest,
+        ) -> Result<OutboundResponse> {
+            self.urls.lock().unwrap().push(req.url.clone());
+            let mut responses = self.responses.lock().unwrap();
+            if responses.is_empty() {
+                return Err(ark_common::ArkError::new(
+                    ark_common::ArkErrorCode::ToolExecutionFailed,
+                    "scripted http ran out of responses",
+                ));
+            }
+            Ok(responses.remove(0))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_permanent_redirect_is_followed_and_re_guarded() {
+        // Ordinary https migrations answer 301. Returning it raw made every
+        // such fetch a failure; the tool now walks the hop itself so the guard
+        // runs again on the new URL.
+        let scripted = Arc::new(ScriptedHttp::new(vec![
+            (301, Some("/moved"), ""),
+            (200, None, "<html><body>final page</body></html>"),
+        ]));
+        let tool = WebFetchTool::new(Arc::clone(&scripted) as Arc<dyn HttpCapability>);
+        let out = tool
+            .execute(
+                &ctx(),
+                ToolArgs(serde_json::json!({"url": "https://1.1.1.1/start"})),
+            )
+            .await
+            .unwrap();
+        assert!(out.ok, "{}", out.content);
+        assert!(out.content.contains("final page"), "{}", out.content);
+        assert_eq!(
+            scripted.urls(),
+            vec![
+                "https://1.1.1.1/start".to_string(),
+                "https://1.1.1.1/moved".to_string(),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_redirect_to_a_private_host_is_refused_after_the_hop() {
+        // The bus would follow this silently under `allow_all()`; the tool must
+        // resolve the new host and refuse it instead of opening the connection.
+        let scripted = Arc::new(ScriptedHttp::new(vec![(
+            302,
+            Some("https://169.254.169.254/latest/meta-data/"),
+            "",
+        )]));
+        let tool = WebFetchTool::new(Arc::clone(&scripted) as Arc<dyn HttpCapability>);
+        let out = tool
+            .execute(
+                &ctx(),
+                ToolArgs(serde_json::json!({"url": "https://1.1.1.1/start"})),
+            )
+            .await
+            .unwrap();
+        assert!(!out.ok, "{}", out.content);
+        assert!(out.content.contains("SSRF"), "{}", out.content);
+        assert_eq!(
+            scripted.urls().len(),
+            1,
+            "the private hop must never be requested"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_redirect_loop_stops_at_the_budget() {
+        let responses: Vec<(u16, Option<&str>, &str)> = (0..(MAX_REDIRECTS as usize + 2))
+            .map(|_| (302, Some("/loop"), ""))
+            .collect();
+        let tool = WebFetchTool::new(Arc::new(ScriptedHttp::new(responses)));
+        let out = tool
+            .execute(
+                &ctx(),
+                ToolArgs(serde_json::json!({"url": "https://1.1.1.1/start"})),
+            )
+            .await
+            .unwrap();
+        assert!(!out.ok, "{}", out.content);
+        assert!(out.content.contains("redirects"), "{}", out.content);
+    }
+
+    #[tokio::test]
+    async fn a_redirect_without_a_usable_location_reports_its_status() {
+        let tool = WebFetchTool::new(Arc::new(ScriptedHttp::new(vec![(302, None, "")])));
+        let out = tool
+            .execute(
+                &ctx(),
+                ToolArgs(serde_json::json!({"url": "https://1.1.1.1/start"})),
+            )
+            .await
+            .unwrap();
+        assert!(!out.ok, "{}", out.content);
+        assert!(out.content.contains("302"), "{}", out.content);
     }
 
     #[tokio::test]
