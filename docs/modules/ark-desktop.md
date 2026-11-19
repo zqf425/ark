@@ -31,6 +31,14 @@ Windows 发布构建必须使用 GUI 子系统（`main.rs` 的 `windows_subsyste
 构建保留控制台供 `tauri dev` 查看日志。`arkd` 作为 CLI 仍是控制台程序，但桌面壳通过 Tauri shell plugin
 启动它时已带 `CREATE_NO_WINDOW`，不会单独弹窗。
 
+安装器使用自定义 NSIS 模板 `src-tauri/nsis/installer.nsi`（由 `tauri.release.conf.json` 的
+`bundle.windows.nsis.template` 指向），基于 Tauri 2.12 官方模板，只改重装页面的同版本分支：默认选项从
+"Add/Reinstall"改为"Uninstall before installing"，并同步修正 `PageLeaveReinstall` 的跳转。原因是 `arkd`
+作为独立 sidecar 在运行中持有自身 exe 的文件句柄，同版本直接覆盖 `File` 会报 `Error opening file for
+writing`；先走卸载流程会由卸载脚本的 `CheckIfAppIsRunning` 结束主程序并回收 sidecar，再安装新文件。
+升级/降级分支和卸载脚本保持官方模板逻辑不变。模板含 Tauri 占位符，禁止手工替换成具体值；Tauri 升级后
+需重新比对官方模板并重新套用这两处改动。
+
 桌面仅在端口上与 CLI/纯 Web 默认值隔离：CLI 和直接运行 `web/npm run dev` 使用 18790，桌面使用 18791；
 两种构建都把 `~/.arkd/data` 和 `~/.arkd/workspace` 显式传给 arkd，不再使用 Tauri `app_data_dir`、
 Documents 或仓库根。已有 18791 监听必须通过健康检查才会复用，从而避免两个 arkd 并发写同一会话目录。

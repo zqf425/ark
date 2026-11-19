@@ -1,5 +1,10 @@
 {
   "bundle": {
-    "externalBin": ["binaries/arkd"]
+    "externalBin": ["binaries/arkd"],
+    "windows": {
+      "nsis": {
+        "template": "nsis/installer.nsi"
+      }
+    }
   }
 }
