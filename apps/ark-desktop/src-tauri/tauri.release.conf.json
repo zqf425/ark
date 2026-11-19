@@ -3,7 +3,7 @@
     "externalBin": ["binaries/arkd"],
     "windows": {
       "nsis": {
-        "template": "nsis/installer.nsi"
+        "installerHooks": "nsis/installer-hooks.nsh"
       }
     }
   }

@@ -31,13 +31,25 @@ Windows 发布构建必须使用 GUI 子系统（`main.rs` 的 `windows_subsyste
 构建保留控制台供 `tauri dev` 查看日志。`arkd` 作为 CLI 仍是控制台程序，但桌面壳通过 Tauri shell plugin
 启动它时已带 `CREATE_NO_WINDOW`，不会单独弹窗。
 
-安装器使用自定义 NSIS 模板 `src-tauri/nsis/installer.nsi`（由 `tauri.release.conf.json` 的
-`bundle.windows.nsis.template` 指向），基于 Tauri 2.12 官方模板，只改重装页面的同版本分支：默认选项从
-"Add/Reinstall"改为"Uninstall before installing"，并同步修正 `PageLeaveReinstall` 的跳转。原因是 `arkd`
-作为独立 sidecar 在运行中持有自身 exe 的文件句柄，同版本直接覆盖 `File` 会报 `Error opening file for
-writing`；先走卸载流程会由卸载脚本的 `CheckIfAppIsRunning` 结束主程序并回收 sidecar，再安装新文件。
-升级/降级分支和卸载脚本保持官方模板逻辑不变。模板含 Tauri 占位符，禁止手工替换成具体值；Tauri 升级后
-需重新比对官方模板并重新套用这两处改动。
+### 安装与升级
+
+安装器走 NSIS 的原地覆盖升级，不先卸载旧版本：失败时旧文件仍在磁盘上，用户不会得到"卸载完、装不上"的
+空目录。这是 Notepad++、7-Zip 等 NSIS 应用的通行做法；Chrome/Electron 的版本化目录 + 原子切换需要重排
+安装布局，不在当前范围。
+
+覆盖失败的真实原因是 `arkd` 作为独立 sidecar 会活过桌面壳（外壳被强关，或外壳只复用了外部启动的运行时），
+持续持有自身 exe 的文件句柄，`File` 因此报 `Error opening file for writing`。Tauri 默认模板的
+`CheckIfAppIsRunning` 只检查主程序，卸载脚本同样不管 sidecar，所以"先卸载再装"并不能绕过该占用。
+
+`src-tauri/nsis/installer-hooks.nsh`（由 `tauri.release.conf.json` 的 `bundle.windows.nsis.installerHooks`
+指向）在安装、卸载前用 `taskkill` 结束 `arkd`，并留出句柄释放时间；安装前把主程序、`arkd` 和
+`WebView2Loader.dll` 备份到 `$INSTDIR\.ark-upgrade-backup`，`NSIS_HOOK_POSTINSTALL` 成功后删除，
+`.onInstFailed` 在安装中止或写入失败时把备份复制回原位。用户数据在 `~/.arkd`，不属于安装目录，升级和
+卸载都不触碰。
+
+`arkd` 被强杀会中断正在进行的回合；安装器一律先关主程序再动文件，属于安装场景可接受的代价。hook 文件
+在 Tauri 模板的 `installer_hooks` 位置 include（早于产品名 define），因此只能用 `MAINBINARYNAME` 这类
+宏内展开的变量，函数体里用通配符，不得改成顶层直接引用的具体值。
 
 桌面仅在端口上与 CLI/纯 Web 默认值隔离：CLI 和直接运行 `web/npm run dev` 使用 18790，桌面使用 18791；
 两种构建都把 `~/.arkd/data` 和 `~/.arkd/workspace` 显式传给 arkd，不再使用 Tauri `app_data_dir`、
