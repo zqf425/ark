@@ -1,3 +1,8 @@
+// A release binary with the console subsystem gets a Windows console window;
+// closing that window tears down the shell and its sidecar. Debug keeps the
+// console so `tauri dev` can show logs.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod runtime;
 
 use tauri_plugin_dialog::DialogExt;

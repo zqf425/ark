@@ -26,6 +26,11 @@ Tauri 2.12 及其 shell plugin 的最低 Rust 版本为 1.90，因此 `ark-deskt
 - 复用：如果 `127.0.0.1:18791` 已有监听，外壳只在 `/health` 响应确认它是 arkd 时复用；未知服务会显示
   端口冲突，绝不终止或连接它。由外壳启动的 sidecar 由其显式持有，并在退出时通过进程组/Job Object 回收。
 
+Windows 发布构建必须使用 GUI 子系统（`main.rs` 的 `windows_subsystem = "windows"`）：控制台子系统会额外显示
+一个黑色控制台窗口，用户关闭该窗口会向挂在其上的进程发送关闭信号，导致桌面壳和 sidecar 一起退出。Debug
+构建保留控制台供 `tauri dev` 查看日志。`arkd` 作为 CLI 仍是控制台程序，但桌面壳通过 Tauri shell plugin
+启动它时已带 `CREATE_NO_WINDOW`，不会单独弹窗。
+
 桌面仅在端口上与 CLI/纯 Web 默认值隔离：CLI 和直接运行 `web/npm run dev` 使用 18790，桌面使用 18791；
 两种构建都把 `~/.arkd/data` 和 `~/.arkd/workspace` 显式传给 arkd，不再使用 Tauri `app_data_dir`、
 Documents 或仓库根。已有 18791 监听必须通过健康检查才会复用，从而避免两个 arkd 并发写同一会话目录。
