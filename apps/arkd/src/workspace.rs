@@ -153,7 +153,7 @@ fn view_state(state: &State) -> WorkspaceView {
             .recent
             .iter()
             .map(|path| WorkspaceDescriptor {
-                path: path.display().to_string(),
+                path: display_key(path),
                 generation: state.active.generation,
             })
             .collect(),
@@ -163,9 +163,20 @@ fn view_state(state: &State) -> WorkspaceView {
 
 fn descriptor(lease: &WorkspaceLease) -> WorkspaceDescriptor {
     WorkspaceDescriptor {
-        path: lease.canonical_root.display().to_string(),
+        path: display_key(&lease.canonical_root),
         generation: lease.generation,
     }
+}
+
+/// The descriptor string clients store as a thread override and group by.
+///
+/// `canonicalize` yields native backslashes on Windows; the thread store keeps
+/// overrides in `ark_common::path::normalize` form, and the rail groups by the
+/// exact string. Emitting the canonical form here would put the same root into
+/// two project groups (descriptor vs override), so this is the one place the
+/// two key spaces are joined.
+fn display_key(path: &Path) -> String {
+    ark_common::path::normalize(&path.to_string_lossy())
 }
 
 fn canonical_directory(path: &Path) -> Result<PathBuf> {
@@ -350,6 +361,42 @@ mod tests {
         assert!(
             !roots.current().to_string_lossy().starts_with(r"\\?\"),
             "workspace root must be suitable for prompts and tool inputs"
+        );
+    }
+
+    /// 会话列表按 `ThreadSummary.workspace` / active root 的**字符串**分组。
+    /// thread 覆盖存的是 normalize 形态(`C:/w/alpha`),descriptor 若仍输出
+    /// canonical 的反斜杠形态(`C:\w\alpha`),同一个根在侧栏就是两个项目。
+    /// descriptor 必须与覆盖同键:normalize 后的字符串。
+    #[test]
+    fn descriptors_carry_the_normalized_path_form() {
+        let test = TestDir::new("descriptor-form");
+        let active = test.child("active");
+        let other = test.child("other");
+
+        let roots = WorkspaceRoots::new(active.clone(), test.path()).expect("root");
+        let view = roots
+            .switch(&other.display().to_string(), 0)
+            .expect("switch");
+
+        let expected_active = ark_common::path::normalize(
+            &canonical_directory(&active)
+                .expect("canonical")
+                .to_string_lossy(),
+        );
+        let expected_other = ark_common::path::normalize(
+            &canonical_directory(&other)
+                .expect("canonical")
+                .to_string_lossy(),
+        );
+        assert_eq!(
+            view.active.as_ref().expect("active").path,
+            expected_other,
+            "the active descriptor uses the normalized comparison form"
+        );
+        assert_eq!(
+            view.recent[0].path, expected_active,
+            "recent descriptors use the normalized comparison form"
         );
     }
 }

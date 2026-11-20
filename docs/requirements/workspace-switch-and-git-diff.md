@@ -53,6 +53,12 @@ headless/远程构建不装配，避免在无人可见的机器上弹窗。macOS
 `validate` + PATCH,不再调用 `POST /v1/workspace/switch`。全局默认工作空间切换（含进程级 busy 409 语义）
 保留在设置页与 Changes 面板,服务端行为不变。
 
+**存储与分组键统一（2026-11-20 补充）**：会话列表按覆盖字符串精确分组，因此覆盖与 descriptor 必须同键。
+`PATCH` 边界对提交值做 `ark_common::path::normalize`（此前原样落库,canonical 反斜杠与 normalize 正斜杠
+形态并存导致同一项目拆成两组）;`create_thread` 的 default 种子同样 normalize;`GET /v1/workspace` 的
+descriptor（active/recent）输出 normalize 形态;列表投影 `summary_of` 读出时 normalize,兜底历史数据与
+scheduler/IM 旁路写入。运行回合的 `resolve_workspace` 仍做 canonicalize（语义不受影响）。
+
 ## 当前实现（2026-11-03 更新）
 
 - `WorkspaceRoots` 持有 canonical root 与 generation；父 turn 在 runner 入口获取 lease，prompt 与每次

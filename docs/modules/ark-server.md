@@ -63,8 +63,14 @@
 - `POST /v1/threads` 接受可选 `workspace`：经 `WorkspaceService::validate` 校验（与 composer 的
   新增项目同一条规则）后作为该线程的 workspace 覆盖种子，校验失败返回结构化 400 而不是写入死路径；
   缺省时保持既有行为（回落配置的 default workspace）。编排宿主 `service::threads::create_thread` 的
-  显式值优先于 default 种子，并统一经 `ark_common::path::normalize` 规范化；scheduler/IM 等其他调用方
-  传 `None` 语义不变。
+  显式值与 default 种子**都**统一经 `ark_common::path::normalize` 规范化——default 配置常是原生
+  反斜杠形态，不归一会让同一目录以两种字符串进入 `thread.json`，侧栏按原样字符串分组时拆成两个项目；
+  scheduler/IM 等其他调用方传 `None` 语义不变。
+- **workspace 字符串是侧栏分组键**，所有写入与读取边界必须产出同一形态：`PATCH
+  /v1/threads/{id}` 的 `merge_runtime` 对提交值 normalize（空白折叠为未提交，缺省字段保留存量）；
+  列表/详情/删行投影 `service::threads::summary_of` 读出时同样 normalize（历史数据与旁路写入的
+  兜底）；`GET /v1/workspace` 的 descriptor（arkd `WorkspaceRoots`）输出 normalize 形态。回落
+  active root 的比较已按 normalize 进行（bulk delete 与渲染层 rail 同一规则）。
 - `DELETE /v1/threads?workspace=…`（`service::threads::delete_settled_by_workspace`）按项目批量删除
   **已结束**的线程：匹配遵循渲染层项目分组规则（显式 override 与路径规范化后比对，无 override 回退
   运行时 active root；默认组不被此动词服务），"已结束"复用列表 busy 标记的同一持久折叠

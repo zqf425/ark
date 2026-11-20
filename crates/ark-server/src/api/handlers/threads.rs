@@ -9,6 +9,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use chrono::Utc;
 
+use ark_common::path::normalize;
 use ark_common::ThreadId;
 use ark_contract::{
     BulkDeleteThreadsResponse, ChildCompletionNotice, CreateThreadRequest, PendingApprovalView,
@@ -298,8 +299,19 @@ fn merge_runtime(
             ));
         }
     }
+    // The workspace pill sends `GET /v1/workspace` descriptor paths — on
+    // Windows the canonical backslash form. Create normalizes before storing;
+    // this boundary must too, or the same root lands in `thread.json` under
+    // two string forms and the rail's exact-match grouping splits it in two.
+    // A blank value folds to "not submitted", matching the create boundary's
+    // refusal to seed whitespace-only overrides.
+    let workspace = patch
+        .workspace
+        .map(|value| normalize(value.trim()))
+        .filter(|value| !value.is_empty())
+        .or(current.workspace);
     Ok(ark_contract::ThreadRuntimeSettings {
-        workspace: patch.workspace.or(current.workspace),
+        workspace,
         provider_id,
         model,
         autonomy,

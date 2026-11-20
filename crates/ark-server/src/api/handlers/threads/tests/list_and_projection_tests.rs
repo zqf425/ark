@@ -43,6 +43,36 @@ fn summary_mapping_preserves_title_and_archive_flag() {
 }
 
 #[test]
+fn summary_mapping_normalizes_the_workspace_grouping_key() {
+    // The rail groups by this exact string. Legacy rows and side-door writers
+    // (scheduler, IM) can still hold native backslash forms in `thread.json`,
+    // so the read boundary must hand out the same normalized form the write
+    // boundaries now store — otherwise one directory splits into two groups.
+    let meta = ThreadMeta {
+        thread_id: ThreadId::new(),
+        title: "legacy".into(),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        archived: false,
+        runtime: ark_contract::ThreadRuntimeSettings {
+            workspace: Some("C:\\w\\alpha\\".into()),
+            ..Default::default()
+        },
+        forked_from: None,
+        fork_at_seq: None,
+        inherited_item_count: None,
+        last_seq: None,
+        last_event_at: None,
+    };
+    let summary = summary_of(&meta);
+    assert_eq!(
+        summary.workspace.as_deref(),
+        Some("C:/w/alpha"),
+        "list rows must carry the normalized comparison form"
+    );
+}
+
+#[test]
 fn summary_mapping_carries_watermark_and_fork_provenance() {
     let source = ThreadId::new();
     let meta = ThreadMeta {

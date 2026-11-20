@@ -32,18 +32,24 @@ pub async fn create_thread(
     // （未设置） without a manual switch. The seed happens before the
     // `thread_created` event so an SSE client attached to the new thread never
     // sees a workspace-less snapshot; an explicit thread-level workspace
-    // (fork inheritance, IM/scheduler callers) wins. The explicit value is
-    // normalized with the same single implementation the runtime uses for
-    // comparisons (`ark_common::path::normalize`), never re-implemented here.
+    // (fork inheritance, IM/scheduler callers) wins. Both branches normalize
+    // with the same single implementation the runtime uses for comparisons
+    // (`ark_common::path::normalize`) — the configured default is often a
+    // native backslash path, and an un-normalized seed would group as a
+    // separate project from the same root seeded through an explicit
+    // (already normalized) create call.
     if meta.runtime.workspace.is_none() {
-        let seeded = workspace.map(normalize).or_else(|| {
-            state
-                .config
-                .snapshot()
-                .default_workspace
-                .as_deref()
-                .map(|path| path.to_string_lossy().into_owned())
-        });
+        let seeded = workspace
+            .map(normalize)
+            .or_else(|| {
+                state
+                    .config
+                    .snapshot()
+                    .default_workspace
+                    .as_deref()
+                    .map(|path| normalize(&path.to_string_lossy()))
+            })
+            .filter(|path| !path.is_empty());
         if let Some(workspace) = seeded {
             meta.runtime.workspace = Some(workspace);
             meta = state
@@ -122,6 +128,12 @@ pub async fn durable_running_ids(
 }
 
 /// Map stored metadata onto the wire shape.
+///
+/// The workspace string is the rail's exact-match grouping key, so the read
+/// boundary normalizes it too: legacy rows and side-door writers (scheduler,
+/// IM threads) may still hold a native backslash form in `thread.json`, and a
+/// verbatim projection would keep that directory split into two project
+/// groups even after every write path stores the normalized form.
 pub fn summary_of(meta: &ThreadMeta) -> ThreadSummary {
     ThreadSummary {
         thread_id: meta.thread_id,
@@ -137,7 +149,13 @@ pub fn summary_of(meta: &ThreadMeta) -> ThreadSummary {
         inherited_item_count: meta.inherited_item_count,
         // The list groups threads into projects by workspace; `to_meta` fills
         // this from `thread.json`, the index path mirrors it for list rows.
-        workspace: meta.runtime.workspace.clone(),
+        workspace: meta
+            .runtime
+            .workspace
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(normalize),
         archived: meta.archived,
         // `running` is live registry state only the caller knows; the mapping
         // from metadata alone cannot assert it.

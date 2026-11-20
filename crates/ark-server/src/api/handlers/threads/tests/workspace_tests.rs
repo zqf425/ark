@@ -38,9 +38,49 @@ async fn a_new_thread_seeds_the_configured_default_workspace() {
         .get_thread(summary.thread_id)
         .await
         .expect("thread");
+    // The seed lands in the same normalized comparison form the explicit
+    // create path uses (see `the_default_workspace_seed_is_normalized`).
     assert_eq!(
         meta.runtime.workspace.as_deref(),
-        Some(dir.path().to_string_lossy().as_ref())
+        Some(ark_common::path::normalize(&dir.path().to_string_lossy()).as_str())
+    );
+}
+
+/// default workspace 的种子与显式 `workspace` 参数走同一条归一化规则:
+/// 配置里常是原生反斜杠形态(`~/.arkd/workspace`),不 normalize 就会让
+/// 同一目录在 `thread.json` 里同时存在 `C:\w` 与 `C:/w` 两种键,侧栏分组
+/// 按字符串精确比较时同一项目被拆成两组。
+#[tokio::test]
+async fn the_default_workspace_seed_is_normalized() {
+    let dir = test_dir("seed-normalize");
+    let sessions =
+        Arc::new(FileSessionStore::open(StoreConfig::new(dir.path())).expect("session store"));
+    let store: Arc<dyn SessionStore> = sessions;
+    let config = RuntimeConfig {
+        default_workspace: Some(dir.path().join("nested").join("project")),
+        ..Default::default()
+    };
+    let state = AppState::new(
+        store,
+        Arc::new(EmptyTools),
+        Arc::new(ConfigStore::new(config)),
+        Arc::new(UsageRecorder::new()),
+        Arc::new(NoopRunner),
+        dir.path().to_path_buf(),
+        "test",
+    )
+    .with_base_services(BaseServices::new().with_providers(Arc::new(Providers)));
+
+    let summary = crate::service::create_thread(&state, "seeded", None)
+        .await
+        .expect("create");
+
+    let expected =
+        ark_common::path::normalize(&dir.path().join("nested/project").to_string_lossy());
+    assert_eq!(
+        summary.workspace.as_deref(),
+        Some(expected.as_str()),
+        "the default seed must land in the normalized comparison form"
     );
 }
 
@@ -59,6 +99,121 @@ async fn without_a_default_workspace_a_new_thread_stays_unset() {
         .await
         .expect("thread");
     assert_eq!(meta.runtime.workspace, None);
+}
+
+/// 会话 pill 的切换走 `PATCH /v1/threads/{id}`(`merge_runtime`),前端发来的
+/// 是 `GET /v1/workspace` 描述符里的 canonical 路径——Windows 上是反斜杠形态。
+/// create 边界统一经 `ark_common::path::normalize` 规范化后落库,PATCH 边界
+/// 必须同规则,否则同一目录会以两种字符串形态进入 `thread.json`,侧栏按
+/// 原样字符串分组时把同一项目拆成两组(实测缺陷)。
+#[tokio::test]
+async fn patch_runtime_normalizes_the_workspace_override() {
+    let dir = test_dir("patch-normalize");
+    let data_dir = dir.path().to_path_buf();
+    let state = state(&data_dir);
+    let thread = state.store.create_thread("switch").await.expect("thread");
+
+    let patched = update(
+        State(state.clone()),
+        Path(thread.thread_id.to_string()),
+        Json(UpdateThreadRequest {
+            title: None,
+            archived: None,
+            runtime: Some(ark_contract::ThreadRuntimeSettings {
+                workspace: Some("C:\\w\\alpha\\".to_string()),
+                ..Default::default()
+            }),
+        }),
+    )
+    .await
+    .expect("patch")
+    .0;
+
+    assert_eq!(
+        patched.workspace.as_deref(),
+        Some("C:/w/alpha"),
+        "the stored override must be the normalized comparison key"
+    );
+}
+
+/// PATCH 缺省 workspace 字段保持现状(契约注释明示),归一化不得把
+/// "未提交" 误当成重置或改写存量值。
+#[tokio::test]
+async fn patch_without_a_workspace_keeps_the_stored_one_verbatim() {
+    let dir = test_dir("patch-keep-ws");
+    let data_dir = dir.path().to_path_buf();
+    let state = state(&data_dir);
+    let thread = state.store.create_thread("keep").await.expect("thread");
+
+    let first = update(
+        State(state.clone()),
+        Path(thread.thread_id.to_string()),
+        Json(UpdateThreadRequest {
+            title: None,
+            archived: None,
+            runtime: Some(ark_contract::ThreadRuntimeSettings {
+                workspace: Some("/w/alpha".to_string()),
+                ..Default::default()
+            }),
+        }),
+    )
+    .await
+    .expect("first patch")
+    .0;
+    assert_eq!(first.workspace.as_deref(), Some("/w/alpha"));
+
+    let second = update(
+        State(state.clone()),
+        Path(thread.thread_id.to_string()),
+        Json(UpdateThreadRequest {
+            title: Some("renamed".to_string()),
+            archived: None,
+            runtime: Some(ark_contract::ThreadRuntimeSettings {
+                autonomy: Some("strict".to_string()),
+                ..Default::default()
+            }),
+        }),
+    )
+    .await
+    .expect("second patch")
+    .0;
+
+    assert_eq!(
+        second.workspace.as_deref(),
+        Some("/w/alpha"),
+        "an absent workspace field must keep the stored value"
+    );
+}
+
+/// 空白 workspace 覆盖在 PATCH 侧折叠为"未提交",与 create 边界对显式空串
+/// 的处理一致,避免把无意义字符串种子成死覆盖。
+#[tokio::test]
+async fn patch_with_a_blank_workspace_stays_unset() {
+    let dir = test_dir("patch-blank-ws");
+    let data_dir = dir.path().to_path_buf();
+    let state = state(&data_dir);
+    let thread = state.store.create_thread("blank").await.expect("thread");
+
+    let patched = update(
+        State(state.clone()),
+        Path(thread.thread_id.to_string()),
+        Json(UpdateThreadRequest {
+            title: None,
+            archived: None,
+            runtime: Some(ark_contract::ThreadRuntimeSettings {
+                workspace: Some("   ".to_string()),
+                ..Default::default()
+            }),
+        }),
+    )
+    .await
+    .expect("patch")
+    .0;
+
+    assert_eq!(
+        patched.workspace, None,
+        "a whitespace-only override must not be seeded"
+    );
 }
 
 // ---------------------------------------------------------------------------

@@ -117,7 +117,10 @@ recent workspace descriptors 是可重建的展示数据，以 canonical 路径 
 containment 或任何工具授权判断。
 
 Windows 上组合根会在保存 canonical root 前移除 `\\?\` verbatim 前缀，因此 WorkspaceView、模型 prompt
-和工具运行器使用同一份可显示、可解析的路径。
+和工具运行器使用同一份可显示、可解析的路径。**descriptor 输出统一再经
+`ark_common::path::normalize`**（active 与 recent 一致）：会话列表按 `ThreadSummary.workspace` /
+active root 的字符串精确分组，线程覆盖存的是 normalize 形态（`C:/w`），descriptor 若输出 canonical
+反斜杠形态（`C:\w`）会把同一根拆成两个项目组；存储/比较键统一为 normalize 后的字符串。
 
 UI catalog 由组合根创建唯一 `UiBus`：授予本构建实际具备的能力，以 `ark.builtin.code-ui` 注册 Code 页与
 四个面板，再以 `BaseServices::with_ui` 注入 server。注册句柄必须 `forget()` 活到进程结束，否则 drop 即
