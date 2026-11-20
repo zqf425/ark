@@ -3,7 +3,9 @@
  * The mirror layer only exists while the draft holds something recognizable:
  * complete mentions and the in-progress token chip, everything else stays
  * plain text. A wrong mirror would also mean a wrong alignment with the real
- * textarea, so the render rules are pinned here.
+ * textarea, so the render rules are pinned here — including the zero-advance
+ * rule: a chip must occupy exactly the advance of the verbatim token, or every
+ * glyph after it drifts and the draft reads as double text.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { installBrowserStubs, mountWithProviders } from '../../../shared/testing/react-harness'
@@ -60,5 +62,28 @@ describe('DraftHighlight', () => {
     expect(chip?.textContent).toContain('/pd')
     // Only the open token chips; no completed mention exists in this draft.
     expect(harness.host.querySelectorAll('.ark-mention')).toHaveLength(1)
+  })
+
+  it('芯片文字逐字等于 token,镜像芯片不渲染图标', async () => {
+    harness = await mountWithProviders(
+      <DraftHighlight text="/kun-new-session 跑一下" skills={SKILLS} token={null} />
+    )
+    const chip = harness.host.querySelector('.ark-mention')
+    // The verbatim token stays intact as the chip's only content; the mirror
+    // renders no bolt glyph (it would poke out from under the opaque text).
+    expect(chip?.textContent).toContain('/kun-new-session')
+    expect(chip?.querySelector('svg')).toBeNull()
+  })
+
+  it('镜像芯片可被镜像层作用域选择器命中(零占位度量挂在 CSS)', async () => {
+    harness = await mountWithProviders(
+      <DraftHighlight text="前面 /pdf 后面" skills={SKILLS} token={null} />
+    )
+    // The zero-advance footprint is pure CSS keyed on the mirror scope; the
+    // component contract is that the chip lives inside that scope and renders
+    // no inline glyph/icon of its own (the CSS carries the whole geometry).
+    const chip = harness.host.querySelector('.ark-composer__highlight .ark-mention')
+    expect(chip).not.toBeNull()
+    expect(chip?.querySelector('svg')).toBeNull()
   })
 })

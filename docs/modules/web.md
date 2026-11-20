@@ -384,7 +384,13 @@
   `StreamRow`/`TurnBlock` 拿到所属 threadId**（芯片依赖该线程的技能缓存），脱离流的独立渲染
   传 `null` 回落纯文本。输入框草稿侧，`DraftHighlight` 镜像层在 textarea 之下按同字体度量
   （`.ark-composer__editor-font`）重绘草稿：完整提及与光标下进行中 token（虚线边）渲染为芯片，
-  镜像层 `pointer-events: none` 且文本透明，不影响输入/选择/IME/复制。
+  镜像层 `pointer-events: none` 且文本透明，不影响输入/选择/IME/复制。镜像芯片必须与逐字文本
+  **同宽等位**：芯片默认 mono 0.86em 与 padding/图标会多占 ~37px，其后所有字形整体漂移成重影
+  （无头 Chrome 实测）。`.ark-composer__highlight .ark-mention` 作用域覆盖以负 margin 把洗色吃进
+  词边界的相邻空格、letter-spacing 收敛 mono 面宽、line-height 固定为编辑器 21.75px（芯片自身
+  1.55 会抬行盒）、typing 芯片按边框盒差再修 1px，同时镜像芯片不渲染闪电图标（被不透明文字覆盖
+  只会外溢压字）；组件侧芯片只含逐字 token 文本，无结构性垫片。逐字对齐验证方式：逐像素垂直/水平
+  配准（暗行/暗列直方图互相关偏移 = 0px）+ 芯片后首字符 x 坐标与正文 advance 差 ≤ 0.2px。
 - 用户可见文本通过 `web/src/shared/i18n/` 的消息键与中英文资源提供；新增 UI 不得硬编码文案。
   该目录已按域拆分为 `catalogs/*`（`common`、`errors`、`session`、`thread-list`、`workbench`、
   `session-canvas`、`settings-*`）：每个 catalog 输出一张

@@ -11,6 +11,15 @@
  * both layers MUST share the exact same font metrics and padding (one shared
  * class, `.ark-composer__editor-font`).
  *
+ * The chip itself must also occupy exactly the advance the verbatim text
+ * takes, or every glyph after it drifts (measured: the mono chip face ran
+ * ~10px wide and its padding + bolt glyph added another ~28px). The wash is a
+ * box around the text it decorates, never wider than it: metrics live in
+ * `.ark-composer__highlight .ark-mention` overrides (letter-spacing + negative
+ * margins), the bolt glyph is dropped (behind the textarea's opaque text it
+ * would only poke out over neighboring glyphs), and the component renders the
+ * verbatim token as the chip's only text — no structural spacers.
+ *
  * Rendering `null` when the draft has nothing recognizable keeps an ordinary
  * draft at zero cost — no extra DOM, no layout shift.
  */
@@ -18,18 +27,16 @@ import { memo } from 'react'
 import type { SkillSummary } from '../../../shared/contracts'
 import { splitSkillMentions, type MentionToken } from './skill-mention'
 
-function MentionGlyph(): JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true" focusable="false">
-      <path
-        d="M13 2.5 4.5 13.5H11L9.8 21.5 19.5 9.5H13l1.4-7Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
+/**
+ * One mirror mention chip. The text must stay the verbatim token: alignment
+ * with the textarea is glyph-for-glyph, and the zero-advance footprint (wash
+ * margins, letter-spacing) comes entirely from the CSS overrides scoped to the
+ * mirror layer. No bolt glyph here: the chip sits behind the textarea's opaque
+ * text, so the icon would only poke out over adjacent glyphs — the wash alone
+ * reads as the same violet mention language the message chips use.
+ */
+function MirrorMention({ value, typing }: { value: string; typing: boolean }): JSX.Element {
+  return <span className={typing ? 'ark-mention ark-mention--typing' : 'ark-mention'}>{value}</span>
 }
 
 export const DraftHighlight = memo(function DraftHighlight({
@@ -49,14 +56,7 @@ export const DraftHighlight = memo(function DraftHighlight({
     <div className="ark-composer__editor-font ark-composer__highlight" aria-hidden="true">
       {segments.map((segment, index) => {
         if (segment.kind === 'mention') {
-          return (
-            <span key={`m-${index}-${segment.value}`} className="ark-mention">
-              <span className="ark-mention__glyph">
-                <MentionGlyph />
-              </span>
-              {segment.value}
-            </span>
-          )
+          return <MirrorMention key={`m-${index}-${segment.value}`} value={segment.value} typing={false} />
         }
         // Plain text may still contain the open token; chip it when present.
         if (token && segment.value.length > token.start) {
@@ -74,14 +74,7 @@ export const DraftHighlight = memo(function DraftHighlight({
               const overlapEnd = Math.min(segment.value.length, token.end - segStartGlobal)
               const overlap = segment.value.slice(overlapStart, overlapEnd)
               if (overlap) {
-                parts.push(
-                  <span key={`k-${index}-${parts.length}`} className="ark-mention ark-mention--typing">
-                    <span className="ark-mention__glyph">
-                      <MentionGlyph />
-                    </span>
-                    {overlap}
-                  </span>
-                )
+                parts.push(<MirrorMention key={`k-${index}-${parts.length}`} value={overlap} typing />)
               }
               cursor = overlapEnd
             } else {
