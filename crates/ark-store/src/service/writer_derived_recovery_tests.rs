@@ -3,7 +3,7 @@ use crate::domain::diagnostics::{DiagnosticKind, MemoryDiagnostics};
 use crate::domain::layout::{DataPaths, ThreadPaths};
 use crate::domain::session_state::SessionState;
 use crate::store::fs_util::ensure_dir;
-use crate::store::items_log::{read_items_blocking, thread_usage_blocking};
+use crate::store::items_log::read_items_blocking;
 use crate::store::tests::TempDir;
 use crate::store::writer_state::WriterState;
 use ark_common::{ItemId, ThreadId, TurnId, Usage};
@@ -204,6 +204,10 @@ fn compacted_writer_restart_preserves_item_and_session_checkpoints() {
 #[test]
 fn dirty_compacted_reads_merge_suffix_after_derived_append_failures() {
     use std::os::unix::fs::PermissionsExt;
+
+    // Unix-only test: the usage probe is imported here so a Windows build
+    // (which compiles this file but drops the test) keeps a clean import set.
+    use crate::store::items_log::thread_usage_blocking;
 
     let dir = TempDir::new("compacted-dirty-live-read");
     let thread = ThreadId::new();
