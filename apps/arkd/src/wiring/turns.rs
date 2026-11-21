@@ -522,9 +522,17 @@ fn resolve_thread_provider(
     model: Option<String>,
     reasoning_effort: Option<String>,
 ) -> Result<Option<ark_llm::ProviderConfig>> {
-    let mut provider = match provider_id {
-        Some(id) => Some(providers.resolve_for_model(Some(id), model.clone())?),
-        None => Some(providers.resolve_for_model(None, model)?),
+    let mut provider = match providers.resolve_for_model(provider_id, model) {
+        // The table has no usable entry for the *default* path: fall back to
+        // the legacy `model_providers` / local-model selection in
+        // `model_for_turn` (headless-run.md's provider-less smoke depends on
+        // it; review R3). A *named* provider that fails is a real
+        // configuration error and surfaces its diagnostic.
+        Ok(provider) => Some(provider),
+        Err(error) if provider_id.is_none() && error.code == ark_common::ArkErrorCode::NotFound => {
+            None
+        }
+        Err(error) => return Err(error),
     };
     if let Some(provider) = &mut provider {
         // An empty override means "unset": drop it instead of sending an empty

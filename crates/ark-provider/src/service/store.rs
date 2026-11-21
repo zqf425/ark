@@ -341,7 +341,7 @@ impl ProviderStore {
     /// actionable error instead of at the provider with an opaque upstream
     /// 404 (review: a child delegate passed workbuddy's
     /// `global:deepseek-v4.1-flash` to the brgroup provider). Entries without
-    /// an inventory stay permissive — the store cannot distinguish "no
+    /// an inventory stay permissive: the store cannot distinguish "no
     /// directory was ever imported" from "model absent".
     pub fn resolve_for_model(
         &self,
@@ -351,14 +351,17 @@ impl ProviderStore {
         let trimmed = id.map(str::trim).filter(|value| !value.is_empty());
         let mut config = self.resolve(id).ok_or_else(|| {
             if trimmed.is_none() {
-                // No default provider configured: callers (child runs) use
-                // this code to fall through to the parent's model.
-                ArkError::not_found("no default provider is configured")
-            } else {
-                ArkError::validation(format!(
-                    "provider is unavailable: {}",
-                    trimmed.unwrap_or_default()
+                // No default provider configured (or the default entry cannot
+                // produce a config: disabled, key missing). Child runs use
+                // the NotFound code to fall through to the parent's model.
+                ArkError::not_found(format!(
+                    "no usable default provider is configured{}",
+                    trimmed
+                        .map(|id| format!(" (requested `{id}` is unavailable too)"))
+                        .unwrap_or_default()
                 ))
+            } else {
+                ArkError::validation(format!("provider is unavailable: {trimmed:?}"))
             }
         })?;
         let Some(model) = model
@@ -367,27 +370,32 @@ impl ProviderStore {
         else {
             return Ok(config);
         };
-        if model == config.model {
-            return Ok(config);
-        }
         let document = self.lock();
-        let target = match id.map(str::trim).filter(|value| !value.is_empty()) {
+        let target = match trimmed {
             Some(explicit) => document.get(explicit),
             None => document
                 .effective_default()
                 .and_then(|default| document.get(default)),
         };
         if let Some(entry) = target {
-            let inventory: Option<Vec<&str>> = entry
-                .models
-                .as_ref()
-                .map(|rows| rows.iter().map(|item| item.id.as_str()).collect());
-            if let Some(served) = inventory {
-                let known = served.iter().any(|served| *served == model);
+            // Served models: the entry's stored `model` plus any inventory
+            // row. `entry.model` participates even when the default-model pin
+            // already replaced `config.model` with a different id — the pin
+            // changes what the *default request* sends, not what the entry
+            // can serve (review R2). `Some(vec![])` and `None` are both
+            // "no directory": a hand-filled provider never imported a
+            // catalog, and the settings UI persists `[]` on every save
+            // (review R1) — checking only a non-empty inventory keeps those
+            // overrides permissive.
+            let has_directory = entry.models.as_ref().is_some_and(|rows| !rows.is_empty());
+            if has_directory {
+                let served = entry.models.as_deref().expect("has_directory implies rows");
+                let known =
+                    model == entry.model.trim() || served.iter().any(|item| item.id == model);
                 if !known {
                     let mut listed: Vec<&str> = Vec::with_capacity(served.len() + 1);
                     listed.push(entry.model.trim());
-                    listed.extend(served);
+                    listed.extend(served.iter().map(|item| item.id.as_str()));
                     return Err(ArkError::validation(format!(
                         "provider `{}` does not serve model `{}`; served models: {}",
                         entry.id,
@@ -396,6 +404,9 @@ impl ProviderStore {
                     )));
                 }
             }
+        }
+        if model == config.model {
+            return Ok(config);
         }
         config.model = model;
         config.context_window_tokens = target.and_then(|entry| {

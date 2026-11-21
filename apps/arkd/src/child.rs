@@ -26,7 +26,6 @@ use ark_contract::{item::ItemKind, RuntimeEvent};
 use ark_delegation::{ChildTurnContext, ChildTurnExecutor, ChildTurnReport, ChildTurnStatus};
 use ark_obs::UsageRecorder;
 use ark_ports::{EventSink, ModelClient, SandboxPolicy, SessionStore, ToolRegistryPort};
-
 use ark_tool::{RegistryToolRunner, ToolRegistry};
 
 use crate::model;
@@ -525,7 +524,7 @@ mod tests {
     /// The delegate-time guard: an override model the provider's inventory
     /// does not list fails at `provider_for` with a diagnostic naming the
     /// served models, before any model request is attempted (the incident
-    /// that motivated this guard never reached the provider — it 404'd at
+    /// that motivated this guard never reached the provider (it 404'd at
     /// the gateway with no hint about the mismatch).
     #[test]
     fn provider_for_rejects_a_model_outside_the_provider_inventory() {
@@ -540,7 +539,7 @@ mod tests {
         entry.api_key = Some("sk-test-1234567890".into());
         entry.endpoint_format = "openai_chat".into();
         entry.models = Some(vec![ProviderModelInventoryItem {
-            id: "glm-5-3-flash".into(),
+            id: "glm-5-2".into(),
             context_window_tokens: Some(200_000),
             supports_vision: None,
         }]);
@@ -586,10 +585,58 @@ mod tests {
             error.message
         );
         assert!(
-            error.message.contains("glm-5-3-flash"),
+            error.message.contains("glm-5-3-flash") && error.message.contains("glm-5-2"),
             "the served models must be listed: {}",
             error.message
         );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// R5 regression: with no provider table at all, the child falls through
+    /// to the parent's model (`Ok(None)`) instead of failing the run. The
+    /// executor is not needed beyond construction; the assertion is the
+    /// provider resolution itself.
+    #[test]
+    fn provider_for_falls_through_to_the_parent_model_without_a_table() {
+        let dir = std::env::temp_dir().join(format!(
+            "ark-child-guard-fallback-{}",
+            ark_common::ThreadId::new()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let providers = ark_provider::ProviderStore::new(dir.clone());
+
+        let usage = Arc::new(UsageRecorder::new());
+        let parent_config = ark_llm::ProviderConfig::new("test-parent", "test-model");
+        let parent_model = model::select_from_config(parent_config, Arc::clone(&usage)).0;
+        let snapshot_store = Arc::new(ark_config::ConfigStore::new(RuntimeConfig::default()));
+        let skills = Arc::new(ark_skills::SkillRuntime::new(
+            Arc::new(ark_skills::SkillsConfig::default),
+            dir.clone(),
+        ));
+        let roots = Arc::new(WorkspaceRoots::new(dir.clone(), &dir).unwrap());
+        let session_store =
+            Arc::new(ark_store::FileSessionStore::open(ark_store::StoreConfig::new(&dir)).unwrap());
+        let executor = ChildTurnExecutorImpl::new(
+            snapshot_store,
+            Arc::new(providers),
+            usage,
+            parent_model,
+            Arc::new(ToolRegistry::new()),
+            Arc::clone(&session_store) as Arc<dyn EventSink>,
+            session_store,
+            Arc::new(ark_tool::BuiltinSandboxPolicy::new(
+                ark_tool::Autonomy::WorkspaceWrite,
+            )),
+            roots,
+            skills,
+            Arc::new(ark_ports::NoHooks),
+        );
+
+        // No table entry and no explicit provider: the child inherits the
+        // parent's client instead of failing with "no usable default
+        // provider".
+        assert!(executor.provider_for(None, None).unwrap().is_none());
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

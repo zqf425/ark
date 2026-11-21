@@ -93,7 +93,11 @@ per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启
 - `runtime.workspace` 非空时经 `turn_common::resolve_workspace` 覆盖进程 workspace lease；
 - provider/model/reasoning_effort 经 `resolve_thread_provider`（`wiring/turns.rs`）从存活 provider
   表解析：显式 `provider_id` 必须可解析，`model` 仅在显式给出时覆盖目录模型，空 `reasoning_effort`
-  视为未设置（不发空提示），协议映射见 [ark-llm](ark-llm.md)；
+  视为未设置（不发空提示），协议映射见 [ark-llm](ark-llm.md)；覆盖模型还会经
+  `resolve_for_model` 的 served-model 校验（带非空清单的条目拒绝不在清单的模型，错误列出可服务
+  模型；无清单/空清单条目放行）。默认路径（未显式给 `provider_id`）在表无可用条目时返回
+  NotFound，`resolve_thread_provider` 据此降级为 `None`，保留 `model_providers`/本地模型的
+  legacy 回退（headless 无 provider 冒烟依赖它）；具名 provider 失败则是带诊断的真实错误。
 - `runtime.autonomy` 决定该回合的 sandbox 档位（定时任务的 `unattended` 缺省即写这个字段）。
 
 模型与目录流量的 `reqwest::Client` 由组合根经
