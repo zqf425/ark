@@ -307,7 +307,8 @@ pub(crate) fn build_reactor(spec: ReactorSpec) -> Reactor {
 /// Who the child is, appended to the shared prefix before the skill tail.
 pub(crate) const CHILD_ROLE_LINE: &str =
     "You are a child run. Finish the delegated task and answer with the result. \
-     You cannot delegate further.";
+     You cannot delegate further, and you have no `todo_write` tool: state your \
+     steps directly in the reply instead of writing a plan.";
 
 /// Append the workspace's project instructions to a seed's dynamic tail.
 ///

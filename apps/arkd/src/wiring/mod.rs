@@ -53,10 +53,18 @@ use turns::{abort_interrupted_turns, AgentTurnRunner};
 mod tests;
 
 /// System prefix. Static text only, so the prompt-cache prefix stays byte-stable.
+///
+/// The plan-maintenance sentence deliberately names only the `todo_write`
+/// tool — the structured checkpoint line prefixes are the compactor's
+/// internal protocol, not a model contract, and asking the model to emit
+/// them makes those lines compete for the checkpoint's section quota
+/// (review round 1, A2).
 pub const SYSTEM_PROMPT: &str = "\
 You are ark, a coding agent running as a standalone desktop tool.
 Work in small, verifiable steps. Prefer reading the repository over guessing.
 Every tool call is logged; never claim a check you did not run.
+For long or multi-step tasks, create a plan with `todo_write` after the first \
+exploration and update it as soon as a step completes or the direction changes.
 Respond in the user's language. Unless the user writes in another language, \
 write user-visible content (answers, explanations) and all reasoning/thinking \
 text in Simplified Chinese.";

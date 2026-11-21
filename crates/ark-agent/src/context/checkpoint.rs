@@ -15,6 +15,11 @@ const MAX_SECTION_LINES: usize = 40;
 /// goal; dropping it silently is what left the model in session cb274b9d
 /// without its task anchor after the second compaction.
 const KEEP_OLDEST_USER_LINES: usize = 6;
+/// Independent cap for the `[thread plan]` tail restate. Plan rows do not
+/// compete with the render sections' quota: the restate is the model's
+/// objective anchor and must not be crowded out by decision rows (review N1).
+/// The truncation-notice test asserts against this name.
+pub(crate) const MAX_PLAN_LINES: usize = 40;
 
 /// Deterministic, model-readable handoff retained across a compaction boundary.
 ///
@@ -204,6 +209,79 @@ impl ContextCheckpoint {
             && self.identifiers.is_empty()
             && self.user_lines.is_empty()
             && self.failures.is_empty()
+    }
+
+    /// Extract the durable plan rows (the `Goal:` line and the `- [ ]`/`- [~]`/`- [x]`
+    /// checkbox lines the turn seed restates every round) from the extracted
+    /// facts, rendered as a standalone `[thread plan]` block.
+    ///
+    /// Plan rows are filtered from the *whole* `entries` list before any
+    /// quota: they sit at the seed tail, after earlier structured facts, so a
+    /// take-first scan would drop them exactly in the longest turns where the
+    /// restate matters (review N1). The same todo appears once per rendered
+    /// status (`- [ ] run tests` before completion, `- [x] run tests`
+    /// after), and successive objectives update the one `Goal:` slot, so the
+    /// fold is last-wins per todo title — restating both statuses or an
+    /// outdated objective would show the model a self-contradicting plan
+    /// (review N2). Plan lines are capped by their own quota, independent of
+    /// the render section quota: they do not compete with decision rows.
+    ///
+    /// Returns `None` when the folded region carried no plan rows.
+    pub(crate) fn plan_restate(&self) -> Option<String> {
+        let plan_lines: Vec<&String> = self
+            .entries
+            .iter()
+            .filter(|entry| entry.starts_with("Goal:") || is_plan_checkbox_line(entry))
+            .collect();
+        if plan_lines.is_empty() {
+            return None;
+        }
+        // First pass: collapse status variants / objective updates last-wins
+        // per title, keeping insertion order of first appearance.
+        let mut ordered: Vec<String> = Vec::new();
+        let mut slots: Vec<(String, usize)> = Vec::new();
+        for line in plan_lines {
+            let title = todo_title(line);
+            match slots.iter_mut().find(|(existing, _)| *existing == title) {
+                Some((_, slot)) => {
+                    ordered[*slot] = line.clone();
+                }
+                None => {
+                    slots.push((title, ordered.len()));
+                    ordered.push(line.clone());
+                }
+            }
+        }
+        // Second pass: emit the newest objective first (an early break below
+        // must never drop it — review M5), then the todo rows in first-
+        // appearance order, capped by MAX_PLAN_LINES with an explicit
+        // truncation notice (the checkpoint budget render sets the same
+        // precedent).
+        let newest_goal = ordered
+            .iter()
+            .rev()
+            .find(|line| line.starts_with("Goal:"))
+            .cloned();
+        let mut lines: Vec<String> = Vec::new();
+        if let Some(goal) = newest_goal {
+            lines.push(goal);
+        }
+        for line in &ordered {
+            if line.starts_with("Goal:") {
+                continue;
+            }
+            if lines.len() >= MAX_PLAN_LINES {
+                lines.push(format!(
+                    "[thread plan truncated at {MAX_PLAN_LINES} todo rows]"
+                ));
+                break;
+            }
+            lines.push(line.clone());
+        }
+        if lines.is_empty() {
+            return None;
+        }
+        Some(format!("[thread plan]\n{}", lines.join("\n")))
     }
 
     /// Render the durable handoff for the next model context window.
@@ -494,12 +572,37 @@ fn push_bounded(vec: &mut Vec<String>, value: String, max_chars: usize) {
     vec.push(value);
 }
 
+/// The todo title behind one plan line, for last-wins folding: a `Goal:` line
+/// collapses every objective to one slot (the latest objective wins), and a
+/// checkbox line keeps its title with the status marker stripped via exact
+/// prefixes — char-set stripping would eat a title's leading `x`
+/// (`- [ ] xtask migration` colliding with `- [ ] task migration`, review
+/// M3), and `line[2..]` byte indexing would panic on a multi-byte first char.
+fn todo_title(line: &str) -> String {
+    if let Some(rest) = line.strip_prefix("Goal:") {
+        return format!("goal:{}", rest.trim_start().to_lowercase());
+    }
+    let body = line
+        .strip_prefix("- [ ] ")
+        .or_else(|| line.strip_prefix("- [~] "))
+        .or_else(|| line.strip_prefix("- [x] "))
+        .unwrap_or(line);
+    body.trim().to_string()
+}
+
+/// A durable-plan todo row: `- [ ]` / `- [~]` / `- [x]` as rendered by the
+/// shared `todo_marker` vocabulary (`ark_server::workbench`, the
+/// `todo_write` tool result and the turn-seed plan message).
+fn is_plan_checkbox_line(line: &str) -> bool {
+    line.starts_with("- [ ]") || line.starts_with("- [~]") || line.starts_with("- [x]")
+}
+
 fn is_structured_line(line: &str) -> bool {
     // A plan-seed todo line (`- [ ] title`, from `plan_seed_message` /
     // `todo_write`) carries the durable plan across a compaction boundary:
     // the seed tail is restated every turn, but the checkpoint must also name
     // it so an in-turn compact does not drop the objective list.
-    if line.starts_with("- [ ]") || line.starts_with("- [~]") || line.starts_with("- [x]") {
+    if is_plan_checkbox_line(line) {
         return true;
     }
     [

@@ -472,6 +472,237 @@ fn repeated_compaction_replaces_the_previous_checkpoint() {
     );
 }
 
+#[test]
+fn compaction_restates_the_plan_at_the_history_tail() {
+    // A mid-turn compaction drops the turn-seed plan line (it sits at the
+    // seed tail, after the replayed history rows, so it is foldable) into
+    // the checkpoint note at the fold boundary, ahead of the kept tail;
+    // later rounds push it ever further from the recency window
+    // (lost-in-the-middle). The plan must also be restated as the LAST
+    // history row, in-memory only, so the model keeps seeing it at the near
+    // position for the rest of the turn.
+    let writer = Arc::new(MemoryWriter::new());
+    let mut reactor = reactor(writer);
+    reactor.history = vec![
+        ModelMessage::system("stable system prompt"),
+        ModelMessage::system("workspace root: D:/repo"),
+        ModelMessage::user("old user message"),
+        ModelMessage::assistant("old answer"),
+        ModelMessage::system(
+            "[thread plan - current objective and progress]\n\
+             Goal: repair the parser\n\
+             - [~] fix wire format\n\
+             - [ ] run tests",
+        ),
+        ModelMessage::user("recent user message"),
+        ModelMessage::assistant("recent assistant message"),
+    ];
+
+    let (removed, _) = reactor.compact_history(2);
+
+    assert_eq!(removed, 3);
+    let last = reactor.history.last().expect("history keeps rows");
+    assert_eq!(last.role, ModelRole::System);
+    assert!(last.content.contains("Goal: repair the parser"));
+    assert!(last.content.contains("- [~] fix wire format"));
+    assert!(last.content.contains("- [ ] run tests"));
+    assert!(
+        HistoryHygiene::new().is_legal(&reactor.history),
+        "restated plan must keep history provider-legal: {:?}",
+        reactor.history
+    );
+}
+
+#[test]
+fn compaction_skips_the_plan_restate_without_plan_facts() {
+    // No Goal/checkbox rows in the folded region: nothing to restate, and an
+    // empty tail note would be pure noise before the next user message.
+    let writer = Arc::new(MemoryWriter::new());
+    let mut reactor = reactor(writer);
+    reactor.history = vec![
+        ModelMessage::system("stable system prompt"),
+        ModelMessage::user("old user message QUARTZ-11"),
+        ModelMessage::assistant("old answer"),
+        ModelMessage::user("recent user message"),
+        ModelMessage::assistant("recent assistant message"),
+    ];
+
+    let (removed, _) = reactor.compact_history(2);
+
+    assert_eq!(removed, 2);
+    assert_eq!(
+        reactor.history.last().map(|message| message.role),
+        Some(ModelRole::Assistant),
+    );
+}
+
+#[test]
+fn repeated_compaction_keeps_exactly_one_plan_restate() {
+    let writer = Arc::new(MemoryWriter::new());
+    let mut reactor = reactor(writer);
+    reactor.history = vec![
+        ModelMessage::system("stable system prompt"),
+        ModelMessage::system("workspace root: D:/repo"),
+        ModelMessage::user("first old message"),
+        ModelMessage::assistant("first old answer"),
+        ModelMessage::system(
+            "[thread plan - current objective and progress]\nGoal: ship it\n- [ ] step one",
+        ),
+        ModelMessage::user("first recent message"),
+        ModelMessage::assistant("first recent answer"),
+    ];
+    reactor.compact_history(2);
+    reactor
+        .history
+        .push(ModelMessage::user("second recent message"));
+    reactor
+        .history
+        .push(ModelMessage::assistant("second recent answer"));
+
+    reactor.compact_history(2);
+
+    let plan_restates = reactor
+        .history
+        .iter()
+        .filter(|message| message.content.contains("Goal: ship it"))
+        .count();
+    assert_eq!(
+        plan_restates, 2,
+        "one occurrence in the checkpoint note + one tail restate: {:?}",
+        reactor.history
+    );
+    let tail_restates = reactor
+        .history
+        .iter()
+        .filter(|message| message.content.starts_with("[thread plan]\n"))
+        .count();
+    assert_eq!(
+        tail_restates, 1,
+        "repeated compactions must not stack tail restates: {:?}",
+        reactor.history
+    );
+    assert_eq!(
+        reactor.history.last().map(|message| message.role),
+        Some(ModelRole::System),
+    );
+}
+
+#[test]
+fn repeated_compaction_within_keep_recent_keeps_one_plan_restate() {
+    // N1b: the restate row sits at the tail, so a second compaction whose
+    // `keep_recent` window still covers it would preserve the old row AND
+    // push a new one — two `[thread plan]` rows separated by kept messages,
+    // which hygiene cannot collapse (it only folds adjacent duplicates).
+    // The rebuild must drop any surviving restate rows before pushing the
+    // fresh one.
+    let writer = Arc::new(MemoryWriter::new());
+    let mut reactor = reactor(writer);
+    reactor.history = vec![
+        ModelMessage::system("stable system prompt"),
+        ModelMessage::system("workspace root: D:/repo"),
+        ModelMessage::user("first old message"),
+        ModelMessage::assistant("first old answer"),
+        ModelMessage::system(
+            "[thread plan - current objective and progress]\nGoal: ship it\n- [ ] step one",
+        ),
+        ModelMessage::user("first recent message"),
+        ModelMessage::assistant("first recent answer"),
+    ];
+    reactor.compact_history(2);
+    // One large tool output already crosses the threshold again; the tail
+    // (old restate + 2 rows) is smaller than keep_recent, so the old restate
+    // survives inside the kept window.
+    reactor
+        .history
+        .push(ModelMessage::user("second recent message"));
+    reactor
+        .history
+        .push(ModelMessage::assistant("second recent answer"));
+
+    reactor.compact_history(4);
+
+    let tail_restates = reactor
+        .history
+        .iter()
+        .filter(|message| message.content.starts_with("[thread plan]\n"))
+        .count();
+    assert_eq!(
+        tail_restates, 1,
+        "a restate kept by keep_recent must be replaced, not duplicated: {:?}",
+        reactor.history
+    );
+    assert_eq!(
+        reactor.history.last().map(|message| message.role),
+        Some(ModelRole::System),
+    );
+}
+
+#[test]
+fn compaction_never_deletes_a_kept_seed_plan_row() {
+    // M1 regression: the seed header `[thread plan - current objective and
+    // progress]` shares a prefix with the restate marker. The seed sits in
+    // the leading system region (it precedes the first user row, so
+    // `compact_history`'s `system_count` take-while swallows it into the
+    // stable prefix), and the rebuilt history copies that region verbatim —
+    // the retain runs over `next`, which includes the prefix, so a looser
+    // marker (`[thread plan]`) WOULD delete the seed there. The tightened
+    // `[thread plan]\n` marker must keep it.
+    let writer = Arc::new(MemoryWriter::new());
+    let mut reactor = reactor(writer);
+    reactor.history = vec![
+        ModelMessage::system("stable system prompt"),
+        ModelMessage::system("workspace root: D:/repo"),
+        ModelMessage::system(
+            "[thread plan - current objective and progress]\nGoal: ship it\n- [ ] step one",
+        ),
+        ModelMessage::user("first user message"),
+        ModelMessage::assistant("first answer"),
+        ModelMessage::user("second user message"),
+        ModelMessage::assistant("second answer"),
+        ModelMessage::assistant("third answer"),
+    ];
+    reactor.compact_history(4);
+    reactor
+        .history
+        .push(ModelMessage::user("third user message"));
+    reactor
+        .history
+        .push(ModelMessage::assistant("fourth answer"));
+
+    reactor.compact_history(4);
+
+    let seeds = reactor
+        .history
+        .iter()
+        .filter(|message| {
+            message
+                .content
+                .starts_with("[thread plan - current objective and progress]")
+        })
+        .count();
+    assert_eq!(
+        seeds,
+        1,
+        "a seed plan row inside the stable prefix must never be deleted: {:?}",
+        reactor
+            .history
+            .iter()
+            .map(|message| (
+                message.role,
+                message.content.get(0..45).unwrap_or("").to_string()
+            ))
+            .collect::<Vec<_>>()
+    );
+    // The folded region holds no plan rows (the seed is in the prefix), so a
+    // restate would be noise — None is the correct outcome here.
+    let restates = reactor
+        .history
+        .iter()
+        .filter(|message| message.content.starts_with("[thread plan]\n"))
+        .count();
+    assert_eq!(restates, 0);
+}
+
 /// A `tool` role row answering `call_id`, the shape the provider requires.
 fn tool_message(call_id: &str, name: &str, output: &str) -> ModelMessage {
     ModelMessage {

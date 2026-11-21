@@ -3,6 +3,17 @@
 
 use super::*;
 
+/// Prefix of the in-memory plan restate row pushed by `compact_history`.
+/// Marker identity for the retain that deduplicates restates across repeated
+/// compactions; the restate is never journalled, so this prefix is only ever
+/// matched inside the live history. The trailing newline is part of the
+/// marker on purpose: the turn-seed header is
+/// `[thread plan - current objective and progress]`, which does NOT match —
+/// the retain must never delete a seed row that `keep_recent` kept in the
+/// retained window (review M1). The restate render always emits
+/// `[thread plan]\n<rows>`, so a header-less line cannot exist.
+pub(super) const PLAN_RESTATE_PREFIX: &str = "[thread plan]\n";
+
 impl Reactor {
     /// Compact the prefix. The in-memory history is replaced immediately; the
     /// journal records a checkpoint item that becomes the durable boundary for
@@ -90,6 +101,33 @@ impl Reactor {
         );
         next.push(ModelMessage::system(rendered.clone()));
         next.extend_from_slice(&self.history[split..]);
+        // Restate the durable plan as the last in-memory row. A mid-turn
+        // compaction leaves the turn-seed plan inside the checkpoint note at
+        // the fold boundary; as the tool loop appends rows the note drifts
+        // out of the model's recency window and the objective loses its
+        // near-position attention (Manus-style recitation). This row is
+        // memory-only: it is never journalled, so the next turn rebuilds its
+        // own seed and `plan_seed_message` re-emits the current plan at the
+        // tail. A previous restate that `keep_recent` kept inside the
+        // retained window must be dropped here: hygiene only collapses
+        // ADJACENT duplicate system rows, and kept messages would separate
+        // the two rows, leaving a stale copy in front (review N1b) — the
+        // marker-based retain is the guarantee, and the marker cannot match
+        // the turn-seed header (it carries an extra
+        // `- current objective and progress` suffix, review M1), so a seed
+        // row inside the stable prefix survives. The rebuild itself never
+        // loses plan content: `from_messages` already re-absorbed every
+        // folded plan line into the checkpoint entries. "Near the tail" is
+        // adapter-relative: the OpenAI chat and responses families keep the
+        // row as the last message, while the Anthropic adapter hoists system
+        // rows into the top-level `system` field — still high-attention, but
+        // not the literal tail.
+        next.retain(|message| {
+            !(message.role == ModelRole::System && message.content.starts_with(PLAN_RESTATE_PREFIX))
+        });
+        if let Some(plan) = checkpoint.plan_restate() {
+            next.push(ModelMessage::system(plan));
+        }
         self.history = next;
         (removed, Some(rendered))
     }
