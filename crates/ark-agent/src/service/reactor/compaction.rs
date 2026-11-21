@@ -90,6 +90,19 @@ impl Reactor {
         );
         next.push(ModelMessage::system(rendered.clone()));
         next.extend_from_slice(&self.history[split..]);
+        // Restate the durable plan as the last in-memory row. A mid-turn
+        // compaction leaves the turn-seed plan inside the checkpoint note at
+        // the fold boundary; as the tool loop appends rows the note drifts
+        // out of the model's recency window and the objective loses its
+        // near-position attention (Manus-style recitation). This row is
+        // memory-only: it is never journalled, so the next turn rebuilds its
+        // own seed and `plan_seed_message` re-emits the current plan at the
+        // tail. Repeated compactions collapse to one because hygiene drops a
+        // consecutive duplicate system row and the restate is rebuilt from
+        // the same checkpoint entries.
+        if let Some(plan) = checkpoint.plan_restate() {
+            next.push(ModelMessage::system(plan));
+        }
         self.history = next;
         (removed, Some(rendered))
     }

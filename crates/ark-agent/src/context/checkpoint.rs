@@ -206,6 +206,24 @@ impl ContextCheckpoint {
             && self.failures.is_empty()
     }
 
+    /// Extract the durable plan rows (the `Goal:` line and the `- [ ]`/`- [~]`/`- [x]`
+    /// checkbox lines the turn seed restates every round) from the extracted
+    /// facts, rendered as a standalone `[thread plan]` block.
+    ///
+    /// Returns `None` when the folded region carried no plan rows.
+    pub(crate) fn plan_restate(&self) -> Option<String> {
+        let mut lines = Vec::new();
+        for entry in self.entries.iter().take(MAX_SECTION_LINES) {
+            if entry.starts_with("Goal:") || is_plan_checkbox_line(entry) {
+                lines.push(entry.clone());
+            }
+        }
+        if lines.is_empty() {
+            return None;
+        }
+        Some(format!("[thread plan]\n{}", lines.join("\n")))
+    }
+
     /// Render the durable handoff for the next model context window.
     pub fn render(&self) -> String {
         let mut lines = vec![
@@ -494,12 +512,19 @@ fn push_bounded(vec: &mut Vec<String>, value: String, max_chars: usize) {
     vec.push(value);
 }
 
+/// A durable-plan todo row: `- [ ]` / `- [~]` / `- [x]` as rendered by the
+/// shared `todo_marker` vocabulary (`ark_server::workbench`, the
+/// `todo_write` tool result and the turn-seed plan message).
+fn is_plan_checkbox_line(line: &str) -> bool {
+    line.starts_with("- [ ]") || line.starts_with("- [~]") || line.starts_with("- [x]")
+}
+
 fn is_structured_line(line: &str) -> bool {
     // A plan-seed todo line (`- [ ] title`, from `plan_seed_message` /
     // `todo_write`) carries the durable plan across a compaction boundary:
     // the seed tail is restated every turn, but the checkpoint must also name
     // it so an in-turn compact does not drop the objective list.
-    if line.starts_with("- [ ]") || line.starts_with("- [~]") || line.starts_with("- [x]") {
+    if is_plan_checkbox_line(line) {
         return true;
     }
     [
