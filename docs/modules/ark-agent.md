@@ -50,8 +50,9 @@ HTTP 侧批准一条策略表明确拒绝的调用。
   `[N middle user requests folded]` 显式声明丢弃。失败证据只收真实诊断行：词边界匹配
   （`failed:` 接受、`failedValue` 拒绝）叠加代码形态拒绝（序列化 JS 行以 `,`/`;` 结尾且冒号后
   是标识符/字面量，如 `failed: null,`、`Failure: null,`；尾分号/`instanceof`/裸 ` => `；
-  rustc 的反引号签名诊断保留），数字变体仅在计数语境归并（`count=`/`actual`/`got`/`expected`/
-  `实际` 前缀，错误码 `A3/A4`、HTTP `401/500`、路径版本 `v2/v3` 等语义数字保持独立），归并
+  rustc 的反引号签名诊断保留），数字变体仅在计数语境归并（数字 run 前最近 token 以
+  `count`/`actual`/`got`/`expected`/`实际` 等**后缀**匹配，组合词 `actionCount` 同样触发；
+  错误码 `A3/A4`、HTTP `401/500`、路径版本 `v2/v3` 等语义数字保持独立），归并
   计数以 ` (repeated xN)` 后缀呈现（字面 `[xN]` 数据不受影响）。并受 `context_limit_tokens` 约束。
   后续压缩会替换已有 checkpoint，不会把它当作稳定 system 前缀累积。预算不足时 checkpoint 明示已裁剪，且只在 UTF-8 字符边界裁剪；`compaction_completed` 复用
   `removed_items` 报告折叠消息数，并报告 checkpoint 字符数。回合种子尾部的持久计划行

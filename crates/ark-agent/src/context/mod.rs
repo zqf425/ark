@@ -290,10 +290,6 @@ mod checkpoint_tests {
         ]);
 
         let rendered = checkpoint.render();
-        eprintln!(
-            "DBG rendered:
-{rendered}"
-        );
         assert_eq!(rendered.matches("exit status 101").count(), 1);
         assert!(rendered.contains("(repeated x2)"));
 
@@ -316,10 +312,6 @@ mod checkpoint_tests {
         ]);
 
         let rendered = second.render();
-        eprintln!(
-            "DBG repeated rendered:
-{rendered}"
-        );
         assert!(!rendered.contains("(repeated x2)"));
         assert_eq!(rendered.matches("exit status 101").count(), 1);
     }
@@ -396,5 +388,90 @@ mod checkpoint_tests {
         let rendered = next.render();
         assert!(rendered.contains("Error: ENOENT"));
         assert!(!rendered.contains("retry the deploy later"));
+    }
+
+    /// N1：单引号 JS 值行必须被拒绝（recheck 报告确认 `failed: 'x',` 泄漏）。
+    #[test]
+    fn single_quoted_js_values_are_rejected() {
+        let checkpoint = ContextCheckpoint::from_texts(["failed: 'x',", "Failure: 'y',"]);
+        let rendered = checkpoint.render();
+        assert!(!rendered.contains("'x'"));
+        assert!(!rendered.contains("'y'"));
+    }
+
+    /// N2：组合词 `actionCount` 必须触发计数语境归并（recheck 报告实证
+    /// 整 token 精确比较时两个数字都变的场景不归并）。
+    #[test]
+    fn compound_counting_words_trigger_collapse() {
+        let checkpoint = ContextCheckpoint::from_texts([
+            "ERROR: actionCount=27, actual 28",
+            "ERROR: actionCount=29, actual 30",
+        ]);
+        let rendered = checkpoint.render();
+        assert!(rendered.contains("(repeated x2)"));
+        assert_eq!(rendered.matches("ERROR:").count(), 1);
+    }
+
+    /// N3：截断渲染中某段首行放不下时，同段后续行必须仍带本段标题或被裁，
+    /// 不得悬挂在上一段标题下（否则吸收后错段）。
+    #[test]
+    fn truncated_render_never_dangles_bullets_under_the_wrong_title() {
+        let messages = vec![
+            ModelMessage::user("short-goal QUARTZ-99"),
+            // 失败段的第一条极长（在低预算下放不下），后续条较短。
+            tool_result(
+                "Error: a very long failure line that certainly will not fit into a small budget at all",
+            ),
+            tool_result("Error: short"),
+        ];
+        let checkpoint = ContextCheckpoint::from_messages(&messages);
+
+        for budget in 12..=40 {
+            let rendered = checkpoint.render_with_token_limit(budget);
+            let mut current = "";
+            for line in rendered.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                    current = trimmed;
+                } else if trimmed.starts_with("- Error") {
+                    assert_eq!(
+                        current, "[failed attempts - do not repeat]",
+                        "budget {budget}: dangling failure bullet under {current}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// B5 残余盲区：三代连续压缩（两次再吸收）后首条用户请求与失败证据
+    /// 必须完整存活，计数链单调不分裂。
+    #[test]
+    fn three_generation_compaction_chain_keeps_original_goal() {
+        let original = ContextCheckpoint::from_messages(&[
+            ModelMessage::user("原始目标：完善原子库并优化召回逻辑 QUARTZ-99"),
+            tool_result("Error: exit status 101"),
+            tool_result("Error: exit status 101"),
+        ]);
+        let gen1 = ContextCheckpoint::from_messages(&[
+            ModelMessage::system(original.render()),
+            ModelMessage::user("继续验证后面的只读安全用例"),
+        ]);
+        let gen2 = ContextCheckpoint::from_messages(&[
+            ModelMessage::system(gen1.render()),
+            ModelMessage::user("跳过异常监控模块的用例"),
+        ]);
+        let gen3 = ContextCheckpoint::from_messages(&[
+            ModelMessage::system(gen2.render()),
+            ModelMessage::user("先测试 system-setting 模块"),
+        ]);
+
+        let rendered = gen3.render();
+        assert!(rendered.contains("原始目标：完善原子库并优化召回逻辑"));
+        assert!(rendered.contains("继续验证后面的只读安全用例"));
+        assert!(rendered.contains("先测试 system-setting 模块"));
+        assert_eq!(rendered.matches("exit status 101").count(), 1);
+        // 计数链:原始代两次失败 → x2;此后三代吸收均幂等不 bump(S3 语义),
+        // 没有新的真实失败,计数保持 x2 不虚增。
+        assert!(rendered.contains("(repeated x2)"));
     }
 }

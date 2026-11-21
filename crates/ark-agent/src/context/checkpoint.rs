@@ -268,23 +268,26 @@ impl ContextCheckpoint {
         }
 
         let mut limited = format!("{CHECKPOINT_PREFIX}: truncated]");
-        let mut current_title = "";
+        let mut emitted_title = "";
         for (section, line) in self.prioritized_entries_with_sections() {
-            let title = if section != current_title {
-                current_title = section;
-                section
+            // The section title only counts as emitted when its line actually
+            // fits: advancing the pointer before the fit check would leave a
+            // skipped section's later (shorter) lines dangling under the
+            // previous title, and absorption would then reassign them to the
+            // wrong section (recheck N3).
+            let needs_title = section != emitted_title;
+            let candidate = if needs_title {
+                format!("{limited}\n{section}\n{line}")
             } else {
-                ""
-            };
-            let candidate = if title.is_empty() {
                 format!("{limited}\n{line}")
-            } else {
-                format!("{limited}\n{title}\n{line}")
             };
             if TokenEstimator::new().estimate_text(&candidate) > max_tokens {
                 continue;
             }
             limited = candidate;
+            if needs_title {
+                emitted_title = section;
+            }
         }
         limited
     }
@@ -408,12 +411,13 @@ fn failure_match_key(line: &str) -> String {
     normalized
 }
 
-/// Do the digits at `chars[start..end]` sit in a counting context? Scan back
-/// over up to two (`separator`, keyword) pairs ending at the run: `28` in
-/// `…，实际 28` finds `实际` across the space, `27` in `actionCount=27` finds
-/// `count` across `=`. CJK characters are word characters, CJK punctuation is
-/// a separator — matching the way these diagnostics are actually written in
-/// session cb274b9d (`…的 actionCount=27，实际 28`).
+/// Do the digits at `chars[start..end]` sit in a counting context? Scan the
+/// two tokens nearest the run: each matches when it *ends* with a counting
+/// keyword, so both `count=27` and the compound `actionCount=27` qualify
+/// (recheck N2 — a whole-token comparison would silently exclude compound
+/// words). CJK forms (`实际 28`, `共17条`) likewise match by suffix. Error
+/// codes, HTTP statuses and path versions keep their digits: `ERROR A4`,
+/// `HTTP 500`, `v3` carry no counting keyword.
 fn is_counting_context(chars: &[char], _start: usize, end: usize) -> bool {
     let is_separator = |c: char| {
         matches!(
@@ -423,10 +427,12 @@ fn is_counting_context(chars: &[char], _start: usize, end: usize) -> bool {
     };
     let counting = |token: &[char]| -> bool {
         let keyword: String = token.iter().collect();
-        keyword.eq_ignore_ascii_case("count")
-            || keyword.eq_ignore_ascii_case("actual")
-            || keyword.eq_ignore_ascii_case("got")
-            || keyword.eq_ignore_ascii_case("expected")
+        // Suffix match on purpose: compound words like `actionCount` must
+        // trigger the collapse just like a bare `count` (recheck N2).
+        keyword.ends_with("count")
+            || keyword.ends_with("actual")
+            || keyword.ends_with("got")
+            || keyword.ends_with("expected")
             || keyword.ends_with("实际")
             || keyword.ends_with("共")
             || keyword.ends_with("行")
@@ -561,13 +567,13 @@ fn is_code_shaped(line: &str) -> bool {
     // diagnostic sentence does not. Requiring the terminator is what keeps
     // `failed: connect 127.0.0.1 refused` alive while `failed: null,` dies
     // (review S1). Matching runs on the lowercased line so capitalized keys
-    // (`Failure: null,`) are caught too (M6).
+    // (`Failure: null,`) are caught too (M6); single-quoted values (`failed:
+    // 'x',`) are caught by the value whitelist below (recheck N1).
     if !(trimmed.ends_with(',') || trimmed.ends_with(';')) {
         return false;
     }
     let lower = trimmed.to_ascii_lowercase();
-    keyword_colon_with_code_value(&lower, "errormessage:")
-        || keyword_colon_with_code_value(&lower, "failed:")
+    keyword_colon_with_code_value(&lower, "failed:")
         || keyword_colon_with_code_value(&lower, "failure:")
 }
 
@@ -582,7 +588,7 @@ fn keyword_colon_with_code_value(line: &str, keyword: &str) -> bool {
     let Some(first) = value.chars().next() else {
         return false;
     };
-    first.is_ascii_alphanumeric() || first == '_' || first == '$' || first == '"'
+    first.is_ascii_alphanumeric() || first == '_' || first == '$' || first == '"' || first == '\''
 }
 
 fn identifiers_in(text: &str) -> Vec<String> {
