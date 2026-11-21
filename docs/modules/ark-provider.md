@@ -49,6 +49,16 @@ unknown 元数据。线程覆盖模型时经 `resolve_for_model` / `resolve_visi
 行、每行只编辑自己的元数据，正是这一「每行归属」语义在 UI 上的对应；`headers` / `temperature` /
 `max_tokens` 是供应商级字段，对所有模型生效，不属于任何一行。
 
+`served-model` 校验：条目带**非空清单**时，`resolve_for_model` 拒绝既不等于条目默认 `model`、也不在
+清单里的覆盖模型（默认供应商 pin 了 `default_model` 时，条目默认 `model` 仍可服务——pin 只改默认请求发什么，
+不改条目能服务什么；清单在归一化时会剥掉与 `model` 相同的项，所以它不在清单里），错误文本列出全部可服务模型（默认 + 清单），使「model 与 provider_id 配错对」
+在派发前失败并可被模型自我纠正，而不是在 provider 网关上 404。条目**无清单或空清单**（从未导入目录；设置页保存手填供应商时总是写 `models: []`）时
+保持放行——store 无法区分「目录不可知」与「模型不存在」，强校验会破坏从未导入目录的合法覆盖；
+要获得校验，先在设置页导入该供应商的目录。该 served-model 校验只作用于 `resolve_for_model`；
+`resolve_vision` 对未知覆盖模型仍返回 unknown（识图不放行），不做同款校验。`resolve_for_model` 的签名是
+`Result<ProviderConfig>`：`provider_id` 未给且无默认供应商时返回 NotFound（子代理以此回落父模型），
+其余失败（具名 provider 不存在/无 key/模型不在清单）都是带诊断的 validation 错误。
+
 `headers`、`temperature`、`max_tokens` 不是仅供展示的字段：有效条目必须将它们映射到每个实际模型请求。
 目录已知的上下文窗口在回合内按 80% 比例（`ark_llm::COMPACTION_TRIGGER_RATIO`）推导压缩阈值，若用户设置了
 输出上限，应先预留该输出空间；未声明窗口的条目按默认窗口 `ark_llm::DEFAULT_CONTEXT_WINDOW_TOKENS`

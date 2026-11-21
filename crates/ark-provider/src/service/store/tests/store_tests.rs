@@ -496,11 +496,162 @@ fn resolve_for_model_applies_the_inventory_window() {
         .unwrap();
     assert_eq!(small.context_window_tokens, None);
 
-    // Unrelated override: also unknown.
-    let other = store
+    // Unrelated override: still resolves (window unknown), but the served-
+    // model check now rejects it: the entry HAS an inventory and "other"
+    // is neither the stored model nor a row.
+    let error = store
         .resolve_for_model(Some("p"), Some("other".to_string()))
+        .unwrap_err();
+    assert!(
+        error.message.contains("does not serve model"),
+        "{}",
+        error.message
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// R1 regression: the settings UI persists `models: []` on every save of a
+/// hand-filled provider, so an empty inventory must behave exactly like no
+/// inventory: permissive for unknown overrides.
+#[test]
+fn resolve_for_model_stays_permissive_with_an_empty_inventory() {
+    let dir = temp_dir("resolve-for-model-empty-inventory");
+    let store = store(&dir);
+    let mut entry = entry("p", Some("sk-1234567890abcdef"));
+    entry.models = Some(Vec::new());
+    store.upsert(entry, true).unwrap();
+
+    assert!(store
+        .resolve_for_model(Some("p"), Some("any-override".to_string()))
+        .is_ok());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// R2 regression: the DEFAULT provider pinned `default_model` to a second
+/// model (B), so `resolve(None)` already replaced `config.model`; overriding
+/// back to the entry's stored `model` (A) must be accepted: the pin changes
+/// what the *default request* sends, not what the entry can serve.
+#[test]
+fn resolve_for_model_accepts_the_stored_model_under_a_pinned_default() {
+    let dir = temp_dir("resolve-for-model-pin");
+    let store = store(&dir);
+    let mut entry = entry("p", Some("sk-1234567890abcdef"));
+    entry.models = Some(vec![ProviderModelInventoryItem {
+        id: "b-model".into(),
+        context_window_tokens: Some(1_000_000),
+        supports_vision: None,
+    }]);
+    store.upsert(entry, true).unwrap();
+    store.set_default("p", Some("b-model")).unwrap();
+
+    // The pin applied: the no-override resolve carries B.
+    assert_eq!(
+        store.resolve_for_model(None, None).unwrap().model,
+        "b-model"
+    );
+    // Overriding back to the entry's stored model A is accepted (A is served
+    // even though the inventory normalized the A row away).
+    assert!(store
+        .resolve_for_model(None, Some("deepseek-chat".to_string()))
+        .is_ok());
+    // A genuine miss still fails, and the diagnostic does not claim A is
+    // unserved.
+    let error = store
+        .resolve_for_model(None, Some("never-served".to_string()))
+        .unwrap_err();
+    assert!(error.message.contains("never-served"), "{}", error.message);
+    assert!(error.message.contains("deepseek-chat"), "{}", error.message);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// R4/R5 companion: the no-default path is a NotFound (the child run's
+/// fall-through signal), while the served-model rejection is a validation
+/// error with a diagnostic.
+#[test]
+fn resolve_for_model_error_codes_distinguish_fallthrough_from_rejection() {
+    let dir = temp_dir("resolve-for-model-codes");
+    // No providers at all → NotFound.
+    let empty = store(&dir.join("empty"));
+    let error = empty
+        .resolve_for_model(None, Some("m".to_string()))
+        .unwrap_err();
+    assert_eq!(error.code, ark_common::ArkErrorCode::NotFound);
+    // Named provider with a directory → served-model miss is ValidationError.
+    let dir2 = temp_dir("resolve-for-model-codes-named");
+    let store = store(&dir2);
+    let mut entry = entry("p", Some("sk-1234567890abcdef"));
+    entry.models = Some(vec![ProviderModelInventoryItem {
+        id: "big".into(),
+        context_window_tokens: None,
+        supports_vision: None,
+    }]);
+    store.upsert(entry, true).unwrap();
+    let error = store
+        .resolve_for_model(Some("p"), Some("missing".to_string()))
+        .unwrap_err();
+    assert_eq!(error.code, ark_common::ArkErrorCode::ValidationError);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&dir2);
+}
+
+/// An override model the provider cannot serve is rejected up front instead
+/// of failing at the model request with an opaque upstream 404 (review:
+/// child delegate passed workbuddy's `global:deepseek-v4.1-flash` to the
+/// brgroup provider, which served it a 404 only at request time). A known
+/// model is the stored `model` or an inventory row.
+#[test]
+fn resolve_for_model_rejects_a_model_the_provider_does_not_serve() {
+    let dir = temp_dir("resolve-for-model-unknown");
+    let store = store(&dir);
+    let mut entry = entry("p", Some("sk-1234567890abcdef"));
+    entry.models = Some(vec![ProviderModelInventoryItem {
+        id: "big".into(),
+        context_window_tokens: Some(1_000_000),
+        supports_vision: None,
+    }]);
+    store.upsert(entry, true).unwrap();
+
+    // The stored default model is always known.
+    assert!(store
+        .resolve_for_model(Some("p"), Some("deepseek-chat".to_string()))
+        .is_ok());
+    // An inventory row is known.
+    assert!(store
+        .resolve_for_model(Some("p"), Some("big".to_string()))
+        .is_ok());
+    // Anything else is rejected with a model-listing diagnostic, before any
+    // network round-trip.
+    let error = store
+        .resolve_for_model(Some("p"), Some("global:deepseek-v4.1-flash".to_string()))
+        .unwrap_err();
+    assert!(
+        error.message.contains("does not serve model"),
+        "{}",
+        error.message
+    );
+    assert!(
+        error.message.contains("deepseek-chat") && error.message.contains("big"),
+        "the error must list the served models: {}",
+        error.message
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An entry with no inventory at all (never imported a catalog) keeps its
+/// permissive behaviour for non-default overrides: the store cannot tell
+/// "no directory" from "model absent", and rejecting those would break every
+/// provider whose catalog was never imported.
+#[test]
+fn resolve_for_model_stays_permissive_without_an_inventory() {
+    let dir = temp_dir("resolve-for-model-no-inventory");
+    let store = store(&dir);
+    store
+        .upsert(entry("p", Some("sk-1234567890abcdef")), true)
         .unwrap();
-    assert_eq!(other.context_window_tokens, None);
+
+    assert!(store
+        .resolve_for_model(Some("p"), Some("any-override".to_string()))
+        .is_ok());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

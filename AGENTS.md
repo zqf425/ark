@@ -153,3 +153,15 @@ docs/
    或 DeepSeek 通道异常时，临时改用同供应商的 `global:glm-5.3-flash`；
 3. 不要依赖 kun 实例默认网关（`t.100credit.cn`）的任何模型通道：该账户额度已耗尽，所有请求
    都会因预扣费失败（`insufficient_user_quota`），实测覆盖 DeepSeek 与默认 GLM 全部通道。
+
+**供应商 id 以运行时配置为准，不要照抄本节的历史值**：`custom-provider-8` 等数字 id 是
+kun 数据目录 `config.json` 里 serve.providers 的注册键，随本机重装/增删漂移（实测同一台机器上
+workbuddy 网关曾注册为 `custom-provider-10`）。调用前先用 `GET /v1/runtime/providers`
+（arkd）或读取 kun 的 providers 配置，按 `baseUrl` 匹配出当前 id，再建线程；匹配不到时先在
+应用设置里添加供应商，不要猜 id。`model` 同理以该供应商的 models 目录为准
+（workbuddy 目录里 DeepSeek-V4.1-Flash 的 id 曾为 `cn:deepseek-v4.1-flash`，与
+`global:` 前缀形态并存过）。
+
+子代理（`delegate_task`）同样如此：`model` 与 `provider_id` 是一对，只改 model 会继承
+父线程供应商；模型不在该供应商目录时，回合会在派发前被拒绝并列出可服务模型
+（见 ark-provider `resolve_for_model` 的 served-model 校验）。

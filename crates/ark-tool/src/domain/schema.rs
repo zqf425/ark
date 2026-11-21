@@ -169,8 +169,8 @@ fn delegate_task_schema() -> serde_json::Value {
         serde_json::json!({
             "prompt": { "type": "string", "description": "The complete task for the child run; it sees only this, so state the goal and the boundaries" },
             "label": { "type": "string", "description": "Short human label shown in the parent thread" },
-            "model": { "type": "string", "description": "Model override; defaults to the parent turn's model" },
-            "provider_id": { "type": "string", "description": "Provider override; defaults to the parent turn's provider" },
+            "model": { "type": "string", "description": "Model override; defaults to the parent turn's model. A model outside the provider's inventory is rejected at dispatch with the list of served models, so pass a `provider_id` that actually serves this model id" },
+            "provider_id": { "type": "string", "description": "Provider override; defaults to the parent turn's provider. `model` and `provider_id` are a pair: overriding only the model keeps the parent's provider, which fails when that provider does not serve the model" },
             "autonomy": { "type": "string", "enum": autonomy_values_for_schema(), "description": "Permission override; defaults to the parent thread's permission" },
             "background": { "type": "boolean", "description": "Force the dispatch mode: true returns after the child is queued and keeps it running under the runtime supervisor, false waits for the child's final answer. Absent means the configured default (subagents.default_background, usually background)." },
             "resumeChildId": { "type": "string", "description": "Resume this interrupted child on its existing session instead of creating a new child" },
