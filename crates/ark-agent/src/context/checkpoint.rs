@@ -60,25 +60,16 @@ impl ContextCheckpoint {
                 continue;
             }
             out.merge(Self::from_texts([text]));
-            match message.role {
-                ModelRole::User => {
-                    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
-                        push_bounded(&mut out.user_lines, line.to_owned(), MAX_USER_LINE_CHARS);
-                    }
+            if let ModelRole::User = message.role {
+                for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+                    push_bounded(&mut out.user_lines, line.to_owned(), MAX_USER_LINE_CHARS);
                 }
-                ModelRole::Tool => {
-                    for line in text.lines().map(str::trim) {
-                        if is_failure_line(line) {
-                            push_bounded(
-                                &mut out.failures,
-                                line.to_owned(),
-                                MAX_FAILURE_LINE_CHARS,
-                            );
-                        }
-                    }
-                }
-                _ => {}
             }
+            // Tool failure rows need no separate branch: `from_texts` already
+            // runs the same `is_failure_line` filter and `push_failure` merge
+            // over every line. A dedicated Tool arm processed the same text a
+            // second time and double-counted every tool error (rendered
+            // `(repeated x4)` for two occurrences, review S2's root cause).
             for identifier in identifiers_in(text) {
                 push_unique(&mut out.identifiers, identifier);
             }
@@ -122,9 +113,12 @@ impl ContextCheckpoint {
     /// Absorb the sections of a previously rendered checkpoint.
     ///
     /// Section titles themselves are not re-emitted (the render pass writes
-    /// fresh ones), and bookkeeping lines such as `[N earlier messages
-    /// compacted]` are dropped. Absorbed lines keep the oldest-first order of
-    /// the prior note, so user requests read as a chronological chain.
+    /// fresh ones), bookkeeping lines (`[N earlier messages compacted]`, the
+    /// `[N middle user requests folded]` marker) are dropped rather than being
+    /// mistaken for real content (review M2), and failure lines pass the same
+    /// diagnostic filter as fresh captures so the two channels stay symmetric
+    /// (review B1). Absorbed lines keep the oldest-first order of the prior
+    /// note, so user requests read as a chronological chain.
     fn absorb_checkpoint_text(&mut self, text: &str) {
         let mut section = CheckpointSection::None;
         for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
@@ -149,6 +143,12 @@ impl ContextCheckpoint {
                     let content = line.strip_prefix("- ");
                     match (section, content) {
                         (CheckpointSection::UserRequests, Some(content)) => {
+                            // A folded marker bullet survived into the prior
+                            // note (rendered before M2 was fixed): drop it so
+                            // it never occupies a user-request slot again.
+                            if content.starts_with('[') && content.ends_with(']') {
+                                continue;
+                            }
                             push_bounded(
                                 &mut self.user_lines,
                                 content.to_owned(),
@@ -159,7 +159,20 @@ impl ContextCheckpoint {
                             push_unique(&mut self.entries, content.to_owned());
                         }
                         (CheckpointSection::Failures, Some(content)) => {
-                            push_failure(&mut self.failures, content, MAX_FAILURE_LINE_CHARS);
+                            // Absorption must never bump a count: an older
+                            // checkpoint already subsumes the occurrences of
+                            // the rows it folded. Re-reading the full journal
+                            // (manual /compact) would otherwise inflate the
+                            // count once per compaction (review S3). Fresh
+                            // rows after the checkpoint still bump via
+                            // `from_texts`, which is the recurrence signal.
+                            if is_failure_line(content)
+                                && !self.failures.iter().any(|existing| {
+                                    failure_match_key(existing) == failure_match_key(content)
+                                })
+                            {
+                                push_failure(&mut self.failures, content, MAX_FAILURE_LINE_CHARS);
+                            }
                         }
                         (CheckpointSection::Identifiers, Some(content)) => {
                             push_unique(&mut self.identifiers, content.to_owned());
@@ -241,6 +254,13 @@ impl ContextCheckpoint {
 
     /// Render without exceeding the configured context budget, keeping the
     /// highest-signal lines first and telling the model what was dropped.
+    ///
+    /// Every kept line is prefixed with the section title it belongs to: a
+    /// truncated render loses the bare section headers that group the lines,
+    /// and a later compaction absorbing this note would then see unassigned
+    /// bullets and silently drop everything (review M1). `absorb_checkpoint_text`
+    /// re-associates lines with the nearest preceding title, so re-emitting
+    /// titles keeps the absorption chain intact across truncated generations.
     pub fn render_with_token_limit(&self, max_tokens: u64) -> String {
         let rendered = self.render();
         if TokenEstimator::new().estimate_text(&rendered) <= max_tokens {
@@ -248,8 +268,19 @@ impl ContextCheckpoint {
         }
 
         let mut limited = format!("{CHECKPOINT_PREFIX}: truncated]");
-        for line in self.prioritized_entries() {
-            let candidate = format!("{limited}\n{line}");
+        let mut current_title = "";
+        for (section, line) in self.prioritized_entries_with_sections() {
+            let title = if section != current_title {
+                current_title = section;
+                section
+            } else {
+                ""
+            };
+            let candidate = if title.is_empty() {
+                format!("{limited}\n{line}")
+            } else {
+                format!("{limited}\n{title}\n{line}")
+            };
             if TokenEstimator::new().estimate_text(&candidate) > max_tokens {
                 continue;
             }
@@ -258,33 +289,26 @@ impl ContextCheckpoint {
         limited
     }
 
-    /// Highest-signal lines first for the budget-limited render.
-    ///
-    /// User requests come first: the earliest request carries the original
-    /// goal, and in session cb274b9d the budget cut silently dropped it while
-    /// keeping noise such as `Base64`. Identifiers rank last because they are
-    /// lossless fragments — anything valuable in them also appears in the
-    /// structured sections.
-    fn prioritized_entries(&self) -> Vec<String> {
+    /// [`Self::prioritized_entries`] with the owning section attached per line,
+    /// so the budget render can re-emit section titles (M1).
+    fn prioritized_entries_with_sections(&self) -> Vec<(&'static str, String)> {
+        const USER: &str = "[user requests]";
+        const ENTRIES: &str = "[goals / constraints / decisions]";
+        const FAILURES: &str = "[failed attempts - do not repeat]";
+        const IDENTIFIERS: &str = "[remembered identifiers]";
         let mut lines = Vec::new();
-        lines.extend(
-            self.bounded_user_lines()
-                .into_iter()
-                .map(|line| format!("- {line}")),
-        );
-        lines.extend(self.entries.iter().take(MAX_SECTION_LINES).cloned());
-        lines.extend(
-            self.failures
-                .iter()
-                .take(MAX_SECTION_LINES)
-                .map(|line| format!("- {line}")),
-        );
-        lines.extend(
-            self.identifiers
-                .iter()
-                .take(MAX_SECTION_LINES)
-                .map(|identifier| format!("- {identifier}")),
-        );
+        for line in self.bounded_user_lines() {
+            lines.push((USER, format!("- {line}")));
+        }
+        for entry in self.entries.iter().take(MAX_SECTION_LINES) {
+            lines.push((ENTRIES, entry.clone()));
+        }
+        for failure in self.failures.iter().take(MAX_SECTION_LINES) {
+            lines.push((FAILURES, format!("- {failure}")));
+        }
+        for identifier in self.identifiers.iter().take(MAX_SECTION_LINES) {
+            lines.push((IDENTIFIERS, format!("- {identifier}")));
+        }
         lines
     }
 
@@ -332,13 +356,18 @@ fn push_unique(vec: &mut Vec<String>, value: String) {
 /// present instead of spending a new quota slot on them. Counting misses like
 /// `actionCount=27, actual 28` re-fire per module and per rerun; session
 /// cb274b9d filled its `[failed attempts]` section with near-duplicates.
+///
+/// The match key strips any `[xN]` counter first: the same diagnostic arriving
+/// through a different channel (tool result vs. an absorbed checkpoint whose
+/// entry was already bumped) must still merge, or the counter semantics break
+/// down into duplicate entries (review findings S2/S3).
 fn push_failure(vec: &mut Vec<String>, line: &str, max_chars: usize) {
     if line.chars().count() > max_chars {
         return;
     }
     if let Some(existing) = vec
         .iter_mut()
-        .find(|existing| normalize_failure(existing) == normalize_failure(line))
+        .find(|existing| failure_match_key(existing) == failure_match_key(line))
     {
         bump_failure_count(existing);
         return;
@@ -346,38 +375,110 @@ fn push_failure(vec: &mut Vec<String>, line: &str, max_chars: usize) {
     vec.push(line.to_owned());
 }
 
-/// Collapse every digit run to a placeholder so numeric variants compare equal.
-fn normalize_failure(line: &str) -> String {
-    let mut normalized = String::with_capacity(line.len());
-    let mut digits = false;
-    for character in line.chars() {
-        if character.is_ascii_digit() {
-            digits = true;
-        } else {
-            if digits {
-                normalized.push('\u{0}');
-                digits = false;
-            }
+/// Collapse digit runs to a placeholder so numeric variants compare equal —
+/// but only in counting contexts (`count=`, `actual 28`, `got 27`). Semantic
+/// numbers elsewhere (error codes `A3`/`A4`, HTTP statuses `401`/`500`, asset
+/// versions `v2`/`v3`) must stay distinct: they are exactly what tells the
+/// next model which case not to repeat (review M3). The trailing `[xN]`
+/// counter is stripped first so entries bumped in an earlier generation still
+/// match their bare form arriving from another channel (review S2/S3).
+fn failure_match_key(line: &str) -> String {
+    let (bare, _) = strip_failure_counter(line);
+    let lower = bare.to_ascii_lowercase();
+    let chars: Vec<char> = lower.chars().collect();
+    let mut normalized = String::with_capacity(lower.len());
+    let mut index = 0usize;
+    while index < chars.len() {
+        let character = chars[index];
+        if !character.is_ascii_digit() {
             normalized.push(character);
+            index += 1;
+            continue;
         }
-    }
-    if digits {
-        normalized.push('\u{0}');
+        let run_start = index;
+        while index < chars.len() && chars[index].is_ascii_digit() {
+            index += 1;
+        }
+        if is_counting_context(&chars, run_start, index) {
+            normalized.push('\u{0}');
+        } else {
+            normalized.extend(&chars[run_start..index]);
+        }
     }
     normalized
 }
 
-/// Bump or add the trailing `[xN]` counter on a collapsed failure entry.
-fn bump_failure_count(entry: &mut String) {
-    if let Some(start) = entry.rfind("[x") {
-        if entry.ends_with(']') {
-            if let Ok(count) = entry[start + 2..entry.len() - 1].parse::<u32>() {
-                *entry = format!("{}[x{}]", &entry[..start], count + 1);
-                return;
+/// Do the digits at `chars[start..end]` sit in a counting context? Scan back
+/// over up to two (`separator`, keyword) pairs ending at the run: `28` in
+/// `…，实际 28` finds `实际` across the space, `27` in `actionCount=27` finds
+/// `count` across `=`. CJK characters are word characters, CJK punctuation is
+/// a separator — matching the way these diagnostics are actually written in
+/// session cb274b9d (`…的 actionCount=27，实际 28`).
+fn is_counting_context(chars: &[char], _start: usize, end: usize) -> bool {
+    let is_separator = |c: char| {
+        matches!(
+            c,
+            ' ' | '=' | ':' | ',' | '，' | '、' | '(' | '（' | ')' | '）' | '[' | '【' | '-'
+        )
+    };
+    let counting = |token: &[char]| -> bool {
+        let keyword: String = token.iter().collect();
+        keyword.eq_ignore_ascii_case("count")
+            || keyword.eq_ignore_ascii_case("actual")
+            || keyword.eq_ignore_ascii_case("got")
+            || keyword.eq_ignore_ascii_case("expected")
+            || keyword.ends_with("实际")
+            || keyword.ends_with("共")
+            || keyword.ends_with("行")
+    };
+    // Split everything before the run into tokens, then check the two tokens
+    // nearest the run: `…的 actionCount=27，实际 28` reads `实际` for the
+    // second number and `actioncount` for the first. `tokens` is oldest-first.
+    let mut tokens: Vec<&[char]> = Vec::new();
+    let mut index = 0usize;
+    while index < end {
+        if is_separator(chars[index]) {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < end && !is_separator(chars[index]) {
+            index += 1;
+        }
+        tokens.push(&chars[start..index]);
+    }
+    tokens.iter().rev().take(2).any(|token| counting(token))
+}
+
+/// Split a trailing occurrence counter off a failure entry. The counter is
+/// always appended by [`bump_failure_count`] as ` (repeated xN)`; the phrase
+/// is unique enough that literal data ending in it is not a realistic shape,
+/// while a bare `[xN]` suffix collides with ordinary data (review M4's
+/// `ERROR: crc mismatch [x86]`). Returns `(text, count)`; `count` is 0 for an
+/// uncounted entry.
+fn strip_failure_counter(entry: &str) -> (&str, u32) {
+    const MARKER: &str = " (repeated x";
+    if let Some(open) = entry.rfind(MARKER) {
+        let inside = &entry[open + MARKER.len()..];
+        if let Some(close) = inside.find(')') {
+            if close == inside.len() - 1 {
+                if let Ok(count) = inside[..close].parse::<u32>() {
+                    if count >= 2 {
+                        return (&entry[..open], count);
+                    }
+                }
             }
         }
     }
-    entry.push_str(" [x2]");
+    (entry, 0)
+}
+
+/// Bump or add the trailing occurrence counter on a collapsed failure entry.
+/// A bare entry already represents one occurrence, so the first merge shows
+/// `(repeated x2)`; an existing counter increments.
+fn bump_failure_count(entry: &mut String) {
+    let (text, count) = strip_failure_counter(entry);
+    *entry = format!("{text} (repeated x{})", count.max(1) + 1);
 }
 
 fn push_bounded(vec: &mut Vec<String>, value: String, max_chars: usize) {
@@ -415,10 +516,11 @@ fn is_structured_line(line: &str) -> bool {
 /// Session cb274b9d filled the `[failed attempts]` section with formatter
 /// output such as `failed: Boolean(failed),` and `errorMessage: null,` —
 /// minified JS that starts with the same words. Two filters keep them out:
-/// a word boundary after the keyword (the `lower.starts_with(prefix)`
-/// variant that would wrongly accept `failed:` is replaced by a
-/// next-char check), and a code-shape rejection for lines that carry
-/// JavaScript/call syntax.
+/// a word boundary after the keyword, and a code-shape rejection for lines
+/// that carry JavaScript/call syntax. The keyword-colon arms reject only a
+/// value that itself looks like an identifier or literal — the shape of
+/// serialized JS object lines — so a real `failed: connect 127.0.0.1
+/// refused` survives (review finding S1; capitalised keys covered, M6).
 fn is_failure_line(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
     if is_code_shaped(line) {
@@ -438,20 +540,49 @@ fn is_failure_line(line: &str) -> bool {
 /// Line looks like source code rather than a human- or tool-written diagnostic.
 ///
 /// Conservative by design: a genuine error message containing a snippet (for
-/// example a path with parentheses) must stay. The patterns below only match
-/// the shapes the observed noise took — trailing separators, arrow bodies,
-/// `instanceof`/ternary chains, and keyword-parameter lines.
+/// example a path with parentheses) must stay. The arrow arm demands a bare
+/// match-arm / body shape — rustc diagnostics quote signatures in backticks
+/// and must survive (M5).
 fn is_code_shaped(line: &str) -> bool {
     let trimmed = line.trim_end();
-    trimmed.ends_with(';')
-        || trimmed.ends_with("','")
-        || trimmed.ends_with(");")
-        || trimmed.ends_with(',') && trimmed.contains('(')
-        || trimmed.contains("instanceof")
-        || trimmed.contains(" => ")
-        || trimmed.starts_with("errorMessage:")
-        || trimmed.starts_with("failed:")
-        || trimmed.starts_with("failure:")
+    if trimmed.ends_with(';') || trimmed.ends_with("),") {
+        return true;
+    }
+    if trimmed.ends_with(',') && trimmed.contains('(') {
+        return true;
+    }
+    if trimmed.contains("instanceof") {
+        return true;
+    }
+    if trimmed.contains(" => ") && !trimmed.contains('`') && !trimmed.contains('"') {
+        return true;
+    }
+    // Serialized-JS key/value lines always terminate in `,` or `;`; a real
+    // diagnostic sentence does not. Requiring the terminator is what keeps
+    // `failed: connect 127.0.0.1 refused` alive while `failed: null,` dies
+    // (review S1). Matching runs on the lowercased line so capitalized keys
+    // (`Failure: null,`) are caught too (M6).
+    if !(trimmed.ends_with(',') || trimmed.ends_with(';')) {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    keyword_colon_with_code_value(&lower, "errormessage:")
+        || keyword_colon_with_code_value(&lower, "failed:")
+        || keyword_colon_with_code_value(&lower, "failure:")
+}
+
+/// `keyword: <code value><,|;>` shape: the text after the colon starts like an
+/// identifier, literal or quoted string. Only called on terminator-terminated
+/// lines, so a diagnostic sentence after the colon never reaches this.
+fn keyword_colon_with_code_value(line: &str, keyword: &str) -> bool {
+    let Some(rest) = line.strip_prefix(keyword) else {
+        return false;
+    };
+    let value = rest.trim_start().trim_end_matches([',', ';']).trim_end();
+    let Some(first) = value.chars().next() else {
+        return false;
+    };
+    first.is_ascii_alphanumeric() || first == '_' || first == '$' || first == '"'
 }
 
 fn identifiers_in(text: &str) -> Vec<String> {

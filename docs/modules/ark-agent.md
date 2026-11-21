@@ -43,11 +43,16 @@ HTTP 侧批准一条策略表明确拒绝的调用。
   链式继承：折叠区内旧 checkpoint 的四个段整体吸收进新 checkpoint（`[user requests]` 保真迁移、
   结构化行归入 goals、段标题与 `[N earlier messages compacted]` 账目行不再重排）——纯文本用户
   请求不匹配任何结构化前缀，不链式继承则第二次压缩会静默丢掉最早的目标请求（实测会话 cb274b9d
-  由此失忆）。预算截断的优先级为用户请求 → 结构化事实 → 失败证据 → 标识符：标识符是可达碎片，
-  最先被裁；用户请求段超配额时保最旧 6 条与最新若干条，中段以 `[N middle user requests folded]`
-  显式声明丢弃。失败证据只收真实诊断行：词边界匹配（`failed:` 接受、`failedValue` 拒绝）叠加
-  代码形态拒绝（尾分号/`instanceof`/`=>`/`key:` 前缀），数字变体（如 `actionCount=27, actual 28`
-  与 `29`）折叠为单条并带 `[xN]` 计数。并受 `context_limit_tokens` 约束。
+  由此失忆）。吸收必须幂等且不 bump 计数：手动 `/compact` 每次重读全部 items,重复吸收同一条
+  失败证据不得虚增复发次数。预算截断的优先级为用户请求 → 结构化事实 → 失败证据 → 标识符：
+  标识符是可达碎片，最先被裁；截断渲染为每段重放段标题（否则截断代被再吸收时无段 bullet 全部
+  丢失，链条在该代断开）；用户请求段超配额时保最旧 6 条与最新若干条，中段以
+  `[N middle user requests folded]` 显式声明丢弃。失败证据只收真实诊断行：词边界匹配
+  （`failed:` 接受、`failedValue` 拒绝）叠加代码形态拒绝（序列化 JS 行以 `,`/`;` 结尾且冒号后
+  是标识符/字面量，如 `failed: null,`、`Failure: null,`；尾分号/`instanceof`/裸 ` => `；
+  rustc 的反引号签名诊断保留），数字变体仅在计数语境归并（`count=`/`actual`/`got`/`expected`/
+  `实际` 前缀，错误码 `A3/A4`、HTTP `401/500`、路径版本 `v2/v3` 等语义数字保持独立），归并
+  计数以 ` (repeated xN)` 后缀呈现（字面 `[xN]` 数据不受影响）。并受 `context_limit_tokens` 约束。
   后续压缩会替换已有 checkpoint，不会把它当作稳定 system 前缀累积。预算不足时 checkpoint 明示已裁剪，且只在 UTF-8 字符边界裁剪；`compaction_completed` 复用
   `removed_items` 报告折叠消息数，并报告 checkpoint 字符数。回合种子尾部的持久计划行
   （`[thread plan]` 的 `Goal:` 与 `- [ ]`/`- [~]`/`- [x]` checkbox 行）同样被识别为结构化事实：

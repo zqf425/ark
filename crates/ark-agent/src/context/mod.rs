@@ -19,6 +19,18 @@ mod checkpoint_tests {
     use super::ContextCheckpoint;
     use ark_ports::ModelMessage;
 
+    /// Tool 角色测试桩：与 reactor 回放 `ToolCall` 结果时的消息形态一致。
+    fn tool_result(output: &str) -> ModelMessage {
+        ModelMessage {
+            role: ark_ports::ModelRole::Tool,
+            content: output.to_string(),
+            images: Vec::new(),
+            tool_call_id: Some("call_test".to_string()),
+            name: Some("bash".to_string()),
+            tool_calls: Vec::new(),
+        }
+    }
+
     #[test]
     fn checkpoint_keeps_goal_constraints_and_recent_decision() {
         let checkpoint = ContextCheckpoint::from_messages(&[
@@ -197,7 +209,7 @@ mod checkpoint_tests {
             ModelMessage::assistant("noted P30 QUARTZ-99"),
         ]);
 
-        let rendered = checkpoint.render_with_token_limit(17);
+        let rendered = checkpoint.render_with_token_limit(21);
         assert!(rendered.contains("please migrate the parser module"));
         assert!(!rendered.contains("P30"));
     }
@@ -231,7 +243,7 @@ mod checkpoint_tests {
         ]);
 
         let rendered = checkpoint.render();
-        assert!(rendered.contains("[x2]"));
+        assert!(rendered.contains("(repeated x2)"));
         assert!(rendered.contains("模块 shell"));
         assert_eq!(rendered.matches("ERROR A3").count(), 2);
     }
@@ -248,5 +260,141 @@ mod checkpoint_tests {
         assert!(rendered.contains("request-000"));
         assert!(rendered.contains("request-059"));
         assert!(rendered.contains("folded"));
+    }
+
+    /// S1：`failed:` 后跟真实诊断描述必须存活——该形态是工具失败的主要
+    /// 前缀，整行拒绝会让失败证据段对它完全失明。
+    #[test]
+    fn genuine_failed_diagnostics_survive_code_shaped_filter() {
+        let checkpoint = ContextCheckpoint::from_texts([
+            "failed: connect 127.0.0.1:18792 refused",
+            "failed: exit code 101",
+            "failed to compile module",
+            "failed: Boolean(failed),",
+        ]);
+
+        let rendered = checkpoint.render();
+        assert!(rendered.contains("connect 127.0.0.1:18792 refused"));
+        assert!(rendered.contains("exit code 101"));
+        assert!(rendered.contains("failed to compile module"));
+        assert!(!rendered.contains("Boolean(failed)"));
+    }
+
+    /// S2：同一条 Tool 失败出现两次必须归并为一条，数字变体同样归并——
+    /// Tool 结果是错误的主要来源，双通道写入会让归并失效。
+    #[test]
+    fn tool_failure_duplicates_and_variants_collapse() {
+        let checkpoint = ContextCheckpoint::from_messages(&[
+            tool_result("Error: exit status 101"),
+            tool_result("Error: exit status 101"),
+        ]);
+
+        let rendered = checkpoint.render();
+        eprintln!(
+            "DBG rendered:
+{rendered}"
+        );
+        assert_eq!(rendered.matches("exit status 101").count(), 1);
+        assert!(rendered.contains("(repeated x2)"));
+
+        let variants = ContextCheckpoint::from_messages(&[
+            tool_result("Error: HTTP 401 unauthorized"),
+            tool_result("Error: HTTP 404 not found"),
+        ]);
+        assert_eq!(variants.render().matches("HTTP 4").count(), 2);
+    }
+
+    /// S3：手动 /compact 每次重读全部 items,同一条失败证据被重复吸收；
+    /// absorb 必须幂等,不得把既有条目再 bump 出假计数。
+    #[test]
+    fn repeated_checkpoint_absorption_is_idempotent() {
+        let messages = vec![tool_result("Error: exit status 101")];
+        let first = ContextCheckpoint::from_messages(&messages).render();
+        let second = ContextCheckpoint::from_messages(&[
+            ModelMessage::system(&first),
+            ModelMessage::system(&first),
+        ]);
+
+        let rendered = second.render();
+        eprintln!(
+            "DBG repeated rendered:
+{rendered}"
+        );
+        assert!(!rendered.contains("(repeated x2)"));
+        assert_eq!(rendered.matches("exit status 101").count(), 1);
+    }
+
+    /// M1：`render_with_token_limit` 的截断变体头同样会被吸收；截断渲染
+    /// 保留段标题，吸收后内容不丢。
+    #[test]
+    fn truncated_checkpoint_absorption_keeps_user_requests() {
+        let mut messages: Vec<ModelMessage> =
+            vec![ModelMessage::user("原始目标：完善原子库并优化召回逻辑")];
+        messages.extend((0..20).map(|i| ModelMessage::user(format!("req-{i:02} QUARTZ-99"))));
+        let truncated = ContextCheckpoint::from_messages(&messages).render_with_token_limit(60);
+        assert!(truncated.contains("truncated"));
+
+        let next = ContextCheckpoint::from_messages(&[
+            ModelMessage::system(&truncated),
+            ModelMessage::user("继续验证只读用例"),
+        ]);
+        let rendered = next.render();
+        assert!(rendered.contains("原始目标：完善原子库并优化召回逻辑"));
+        assert!(rendered.contains("继续验证只读用例"));
+    }
+
+    /// M2：fold 账目行再吸收时必须丢弃，不占用户请求配额。
+    #[test]
+    fn fold_marker_lines_are_dropped_on_absorption() {
+        let messages: Vec<ModelMessage> = (0..60)
+            .map(|index| ModelMessage::user(format!("request-{index:03} with QUARTZ-99")))
+            .collect();
+        let first = ContextCheckpoint::from_messages(&messages).render();
+        let next = ContextCheckpoint::from_messages(&[ModelMessage::system(&first)]);
+
+        let rendered = next.render();
+        assert!(!rendered.contains("folded - see the event log"));
+        assert!(rendered.contains("request-000"));
+    }
+
+    /// M4：行尾恰为 `[xN]` 形态的字面数据不得被当作计数器改写。
+    #[test]
+    fn literal_xn_suffix_is_not_treated_as_a_counter() {
+        let checkpoint = ContextCheckpoint::from_texts([
+            "ERROR: crc mismatch [x86]",
+            "ERROR: crc mismatch [x87]",
+        ]);
+
+        let rendered = checkpoint.render();
+        assert!(rendered.contains("[x86]"));
+        assert!(rendered.contains("[x87]"));
+        assert!(!rendered.contains("(repeated x2)"));
+    }
+
+    /// M5：rustc 诊断携带 `=> ` 闭包签名时必须存活。
+    #[test]
+    fn rustc_diagnostics_with_arrow_survive() {
+        let checkpoint = ContextCheckpoint::from_texts(["error[E0277]: expected `Fn(u8) => bool`"]);
+        assert!(checkpoint.render().contains("error[E0277]"));
+    }
+
+    /// M6：JS 序列化键首字母大写的代码行同样要被拒绝。
+    #[test]
+    fn capitalized_key_value_code_lines_are_rejected() {
+        let checkpoint = ContextCheckpoint::from_texts(["Failure: null,", "Failed: null,"]);
+        let rendered = checkpoint.render();
+        assert!(!rendered.contains("Failure: null"));
+        assert!(!rendered.contains("Failed: null"));
+    }
+
+    /// B1：absorb 失败段时过滤非诊断行，与 from_texts 行为对称。
+    #[test]
+    fn absorption_applies_failure_filter() {
+        let old =
+            ContextCheckpoint::from_texts(["Error: ENOENT", "retry the deploy later"]).render();
+        let next = ContextCheckpoint::from_messages(&[ModelMessage::system(&old)]);
+        let rendered = next.render();
+        assert!(rendered.contains("Error: ENOENT"));
+        assert!(!rendered.contains("retry the deploy later"));
     }
 }
