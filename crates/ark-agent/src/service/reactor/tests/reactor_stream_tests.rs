@@ -637,6 +637,72 @@ fn repeated_compaction_within_keep_recent_keeps_one_plan_restate() {
     );
 }
 
+#[test]
+fn compaction_never_deletes_a_kept_seed_plan_row() {
+    // M1 regression: the seed header `[thread plan - current objective and
+    // progress]` shares a prefix with the restate marker. The seed sits in
+    // the leading system region (it precedes the first user row, so
+    // `compact_history`'s `system_count` take-while swallows it into the
+    // stable prefix), and the rebuilt history copies that region verbatim —
+    // the retain runs over `next`, which includes the prefix, so a looser
+    // marker (`[thread plan]`) WOULD delete the seed there. The tightened
+    // `[thread plan]\n` marker must keep it.
+    let writer = Arc::new(MemoryWriter::new());
+    let mut reactor = reactor(writer);
+    reactor.history = vec![
+        ModelMessage::system("stable system prompt"),
+        ModelMessage::system("workspace root: D:/repo"),
+        ModelMessage::system(
+            "[thread plan - current objective and progress]\nGoal: ship it\n- [ ] step one",
+        ),
+        ModelMessage::user("first user message"),
+        ModelMessage::assistant("first answer"),
+        ModelMessage::user("second user message"),
+        ModelMessage::assistant("second answer"),
+        ModelMessage::assistant("third answer"),
+    ];
+    reactor.compact_history(4);
+    reactor
+        .history
+        .push(ModelMessage::user("third user message"));
+    reactor
+        .history
+        .push(ModelMessage::assistant("fourth answer"));
+
+    reactor.compact_history(4);
+
+    let seeds = reactor
+        .history
+        .iter()
+        .filter(|message| {
+            message
+                .content
+                .starts_with("[thread plan - current objective and progress]")
+        })
+        .count();
+    assert_eq!(
+        seeds,
+        1,
+        "a seed plan row inside the stable prefix must never be deleted: {:?}",
+        reactor
+            .history
+            .iter()
+            .map(|message| (
+                message.role,
+                message.content.get(0..45).unwrap_or("").to_string()
+            ))
+            .collect::<Vec<_>>()
+    );
+    // The folded region holds no plan rows (the seed is in the prefix), so a
+    // restate would be noise — None is the correct outcome here.
+    let restates = reactor
+        .history
+        .iter()
+        .filter(|message| message.content.starts_with("[thread plan]\n"))
+        .count();
+    assert_eq!(restates, 0);
+}
+
 /// A `tool` role row answering `call_id`, the shape the provider requires.
 fn tool_message(call_id: &str, name: &str, output: &str) -> ModelMessage {
     ModelMessage {

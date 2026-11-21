@@ -16,6 +16,7 @@ pub use token::TokenEstimator;
 
 #[cfg(test)]
 mod checkpoint_tests {
+    use super::checkpoint::MAX_PLAN_LINES;
     use super::ContextCheckpoint;
     use ark_ports::ModelMessage;
 
@@ -194,6 +195,39 @@ mod checkpoint_tests {
         assert!(restate.contains("- [x] run tests"));
         assert!(!restate.contains("- [ ] run tests"));
         assert!(restate.contains("- [~] fix wire format"));
+    }
+
+    #[test]
+    fn plan_restate_does_not_eat_leading_x_of_a_title() {
+        // M3: char-set stripping ate a title's leading `x`, colliding
+        // `- [ ] xtask migration` with `- [ ] task migration` and silently
+        // folding two different todos into one. Exact marker prefixes only.
+        let checkpoint =
+            ContextCheckpoint::from_texts(["- [ ] xtask migration", "- [ ] task migration"]);
+
+        let restate = checkpoint.plan_restate().expect("plan rows exist");
+        assert!(restate.contains("- [ ] xtask migration"));
+        assert!(restate.contains("- [ ] task migration"));
+    }
+
+    #[test]
+    fn plan_restate_keeps_the_newest_goal_first_and_marks_quota_truncation() {
+        // M5: the objective must never be dropped by the todo quota, and a
+        // quota cut is announced instead of silent (the checkpoint budget
+        // render sets the same precedent).
+        let mut texts: Vec<String> = (0..(MAX_PLAN_LINES))
+            .map(|i| format!("- [ ] todo {i}"))
+            .collect();
+        texts.push("Goal: the real objective".to_string());
+        let checkpoint = ContextCheckpoint::from_texts(texts.iter().map(String::as_str));
+
+        let restate = checkpoint.plan_restate().expect("plan rows exist");
+        assert!(restate.starts_with("[thread plan]\nGoal: the real objective"));
+        assert!(restate.contains("truncated"));
+        // The goal occupies one slot, so todos 0..=38 survive (39 of 40);
+        // todo 39 is the first behind the cut.
+        assert!(restate.contains(&format!("- [ ] todo {}", MAX_PLAN_LINES - 2)));
+        assert!(!restate.contains("- [ ] todo 39"));
     }
 
     /// 回归：第二次压缩必须继承旧 checkpoint 的 `[user requests]` 段。

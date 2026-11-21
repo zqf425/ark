@@ -18,7 +18,8 @@ const KEEP_OLDEST_USER_LINES: usize = 6;
 /// Independent cap for the `[thread plan]` tail restate. Plan rows do not
 /// compete with the render sections' quota: the restate is the model's
 /// objective anchor and must not be crowded out by decision rows (review N1).
-const MAX_PLAN_LINES: usize = 40;
+/// The truncation-notice test asserts against this name.
+pub(crate) const MAX_PLAN_LINES: usize = 40;
 
 /// Deterministic, model-readable handoff retained across a compaction boundary.
 ///
@@ -251,21 +252,31 @@ impl ContextCheckpoint {
                 }
             }
         }
-        // Second pass: the single objective slot keeps only the newest goal
-        // row — earlier `Goal:` lines are superseded statements, not separate
-        // todos.
+        // Second pass: emit the newest objective first (an early break below
+        // must never drop it — review M5), then the todo rows in first-
+        // appearance order, capped by MAX_PLAN_LINES with an explicit
+        // truncation notice (the checkpoint budget render sets the same
+        // precedent).
+        let newest_goal = ordered
+            .iter()
+            .rev()
+            .find(|line| line.starts_with("Goal:"))
+            .cloned();
         let mut lines: Vec<String> = Vec::new();
-        for (slot, line) in ordered.iter().enumerate() {
+        if let Some(goal) = newest_goal {
+            lines.push(goal);
+        }
+        for line in &ordered {
             if line.starts_with("Goal:") {
-                let is_newest_goal = ordered[slot + 1..].iter().all(|l| !l.starts_with("Goal:"));
-                if !is_newest_goal {
-                    continue;
-                }
+                continue;
             }
-            lines.push(line.clone());
             if lines.len() >= MAX_PLAN_LINES {
+                lines.push(format!(
+                    "[thread plan truncated at {MAX_PLAN_LINES} todo rows]"
+                ));
                 break;
             }
+            lines.push(line.clone());
         }
         if lines.is_empty() {
             return None;
@@ -562,21 +573,21 @@ fn push_bounded(vec: &mut Vec<String>, value: String, max_chars: usize) {
 }
 
 /// The todo title behind one plan line, for last-wins folding: a `Goal:` line
-/// collapses every goal to one slot (the latest objective wins), and a
-/// checkbox line keeps its title with the status marker stripped, so
-/// `- [ ] run tests` and `- [x] run tests` fold to the newest status.
+/// collapses every objective to one slot (the latest objective wins), and a
+/// checkbox line keeps its title with the status marker stripped via exact
+/// prefixes — char-set stripping would eat a title's leading `x`
+/// (`- [ ] xtask migration` colliding with `- [ ] task migration`, review
+/// M3), and `line[2..]` byte indexing would panic on a multi-byte first char.
 fn todo_title(line: &str) -> String {
     if let Some(rest) = line.strip_prefix("Goal:") {
         return format!("goal:{}", rest.trim_start().to_lowercase());
     }
-    // Checkbox rows only: strip the `- `, the `[ ]`/`[~]`/`[x]` marker and
-    // surrounding spaces. Char-set stripping is safe here because the caller
-    // already routed `Goal:` rows away and every plan row matches one of the
-    // two shapes.
-    line[2..]
-        .trim_start_matches(['[', ']', '~', 'x', ' '])
-        .trim()
-        .to_string()
+    let body = line
+        .strip_prefix("- [ ] ")
+        .or_else(|| line.strip_prefix("- [~] "))
+        .or_else(|| line.strip_prefix("- [x] "))
+        .unwrap_or(line);
+    body.trim().to_string()
 }
 
 /// A durable-plan todo row: `- [ ]` / `- [~]` / `- [x]` as rendered by the

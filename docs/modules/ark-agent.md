@@ -56,16 +56,22 @@ HTTP 侧批准一条策略表明确拒绝的调用。
   计数以 ` (repeated xN)` 后缀呈现（字面 `[xN]` 数据不受影响）。并受 `context_limit_tokens` 约束。
   后续压缩会替换已有 checkpoint，不会把它当作稳定 system 前缀累积。预算不足时 checkpoint 明示已裁剪，且只在 UTF-8 字符边界裁剪；`compaction_completed` 复用
   `removed_items` 报告折叠消息数，并报告 checkpoint 字符数。回合种子尾部的持久计划行
-  （`[thread plan]` 的 `Goal:` 与 `- [ ]`/`- [~]`/`- [x]` checkbox 行）同样被识别为结构化事实：
-  checkpoint 摘要整个历史（含种子尾部），把这些行带上才能让回合内压缩不丢失未完成待办。
-  折叠区含计划行时，`compact_history` 还会把 `checkpoint.plan_restate()`（计划行从**整个**
-  entries 过滤后再截独立配额 `MAX_PLAN_LINES`，同一待办的状态变体与前后目标按标题**后出现者胜**，
-  避免把自相矛盾的计划放到模型近处）作为尾部 system 消息 push 到保留尾部之后（先按
-  `PLAN_RESTATE_PREFIX` 剔除保留窗内的旧 restate 再 push——hygiene 只折叠**相邻**重复，
-  `keep_recent` 保住旧 restate 时靠这个剔除保证全 history 至多一条；hygiene 只是兜底）。
+  （`[thread plan - current objective and progress]` 的 `Goal:` 与 `- [ ]`/`- [~]`/`- [x]`
+  checkbox 行）同样被识别为结构化事实：checkpoint 摘要整个历史（含种子尾部），把这些行带上
+  才能让回合内压缩不丢失未完成待办。折叠区含计划行时，`compact_history` 还会把
+  `checkpoint.plan_restate()`（计划行从**整个** entries 过滤后再截独立配额 `MAX_PLAN_LINES`，
+  最新目标行最先输出不被配额截断，配额截断显式标注；同一待办的状态变体与前后目标按标题
+  **后出现者胜**，标题剥离用精确 marker 前缀而非字符集，避免吃掉标题首字符）作为尾部 system
+  消息 push 到保留尾部之后（先按 `PLAN_RESTATE_PREFIX`＝`"[thread plan]\n"` 剔除旧 restate
+  再 push——该标记**不匹配**种子标题（种子多 `- current objective and progress` 后缀），
+  稳定前缀区的种子行永不误删；hygiene 的相邻重复折叠只是兜底，剔除本身是唯一性保证）。
   这是纯内存行为，不落 journal，下一回合重建种子时由 `plan_seed_message` 在种子尾给出当前计划，
   因此不会跨回合堆叠。"尾部近因"是适配器相对的：OpenAI chat/responses 族保留为最后一条消息，
   Anthropic 族会把 system 行提升进顶层 `system` 字段（仍是高注意力位置，但不是字面尾部）。
+  已知限制：来自项目指令或工具输出的任意 markdown checkbox 行同样会被识别为计划行
+  （`is_structured_line` 自 master 起如此），带待办清单的 README 可能被提升进 restate——
+  状态变体折叠保证不会自相矛盾，但第三方待办可能混入"当前计划"；按来源过滤需行级来源标记，
+  留待独立需求评估。
 - 压缩判定使用唯一估算器 `TokenEstimator`，它必须计入 `tool_calls` 的 `call_id`/`name`/`arguments`
   与每条消息的图片部分（按固定 `IMAGE_PART_TOKENS` 计，不按 base64 长度计——视觉模型按几何计费）：
   编码会话的体积主要来自工具参数（一次 `write` 携带整个文件、一次 `bash` 携带整个脚本），只计 `content`
