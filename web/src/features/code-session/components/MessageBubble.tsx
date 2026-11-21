@@ -110,17 +110,6 @@ function MentionBody({ text, threadId }: { text: string; threadId: string | null
             className="ark-mention"
             title={segment.skill.description ?? t('canvas.composer.skillsAria')}
           >
-            <span className="ark-mention__glyph" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="11" height="11" focusable="false">
-                <path
-                  d="M13 2.5 4.5 13.5H11L9.8 21.5 19.5 9.5H13l1.4-7Z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </span>
             {segment.value}
           </span>
         ) : (

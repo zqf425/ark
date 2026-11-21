@@ -383,14 +383,16 @@
   未知斜杠词（路径、URL）保持纯文本；识别只影响展示，复制按钮仍复制逐字原文。**UserBubble 必须从
   `StreamRow`/`TurnBlock` 拿到所属 threadId**（芯片依赖该线程的技能缓存），脱离流的独立渲染
   传 `null` 回落纯文本。输入框草稿侧，`DraftHighlight` 镜像层在 textarea 之下按同字体度量
-  （`.ark-composer__editor-font`）重绘草稿：完整提及与光标下进行中 token（虚线边）渲染为芯片，
-  镜像层 `pointer-events: none` 且文本透明，不影响输入/选择/IME/复制。镜像芯片必须与逐字文本
-  **同宽等位**：芯片默认 mono 0.86em 与 padding/图标会多占 ~37px，其后所有字形整体漂移成重影
-  （无头 Chrome 实测）。`.ark-composer__highlight .ark-mention` 作用域覆盖以负 margin 把洗色吃进
-  词边界的相邻空格、letter-spacing 收敛 mono 面宽、line-height 固定为编辑器 21.75px（芯片自身
-  1.55 会抬行盒）、typing 芯片按边框盒差再修 1px，同时镜像芯片不渲染闪电图标（被不透明文字覆盖
-  只会外溢压字）；组件侧芯片只含逐字 token 文本，无结构性垫片。逐字对齐验证方式：逐像素垂直/水平
-  配准（暗行/暗列直方图互相关偏移 = 0px）+ 芯片后首字符 x 坐标与正文 advance 差 ≤ 0.2px。
+  （`.ark-composer__editor-font`）重绘草稿：完整提及与光标下进行中 token 均渲染为轻量标记，
+  镜像层 `pointer-events: none` 且文本透明，不影响输入/选择/IME/复制。skill 提及的视觉语言是
+  **编辑器式轻量标记**（`.ark-mention`）：不再用 mono 小字 + 999px 药丸 + 闪电图标的"贴纸"造型，
+  改为继承正文的字体/字号/字重，左侧 2px 紫色竖线 + 淡紫底；竖线与底色均用 `background` 图层绘制
+  （零布局占位），chip 无水平 padding/border/margin，因此占位严格等于逐字 token 的 advance，
+  行首芯片不会越界、其后字形不会漂移；进行中 token 把竖线换成低对比色。`box-decoration-break: clone`
+  让跨行 token 每段都保留竖线与底色。消息气泡与输入框共用同一标记，深浅主题由
+  `--ark-skill` / `--ark-skill-soft` 切换。验证口径：芯片后首字符 x 坐标与"同长度正文"的
+  advance 预测差 ≤ 0.2px（实测 0.03px），行首芯片左边界等于 textarea 内容左边界（4px），
+  且深浅主题的竖线/底色 token 正确切换。
 - 用户可见文本通过 `web/src/shared/i18n/` 的消息键与中英文资源提供；新增 UI 不得硬编码文案。
   该目录已按域拆分为 `catalogs/*`（`common`、`errors`、`session`、`thread-list`、`workbench`、
   `session-canvas`、`settings-*`）：每个 catalog 输出一张

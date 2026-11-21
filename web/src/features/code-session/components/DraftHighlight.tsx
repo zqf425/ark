@@ -11,14 +11,10 @@
  * both layers MUST share the exact same font metrics and padding (one shared
  * class, `.ark-composer__editor-font`).
  *
- * The chip itself must also occupy exactly the advance the verbatim text
- * takes, or every glyph after it drifts (measured: the mono chip face ran
- * ~10px wide and its padding + bolt glyph added another ~28px). The wash is a
- * box around the text it decorates, never wider than it: metrics live in
- * `.ark-composer__highlight .ark-mention` overrides (letter-spacing + negative
- * margins), the bolt glyph is dropped (behind the textarea's opaque text it
- * would only poke out over neighboring glyphs), and the component renders the
- * verbatim token as the chip's only text — no structural spacers.
+ * The chip shares the editor's exact font metrics, so the wash painted behind
+ * sits under the textarea's own glyphs without shifting them. It is a quiet
+ * inline mark (violet rule + wash), not a box that competes with prose. The
+ * component renders the verbatim token as the mark's only content.
  *
  * Rendering `null` when the draft has nothing recognizable keeps an ordinary
  * draft at zero cost — no extra DOM, no layout shift.
@@ -28,12 +24,9 @@ import type { SkillSummary } from '../../../shared/contracts'
 import { splitSkillMentions, type MentionToken } from './skill-mention'
 
 /**
- * One mirror mention chip. The text must stay the verbatim token: alignment
- * with the textarea is glyph-for-glyph, and the zero-advance footprint (wash
- * margins, letter-spacing) comes entirely from the CSS overrides scoped to the
- * mirror layer. No bolt glyph here: the chip sits behind the textarea's opaque
- * text, so the icon would only poke out over adjacent glyphs — the wash alone
- * reads as the same violet mention language the message chips use.
+ * One mirror mention mark. It renders the verbatim token inline with the same
+ * font metrics as the textarea; the violet rule/wash comes from CSS, so there
+ * is no glyph, spacer or metric compensation to keep in sync.
  */
 function MirrorMention({ value, typing }: { value: string; typing: boolean }): JSX.Element {
   return <span className={typing ? 'ark-mention ark-mention--typing' : 'ark-mention'}>{value}</span>

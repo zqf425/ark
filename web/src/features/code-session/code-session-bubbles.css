@@ -458,73 +458,40 @@
   }
 }
 
-/* ---------- skill mention chips (user message body) ---------- */
+/* ---------- skill mention chips ---------- */
 
 /*
  * `/skill-id` tokens recognized against the thread's loaded skill set render
- * as violet chips inline with the text. The chip is display-only: the bubble's
- * copy button still copies the verbatim draft, so nothing the user typed is
- * rewritten. Colors come from the skill token pair, both themes.
+ * as inline skill marks. The mark reads as an editor token rather than a pasted
+ * label: a violet left rule and a quiet wash share the token's exact footprint,
+ * so it never looks like a pill glued onto the prose.
+ *
+ * The bubble copy button still copies the verbatim draft — styling never
+ * rewrites what the user typed. Colors come from the skill token pair, both
+ * themes.
  */
 .ark-mention {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0 7px;
-  border-radius: 999px;
-  background: var(--ark-skill-soft);
+  display: inline;
+  /* No horizontal padding/border: the mark occupies exactly the advance of the
+     verbatim token, so following glyphs never drift. The violet rule and wash
+     are painted as backgrounds (zero layout footprint); rounded ends come from
+     box-decoration-break so a wrapped mention keeps its shape on each line. */
+  background:
+    linear-gradient(var(--ark-skill), var(--ark-skill)) left center / 2px 1.2em no-repeat,
+    var(--ark-skill-soft);
   color: var(--ark-skill);
-  font-family: var(--ark-mono);
-  font-size: 0.86em;
-  font-weight: 550;
-  line-height: 1.55;
+  font-family: inherit;
+  font-size: inherit;
+  /* Weight is inherited: a heavier chip face would widen the token and drift
+     every following glyph. The left rule carries the emphasis instead. */
+  line-height: inherit;
   white-space: nowrap;
-  vertical-align: baseline;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
-.ark-mention__glyph {
-  display: inline-flex;
-  align-items: center;
-  flex: none;
-}
-
-/* The in-progress token in the composer's mirror layer: same chip shape, but a
-   dashed edge so "still typing" reads differently from a completed mention. */
 .ark-mention--typing {
-  border: 1px dashed color-mix(in srgb, var(--ark-skill) 55%, transparent);
-  padding: 0 6px;
-}
-
-/* ---------- composer mirror overrides ---------- */
-
-/*
- * The mirror layer (DraftHighlight) paints the same draft behind the textarea,
- * so every glyph must occupy exactly the advance the real text takes — any
- * drift shifts everything after the chip and reads as double text. Measured in
- * headless Chrome: the mono chip face runs ~10px wide over a 26-char id and
- * the chip's padding + bolt glyph + gap add another ~28px of pure advance.
- * Three overrides bring the footprint back to the verbatim text:
- *
- * - letter-spacing claws the mono face width back to the body advance;
- * - symmetric negative margins pull the wash over the adjacent spaces — a
- *   mention is always blank- or edge-delimited (word-boundary rule in
- *   skill-mention.ts), so the extra wash only ever covers whitespace, and the
- *   bolt glyph is dropped (the chip sits behind the textarea's opaque text,
- *   where an icon would only poke out over neighboring glyphs);
- * - line-height is pinned to the editor's 21.75px (15px × 1.45): the chip's
- *   own 1.55 would raise the line box and drift every following line.
- */
-.ark-composer__highlight .ark-mention {
-  margin-left: -7px;
-  margin-right: -7px;
-  letter-spacing: -0.028em;
-  line-height: 21.75px;
-}
-
-/* The typing chip carries a 1px border on each side (border-box), so its box
-   is 2px wider than a completed chip at equal text metrics; one less negative
-   pixel on the left edge brings its advance back to the verbatim text. */
-.ark-composer__highlight .ark-mention--typing {
-  margin-left: -7px;
-  margin-right: -8px;
+  background:
+    linear-gradient(var(--ark-accent-dim), var(--ark-accent-dim)) left center / 2px 1.2em no-repeat,
+    var(--ark-skill-soft);
 }

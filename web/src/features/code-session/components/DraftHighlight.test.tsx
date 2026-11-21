@@ -75,13 +75,12 @@ describe('DraftHighlight', () => {
     expect(chip?.querySelector('svg')).toBeNull()
   })
 
-  it('镜像芯片可被镜像层作用域选择器命中(零占位度量挂在 CSS)', async () => {
+  it('镜像芯片可被镜像层作用域选择器命中(装饰全部在 CSS)', async () => {
     harness = await mountWithProviders(
       <DraftHighlight text="前面 /pdf 后面" skills={SKILLS} token={null} />
     )
-    // The zero-advance footprint is pure CSS keyed on the mirror scope; the
-    // component contract is that the chip lives inside that scope and renders
-    // no inline glyph/icon of its own (the CSS carries the whole geometry).
+    // The mark's rule and wash are painted by CSS; the component renders only
+    // the verbatim token — no icon or spacer that could shift following text.
     const chip = harness.host.querySelector('.ark-composer__highlight .ark-mention')
     expect(chip).not.toBeNull()
     expect(chip?.querySelector('svg')).toBeNull()
