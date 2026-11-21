@@ -458,49 +458,42 @@
   }
 }
 
-/* ---------- skill mention tokens ---------- */
+/* ---------- skill mention chips ---------- */
 
 /*
- * A recognized `/skill-id` reads as a resolved token in an editor, not as a
- * sticker pasted onto the line. The design has two layers that do very
- * different jobs:
+ * A recognized `/skill-id` renders as a compact chip, following the same
+ * visual language mainstream coding agents use for `@file` and `/command`
+ * references: a rounded rectangle with a quiet, clearly-bounded fill, label
+ * sized like the surrounding text, and a little breathing room on each side.
  *
- *   1. The glyphs keep the surrounding body metrics exactly (inherited font,
- *      size and weight). Nothing is squeezed, and following text never drifts.
- *   2. The token's "container" is painted entirely outside layout: a compact
- *      background wash plus a spread box-shadow extend a few pixels past the
- *      glyphs, with a hairline border for definition. Zero layout footprint
- *      means the decoration can be generous without pushing the caret.
- *
- * Because the decoration sits outside the inline box, a token at column zero
- * is not clipped and a wrapped token keeps its frame on every line. The bubble
- * copy button still copies the verbatim draft — styling never rewrites text.
+ * The chip lives under the composer's textarea (DraftHighlight) or inline in a
+ * message bubble. Its extra width comes from horizontal padding, which is
+ * cancelled by an equal negative margin so the token's *advance* stays exactly
+ * the width of the verbatim text — following glyphs never drift, and a chip at
+ * column zero is not pushed outside the textarea. The visible wash is wider
+ * than the glyphs, which is precisely the look we want.
  */
 .ark-mention {
   display: inline;
-  border-radius: 5px;
+  padding: 1px 4px;
+  margin: 0 -4px;
+  border-radius: 4px;
   background: var(--ark-skill-soft);
-  /* Two shadows, both outside the token's advance:
-     - a 3px spread of the wash gives the frame its breathing room;
-     - a hairline inset edge adds just enough structure to read as a resolved
-       object rather than a random tint on the line. */
-  box-shadow:
-    0 0 0 3px var(--ark-skill-soft),
-    inset 0 0 0 1px color-mix(in srgb, var(--ark-skill) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ark-skill) 22%, transparent);
   color: var(--ark-skill);
   font-family: inherit;
   font-size: inherit;
-  /* Weight is inherited deliberately — a heavier face would widen the token
-     and drift every glyph after it. Color and frame carry the emphasis. */
+  /* Inherit the body weight: a heavier face widens the token and drifts the
+     following glyphs. Fill + hairline carry the emphasis, not the font. */
   line-height: inherit;
   white-space: nowrap;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
 
-/* While the slash query is still being typed, the frame loosens: a wider,
-   softer halo with no solid fill yet, so "unresolved" reads at a glance. */
+/* While typing, the reference is not yet resolved: same size and shape, but
+   only a hairline — no fill — so the difference reads at a glance. */
 .ark-mention--typing {
   background: transparent;
-  box-shadow: 0 0 0 3px var(--ark-skill-soft), inset 0 0 0 1px var(--ark-accent-dim);
+  box-shadow: inset 0 0 0 1px var(--ark-accent-dim);
 }

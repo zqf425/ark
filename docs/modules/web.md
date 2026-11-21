@@ -384,13 +384,13 @@
   `StreamRow`/`TurnBlock` 拿到所属 threadId**（芯片依赖该线程的技能缓存），脱离流的独立渲染
   传 `null` 回落纯文本。输入框草稿侧，`DraftHighlight` 镜像层在 textarea 之下按同字体度量
   （`.ark-composer__editor-font`）重绘草稿：完整提及与光标下进行中 token 均渲染为轻量标记，
-  镜像层 `pointer-events: none` 且文本透明，不影响输入/选择/IME/复制。skill 提及的视觉语言是
-  **soft token chip**（`.ark-mention`）：继承正文的字体/字号/字重，淡紫圆角底（5px）+
-  3px spread 光晕 + 1px inset 细边，像一枚"已解析的代码令牌"而不是贴纸或一根线；装饰全部用
-  background/box-shadow 绘制（零布局占位），chip 无水平 padding/border/margin，因此占位严格
-  等于逐字 token 的 advance，行首不越界、后续字形不漂移（实测 0.03px）；进行中 token 用更柔的
-  光晕 + 细边表达"未解析"。`box-decoration-break: clone` 让跨行 token 每段都有完整圆角框。
-  消息气泡与输入框共用同一标记，深浅主题由 `--ark-skill` / `--ark-skill-soft` 切换。
+  镜像层 `pointer-events: none` 且文本透明，不影响输入/选择/IME/复制。skill 提及的视觉语言
+  对齐主流 agent 的 `@file`/`/command` 引用：紧凑圆角矩形 chip（4px 圆角、4px 左右内边距、
+  1px 清晰细边、淡紫底），文字与正文同字号同字重。额外宽度来自 `padding`，由等量负 `margin`
+  抵消，使 token 的 advance 严格等于逐字文本——后续字形不漂移（实测 0.03px），行首 chip
+  左边界正好落在内容起点（0px，不裁切）；进行中 token 只保留细边、无底色，表达"未解析"。
+  `box-decoration-break: clone` 让跨行 chip 每段都有完整边框。消息气泡与输入框共用同一 chip，
+  深浅主题由 `--ark-skill` / `--ark-skill-soft` 切换。
 - 用户可见文本通过 `web/src/shared/i18n/` 的消息键与中英文资源提供；新增 UI 不得硬编码文案。
   该目录已按域拆分为 `catalogs/*`（`common`、`errors`、`session`、`thread-list`、`workbench`、
   `session-canvas`、`settings-*`）：每个 catalog 输出一张
