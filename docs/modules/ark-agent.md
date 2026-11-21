@@ -58,12 +58,14 @@ HTTP 侧批准一条策略表明确拒绝的调用。
   `removed_items` 报告折叠消息数，并报告 checkpoint 字符数。回合种子尾部的持久计划行
   （`[thread plan]` 的 `Goal:` 与 `- [ ]`/`- [~]`/`- [x]` checkbox 行）同样被识别为结构化事实：
   checkpoint 摘要整个历史（含种子尾部），把这些行带上才能让回合内压缩不丢失未完成待办。
-  折叠区含计划行时，`compact_history` 还会把 `checkpoint.plan_restate()`（`Goal:` 行与
-  checkbox 行渲染成 `[thread plan]` 块）作为**最后一条内存内 system 消息** push 到保留尾部之后：
-  回合内压缩把种子计划压进折叠边界的 checkpoint note，工具循环的后续行会把 note 越推越远，
-  计划失去近因注意力（lost-in-the-middle）；尾部重述是纯内存行为，不落 journal，下一回合
-  重建种子时由 `plan_seed_message` 在种子尾给出当前计划，因此不会跨回合堆叠；同回合重复
-  压缩时旧 restate 行在折叠区内被吸收、由同一批 entries 重建，也只保留一条。
+  折叠区含计划行时，`compact_history` 还会把 `checkpoint.plan_restate()`（计划行从**整个**
+  entries 过滤后再截独立配额 `MAX_PLAN_LINES`，同一待办的状态变体与前后目标按标题**后出现者胜**，
+  避免把自相矛盾的计划放到模型近处）作为尾部 system 消息 push 到保留尾部之后（先按
+  `PLAN_RESTATE_PREFIX` 剔除保留窗内的旧 restate 再 push——hygiene 只折叠**相邻**重复，
+  `keep_recent` 保住旧 restate 时靠这个剔除保证全 history 至多一条；hygiene 只是兜底）。
+  这是纯内存行为，不落 journal，下一回合重建种子时由 `plan_seed_message` 在种子尾给出当前计划，
+  因此不会跨回合堆叠。"尾部近因"是适配器相对的：OpenAI chat/responses 族保留为最后一条消息，
+  Anthropic 族会把 system 行提升进顶层 `system` 字段（仍是高注意力位置，但不是字面尾部）。
 - 压缩判定使用唯一估算器 `TokenEstimator`，它必须计入 `tool_calls` 的 `call_id`/`name`/`arguments`
   与每条消息的图片部分（按固定 `IMAGE_PART_TOKENS` 计，不按 base64 长度计——视觉模型按几何计费）：
   编码会话的体积主要来自工具参数（一次 `write` 携带整个文件、一次 `bash` 携带整个脚本），只计 `content`

@@ -15,6 +15,10 @@ const MAX_SECTION_LINES: usize = 40;
 /// goal; dropping it silently is what left the model in session cb274b9d
 /// without its task anchor after the second compaction.
 const KEEP_OLDEST_USER_LINES: usize = 6;
+/// Independent cap for the `[thread plan]` tail restate. Plan rows do not
+/// compete with the render sections' quota: the restate is the model's
+/// objective anchor and must not be crowded out by decision rows (review N1).
+const MAX_PLAN_LINES: usize = 40;
 
 /// Deterministic, model-readable handoff retained across a compaction boundary.
 ///
@@ -210,12 +214,57 @@ impl ContextCheckpoint {
     /// checkbox lines the turn seed restates every round) from the extracted
     /// facts, rendered as a standalone `[thread plan]` block.
     ///
+    /// Plan rows are filtered from the *whole* `entries` list before any
+    /// quota: they sit at the seed tail, after earlier structured facts, so a
+    /// take-first scan would drop them exactly in the longest turns where the
+    /// restate matters (review N1). The same todo appears once per rendered
+    /// status (`- [ ] run tests` before completion, `- [x] run tests`
+    /// after), and successive objectives update the one `Goal:` slot, so the
+    /// fold is last-wins per todo title — restating both statuses or an
+    /// outdated objective would show the model a self-contradicting plan
+    /// (review N2). Plan lines are capped by their own quota, independent of
+    /// the render section quota: they do not compete with decision rows.
+    ///
     /// Returns `None` when the folded region carried no plan rows.
     pub(crate) fn plan_restate(&self) -> Option<String> {
-        let mut lines = Vec::new();
-        for entry in self.entries.iter().take(MAX_SECTION_LINES) {
-            if entry.starts_with("Goal:") || is_plan_checkbox_line(entry) {
-                lines.push(entry.clone());
+        let plan_lines: Vec<&String> = self
+            .entries
+            .iter()
+            .filter(|entry| entry.starts_with("Goal:") || is_plan_checkbox_line(entry))
+            .collect();
+        if plan_lines.is_empty() {
+            return None;
+        }
+        // First pass: collapse status variants / objective updates last-wins
+        // per title, keeping insertion order of first appearance.
+        let mut ordered: Vec<String> = Vec::new();
+        let mut slots: Vec<(String, usize)> = Vec::new();
+        for line in plan_lines {
+            let title = todo_title(line);
+            match slots.iter_mut().find(|(existing, _)| *existing == title) {
+                Some((_, slot)) => {
+                    ordered[*slot] = line.clone();
+                }
+                None => {
+                    slots.push((title, ordered.len()));
+                    ordered.push(line.clone());
+                }
+            }
+        }
+        // Second pass: the single objective slot keeps only the newest goal
+        // row — earlier `Goal:` lines are superseded statements, not separate
+        // todos.
+        let mut lines: Vec<String> = Vec::new();
+        for (slot, line) in ordered.iter().enumerate() {
+            if line.starts_with("Goal:") {
+                let is_newest_goal = ordered[slot + 1..].iter().all(|l| !l.starts_with("Goal:"));
+                if !is_newest_goal {
+                    continue;
+                }
+            }
+            lines.push(line.clone());
+            if lines.len() >= MAX_PLAN_LINES {
+                break;
             }
         }
         if lines.is_empty() {
@@ -510,6 +559,24 @@ fn push_bounded(vec: &mut Vec<String>, value: String, max_chars: usize) {
         return;
     }
     vec.push(value);
+}
+
+/// The todo title behind one plan line, for last-wins folding: a `Goal:` line
+/// collapses every goal to one slot (the latest objective wins), and a
+/// checkbox line keeps its title with the status marker stripped, so
+/// `- [ ] run tests` and `- [x] run tests` fold to the newest status.
+fn todo_title(line: &str) -> String {
+    if let Some(rest) = line.strip_prefix("Goal:") {
+        return format!("goal:{}", rest.trim_start().to_lowercase());
+    }
+    // Checkbox rows only: strip the `- `, the `[ ]`/`[~]`/`[x]` marker and
+    // surrounding spaces. Char-set stripping is safe here because the caller
+    // already routed `Goal:` rows away and every plan row matches one of the
+    // two shapes.
+    line[2..]
+        .trim_start_matches(['[', ']', '~', 'x', ' '])
+        .trim()
+        .to_string()
 }
 
 /// A durable-plan todo row: `- [ ]` / `- [~]` / `- [x]` as rendered by the

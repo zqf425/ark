@@ -587,6 +587,56 @@ fn repeated_compaction_keeps_exactly_one_plan_restate() {
     );
 }
 
+#[test]
+fn repeated_compaction_within_keep_recent_keeps_one_plan_restate() {
+    // N1b: the restate row sits at the tail, so a second compaction whose
+    // `keep_recent` window still covers it would preserve the old row AND
+    // push a new one — two `[thread plan]` rows separated by kept messages,
+    // which hygiene cannot collapse (it only folds adjacent duplicates).
+    // The rebuild must drop any surviving restate rows before pushing the
+    // fresh one.
+    let writer = Arc::new(MemoryWriter::new());
+    let mut reactor = reactor(writer);
+    reactor.history = vec![
+        ModelMessage::system("stable system prompt"),
+        ModelMessage::system("workspace root: D:/repo"),
+        ModelMessage::user("first old message"),
+        ModelMessage::assistant("first old answer"),
+        ModelMessage::system(
+            "[thread plan - current objective and progress]\nGoal: ship it\n- [ ] step one",
+        ),
+        ModelMessage::user("first recent message"),
+        ModelMessage::assistant("first recent answer"),
+    ];
+    reactor.compact_history(2);
+    // One large tool output already crosses the threshold again; the tail
+    // (old restate + 2 rows) is smaller than keep_recent, so the old restate
+    // survives inside the kept window.
+    reactor
+        .history
+        .push(ModelMessage::user("second recent message"));
+    reactor
+        .history
+        .push(ModelMessage::assistant("second recent answer"));
+
+    reactor.compact_history(4);
+
+    let tail_restates = reactor
+        .history
+        .iter()
+        .filter(|message| message.content.starts_with("[thread plan]\n"))
+        .count();
+    assert_eq!(
+        tail_restates, 1,
+        "a restate kept by keep_recent must be replaced, not duplicated: {:?}",
+        reactor.history
+    );
+    assert_eq!(
+        reactor.history.last().map(|message| message.role),
+        Some(ModelRole::System),
+    );
+}
+
 /// A `tool` role row answering `call_id`, the shape the provider requires.
 fn tool_message(call_id: &str, name: &str, output: &str) -> ModelMessage {
     ModelMessage {
