@@ -523,16 +523,8 @@ fn resolve_thread_provider(
     reasoning_effort: Option<String>,
 ) -> Result<Option<ark_llm::ProviderConfig>> {
     let mut provider = match provider_id {
-        Some(id) => Some(
-            providers
-                .resolve_for_model(Some(id), model.clone())
-                .ok_or_else(|| {
-                    ark_common::ArkError::validation(format!(
-                        "thread provider is unavailable: {id}"
-                    ))
-                })?,
-        ),
-        None => providers.resolve_for_model(None, model),
+        Some(id) => Some(providers.resolve_for_model(Some(id), model.clone())?),
+        None => Some(providers.resolve_for_model(None, model)?),
     };
     if let Some(provider) = &mut provider {
         // An empty override means "unset": drop it instead of sending an empty

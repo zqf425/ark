@@ -333,20 +333,42 @@ impl ProviderStore {
     /// that model. An override without an inventory entry clears the window —
     /// the stored limit belongs to the stored model id, and compacting against
     /// another model's limit would corrupt the threshold.
+    ///
+    /// A served-model check guards the override: when the entry carries a
+    /// model inventory, an override that is neither the stored `model` nor an
+    /// inventory row is rejected here with a model-listing diagnostic, so a
+    /// mismatched `model`/`provider_id` pair fails at dispatch time with an
+    /// actionable error instead of at the provider with an opaque upstream
+    /// 404 (review: a child delegate passed workbuddy's
+    /// `global:deepseek-v4.1-flash` to the brgroup provider). Entries without
+    /// an inventory stay permissive — the store cannot distinguish "no
+    /// directory was ever imported" from "model absent".
     pub fn resolve_for_model(
         &self,
         id: Option<&str>,
         model: Option<String>,
-    ) -> Option<ProviderConfig> {
-        let mut config = self.resolve(id)?;
+    ) -> Result<ProviderConfig> {
+        let trimmed = id.map(str::trim).filter(|value| !value.is_empty());
+        let mut config = self.resolve(id).ok_or_else(|| {
+            if trimmed.is_none() {
+                // No default provider configured: callers (child runs) use
+                // this code to fall through to the parent's model.
+                ArkError::not_found("no default provider is configured")
+            } else {
+                ArkError::validation(format!(
+                    "provider is unavailable: {}",
+                    trimmed.unwrap_or_default()
+                ))
+            }
+        })?;
         let Some(model) = model
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
         else {
-            return Some(config);
+            return Ok(config);
         };
         if model == config.model {
-            return Some(config);
+            return Ok(config);
         }
         let document = self.lock();
         let target = match id.map(str::trim).filter(|value| !value.is_empty()) {
@@ -355,6 +377,26 @@ impl ProviderStore {
                 .effective_default()
                 .and_then(|default| document.get(default)),
         };
+        if let Some(entry) = target {
+            let inventory: Option<Vec<&str>> = entry
+                .models
+                .as_ref()
+                .map(|rows| rows.iter().map(|item| item.id.as_str()).collect());
+            if let Some(served) = inventory {
+                let known = served.iter().any(|served| *served == model);
+                if !known {
+                    let mut listed: Vec<&str> = Vec::with_capacity(served.len() + 1);
+                    listed.push(entry.model.trim());
+                    listed.extend(served);
+                    return Err(ArkError::validation(format!(
+                        "provider `{}` does not serve model `{}`; served models: {}",
+                        entry.id,
+                        model,
+                        listed.join(", ")
+                    )));
+                }
+            }
+        }
         config.model = model;
         config.context_window_tokens = target.and_then(|entry| {
             entry
@@ -364,7 +406,7 @@ impl ProviderStore {
                 .find(|item| item.id == config.model)
                 .and_then(|item| item.context_window_tokens)
         });
-        Some(config)
+        Ok(config)
     }
 
     /// Probe connectivity with one minimal request.

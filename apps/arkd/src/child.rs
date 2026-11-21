@@ -26,6 +26,7 @@ use ark_contract::{item::ItemKind, RuntimeEvent};
 use ark_delegation::{ChildTurnContext, ChildTurnExecutor, ChildTurnReport, ChildTurnStatus};
 use ark_obs::UsageRecorder;
 use ark_ports::{EventSink, ModelClient, SandboxPolicy, SessionStore, ToolRegistryPort};
+
 use ark_tool::{RegistryToolRunner, ToolRegistry};
 
 use crate::model;
@@ -178,18 +179,24 @@ impl ChildTurnExecutorImpl {
         // `resolve_for_model` applies the inventory entry recorded for the
         // override model (context window); an override without one clears the
         // window, because the stored limit belongs to the stored model id.
+        // It also rejects an override the provider's inventory does not list,
+        // so a mismatched model/provider pair fails here with a diagnostic
+        // that names the served models, not at the provider with a 404.
         let model = model
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
         match self.providers.resolve_for_model(provider_id, model) {
-            Some(provider) => Ok(Some(provider)),
-            // Distinguish "no provider configured" (fall through to the parent
-            // fallback) from "the named provider is unusable" (an error).
-            None if provider_id.is_none() => Ok(None),
-            None => Err(ark_common::ArkError::validation(format!(
-                "child provider is unavailable: {}",
-                provider_id.unwrap_or_default()
-            ))),
+            // "No default provider configured": fall through to the parent
+            // fallback. Every other error (named provider missing, key
+            // absent, override the inventory does not list) is a real
+            // failure whose diagnostic the child run should surface.
+            Ok(provider) => Ok(Some(provider)),
+            Err(error)
+                if provider_id.is_none() && error.code == ark_common::ArkErrorCode::NotFound =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -513,5 +520,77 @@ mod tests {
         // Clamped at the config layer too, but the runtime must never build a
         // gate that can never be acquired.
         assert_eq!(policy_for(true, 0).max_concurrency, 1);
+    }
+
+    /// The delegate-time guard: an override model the provider's inventory
+    /// does not list fails at `provider_for` with a diagnostic naming the
+    /// served models, before any model request is attempted (the incident
+    /// that motivated this guard never reached the provider — it 404'd at
+    /// the gateway with no hint about the mismatch).
+    #[test]
+    fn provider_for_rejects_a_model_outside_the_provider_inventory() {
+        use ark_contract::ProviderModelInventoryItem;
+
+        let dir =
+            std::env::temp_dir().join(format!("ark-child-guard-{}", ark_common::ThreadId::new()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = ark_provider::ProviderStore::new(dir.clone());
+        let mut entry = ark_contract::ProviderEntry::new("brgroup", "glm-5-3-flash");
+        entry.base_url = "https://gateway.invalid".into();
+        entry.api_key = Some("sk-test-1234567890".into());
+        entry.endpoint_format = "openai_chat".into();
+        entry.models = Some(vec![ProviderModelInventoryItem {
+            id: "glm-5-3-flash".into(),
+            context_window_tokens: Some(200_000),
+            supports_vision: None,
+        }]);
+        store.upsert(entry, true).unwrap();
+
+        let snapshot_store = Arc::new(ark_config::ConfigStore::new(RuntimeConfig::default()));
+        let usage = Arc::new(UsageRecorder::new());
+        // The parent fallback never runs in this scenario, so a minimal
+        // config pointing at an unroutable address is fine.
+        let parent_config = ark_llm::ProviderConfig::new("test-parent", "test-model");
+        let parent_model = model::select_from_config(parent_config, Arc::clone(&usage)).0;
+        let skills = Arc::new(ark_skills::SkillRuntime::new(
+            Arc::new(ark_skills::SkillsConfig::default),
+            dir.clone(),
+        ));
+        let roots = Arc::new(WorkspaceRoots::new(dir.clone(), &dir).unwrap());
+        let session_store =
+            Arc::new(ark_store::FileSessionStore::open(ark_store::StoreConfig::new(&dir)).unwrap());
+        let executor = ChildTurnExecutorImpl::new(
+            Arc::clone(&snapshot_store),
+            Arc::new(store),
+            usage,
+            parent_model,
+            Arc::new(ToolRegistry::new()),
+            // The sink only needs to accept constructor-time calls; the store
+            // is the production EventSink.
+            Arc::clone(&session_store) as Arc<dyn EventSink>,
+            session_store,
+            Arc::new(ark_tool::BuiltinSandboxPolicy::new(
+                ark_tool::Autonomy::WorkspaceWrite,
+            )),
+            roots,
+            skills,
+            Arc::new(ark_ports::NoHooks),
+        );
+
+        let error = executor
+            .provider_for(Some("brgroup"), Some("global:deepseek-v4.1-flash"))
+            .unwrap_err();
+        assert!(
+            error.message.contains("does not serve model"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("glm-5-3-flash"),
+            "the served models must be listed: {}",
+            error.message
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
