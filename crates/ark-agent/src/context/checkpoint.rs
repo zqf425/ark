@@ -10,6 +10,11 @@ pub(crate) const CHECKPOINT_PREFIX: &str = "[context checkpoint";
 const MAX_USER_LINE_CHARS: usize = 240;
 const MAX_FAILURE_LINE_CHARS: usize = 240;
 const MAX_SECTION_LINES: usize = 40;
+/// How many of the oldest `[user requests]` lines survive when the section
+/// overflows its quota. The earliest request carries the thread's original
+/// goal; dropping it silently is what left the model in session cb274b9d
+/// without its task anchor after the second compaction.
+const KEEP_OLDEST_USER_LINES: usize = 6;
 
 /// Deterministic, model-readable handoff retained across a compaction boundary.
 ///
@@ -40,10 +45,20 @@ impl ContextCheckpoint {
     /// tail: a checkpoint is a durable boundary, and the next turn replays only
     /// the checkpoint plus newer rows, so the tail must be represented here
     /// rather than assumed to survive verbatim.
+    ///
+    /// A previously rendered checkpoint inside the folded region is chained:
+    /// its sections are absorbed into this one instead of being re-parsed line
+    /// by line. Plain text user requests never match the structured-line
+    /// prefixes, so without chaining every re-compaction silently dropped all
+    /// earlier user requests — the original goal included.
     pub fn from_messages(messages: &[ModelMessage]) -> Self {
         let mut out = Self::default();
         for message in messages {
             let text = message.content.as_str();
+            if is_generated_checkpoint(message) {
+                out.absorb_checkpoint_text(text);
+                continue;
+            }
             out.merge(Self::from_texts([text]));
             match message.role {
                 ModelRole::User => {
@@ -73,15 +88,28 @@ impl ContextCheckpoint {
 
     /// Build structured facts from durable text rows. Also used by the manual
     /// `/compact` route, which has no role information.
+    ///
+    /// Failure evidence needs section awareness: a real error line often drags
+    /// the source-code lines that follow it into the section, and in session
+    /// cb274b9d those lines consumed most of the `[failed attempts]` quota.
+    /// Code-shaped lines only attach while the previous failure line was itself
+    /// a genuine diagnostic, so a stack trace keeps its frames but `Boolean(`
+    /// fragments dropped by a formatter never enter the note.
     pub fn from_texts<'a>(texts: impl IntoIterator<Item = &'a str>) -> Self {
         let mut out = Self::default();
         for text in texts {
+            let mut failure_armed = false;
             for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
                 if is_structured_line(line) {
                     push_unique(&mut out.entries, line.to_owned());
                 }
                 if is_failure_line(line) {
-                    push_bounded(&mut out.failures, line.to_owned(), MAX_FAILURE_LINE_CHARS);
+                    push_failure(&mut out.failures, line, MAX_FAILURE_LINE_CHARS);
+                    failure_armed = true;
+                } else if failure_armed {
+                    // Not a failure and not structured: a code continuation.
+                    // Disarm so unrelated later lines are not captured either.
+                    failure_armed = false;
                 }
                 for identifier in identifiers_in(line) {
                     push_unique(&mut out.identifiers, identifier);
@@ -89,6 +117,58 @@ impl ContextCheckpoint {
             }
         }
         out
+    }
+
+    /// Absorb the sections of a previously rendered checkpoint.
+    ///
+    /// Section titles themselves are not re-emitted (the render pass writes
+    /// fresh ones), and bookkeeping lines such as `[N earlier messages
+    /// compacted]` are dropped. Absorbed lines keep the oldest-first order of
+    /// the prior note, so user requests read as a chronological chain.
+    fn absorb_checkpoint_text(&mut self, text: &str) {
+        let mut section = CheckpointSection::None;
+        for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+            match line {
+                "[user requests]" => section = CheckpointSection::UserRequests,
+                "[goals / constraints / decisions]" => {
+                    section = CheckpointSection::Entries;
+                }
+                "[failed attempts - do not repeat]" => section = CheckpointSection::Failures,
+                "[remembered identifiers]" => section = CheckpointSection::Identifiers,
+                _ if line.starts_with('[') && line.ends_with(']') => {
+                    section = CheckpointSection::None;
+                }
+                _ => {
+                    // Structured facts (`Goal:`, plan checkbox rows) may sit
+                    // under any section of an older render; they always belong
+                    // to entries regardless of where they were displayed.
+                    if is_structured_line(line) {
+                        push_unique(&mut self.entries, line.to_owned());
+                        continue;
+                    }
+                    let content = line.strip_prefix("- ");
+                    match (section, content) {
+                        (CheckpointSection::UserRequests, Some(content)) => {
+                            push_bounded(
+                                &mut self.user_lines,
+                                content.to_owned(),
+                                MAX_USER_LINE_CHARS,
+                            );
+                        }
+                        (CheckpointSection::Entries, Some(content)) => {
+                            push_unique(&mut self.entries, content.to_owned());
+                        }
+                        (CheckpointSection::Failures, Some(content)) => {
+                            push_failure(&mut self.failures, content, MAX_FAILURE_LINE_CHARS);
+                        }
+                        (CheckpointSection::Identifiers, Some(content)) => {
+                            push_unique(&mut self.identifiers, content.to_owned());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
     }
 
     fn merge(&mut self, other: Self) {
@@ -102,7 +182,7 @@ impl ContextCheckpoint {
             push_bounded(&mut self.user_lines, line, MAX_USER_LINE_CHARS);
         }
         for line in other.failures {
-            push_bounded(&mut self.failures, line, MAX_FAILURE_LINE_CHARS);
+            push_failure(&mut self.failures, &line, MAX_FAILURE_LINE_CHARS);
         }
     }
 
@@ -129,9 +209,8 @@ impl ContextCheckpoint {
         if !self.user_lines.is_empty() {
             lines.push("[user requests]".to_string());
             lines.extend(
-                self.user_lines
-                    .iter()
-                    .take(MAX_SECTION_LINES)
+                self.bounded_user_lines()
+                    .into_iter()
                     .map(|line| format!("- {line}")),
             );
         }
@@ -180,8 +259,19 @@ impl ContextCheckpoint {
     }
 
     /// Highest-signal lines first for the budget-limited render.
+    ///
+    /// User requests come first: the earliest request carries the original
+    /// goal, and in session cb274b9d the budget cut silently dropped it while
+    /// keeping noise such as `Base64`. Identifiers rank last because they are
+    /// lossless fragments — anything valuable in them also appears in the
+    /// structured sections.
     fn prioritized_entries(&self) -> Vec<String> {
         let mut lines = Vec::new();
+        lines.extend(
+            self.bounded_user_lines()
+                .into_iter()
+                .map(|line| format!("- {line}")),
+        );
         lines.extend(self.entries.iter().take(MAX_SECTION_LINES).cloned());
         lines.extend(
             self.failures
@@ -195,22 +285,99 @@ impl ContextCheckpoint {
                 .take(MAX_SECTION_LINES)
                 .map(|identifier| format!("- {identifier}")),
         );
-        lines.extend(
-            self.user_lines
-                .iter()
-                .take(MAX_SECTION_LINES)
-                .map(|line| format!("- {line}")),
-        );
+        lines
+    }
+
+    /// User requests capped at the section quota, keeping both ends.
+    ///
+    /// The oldest lines survive verbatim (the goal chain) and the newest fill
+    /// the rest (current steering); the middle is the part that is safe to
+    /// fold, and the renderer says so explicitly.
+    fn bounded_user_lines(&self) -> Vec<String> {
+        if self.user_lines.len() <= MAX_SECTION_LINES {
+            return self.user_lines.clone();
+        }
+        let newest = MAX_SECTION_LINES - KEEP_OLDEST_USER_LINES;
+        let oldest: Vec<String> = self.user_lines[..KEEP_OLDEST_USER_LINES].to_vec();
+        let recent: Vec<String> = self.user_lines[self.user_lines.len() - newest..].to_vec();
+        let folded = self.user_lines.len() - KEEP_OLDEST_USER_LINES - newest;
+        let mut lines = oldest;
+        lines.push(format!(
+            "[{folded} middle user requests folded - see the event log via thread_events]"
+        ));
+        lines.extend(recent);
         lines
     }
 }
 
 use crate::context::TokenEstimator;
 
+/// Which `[section]` a prior checkpoint's lines belong to while absorbing it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CheckpointSection {
+    None,
+    UserRequests,
+    Entries,
+    Failures,
+    Identifiers,
+}
+
 fn push_unique(vec: &mut Vec<String>, value: String) {
     if !vec.contains(&value) {
         vec.push(value);
     }
+}
+
+/// Append one failure line, collapsing numeric variants of an entry already
+/// present instead of spending a new quota slot on them. Counting misses like
+/// `actionCount=27, actual 28` re-fire per module and per rerun; session
+/// cb274b9d filled its `[failed attempts]` section with near-duplicates.
+fn push_failure(vec: &mut Vec<String>, line: &str, max_chars: usize) {
+    if line.chars().count() > max_chars {
+        return;
+    }
+    if let Some(existing) = vec
+        .iter_mut()
+        .find(|existing| normalize_failure(existing) == normalize_failure(line))
+    {
+        bump_failure_count(existing);
+        return;
+    }
+    vec.push(line.to_owned());
+}
+
+/// Collapse every digit run to a placeholder so numeric variants compare equal.
+fn normalize_failure(line: &str) -> String {
+    let mut normalized = String::with_capacity(line.len());
+    let mut digits = false;
+    for character in line.chars() {
+        if character.is_ascii_digit() {
+            digits = true;
+        } else {
+            if digits {
+                normalized.push('\u{0}');
+                digits = false;
+            }
+            normalized.push(character);
+        }
+    }
+    if digits {
+        normalized.push('\u{0}');
+    }
+    normalized
+}
+
+/// Bump or add the trailing `[xN]` counter on a collapsed failure entry.
+fn bump_failure_count(entry: &mut String) {
+    if let Some(start) = entry.rfind("[x") {
+        if entry.ends_with(']') {
+            if let Ok(count) = entry[start + 2..entry.len() - 1].parse::<u32>() {
+                *entry = format!("{}[x{}]", &entry[..start], count + 1);
+                return;
+            }
+        }
+    }
+    entry.push_str(" [x2]");
 }
 
 fn push_bounded(vec: &mut Vec<String>, value: String, max_chars: usize) {
@@ -243,15 +410,48 @@ fn is_structured_line(line: &str) -> bool {
     .any(|prefix| line.starts_with(prefix))
 }
 
+/// A real diagnostic, not a source-code line that happens to start like one.
+///
+/// Session cb274b9d filled the `[failed attempts]` section with formatter
+/// output such as `failed: Boolean(failed),` and `errorMessage: null,` —
+/// minified JS that starts with the same words. Two filters keep them out:
+/// a word boundary after the keyword (the `lower.starts_with(prefix)`
+/// variant that would wrongly accept `failed:` is replaced by a
+/// next-char check), and a code-shape rejection for lines that carry
+/// JavaScript/call syntax.
 fn is_failure_line(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
-    lower.starts_with("error")
-        || lower.starts_with("failed")
-        || lower.starts_with("failure")
-        || lower.contains("panicked at")
+    if is_code_shaped(line) {
+        return false;
+    }
+    let keyword_prefixes = ["error", "failed", "failure"];
+    keyword_prefixes.iter().any(|prefix| {
+        lower.strip_prefix(prefix).is_some_and(|rest| {
+            rest.is_empty() || !rest.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
+        })
+    }) || lower.contains("panicked at")
         || lower.contains("stack trace")
         || lower.contains("command not found")
         || lower.contains("test failed")
+}
+
+/// Line looks like source code rather than a human- or tool-written diagnostic.
+///
+/// Conservative by design: a genuine error message containing a snippet (for
+/// example a path with parentheses) must stay. The patterns below only match
+/// the shapes the observed noise took — trailing separators, arrow bodies,
+/// `instanceof`/ternary chains, and keyword-parameter lines.
+fn is_code_shaped(line: &str) -> bool {
+    let trimmed = line.trim_end();
+    trimmed.ends_with(';')
+        || trimmed.ends_with("','")
+        || trimmed.ends_with(");")
+        || trimmed.ends_with(',') && trimmed.contains('(')
+        || trimmed.contains("instanceof")
+        || trimmed.contains(" => ")
+        || trimmed.starts_with("errorMessage:")
+        || trimmed.starts_with("failed:")
+        || trimmed.starts_with("failure:")
 }
 
 fn identifiers_in(text: &str) -> Vec<String> {
