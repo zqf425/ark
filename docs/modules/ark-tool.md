@@ -72,7 +72,13 @@
   `timeout(wait_with_output)`，超时返回带 `timeout` detail 的结构化错误）。
 - 持久 shell 会话（[需求设计](../requirements/shell-sessions.md)）由
   `exec/tools/shell_session.rs` 承载：`bash_session`（前台复用 `bash` 语义、leading `cd`
-  推进会话 cwd；`run_in_background` 以 std Command 派生独立进程组并立即返回 task_id）、
+  推进会话 cwd。cwd 推进规则：目标带引号时剥一层引号再解析（仅剥一层，不做引号拼接或
+  转义等价）；含未展开 `$` 变量的目标不推进也不记录——按字面记录曾把引号和 `$USERPROFILE`
+  拼进会话 cwd，此后整个会话的每次调用都在 spawn 前死于 os error 123，实测一天 3 次；
+  该次命令仍由 shell 自行执行 `cd`，仅会话 cwd 落后，后续可显式再 `cd`；推进后的路径必须
+  已存在且是目录才提交，否则回落当前 cwd；记住的 cwd 失效（目录被删）时回落工作区并修复
+  会话状态，不让整个调用在 spawn 前硬失败。`run_in_background` 以 std Command 派生独立
+  进程组并立即返回 task_id）、
   `bash_output`（按绝对逻辑字节 offset 增量返回输出与 running/finished 状态；环形缓冲丢弃前缀后仍以
   `base_offset + retained_len` 推进，不能把 offset 当当前 `VecDeque` 下标）、`bash_kill`
   （组信号 + direct kill 兜底，幂等）。`ShellSessionManager` 是进程内运行态（不入盘、不进

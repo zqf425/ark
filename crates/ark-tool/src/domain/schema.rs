@@ -138,7 +138,7 @@ fn bash_schema() -> serde_json::Value {
 fn bash_session_schema() -> serde_json::Value {
     object(
         serde_json::json!({
-            "command": { "type": "string", "description": "Shell command to run in the persistent session; a leading `cd <dir>` advances the session working directory for later calls (environment variables are NOT persisted across calls)" },
+            "command": { "type": "string", "description": "Shell command to run in the persistent session; a leading `cd <dir>` advances the session working directory for later calls (a target containing an unexpanded `$` variable is not tracked; environment variables are NOT persisted across calls)" },
             "timeout_ms": { "type": "integer", "minimum": 1, "description": "Hard timeout in milliseconds; ignored when run_in_background is true" },
             "run_in_background": { "type": "boolean", "description": "Start the command detached and return a task id immediately; poll output with bash_output" },
         }),

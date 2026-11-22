@@ -115,16 +115,59 @@ impl ShellSessionManager {
     /// Returns the cwd the command should run in and the (possibly advanced)
     /// session cwd. Only line-level `cd`/`pushd` prefixes are recognized; the
     /// parse is intentionally crude because the fallback is safe: an
-    /// unrecognized form leaves the cwd unchanged, never wrong.
+    /// unrecognized form leaves the cwd unchanged, never wrong. The advanced
+    /// path must exist and be enterable **before** it is committed: once a
+    /// session cwd points at a non-directory string, every later call of the
+    /// session fails before its command runs (the observed os error 123
+    /// cascade), so an unusable target falls back to the current cwd.
     pub fn resolve_cwd(&self, workspace: &Path, command: &str) -> PathBuf {
-        let current = self.cwd(workspace);
+        // The base is the *effective* cwd: a remembered path that has stopped
+        // being enterable must not poison this call the way it poisoned the
+        // whole session before (spawn refused, message named no fallback).
+        let current = self.effective_cwd(workspace);
         let next = advance_cwd(workspace, &current, command);
-        if next != current {
-            if let Ok(mut state) = self.inner.lock() {
-                state.cwd = Some(next.clone());
-            }
+        if next == current {
+            return current;
+        }
+        let usable = std::fs::metadata(&next)
+            .map(|meta| meta.is_dir())
+            .unwrap_or(false);
+        if !usable {
+            return current;
+        }
+        if let Ok(mut state) = self.inner.lock() {
+            // Committing over a stale remembered value is deliberate: the
+            // fallback above already proved that value unusable in that case.
+            state.cwd = Some(next.clone());
         }
         next
+    }
+
+    /// The cwd a call actually runs in: the remembered session cwd, falling
+    /// back to the workspace when that path is no longer enterable.
+    ///
+    /// The remembered cwd is process-memory state and can go stale (a
+    /// worktree removed between calls); a stale value used to surface as a
+    /// spawn failure naming neither the path nor the fallback, which the
+    /// model could not recover from.
+    fn effective_cwd(&self, workspace: &Path) -> PathBuf {
+        let remembered = self.cwd(workspace);
+        let usable = remembered != workspace
+            && std::fs::metadata(&remembered)
+                .map(|meta| meta.is_dir())
+                .unwrap_or(false);
+        if usable {
+            return remembered;
+        }
+        // Repair the session state instead of leaving a known-bad value in
+        // place: the next call then starts from the workspace without paying
+        // for the failed lookup again.
+        if let Ok(mut state) = self.inner.lock() {
+            if state.cwd.as_deref() == Some(remembered.as_path()) {
+                state.cwd = None;
+            }
+        }
+        workspace.to_path_buf()
     }
 
     /// Register a freshly spawned background task. The caller owns spawn; this
@@ -294,30 +337,64 @@ pub struct TaskSnapshot {
     pub exit_code: Option<i32>,
 }
 
+/// The `cd`/`pushd` target of a command's first non-blank line, with one
+/// layer of shell quotes removed.
+///
+/// Quoted targets are the observed real-world form (`cd "$USERPROFILE/x"`,
+/// `cd "/d/code/repo"`): `split_whitespace` alone would hand the raw quotes
+/// to the path joiner, and the recorded session cwd then contains literal
+/// quote characters. Every following call of the session then dies on
+/// Windows os error 123 before the command even runs -- three calls in one
+/// day's sessions failed exactly there. This is deliberately *not* a shell
+/// tokenizer: only one leading quote pair is stripped, no quote concatenation
+/// (`cd "a"b` yields `a`, not `ab`) and no escape handling. Those inputs are
+/// rare, and a divergence is safe -- the caller verifies the path before
+/// committing, so at worst the session cwd advances to a prefix the shell
+/// itself did not enter, and the model can re-`cd` explicitly.
+fn cd_target(command: &str) -> Option<&str> {
+    let first_line = command.lines().find(|line| !line.trim().is_empty())?;
+    let trimmed = first_line.trim_start();
+    let verb = trimmed.split_whitespace().next()?;
+    if verb != "cd" && verb != "pushd" {
+        return None;
+    }
+    let after_verb = trimmed[verb.len()..].trim_start();
+    let &quote = after_verb.as_bytes().first()?;
+    if quote == b'"' || quote == b'\'' {
+        let inner = &after_verb[1..];
+        let end = inner.find(quote as char)?;
+        return Some(&inner[..end]);
+    }
+    after_verb.split_whitespace().next()
+}
+
 /// Advance `current` by one command's directory changes.
 ///
-/// Recognized forms (one per command, first match wins): `cd -` is a no-op
-/// here (the previous directory is not tracked), `cd`, `pushd`, `popd` with a
-/// single relative/absolute argument. Everything else — including commands
-/// that merely *contain* a `cd` after `&&` in a non-leading position — keeps
-/// the cwd unchanged; the model can always chain `cd dir && cmd` explicitly in
-/// the next call. Escapes are resolved by the caller's path containment, so
-/// this function only normalizes.
+/// Recognized forms (one per command, first non-blank line): `cd -` is a
+/// no-op here (the previous directory is not tracked), `cd`/`pushd` with a
+/// single relative/absolute argument, quoted or bare. Everything else,
+/// including commands that merely *contain* a `cd` after `&&` in a
+/// non-leading position, keeps the cwd unchanged; the model can always chain
+/// `cd dir && cmd` explicitly in the next call. Escapes are resolved by the
+/// caller's path containment, so this function only normalizes.
+///
+/// A target that still contains `$` after unquoting is not tracked: the
+/// *shell* expands it when the command runs, but this parser cannot know the
+/// value, and recording the raw spelling once poisoned a whole session (the
+/// recorded path never exists, so every later call died on Windows os error
+/// 123). Not tracking is the safe divergence: the command still runs with the
+/// shell-expanded `cd`, only the session cwd lags, and the model can re-`cd`
+/// explicitly. The same asymmetry covers single-quoted `$` (which bash would
+/// keep literal) and Windows names that legally contain `$` -- an
+/// under-approximation of what the shell would do, never an over-claim.
 fn advance_cwd(workspace: &Path, current: &Path, command: &str) -> PathBuf {
-    let first_line = command.lines().next().unwrap_or("").trim();
-    let mut tokens = first_line.split_whitespace();
-    let Some(verb) = tokens.next() else {
+    let Some(target) = cd_target(command) else {
         return current.to_path_buf();
     };
-    if verb != "cd" && verb != "pushd" {
+    if target == "-" || target.is_empty() {
         return current.to_path_buf();
     }
-    let Some(target) = tokens.next() else {
-        // Bare `cd` means home on Unix shells; without a tracked home the
-        // safest interpretation is "stay".
-        return current.to_path_buf();
-    };
-    if target == "-" {
+    if target.contains('$') {
         return current.to_path_buf();
     }
     let candidate = Path::new(target);
@@ -334,7 +411,14 @@ fn advance_cwd(workspace: &Path, current: &Path, command: &str) -> PathBuf {
     if lexical.components().any(|c| c.as_os_str() == "..") {
         return current.to_path_buf();
     }
-    joined
+    // Drop `.` segments before the caller compares and commits: `cd .` joins
+    // to `current/.`, which compares unequal to `current` and would otherwise
+    // accumulate one segment per call.
+    let normalized = PathBuf::from(ark_common::path::normalize(&joined.to_string_lossy()));
+    if normalized == current {
+        return current.to_path_buf();
+    }
+    normalized
 }
 
 /// Sandbox baseline for the session tools: identical to `bash`.
@@ -569,365 +653,4 @@ fn as_output(result: ark_common::Result<ToolOutput>) -> ToolOutput {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn fixture(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ark-shell-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("fixture dir");
-        dir
-    }
-
-    #[test]
-    fn cwd_starts_at_the_workspace() {
-        let manager = ShellSessionManager::new();
-        let ws = fixture("cwd-start");
-        assert_eq!(manager.cwd(&ws), ws);
-    }
-
-    #[test]
-    fn cd_advances_the_session_cwd() {
-        let manager = ShellSessionManager::new();
-        let ws = fixture("cd-advance");
-        std::fs::create_dir_all(ws.join("src")).unwrap();
-        let next = manager.resolve_cwd(&ws, "cd src");
-        assert_eq!(next, ws.join("src"));
-        assert_eq!(manager.cwd(&ws), ws.join("src"));
-        // The next call starts from the advanced cwd.
-        let again = manager.resolve_cwd(&ws, "echo hi");
-        assert_eq!(again, ws.join("src"));
-    }
-
-    #[test]
-    fn absolute_cd_outside_the_workspace_is_ignored() {
-        let manager = ShellSessionManager::new();
-        let ws = fixture("cd-escape");
-        let next = manager.resolve_cwd(&ws, "cd /etc");
-        assert_eq!(next, ws, "an escape attempt must not move the session");
-    }
-
-    #[test]
-    fn cd_dash_and_bare_cd_keep_the_cwd() {
-        let manager = ShellSessionManager::new();
-        let ws = fixture("cd-dash");
-        let next = manager.resolve_cwd(&ws, "cd -");
-        assert_eq!(next, ws);
-        let next = manager.resolve_cwd(&ws, "cd");
-        assert_eq!(next, ws);
-    }
-
-    #[test]
-    fn non_leading_cd_keeps_the_cwd() {
-        let manager = ShellSessionManager::new();
-        let ws = fixture("cd-nonleading");
-        let next = manager.resolve_cwd(&ws, "echo hi && cd src");
-        assert_eq!(next, ws);
-    }
-
-    #[test]
-    fn pushd_advances_like_cd() {
-        let manager = ShellSessionManager::new();
-        let ws = fixture("pushd");
-        std::fs::create_dir_all(ws.join("lib")).unwrap();
-        let next = manager.resolve_cwd(&ws, "pushd lib");
-        assert_eq!(next, ws.join("lib"));
-    }
-
-    #[test]
-    fn task_ids_are_unique() {
-        let manager = ShellSessionManager::new();
-        let ws = fixture("task-ids");
-        let output = Arc::new(Mutex::new(TaskOutput::default()));
-        let id_a = manager
-            .register_task(
-                ws.clone(),
-                shared_child(),
-                orphan_tree(),
-                Arc::clone(&output),
-            )
-            .unwrap();
-        let id_b = manager
-            .register_task(ws, shared_child(), orphan_tree(), output)
-            .unwrap();
-        assert_ne!(id_a, id_b);
-    }
-
-    #[test]
-    fn unknown_task_id_is_none() {
-        let manager = ShellSessionManager::new();
-        assert!(manager
-            .task_output(&ShellTaskId::new("task_nope"))
-            .is_none());
-        assert!(!manager.kill_task(&ShellTaskId::new("task_nope")));
-    }
-
-    #[test]
-    fn output_is_incremental_across_polls() {
-        let manager = ShellSessionManager::new();
-        let ws = fixture("incremental");
-        let output = Arc::new(Mutex::new(TaskOutput::default()));
-        let id = manager
-            .register_task(ws, shared_child(), orphan_tree(), Arc::clone(&output))
-            .unwrap();
-        output.lock().unwrap().push(b"first\n");
-        let first = manager.task_output(&id).unwrap();
-        assert_eq!(first.new_output, "first\n");
-        output.lock().unwrap().push(b"second\n");
-        let second = manager.task_output(&id).unwrap();
-        assert_eq!(second.new_output, "second\n");
-        assert_eq!(second.full_text, "first\nsecond\n");
-    }
-
-    #[test]
-    fn overflowed_output_drops_the_oldest_bytes() {
-        let mut output = TaskOutput::default();
-        let big = vec![b'x'; TASK_OUTPUT_CAP + 10];
-        output.push(&big);
-        assert!(output.dropped_prefix);
-        assert_eq!(output.buf.len(), TASK_OUTPUT_CAP);
-    }
-
-    #[test]
-    fn incremental_output_survives_ring_buffer_rotation() {
-        let manager = ShellSessionManager::new();
-        let ws = fixture("incremental-overflow");
-        let output = Arc::new(Mutex::new(TaskOutput::default()));
-        let id = manager
-            .register_task(ws, shared_child(), orphan_tree(), Arc::clone(&output))
-            .unwrap();
-        output.lock().unwrap().push(&vec![b'x'; TASK_OUTPUT_CAP]);
-        let first = manager.task_output(&id).unwrap();
-        assert_eq!(first.new_output.len(), TASK_OUTPUT_CAP);
-        output.lock().unwrap().push(b"new-tail");
-        let second = manager.task_output(&id).unwrap();
-        assert_eq!(second.new_output, "new-tail");
-    }
-
-    #[test]
-    fn registering_a_seventeenth_running_task_is_rejected() {
-        let manager = ShellSessionManager::new();
-        let ws = fixture("task-capacity");
-        let mut outputs = Vec::new();
-        for _ in 0..MAX_TASKS {
-            let output = Arc::new(Mutex::new(TaskOutput::default()));
-            manager
-                .register_task(
-                    ws.clone(),
-                    shared_child(),
-                    orphan_tree(),
-                    Arc::clone(&output),
-                )
-                .expect("task within capacity");
-            outputs.push(output);
-        }
-        let overflow = manager.register_task(
-            ws,
-            shared_child(),
-            orphan_tree(),
-            Arc::new(Mutex::new(TaskOutput::default())),
-        );
-        assert!(overflow.is_err());
-    }
-
-    #[test]
-    fn kill_is_idempotent_after_finish() {
-        let manager = ShellSessionManager::new();
-        let ws = fixture("kill-idempotent");
-        let output = Arc::new(Mutex::new(TaskOutput::default()));
-        let id = manager
-            .register_task(ws, shared_child(), orphan_tree(), output)
-            .unwrap();
-        // The fake child is a real process that exits immediately; either kill
-        // result is acceptable, but a second kill must not panic or hang.
-        let _ = manager.kill_task(&id);
-        let _ = manager.kill_task(&id);
-        assert!(manager.has_task(&id));
-    }
-
-    /// A real child (instant exit) in the shared registry shape.
-    fn shared_child() -> Arc<Mutex<Option<std::process::Child>>> {
-        let child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" })
-            .args(if cfg!(windows) {
-                vec!["/C", "exit 0"]
-            } else {
-                vec![]
-            })
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .expect("spawn fake child");
-        Arc::new(Mutex::new(Some(child)))
-    }
-
-    /// An un-adopted tree handle: the fake child never ran isolated, so group
-    /// signals report false and the direct-kill fallback covers teardown.
-    fn orphan_tree() -> ark_common::ProcessTree {
-        ark_common::ProcessTree::adopt(None)
-    }
-}
-
-#[cfg(test)]
-mod tool_tests {
-    use super::*;
-    use ark_ports::{SandboxDecision, ToolContext};
-    use std::collections::BTreeMap;
-    use std::time::Duration;
-
-    fn ctx(root: &Path) -> ToolContext {
-        ToolContext {
-            thread_id: ark_common::ThreadId::new(),
-            turn_id: ark_common::TurnId::new(),
-            workspace: root.to_path_buf(),
-            sandbox: SandboxDecision::Unrestricted,
-            env: BTreeMap::new(),
-        }
-    }
-
-    fn fixture(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ark-shelltool-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("fixture dir");
-        dir
-    }
-
-    #[tokio::test]
-    async fn foreground_command_runs_and_advances_cwd() {
-        let dir = fixture("fg");
-        std::fs::create_dir_all(dir.join("src")).unwrap();
-        let session = Arc::new(ShellSessionManager::new());
-        let tool = BashSessionTool::new(Arc::clone(&session));
-        // Advance via a leading cd, then read the session cwd back.
-        let _ = tool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({"command": "cd src"})),
-            )
-            .await
-            .unwrap();
-        assert_eq!(session.cwd(&dir), dir.join("src"));
-        // The second call starts from the advanced cwd; a bare command keeps it.
-        let _ = tool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({"command": "echo hi"})),
-            )
-            .await
-            .unwrap();
-        assert_eq!(session.cwd(&dir), dir.join("src"));
-    }
-
-    #[tokio::test]
-    async fn background_task_returns_an_id_and_collects_output() {
-        let dir = fixture("bg");
-        let session = Arc::new(ShellSessionManager::new());
-        let tool = BashSessionTool::new(Arc::clone(&session));
-        let output_tool = BashOutputTool::new(Arc::clone(&session));
-        let started = tool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({
-                    "command": "echo bg-hello",
-                    "run_in_background": true
-                })),
-            )
-            .await
-            .unwrap();
-        assert!(started.ok, "{}", started.content);
-        let task_id = started
-            .content
-            .lines()
-            .find_map(|line| line.strip_prefix("background task started: "))
-            .expect("task id line")
-            .trim()
-            .to_string();
-
-        // Poll until the collector observes the echo; bounded wait.
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        let mut seen = String::new();
-        loop {
-            let snapshot = output_tool
-                .execute(
-                    &ctx(&dir),
-                    ToolArgs(serde_json::json!({ "task_id": task_id })),
-                )
-                .await
-                .unwrap();
-            seen.push_str(&snapshot.content);
-            if snapshot.content.contains("bg-hello") || snapshot.content.contains("finished") {
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "never saw output: {seen}"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        assert!(seen.contains("bg-hello"), "{seen}");
-        assert!(
-            seen.contains("task finished") || seen.contains("task running"),
-            "{seen}"
-        );
-    }
-
-    #[tokio::test]
-    async fn unknown_task_output_is_a_structured_error() {
-        let dir = fixture("unknown");
-        let tool = BashOutputTool::new(Arc::new(ShellSessionManager::new()));
-        let out = tool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "task_id": "task_999" })),
-            )
-            .await
-            .unwrap();
-        assert!(!out.ok);
-        assert!(out.content.contains("unknown task id"));
-    }
-
-    #[tokio::test]
-    async fn kill_unknown_task_is_a_structured_error() {
-        let dir = fixture("kill-unknown");
-        let tool = BashKillTool::new(Arc::new(ShellSessionManager::new()));
-        let out = tool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "task_id": "task_1" })),
-            )
-            .await
-            .unwrap();
-        assert!(!out.ok);
-    }
-
-    #[tokio::test]
-    async fn a_long_background_task_is_killable() {
-        let dir = fixture("kill-running");
-        let session = Arc::new(ShellSessionManager::new());
-        let tool = BashSessionTool::new(Arc::clone(&session));
-        let kill_tool = BashKillTool::new(Arc::clone(&session));
-        let long = "sleep 30";
-        let started = tool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "command": long, "run_in_background": true })),
-            )
-            .await
-            .unwrap();
-        let task_id = started
-            .content
-            .lines()
-            .find_map(|line| line.strip_prefix("background task started: "))
-            .expect("task id line")
-            .trim()
-            .to_string();
-        let killed = kill_tool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "task_id": task_id })),
-            )
-            .await
-            .unwrap();
-        assert!(killed.ok, "{}", killed.content);
-        assert!(killed.content.contains("terminated"));
-    }
-}
+mod tests;
