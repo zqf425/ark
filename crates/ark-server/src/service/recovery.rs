@@ -30,13 +30,14 @@ use crate::service::turns::start_turn_as;
 use crate::state::{AppState, TurnSource};
 
 /// Backoff between recovery attempts, by attempt number (1-based). Three
-/// attempts cover the observed outage shapes (a blip clears in seconds, a
-/// gateway restart in minutes) without turning one user request into an
-/// unattended loop.
+/// attempts cover the observed outage shapes (a blip clears in seconds) and
+/// stay close behind the failure, so a transient gateway hiccup costs the
+/// user seconds rather than minutes — without turning one user request into
+/// an unattended loop.
 pub const RECOVERY_DELAYS: [Duration; 3] = [
     Duration::from_secs(5),
-    Duration::from_secs(30),
-    Duration::from_secs(120),
+    Duration::from_secs(10),
+    Duration::from_secs(20),
 ];
 
 /// Consecutive model-failure terminations that pause automatic recoveries on
@@ -301,10 +302,10 @@ mod tests {
             succeed_after: usize::MAX,
         });
         let (state, thread, _dir) = state_with(runner.clone()).await;
-        // Shrink the first delay indirectly: attempt 1 waits RECOVERY_DELAYS[0].
-        // The test would take 5s; instead schedule the last in-budget attempt
-        // with the shortest delay by asserting scheduling state, not the sleep.
-        // (Full loop timing is covered by the continuation supervisor tests.)
+        // Attempt 1 waits RECOVERY_DELAYS[0]; the test only asserts that
+        // nothing runs before the delay elapses, so the exact table values
+        // are irrelevant here. (Full loop timing is covered by the
+        // continuation supervisor tests.)
         schedule_recovery(
             state.clone(),
             thread,
@@ -313,7 +314,8 @@ mod tests {
             "boom".into(),
         )
         .await;
-        // Nothing ran yet (5s backoff), and the store has no new turn.
+        // Nothing ran yet (the first backoff is 5s), and the store has no new
+        // turn.
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(runner.runs.load(Ordering::SeqCst), 0);
         assert!(state

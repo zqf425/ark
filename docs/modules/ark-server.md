@@ -48,7 +48,7 @@
   调度下一批，确认失败不会自行循环。自动作业仍调用注入的普通 `TurnRunner`，不会绕过 reactor、gate
   或 sandbox，也不会写入伪用户消息。
 - 回合因模型请求失败（`model_request_failed`，网关抖动/断流/流超时）终结时，`service::recovery`
-  调度自动恢复：以同一请求文本（`TurnSource::AutoRecovery`）重开回合，退避 5s/30s/120s，最多 3 次；
+  调度自动恢复：以同一请求文本（`TurnSource::AutoRecovery`）重开回合，退避 5s/10s/20s，最多 3 次；
   尝试号写入 `turn_started.auto_recovery`，恢复回合先写一条 Notice 说明自动重试原因。连续模型失败达
   `RECOVERY_MODEL_FAILURE_STREAK_LIMIT`（与 continuation 熔断同值）即暂停该线程恢复，任何用户回合或
   非模型终态重置计数；日志不可读时 fail-closed。工具/策略失败与预算耗尽的失败保持终态，仍由用户决定
