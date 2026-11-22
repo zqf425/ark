@@ -122,12 +122,27 @@ fn parse_turn(raw: &str) -> Result<TurnId, ApiError> {
 /// totals and the turn rows can never disagree: a turn's row is exactly the
 /// fold of the samples counted into the thread total. Turns keep first-seen
 /// order (the log is append-only, so that is also chronological).
+///
+/// The same pass derives the wall-clock `active_ms` readout (user waits
+/// excluded) from the turn-lifecycle and gate events, so a renderer never
+/// re-times anything from its own clock. See [`ActiveClock`].
 fn aggregate_thread_usage(thread: ThreadId, events: &[RuntimeEvent]) -> ThreadUsageResponse {
     let mut samples = 0u64;
     let mut usage = ark_common::Usage::default();
+    // First-seen order over *all* turns the log shows, not only usage-producing
+    // ones: a turn that failed before its first model round has no usage event
+    // but real active time, and its row must exist for the clock to cover it.
     let mut order: Vec<TurnId> = Vec::new();
+    let mut seen: std::collections::HashSet<TurnId> = std::collections::HashSet::new();
     let mut per_turn: HashMap<TurnId, TurnUsage> = HashMap::new();
+    let mut clock = ActiveClock::default();
     for event in events {
+        if let RuntimeEvent::TurnStarted { turn_id, .. } = event {
+            if seen.insert(*turn_id) {
+                order.push(*turn_id);
+            }
+        }
+        clock.observe(event);
         if let RuntimeEvent::Usage {
             turn_id,
             usage: sample,
@@ -142,29 +157,245 @@ fn aggregate_thread_usage(thread: ThreadId, events: &[RuntimeEvent]) -> ThreadUs
                     row.usage.merge(sample);
                 }
                 None => {
-                    order.push(*turn_id);
                     per_turn.insert(
                         *turn_id,
                         TurnUsage {
                             turn_id: *turn_id,
                             samples: 1,
                             usage: sample.clone(),
+                            active_ms: None,
+                            gate_suspensions: None,
                         },
                     );
                 }
             }
         }
     }
+    let span = clock.finish();
     let turn_usage: Vec<TurnUsage> = order
         .into_iter()
-        .filter_map(|turn_id| per_turn.remove(&turn_id))
+        .map(|turn_id| {
+            // A usage-less turn folds to the default (zero tokens, no measured
+            // durations): its row exists for the active clock, and the token
+            // totals still add up because it contributes nothing.
+            let mut row = per_turn.remove(&turn_id).unwrap_or(TurnUsage {
+                turn_id,
+                samples: 0,
+                usage: ark_common::Usage::default(),
+                active_ms: None,
+                gate_suspensions: None,
+            });
+            if let Some(per_turn_span) = span.turns.get(&turn_id) {
+                row.active_ms = Some(per_turn_span.active_ms);
+                row.gate_suspensions = Some(per_turn_span.gate_suspensions);
+            }
+            row
+        })
         .collect();
+    let gate_suspensions: u64 = turn_usage
+        .iter()
+        .filter_map(|turn| turn.gate_suspensions)
+        .sum();
     ThreadUsageResponse {
         thread_id: thread,
-        turns: turn_usage.len() as u64,
+        turns: span.turns.len() as u64,
         samples,
         turn_usage,
         usage,
+        active_ms: Some(span.total_ms),
+        gate_suspensions: Some(gate_suspensions),
+    }
+}
+
+/// Per-turn active-time span derived from the lifecycle and gate events.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct TurnSpan {
+    active_ms: u64,
+    gate_suspensions: u64,
+}
+
+/// Wall-clock accounting that treats user-caused waits as excluded time.
+///
+/// The clock runs as an open interval: while a turn is active (and no gate is
+/// open) it accumulates `[cursor, event)` into that turn's span on every
+/// lifecycle event and moves the cursor forward. An approval / user-input gate
+/// **stops** the accumulation at its open event and **restarts** it at the
+/// resolve event, so the user's thinking time never enters any span. The gap
+/// between two turns is accumulated **only** when the harness itself inserted
+/// it — an `auto_recovery` or `auto_continuation` `turn_started` re-opens the
+/// clock from the previous turn's end (the backoff between retries is the
+/// harness working, not the user thinking). A plain user / scheduled / IM turn
+/// starts a fresh span: the idle time before it is the user composing the
+/// message and must not appear on any clock.
+///
+/// A turn that never reached a terminal event (a crash, or one still running)
+/// measures up to the last event timestamp seen: for a live thread that is
+/// "now" to within one event, and for a dead log it is the honest last word.
+#[derive(Debug, Default)]
+struct ActiveClock {
+    /// Spans per turn, keyed in first-seen order by the caller.
+    turns: HashMap<TurnId, TurnSpan>,
+    /// The turn currently on the clock, if any.
+    open_turn_id: Option<TurnId>,
+    /// When the currently open turn is a harness retry/continuation, the end
+    /// of the previous turn: the inter-turn gap rides this turn's span.
+    carried_from: Option<DateTime<Utc>>,
+    /// Where the running clock last ticked. `None` while a gate holds the
+    /// clock frozen or no turn is open.
+    cursor: Option<DateTime<Utc>>,
+    /// Whether a user gate currently holds the clock frozen.
+    open_gate: bool,
+    /// Newest event timestamp observed; the live-turn "now" for `finish`.
+    last_event_at: Option<DateTime<Utc>>,
+    /// End timestamp of the most recent settled turn; the anchor a harness
+    /// retry carries its inter-turn gap from.
+    last_turn_end: Option<DateTime<Utc>>,
+}
+
+impl ActiveClock {
+    fn observe(&mut self, event: &RuntimeEvent) {
+        if let Some(timestamp) = event_timestamp(event) {
+            self.last_event_at = Some(timestamp);
+        }
+        match event {
+            RuntimeEvent::TurnStarted {
+                turn_id,
+                timestamp,
+                auto_continuation,
+                auto_recovery,
+                ..
+            } => {
+                self.open_turn_id = Some(*turn_id);
+                self.turns.entry(*turn_id).or_default();
+                self.open_gate = false;
+                // Harness-initiated turns continue the working span from the
+                // previous turn's end: the backoff gap rides *this* turn's
+                // span, so bank it before the cursor moves to the turn start.
+                // Every other source starts fresh: the idle time before it is
+                // the user composing the message.
+                let carried = (*auto_continuation || *auto_recovery > 0)
+                    .then_some(self.last_turn_end)
+                    .flatten();
+                if let Some(from) = carried {
+                    self.cursor = Some(from);
+                    self.bank(*timestamp);
+                }
+                self.carried_from = carried;
+                self.cursor = Some(*timestamp);
+            }
+            RuntimeEvent::ApprovalRequested { timestamp, .. }
+            | RuntimeEvent::UserInputRequested { timestamp, .. } => {
+                // Freeze the clock at the gate: the elapsed window since the
+                // cursor banks into the turn, then nothing accumulates until
+                // the user answers. Counting at open (not resolve) keeps the
+                // counter honest even when the turn dies with the gate raised.
+                self.bank(*timestamp);
+                self.open_gate = true;
+                if let Some(turn_id) = self.open_turn_id {
+                    if let Some(span) = self.turns.get_mut(&turn_id) {
+                        span.gate_suspensions += 1;
+                    }
+                }
+            }
+            RuntimeEvent::ApprovalResolved { timestamp, .. }
+            | RuntimeEvent::UserInputResolved { timestamp, .. } => {
+                // The frozen window itself stays excluded; restart the clock.
+                // A skewed resolve earlier than the open would rewind the
+                // cursor into already-banked time and double count, so the
+                // cursor only ever moves forward.
+                self.cursor = Some(self.cursor.map_or(*timestamp, |held| held.max(*timestamp)));
+                self.open_gate = false;
+            }
+            RuntimeEvent::TurnCompleted {
+                turn_id, timestamp, ..
+            }
+            | RuntimeEvent::TurnFailed {
+                turn_id, timestamp, ..
+            }
+            | RuntimeEvent::TurnAborted {
+                turn_id, timestamp, ..
+            } => {
+                if !self.open_gate {
+                    self.bank(*timestamp);
+                }
+                self.open_gate = false;
+                self.open_turn_id = None;
+                self.cursor = None;
+                self.carried_from = None;
+                self.last_turn_end = Some(*timestamp);
+            }
+            _ => {}
+        }
+    }
+
+    /// Accumulate `[cursor, at)` into the open turn and move the cursor.
+    ///
+    /// No-op when the clock is not running (no open turn, or a gate holds it
+    /// frozen). The elapsed window is clamped at zero, so a skewed timestamp
+    /// can only stall the clock, never rewind it.
+    fn bank(&mut self, at: DateTime<Utc>) {
+        let (Some(turn_id), Some(from)) = (self.open_turn_id, self.cursor) else {
+            return;
+        };
+        let Some(span) = self.turns.get_mut(&turn_id) else {
+            return;
+        };
+        span.active_ms += Self::window_ms(from, at);
+        // The cursor also only moves forward: a banked timestamp earlier than
+        // the cursor (skewed writer) must not rewind it into banked time.
+        self.cursor = Some(self.cursor.map_or(at, |held| held.max(at)));
+    }
+
+    /// Milliseconds in `[from, to)`, clamped at zero against clock skews.
+    fn window_ms(from: DateTime<Utc>, to: DateTime<Utc>) -> u64 {
+        (to - from).num_milliseconds().max(0) as u64
+    }
+
+    /// Finish the fold: extend the still-running turn to the last event seen.
+    ///
+    /// A gate held open at this point keeps the clock frozen: the window from
+    /// the gate's open event to "now" is exactly the user wait the readout
+    /// exists to exclude.
+    fn finish(mut self) -> ActiveSpan {
+        if !self.open_gate {
+            if let Some(at) = self.last_event_at {
+                self.bank(at);
+            }
+        }
+        let total_ms = self.turns.values().map(|span| span.active_ms).sum();
+        ActiveSpan {
+            turns: self.turns,
+            total_ms,
+        }
+    }
+}
+
+/// Result of the [`ActiveClock`] fold: per-turn spans plus the thread total.
+#[derive(Debug, Default)]
+struct ActiveSpan {
+    turns: HashMap<TurnId, TurnSpan>,
+    total_ms: u64,
+}
+
+/// Timestamp of any event that can advance the clock's "now" horizon.
+///
+/// Turn lifecycle and gate events drive the spans themselves; `Usage` counts
+/// too because a running turn's horizon must track the newest *anything* —
+/// for a live fold that is what makes the clock advance between terminal
+/// events. Pure rendering noise (deltas, items) stays out: the horizon only
+/// needs to be fresh to within one UI-visible event.
+fn event_timestamp(event: &RuntimeEvent) -> Option<DateTime<Utc>> {
+    match event {
+        RuntimeEvent::TurnStarted { timestamp, .. }
+        | RuntimeEvent::TurnCompleted { timestamp, .. }
+        | RuntimeEvent::TurnFailed { timestamp, .. }
+        | RuntimeEvent::TurnAborted { timestamp, .. }
+        | RuntimeEvent::ApprovalRequested { timestamp, .. }
+        | RuntimeEvent::ApprovalResolved { timestamp, .. }
+        | RuntimeEvent::UserInputRequested { timestamp, .. }
+        | RuntimeEvent::UserInputResolved { timestamp, .. }
+        | RuntimeEvent::Usage { timestamp, .. } => Some(*timestamp),
+        _ => None,
     }
 }
 
@@ -400,6 +631,302 @@ mod tests {
     fn at(offset_ms: i64) -> DateTime<Utc> {
         // Deterministic base so every call in a fixture shares one timeline.
         DateTime::<Utc>::UNIX_EPOCH + chrono::Duration::milliseconds(offset_ms)
+    }
+
+    /// A `turn_started` event with all additive fields at their defaults.
+    fn started(
+        seq: u64,
+        thread: ThreadId,
+        turn: TurnId,
+        at_ms: i64,
+        recovery: u32,
+    ) -> RuntimeEvent {
+        RuntimeEvent::TurnStarted {
+            auto_recovery: recovery,
+            seq,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: at(at_ms),
+            auto_continuation: false,
+            attachment_ids: Vec::new(),
+            attachment_outcomes: Vec::new(),
+        }
+    }
+
+    fn completed(seq: u64, thread: ThreadId, turn: TurnId, at_ms: i64) -> RuntimeEvent {
+        RuntimeEvent::TurnCompleted {
+            seq,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: at(at_ms),
+        }
+    }
+
+    fn usage_at(seq: u64, thread: ThreadId, turn: TurnId, at_ms: i64) -> RuntimeEvent {
+        RuntimeEvent::Usage {
+            seq,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: at(at_ms),
+            usage: Usage::new(10, 5),
+        }
+    }
+
+    #[test]
+    fn active_ms_equals_wall_clock_when_no_gate_opened() {
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let events = vec![
+            started(1, thread, turn, 0, 0),
+            usage_at(2, thread, turn, 100),
+            completed(3, thread, turn, 5_000),
+        ];
+        let response = aggregate_thread_usage(thread, &events);
+        assert_eq!(response.turn_usage[0].active_ms, Some(5_000));
+        assert_eq!(response.turn_usage[0].gate_suspensions, Some(0));
+        assert_eq!(response.active_ms, Some(5_000));
+    }
+
+    #[test]
+    fn active_ms_excludes_the_user_gate_window() {
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let events = vec![
+            started(1, thread, turn, 0, 0),
+            usage_at(2, thread, turn, 1_000),
+            // The user parks the approval for an hour of wall time.
+            RuntimeEvent::ApprovalRequested {
+                seq: 3,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(2_000),
+                approval_id: "a1".into(),
+                tool: "bash".into(),
+                summary: "cargo test".into(),
+            },
+            RuntimeEvent::ApprovalResolved {
+                seq: 4,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(2_000 + 3_600_000),
+                approval_id: "a1".into(),
+                approved: true,
+            },
+            usage_at(5, thread, turn, 2_000 + 3_600_000 + 500),
+            completed(6, thread, turn, 2_000 + 3_600_000 + 1_500),
+        ];
+        let response = aggregate_thread_usage(thread, &events);
+        // 0→2s active before the gate, then the parked hour excluded, then
+        // 1.5s active after the resolve: 3.5s of the 3_603.5s wall clock.
+        assert_eq!(response.turn_usage[0].active_ms, Some(3_500));
+        assert_eq!(response.turn_usage[0].gate_suspensions, Some(1));
+        assert_eq!(response.active_ms, Some(3_500));
+    }
+
+    #[test]
+    fn user_input_gate_freezes_the_clock_too() {
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let events = vec![
+            started(1, thread, turn, 0, 0),
+            RuntimeEvent::UserInputRequested {
+                seq: 2,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(500),
+                request_id: "u1".into(),
+                prompt: "which db?".into(),
+            },
+            RuntimeEvent::UserInputResolved {
+                seq: 3,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(62_500),
+                request_id: "u1".into(),
+                answer: "postgres".into(),
+            },
+            completed(4, thread, turn, 63_000),
+        ];
+        let response = aggregate_thread_usage(thread, &events);
+        // 0.5s before the gate + 0.5s after it resolved.
+        assert_eq!(response.turn_usage[0].active_ms, Some(1_000));
+        assert_eq!(response.turn_usage[0].gate_suspensions, Some(1));
+    }
+
+    #[test]
+    fn running_turn_extends_to_the_newest_event() {
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let events = vec![
+            started(1, thread, turn, 0, 0),
+            usage_at(2, thread, turn, 2_500),
+        ];
+        let response = aggregate_thread_usage(thread, &events);
+        // No terminal event yet: the span runs to the newest event seen,
+        // which for a live fold is "now" to within one event.
+        assert_eq!(response.turn_usage[0].active_ms, Some(2_500));
+    }
+
+    #[test]
+    fn idle_gap_before_a_user_turn_is_not_counted() {
+        let thread = ThreadId::new();
+        let turn_a = TurnId::new();
+        let turn_b = TurnId::new();
+        let events = vec![
+            started(1, thread, turn_a, 0, 0),
+            completed(2, thread, turn_a, 1_000),
+            // The user goes away for 30 minutes, then sends the next message.
+            started(3, thread, turn_b, 1_000 + 1_800_000, 0),
+            completed(4, thread, turn_b, 1_000 + 1_800_000 + 2_000),
+        ];
+        let response = aggregate_thread_usage(thread, &events);
+        assert_eq!(response.turn_usage[0].active_ms, Some(1_000));
+        assert_eq!(response.turn_usage[1].active_ms, Some(2_000));
+        assert_eq!(response.active_ms, Some(3_000));
+    }
+
+    #[test]
+    fn auto_recovery_backoff_rides_the_recovery_turn_span() {
+        let thread = ThreadId::new();
+        let turn_a = TurnId::new();
+        let turn_b = TurnId::new();
+        let events = vec![
+            started(1, thread, turn_a, 0, 0),
+            // The first turn dies on a model-request failure at t=1000.
+            RuntimeEvent::TurnFailed {
+                seq: 2,
+                thread_id: thread,
+                turn_id: turn_a,
+                timestamp: at(1_000),
+                message: "502".into(),
+                model_request_failed: true,
+            },
+            // The harness retries 30s later as an auto_recovery turn.
+            started(3, thread, turn_b, 31_000, 1),
+            completed(4, thread, turn_b, 33_000),
+        ];
+        let response = aggregate_thread_usage(thread, &events);
+        assert_eq!(response.turn_usage[0].active_ms, Some(1_000));
+        // The failed attempt's span plus the backoff gap plus the retry's
+        // span: the harness working, not the user thinking.
+        assert_eq!(response.turn_usage[1].active_ms, Some(32_000));
+        assert_eq!(response.active_ms, Some(33_000));
+    }
+
+    #[test]
+    fn auto_continuation_gap_is_counted_like_recovery() {
+        let thread = ThreadId::new();
+        let turn_a = TurnId::new();
+        let turn_b = TurnId::new();
+        let events = vec![
+            started(1, thread, turn_a, 0, 0),
+            completed(2, thread, turn_a, 1_000),
+            RuntimeEvent::TurnStarted {
+                auto_recovery: 0,
+                seq: 3,
+                thread_id: thread,
+                turn_id: turn_b,
+                timestamp: at(11_000),
+                auto_continuation: true,
+                attachment_ids: Vec::new(),
+                attachment_outcomes: Vec::new(),
+            },
+            completed(4, thread, turn_b, 12_000),
+        ];
+        let response = aggregate_thread_usage(thread, &events);
+        assert_eq!(response.turn_usage[1].active_ms, Some(11_000));
+        assert_eq!(response.active_ms, Some(12_000));
+    }
+
+    #[test]
+    fn a_turn_without_usage_still_reports_its_active_span() {
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        // A turn that failed before any model round produced no usage event;
+        // its active time must still be visible on the clock.
+        let events = vec![
+            started(1, thread, turn, 0, 0),
+            usage_at(2, thread, turn, 800),
+            RuntimeEvent::TurnFailed {
+                seq: 3,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(1_200),
+                message: "boom".into(),
+                model_request_failed: false,
+            },
+        ];
+        let response = aggregate_thread_usage(thread, &events);
+        assert_eq!(response.turn_usage.len(), 1);
+        assert_eq!(response.turn_usage[0].turn_id, turn);
+        assert_eq!(response.turn_usage[0].active_ms, Some(1_200));
+        assert_eq!(response.samples, 1);
+    }
+
+    #[test]
+    fn gate_open_at_terminal_counts_a_suspension_without_freezing() {
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let events = vec![
+            started(1, thread, turn, 0, 0),
+            RuntimeEvent::ApprovalRequested {
+                seq: 2,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(500),
+                approval_id: "a1".into(),
+                tool: "bash".into(),
+                summary: "x".into(),
+            },
+            RuntimeEvent::TurnAborted {
+                seq: 3,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(600),
+                reason: "user interrupt".into(),
+            },
+        ];
+        let response = aggregate_thread_usage(thread, &events);
+        // The gate froze the clock at 500ms, so the aborted turn's active
+        // time is only the pre-gate window; the suspension counter records
+        // that a gate was raised and never resolved.
+        assert_eq!(response.turn_usage[0].active_ms, Some(500));
+        assert_eq!(response.turn_usage[0].gate_suspensions, Some(1));
+    }
+
+    #[test]
+    fn clock_skew_never_pushes_active_ms_negative() {
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let events = vec![
+            started(1, thread, turn, 1_000, 0),
+            // A resolved timestamp earlier than it opened (skewed writer).
+            RuntimeEvent::ApprovalRequested {
+                seq: 2,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(2_000),
+                approval_id: "a1".into(),
+                tool: "bash".into(),
+                summary: "x".into(),
+            },
+            RuntimeEvent::ApprovalResolved {
+                seq: 3,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(1_500),
+                approval_id: "a1".into(),
+                approved: true,
+            },
+            completed(4, thread, turn, 2_500),
+        ];
+        let response = aggregate_thread_usage(thread, &events);
+        // The skewed resolve (earlier than the gate opened) cannot rewind the
+        // cursor into banked time: the clock restarts where it froze, so the
+        // span is 1s before the gate + 0.5s after the terminal bank — never a
+        // double count, never a negative.
+        assert_eq!(response.turn_usage[0].active_ms, Some(1_500));
+        assert_eq!(response.turn_usage[0].gate_suspensions, Some(1));
     }
 
     #[test]

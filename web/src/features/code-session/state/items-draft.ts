@@ -33,6 +33,7 @@ export type ItemsDraft = {
   roundWindow: RoundWindow | null
   lastCompaction: CompactionNotice | null
   rounds: RoundTiming[]
+  turnLastEventAt: Record<TurnId, number>
 }
 
 export function draftOf(base: ItemsSnapshot): ItemsDraft {
@@ -53,7 +54,8 @@ export function draftOf(base: ItemsSnapshot): ItemsDraft {
     usage: base.usage,
     roundWindow: base.roundWindow,
     lastCompaction: base.lastCompaction,
-    rounds: base.rounds
+    rounds: base.rounds,
+    turnLastEventAt: base.turnLastEventAt
   }
 }
 
@@ -82,6 +84,12 @@ export function draftUserInputs(draft: ItemsDraft): Record<string, PendingUserIn
   return draft.userInputs
 }
 
+/** Copy-on-write channel for the per-turn newest-event timestamps. */
+export function draftTurnLastEventAt(draft: ItemsDraft): Record<TurnId, number> {
+  draft.turnLastEventAt ??= { ...draft.base.turnLastEventAt }
+  return draft.turnLastEventAt
+}
+
 export function commitDraft(draft: ItemsDraft): ItemsSnapshot {
   const base = draft.base
   return {
@@ -102,7 +110,8 @@ export function commitDraft(draft: ItemsDraft): ItemsSnapshot {
     // "window reset", so it must not fall back to the base snapshot here.
     roundWindow: draft.roundWindow,
     lastCompaction: draft.lastCompaction,
-    rounds: draft.rounds
+    rounds: draft.rounds,
+    turnLastEventAt: draft.turnLastEventAt ?? base.turnLastEventAt
   }
 }
 

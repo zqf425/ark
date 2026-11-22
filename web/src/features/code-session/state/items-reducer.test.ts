@@ -309,6 +309,8 @@ describe('items reducer usage and compaction', () => {
       cacheMissTokens: null,
       // Neither sample carried a measured duration: unknown, not `0秒`.
       durationMs: null,
+      // The active span is server-owned; live folds keep the last seed value.
+      activeMs: null,
       lastPromptTokens: 1500,
       // No deltas preceded these samples, so no streaming speed was measured.
       lastRoundTokensPerSec: null
@@ -372,6 +374,7 @@ describe('items reducer usage and compaction', () => {
       cacheMissTokens: null,
       // The lifetime seed reports no spanning total here, so nothing is faked.
       durationMs: null,
+      activeMs: null,
       lastPromptTokens: null,
       lastRoundTokensPerSec: null
     })

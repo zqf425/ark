@@ -35,6 +35,12 @@ export type UsageAggregate = {
    * Null until a sample carries one, so "unknown" never renders as `0秒`.
    */
   durationMs: number | null
+  /**
+   * Thread's active span from the server fold: every turn's wall clock minus
+   * user-gate waits, plus harness recovery/continuation gaps, milliseconds.
+   * `null` when the runtime predates the field (render nothing, not `0秒`).
+   */
+  activeMs: number | null
   lastPromptTokens: number | null
   cacheHitTokens: number | null
   cacheMissTokens: number | null
@@ -54,13 +60,19 @@ export type RoundWindow = {
 }
 
 /**
- * Renderer fold of the authoritative per-round model timings. Seeded from
- * `GET /v1/debug/llm-rounds` and extended by live `usage` events; see
+ * Renderer fold of the authoritative per-turn timings. Seeded from
+ * `GET /v1/threads/{id}/usage` and extended by live `usage` events; see
  * `rounds.ts` for the fold contract.
  */
 export type RoundTiming = {
   turnId: TurnId
+  /** Sum of measured model-call wall time in this turn, milliseconds. */
   durationMs: number
+  /**
+   * Active span (wall clock minus user-gate waits) as the server folded it;
+   * `null` until an HTTP seed reports it. Live ticks extend it in place.
+   */
+  activeMs: number | null
 }
 
 /** Latest `compaction_completed` notice; diagnostics for the context meter. */
@@ -121,8 +133,14 @@ export type ItemsSnapshot = {
   usage: UsageAggregate | null
   /** Streaming window of the in-flight model round; null between rounds. */
   roundWindow: RoundWindow | null
-  /** Per-round model-call durations (snapshot-seeded, live-extended). */
+  /** Per-turn clocks (snapshot-seeded, live-extended). */
   rounds: RoundTiming[]
+  /**
+   * Newest event timestamp (epoch ms) the renderer saw per turn. The live
+   * active-clock tick extends a running turn's server-reported span from this
+   * anchor; terminal turns never read it.
+   */
+  turnLastEventAt: Record<TurnId, number>
   /** Newest compaction notice, cleared on rewind with the rest of the projection. */
   lastCompaction: CompactionNotice | null
 }

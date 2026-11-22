@@ -51,8 +51,8 @@
   差异文件行默认折叠，展开后渲染服务端 `patch` 字段的行级 diff（解析仅在展开时进行，面板打开
   不全量解析所有 patch）；`patch` 缺失（二进制或超出字节上限）时明确提示，浏览器不自行 diff。
 - 会话标题下方的 `SessionStatsBar` 展示线程级用量；会话流不再有统计 footer。统计条由
-  `GET /v1/threads/{id}/usage` 的整线程聚合播种，并折叠后续 live `usage` 事件，展示调用数、模型调用
-  实测总耗时、tokens、缓存命中率、费用、最近速度、压缩摘要与错误。它不读取有界诊断分页
+  `GET /v1/threads/{id}/usage` 的整线程聚合播种，并折叠后续 live `usage` 事件，展示调用数、活跃
+  总时长、tokens、缓存命中率、费用、最近速度、压缩摘要与错误。它不读取有界诊断分页
   `GET /v1/debug/llm-rounds`，因此调用数和耗时不会因分页截断变成下限。上下文占用只在输入框工具条的
   context ring 常驻展示：分母取所选模型真实 `context_window_tokens`（未声明时取运行时同源的 256K
   默认窗口），`compaction_threshold_tokens` 仅画为环内压缩刻度/警示线；两者都只供展示，不参与
@@ -95,6 +95,15 @@
   头部把真实十几分钟的回合渲染成「122 步 · 耗时 11 秒」。聚合路由整份日志重放并逐回合折叠，
   与线程总计同一次折叠，所以回合耗时不再取决于历史有多长。`rounds.ts` 的 `appendRound` 也按回合
   累加进已有条目（不是一个回合一行地追加），否则实时 `usage` 事件会把同一回合算两遍。
+- **回合头与统计条的"耗时"读数是活跃时长（`active_ms`），不是模型调用时间之和**：服务端
+  `ActiveClock` 折叠出每个回合的挂钟时间并扣除等审批/用户输入的窗口；工具执行、HTTP 重试、
+  恢复退避与子任务运行全部计入——体感时长（"跑了一两小时的会话"）应与该读数一致，旧口径
+  （`duration_ms`，只含模型调用墙钟）仍保留为 `RoundTiming.durationMs` 供"模型时间"类读数使用。
+  运行中回合由 `liveActiveMs` 按秒延伸：从回合最新事件锚点（`turnLastEventAt`，reducer 维护）加
+  挂钟增量，挂起门禁出现后以最早 `requested_at` 为上限（时钟冻结在提问时刻，不倒退、不空转）；
+  下一次 HTTP 刷新以服务端 `active_ms` 为准整体替换，两边永不漂移。运行中的时钟每秒 tick 由
+  `components/use-clock-tick.ts` 独占（`LiveActivity` 的旧 `setInterval` 仍是独立实现，属另一读数）。
+  旧运行时聚合无 `active_ms` 字段时读数为 `null`：不显示，而不是伪造 `0秒`。
 - 用时文案是**本地化的单位拼接**（`formatDurationWords`，读作“耗时 1时2分3秒”），不是 `m:ss` 时钟：
   时/分/秒的单位词来自 i18n（`canvas.duration.hours|minutes|seconds`），由调用方经
   `hooks/use-duration-words.ts` 的 `useDurationFormat` 注入，因此 `session-stats.ts` 仍保持无 React、

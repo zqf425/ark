@@ -536,11 +536,15 @@ pub struct UsageResponse {
 /// One turn's folded usage inside `GET /v1/threads/{id}/usage`.
 ///
 /// The per-turn breakdown exists because the turn header shows *that turn's*
-/// measured model time. Before it existed the renderer re-derived that span
+/// active span. Before it existed the renderer re-derived that span
 /// from `GET /v1/debug/llm-rounds`, which is a bounded diagnostics page: a long
 /// session pushed whole turns past the page and their clocks silently collapsed
 /// to a fraction of the real span. This fold is the same one the thread totals
 /// use, so "sum of turns == thread total" holds by construction.
+///
+/// `usage.duration_ms` stays the sum of measured model-call time (the "model
+/// time" readout); `active_ms` is the new wall-clock-with-user-waits-excluded
+/// readout. Both are optional so older aggregates keep deserializing.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct TurnUsage {
@@ -550,12 +554,32 @@ pub struct TurnUsage {
     pub samples: u64,
     #[serde(flatten)]
     pub usage: Usage,
+    /// Wall-clock span of the turn minus the time the turn sat waiting for a
+    /// user gate (approval ask / user-input ask), milliseconds. Running turns
+    /// measure up to the fold timestamp, so the clock advances live.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub active_ms: Option<u64>,
+    /// Number of user-gate suspensions folded into `active_ms`. A turn the
+    /// user parked for an hour with an open approval shows the same clock as
+    /// an uninterrupted one; this counter makes that fact visible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub gate_suspensions: Option<u64>,
 }
 
 /// `GET /v1/threads/{id}/usage`.
 ///
 /// Aggregated from the thread's authoritative `usage` events, so it survives
 /// restarts and never drifts from what the model actually reported.
+///
+/// `active_ms` is the wall-clock duration of the thread's turn activity with
+/// user-caused waits excluded: every turn's span from `turn_started` to its
+/// terminal event (a running turn extends to now), minus the windows the turn
+/// sat on an approval / user-input gate, plus the auto-recovery and
+/// auto-continuation backoff gaps the harness inserted *between* turns (the
+/// idle gap before a user's next message stays out: that is the user thinking,
+/// not the session working). See `aggregate_thread_usage` for the fold.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
 pub struct ThreadUsageResponse {
@@ -573,6 +597,15 @@ pub struct ThreadUsageResponse {
     pub turn_usage: Vec<TurnUsage>,
     #[serde(flatten)]
     pub usage: Usage,
+    /// See the struct doc: wall-clock turn activity minus user-gate waits,
+    /// plus harness recovery/continuation gaps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub active_ms: Option<u64>,
+    /// User-gate suspensions folded into `active_ms`, summed over turns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub gate_suspensions: Option<u64>,
 }
 
 /// One model round in `GET /v1/debug/llm-rounds`.

@@ -17,6 +17,7 @@ import {
   draftItemOrder,
   draftItems,
   draftOf,
+  draftTurnLastEventAt,
   draftTurnState,
   draftUserInputs,
   sameItemContent,
@@ -43,7 +44,8 @@ export function emptyItemsState(): ItemsSnapshot {
     usage: null,
     roundWindow: null,
     lastCompaction: null,
-    rounds: []
+    rounds: [],
+    turnLastEventAt: {}
   }
 }
 
@@ -301,6 +303,14 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
   // latter advances on every streamed token, which made each token trigger
   // ~6 full HTTP reloads. Only these events change a server projection.
   if (WORKBENCH_EVENT_KINDS.has(event.kind)) draft.workbenchRevision += 1
+  // The live active-clock tick extends a running turn's server-reported span
+  // from the newest event the renderer saw for that turn. Every turn-scoped
+  // event carries `turn_id`; thread-scoped ones (child activity, heartbeats)
+  // do not and contribute no anchor.
+  if ('turn_id' in event) {
+    const at = eventMs(event.timestamp)
+    if (Number.isFinite(at)) draftTurnLastEventAt(draft)[event.turn_id] = at
+  }
 
   switch (event.kind) {
     case 'item_created':

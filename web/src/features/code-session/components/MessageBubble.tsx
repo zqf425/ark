@@ -225,9 +225,10 @@ export const FinalReplyCard = memo(function FinalReplyCard({
   /** Whitelist of paths this turn wrote; gates which prose chips render. */
   writablePaths?: readonly string[]
   /**
-   * This turn's measured model time, rendered in the title row. Only the
-   * turns without a process card pass it: a turn that ran steps shows the
-   * clock in that card's header, and the answer card stays about the answer.
+   * This turn's active span (wall clock minus user-gate waits), rendered in
+   * the title row. Only the turns without a process card pass it: a turn that
+   * ran steps shows the clock in that card's header, and the answer card
+   * stays about the answer.
    */
   turnMs?: number
 }): JSX.Element {
