@@ -52,12 +52,23 @@ export function foldUsage(
 
 /**
  * Seed the usage aggregate from `GET /v1/threads/{id}/usage` after the detail
- * load. Only fills an empty channel: if a live `usage` event already landed
- * (SSE can win the race against the HTTP seed), overwriting it would double
- * count that sample.
+ * load. The additive counters only fill an empty channel: if a live `usage`
+ * event already landed (SSE can win the race against the HTTP seed),
+ * overwriting them would double count that sample.
+ *
+ * `activeMs` is different: it is the server's authoritative wall-clock fold,
+ * not an accumulation the renderer can reproduce from events, so the seed
+ * always overwrites it (the reducer's live tick then extends it until the
+ * next seed). Leaving it null-until-empty was the "耗时不显示" regression: a
+ * live `usage` event that won the race froze the channel at `null` forever.
  */
 export function seedUsage(state: ItemsSnapshot, response: ThreadUsageResponse): ItemsSnapshot {
-  if (state.usage) return state
+  if (state.usage) {
+    return {
+      ...state,
+      usage: { ...state.usage, activeMs: response.active_ms ?? null }
+    }
+  }
   return {
     ...state,
     usage: {

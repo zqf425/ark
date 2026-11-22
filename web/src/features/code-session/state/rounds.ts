@@ -47,12 +47,22 @@ export type RoundTiming = {
  * keeps `durationMs: null` rather than faking 0: a turn with no clock beats a
  * confident lie. Turns that never produced usage (failed before the first
  * model round) still appear, because the server now emits their active spans.
+ *
+ * `previous` carries the renderer's live rows. Rows the seed also reports are
+ * replaced wholesale (the server fold is authoritative); rows it does **not**
+ * report survive untouched — chiefly the running turn, which finished no
+ * rounds at fetch time and would otherwise vanish mid-run, killing the live
+ * extension ("890+ calls showed 2 minutes": the seed replaced the list, the
+ * running turn's row disappeared, and the total collapsed to the seed alone).
  */
-export function roundsFromTurnUsage(response: ThreadUsageResponse): RoundTiming[] {
+export function roundsFromTurnUsage(
+  response: ThreadUsageResponse,
+  previous: readonly RoundTiming[] = []
+): RoundTiming[] {
   // `turn_usage` is required on the wire but defensively optional here: an
   // older runtime answers without the breakdown, and a missing array must
   // degrade to "no per-turn clocks" rather than throwing mid-render.
-  return (response.turn_usage ?? []).map((turn) => ({
+  const seeded = (response.turn_usage ?? []).map((turn) => ({
     turnId: turn.turn_id,
     durationMs:
       typeof turn.duration_ms === 'number' && Number.isFinite(turn.duration_ms) && turn.duration_ms > 0
@@ -60,6 +70,9 @@ export function roundsFromTurnUsage(response: ThreadUsageResponse): RoundTiming[
         : 0,
     activeMs: typeof turn.active_ms === 'number' && Number.isFinite(turn.active_ms) ? turn.active_ms : null
   }))
+  const seededIds = new Set(seeded.map((row) => row.turnId))
+  const carried = previous.filter((row) => !seededIds.has(row.turnId))
+  return [...seeded, ...carried]
 }
 
 /**
