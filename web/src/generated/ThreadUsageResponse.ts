@@ -7,6 +7,14 @@ import type { TurnUsage } from "./TurnUsage";
  *
  * Aggregated from the thread's authoritative `usage` events, so it survives
  * restarts and never drifts from what the model actually reported.
+ *
+ * `active_ms` is the wall-clock duration of the thread's turn activity with
+ * user-caused waits excluded: every turn's span from `turn_started` to its
+ * terminal event (a running turn extends to now), minus the windows the turn
+ * sat on an approval / user-input gate, plus the auto-recovery and
+ * auto-continuation backoff gaps the harness inserted *between* turns (the
+ * idle gap before a user's next message stays out: that is the user thinking,
+ * not the session working). See `aggregate_thread_usage` for the fold.
  */
 export type ThreadUsageResponse = { thread_id: ThreadId, 
 /**
@@ -22,7 +30,16 @@ samples: number,
  * per-turn readout (the turn header's clock). Not a page — this route
  * replays the whole log, so a long session reports all of its turns.
  */
-turn_usage: Array<TurnUsage>, prompt_tokens: number, completion_tokens: number, total_tokens: number, cache_hit_tokens?: number, cache_miss_tokens?: number, cache_hit_rate?: number, cost_usd?: number, 
+turn_usage: Array<TurnUsage>, 
+/**
+ * See the struct doc: wall-clock turn activity minus user-gate waits,
+ * plus harness recovery/continuation gaps.
+ */
+active_ms?: number, 
+/**
+ * User-gate suspensions folded into `active_ms`, summed over turns.
+ */
+gate_suspensions?: number, prompt_tokens: number, completion_tokens: number, total_tokens: number, cache_hit_tokens?: number, cache_miss_tokens?: number, cache_hit_rate?: number, cost_usd?: number, 
 /**
  * Wall-clock duration of the model call this sample closes, measured
  * by the agent loop around the provider stream. Optional because only

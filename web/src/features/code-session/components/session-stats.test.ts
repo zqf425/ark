@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { RoundTiming } from '../state/types'
-import { formatDurationWords, turnDurationMs } from './session-stats'
+import { formatDurationWords, liveActiveMs, turnActiveMs, turnDurationMs } from './session-stats'
 
-function round(turnId: string, durationMs: number): RoundTiming {
-  return { turnId, durationMs }
+function round(turnId: string, durationMs: number, activeMs: number | null = null): RoundTiming {
+  return { turnId, durationMs, activeMs }
 }
 
 /** Unit words the formatter composes; the wiring under test is the folding. */
@@ -44,5 +44,30 @@ describe('session stats formatting', () => {
   it('keeps the minutes slot once hours are shown', () => {
     // `1时0分3秒` — collapsing to `1时3秒` would read as a different span.
     expect(formatDurationWords(3_603_000, ZH_UNITS)).toBe('1时0分3秒')
+  })
+
+  it('reads the server-folded active span per turn', () => {
+    const rounds = [round('t1', 2_000, 45_000), round('t2', 5_000)]
+    expect(turnActiveMs(rounds, 't1')).toBe(45_000)
+    // A turn without a reported active span is unknown, not zero.
+    expect(turnActiveMs(rounds, 't2')).toBeNull()
+    expect(turnActiveMs(rounds, 't3')).toBeNull()
+  })
+
+  it('extends a running turn and freezes at the moment a gate was raised', () => {
+    const rounds = [round('t1', 2_000, 60_000)]
+    // Five seconds since the newest event: the clock runs on.
+    expect(liveActiveMs(rounds, 't1', 105_000, 100_000, null)).toBe(65_000)
+    // A gate was raised 2s ago: the clock froze at that instant, so the
+    // extension stops there and stays there as wall time passes.
+    expect(liveActiveMs(rounds, 't1', 105_000, 100_000, 102_000)).toBe(62_000)
+    expect(liveActiveMs(rounds, 't1', 305_000, 100_000, 102_000)).toBe(62_000)
+    // The freeze never lands before the anchor (skewed requested_at): the
+    // extension clamps to zero instead of rewinding into banked time.
+    expect(liveActiveMs(rounds, 't1', 105_000, 100_000, 50_000)).toBe(60_000)
+    // No anchor (nothing streamed yet): report the server span as-is.
+    expect(liveActiveMs(rounds, 't1', 305_000, null, null)).toBe(60_000)
+    // The clock never runs backwards past zero.
+    expect(liveActiveMs(rounds, 't1', 50_000, 100_000, null)).toBe(60_000)
   })
 })

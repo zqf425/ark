@@ -49,7 +49,8 @@ import { RewindControl } from './RewindControl'
 import { executeEditResend, userTextOfTurn } from './rewind-flow'
 import type { RewindAvailability } from './rewind-flow'
 import { useCodeSessionStore } from '../state/store'
-import { turnDurationMs } from './session-stats'
+import { turnActiveMs, turnDurationMs, liveActiveMs } from './session-stats'
+import { useClockTick } from './use-clock-tick'
 import { useDurationFormat } from '../hooks/use-duration-words'
 
 /**
@@ -268,13 +269,31 @@ export const TurnBlock = memo(function TurnBlock({
   // The earlier slice renders only what the fold must not hide (errors and
   // notices); everything else in it is represented by the summary row.
   const headRows = foldActive ? trace.prefix.filter((item) => !isFoldedProcessRow(item)) : trace.prefix
-  // This turn's measured model time (the store's per-round fold, recomputed
-  // only when the rounds channel changes — usage events or snapshot refresh).
-  // It renders in the process-card header, which is the row describing what
-  // this turn did; the answer card stays about the answer.
+  // This turn's clocks. `turnMs` is the measured model time (the store's
+  // per-round fold); `turnClock` is the active span — the server-folded wall
+  // clock with user-gate waits excluded, extended live while the turn runs
+  // (frozen at the moment a gate was raised). It renders in the process-card
+  // header, which is the row describing what this turn did; the answer card
+  // stays about the answer.
   const allRounds = useCodeSessionStore((s) => s.rounds)
+  const gatePendingSince = useCodeSessionStore((s) => {
+    const stamps = [
+      ...Object.values(s.approvals).filter((a) => a.turn_id === group.turnId && a.status === 'pending').map((a) => Date.parse(a.requested_at)),
+      ...Object.values(s.userInputs).filter((u) => u.turn_id === group.turnId && u.status === 'pending').map((u) => Date.parse(u.requested_at))
+    ].filter((ms) => Number.isFinite(ms))
+    return stamps.length > 0 ? Math.min(...stamps) : null
+  })
+  const turnLastEventAt = useCodeSessionStore((s) => s.turnLastEventAt[group.turnId] ?? null)
+  const nowMs = useClockTick(live)
   const turnMs = useMemo(() => turnDurationMs(allRounds, group.turnId), [allRounds, group.turnId])
-  const turnClock = useDurationFormat(turnMs, turnMs > 0)
+  const activeMs = useMemo(
+    () =>
+      live
+        ? liveActiveMs(allRounds, group.turnId, nowMs, turnLastEventAt, gatePendingSince)
+        : turnActiveMs(allRounds, group.turnId),
+    [allRounds, group.turnId, nowMs, turnLastEventAt, gatePendingSince, live]
+  )
+  const turnClock = useDurationFormat(activeMs ?? turnMs, live ? activeMs != null : turnMs > 0)
   // Same handler identity for every row of the turn; Markdown absorbs it.
   const openWritten = useOpenWrittenFile(writtenPaths)
 
@@ -348,7 +367,7 @@ export const TurnBlock = memo(function TurnBlock({
             item={item}
             onFileChip={openWritten}
             writablePaths={writtenPaths}
-            turnMs={process.length === 0 ? turnMs : undefined}
+            turnMs={process.length === 0 ? activeMs ?? turnMs : undefined}
           />
         </ErrorBoundary>
       ))}

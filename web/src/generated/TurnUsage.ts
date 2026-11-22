@@ -5,17 +5,33 @@ import type { TurnId } from "./TurnId";
  * One turn's folded usage inside `GET /v1/threads/{id}/usage`.
  *
  * The per-turn breakdown exists because the turn header shows *that turn's*
- * measured model time. Before it existed the renderer re-derived that span
+ * active span. Before it existed the renderer re-derived that span
  * from `GET /v1/debug/llm-rounds`, which is a bounded diagnostics page: a long
  * session pushed whole turns past the page and their clocks silently collapsed
  * to a fraction of the real span. This fold is the same one the thread totals
  * use, so "sum of turns == thread total" holds by construction.
+ *
+ * `usage.duration_ms` stays the sum of measured model-call time (the "model
+ * time" readout); `active_ms` is the new wall-clock-with-user-waits-excluded
+ * readout. Both are optional so older aggregates keep deserializing.
  */
 export type TurnUsage = { turn_id: TurnId, 
 /**
  * Completed model rounds folded into this turn.
  */
-samples: number, prompt_tokens: number, completion_tokens: number, total_tokens: number, cache_hit_tokens?: number, cache_miss_tokens?: number, cache_hit_rate?: number, cost_usd?: number, 
+samples: number, 
+/**
+ * Wall-clock span of the turn minus the time the turn sat waiting for a
+ * user gate (approval ask / user-input ask), milliseconds. Running turns
+ * measure up to the fold timestamp, so the clock advances live.
+ */
+active_ms?: number, 
+/**
+ * Number of user-gate suspensions folded into `active_ms`. A turn the
+ * user parked for an hour with an open approval shows the same clock as
+ * an uninterrupted one; this counter makes that fact visible.
+ */
+gate_suspensions?: number, prompt_tokens: number, completion_tokens: number, total_tokens: number, cache_hit_tokens?: number, cache_miss_tokens?: number, cache_hit_rate?: number, cost_usd?: number, 
 /**
  * Wall-clock duration of the model call this sample closes, measured
  * by the agent loop around the provider stream. Optional because only

@@ -8,7 +8,9 @@
  * `GET /v1/threads/{id}/usage` and extended live per sample, so the strip
  * updates without waiting for an HTTP round trip and the totals never describe
  * a narrower window than the session itself. The duration clock is the
- * aggregate's own `duration_ms` — model time only, never tool execution.
+ * aggregate's `active_ms` — wall clock with user-gate waits excluded (tool
+ * execution, retries, recovery backoff and child runs all count; the user's
+ * own thinking time does not) — extended live while a turn runs.
  * `GET /v1/debug/llm-rounds` is deliberately not read here: it is a bounded
  * diagnostics page, and summing it understated long sessions.
  */
@@ -17,6 +19,8 @@ import { useI18n } from '../../../shared/i18n'
 import { formatTokens, formatUsd } from '../../../shared/format'
 import { getThreadUsage } from '../api/threads-api'
 import { useCodeSessionStore } from '../state/store'
+import { liveActiveMs } from './session-stats'
+import { useClockTick } from './use-clock-tick'
 import { useDurationFormat } from '../hooks/use-duration-words'
 
 type Stats = {
@@ -60,13 +64,31 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
   const visible = stats.owner === threadId ? stats : null
   const turns = visible?.turns ?? null
   const roundsCount = visible?.roundsCount ?? null
-  // Total measured model time, in the same spelled-out units as the per-turn
-  // clock so the session total and the turn totals read alike. It is the
-  // aggregate's own `duration_ms` — not a sum over the renderer's per-turn
-  // rows, which only cover turns the client has seen and would understate a
-  // long session. The two agree because the same fold produces both.
-  const totalMs = usage?.durationMs ?? 0
-  const totalClock = useDurationFormat(totalMs, roundsCount != null)
+  // Total active span: the server-folded wall clock with user-gate waits
+  // excluded, covering every turn in the log (including ones this client never
+  // rendered). While the thread has a turn in flight the clock extends live
+  // from the active turn's anchor; a pending gate freezes it, because the
+  // user is thinking and the clock does not run against them.
+  const activeTurnId = useCodeSessionStore((s) => s.activeTurnId)
+  const allRounds = useCodeSessionStore((s) => s.rounds)
+  const turnLastEventAt = useCodeSessionStore((s) => (activeTurnId ? s.turnLastEventAt[activeTurnId] ?? null : null))
+  // The gate's `requested_at` is the freeze instant: the clock may run up to
+  // it, never past it. Earliest pending gate wins (one gate at a time by
+  // construction, but the earliest is the safe bound).
+  const gatePendingSince = useCodeSessionStore((s) => {
+    if (activeTurnId == null) return null
+    const stamps = [
+      ...Object.values(s.approvals).filter((a) => a.turn_id === activeTurnId && a.status === 'pending').map((a) => Date.parse(a.requested_at)),
+      ...Object.values(s.userInputs).filter((u) => u.turn_id === activeTurnId && u.status === 'pending').map((u) => Date.parse(u.requested_at))
+    ].filter((ms) => Number.isFinite(ms))
+    return stamps.length > 0 ? Math.min(...stamps) : null
+  })
+  const nowMs = useClockTick(activeTurnId != null)
+  const seedMs = usage?.activeMs ?? null
+  const liveMs =
+    activeTurnId != null ? liveActiveMs(allRounds, activeTurnId, nowMs, turnLastEventAt, gatePendingSince) : null
+  const totalMs = liveMs ?? seedMs ?? 0
+  const totalClock = useDurationFormat(totalMs, roundsCount != null && totalMs > 0)
 
   const number = (value: number): string => new Intl.NumberFormat(locale).format(value)
 

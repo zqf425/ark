@@ -42,6 +42,9 @@ export function foldUsage(
     // Same `sum_opt` rule: a sample without a measured duration contributes
     // nothing, and the total stays null until at least one was timed.
     durationMs: sample.duration_ms != null ? (current?.durationMs ?? 0) + sample.duration_ms : current?.durationMs ?? null,
+    // The active span is server-owned (it freezes on user gates): live events
+    // keep the last HTTP-seeded value and the next refresh corrects it.
+    activeMs: current?.activeMs ?? null,
     lastPromptTokens: sample.prompt_tokens,
     lastRoundTokensPerSec: tokensPerSec
   }
@@ -68,6 +71,9 @@ export function seedUsage(state: ItemsSnapshot, response: ThreadUsageResponse): 
       // The seed IS the lifetime spanning total: it covers every round in the
       // log, including rounds of turns the client never rendered.
       durationMs: response.duration_ms ?? null,
+      // Same for the active span: server-folded wall clock with user-gate
+      // waits already excluded, covering turns the client never rendered.
+      activeMs: response.active_ms ?? null,
       // It carries no per-round timing though: prompt fill and speed describe
       // the newest round only, and the seed knows no "newest".
       lastPromptTokens: null,

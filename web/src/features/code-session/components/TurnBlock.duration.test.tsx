@@ -34,16 +34,19 @@ function group(items: ThreadItem[]): { turnId: string; state: 'completed'; items
   return { turnId: TURN, state: 'completed', items }
 }
 
-/** Only this turn has rounds; the clock is 1m 41s. */
+/** Only this turn has clocks; the active span is 1m 41s. */
 function seedRounds(): void {
-  useCodeSessionStore.setState({ rounds: [{ turnId: TURN, durationMs: 101_000 }] })
+  useCodeSessionStore.setState({
+    rounds: [{ turnId: TURN, durationMs: 101_000, activeMs: 101_000 }],
+    turnLastEventAt: {}
+  })
 }
 
 describe('TurnBlock renders the turn duration in the process header', () => {
   beforeEach(seedRounds)
 
   afterEach(() => {
-    useCodeSessionStore.setState({ rounds: [] })
+    useCodeSessionStore.setState({ rounds: [], turnLastEventAt: {} })
     document.body.innerHTML = ''
   })
 

@@ -144,8 +144,18 @@
   调用恰好一条），不维护第二套用量真源。`usage.duration_ms` 优先采用 agent 循环实测的模型调用耗时
   （不含工具执行），并作为轮次耗时的唯一 wire 载体。线程 usage 聚合直接对这些样本做严格折叠，不为
   旧日志缺失值补时；只有诊断用的 llm-rounds 投影会在单个旧样本缺少耗时时回退到回合边界窗口。
+- **同一路由还投影"活跃时长"读数**（`ActiveClock`，与 usage 折叠同一次日志重放）：每个回合的
+  `active_ms` 是 `turn_started` 到终态事件之间的挂钟时间，**扣除回合停在审批/用户输入门禁上的窗口**
+  （`ApprovalRequested/UserInputRequested` 冻结时钟，对应 Resolve 事件恢复；gate 打开即计入
+  `gate_suspensions` 计数，未决即死的 gate 也计数但不冻结额外时间）；运行中回合延伸到最新事件时间戳。
+  回合之间的间隙只在线程总计里计入 harness 主动插入的部分——`auto_continuation`/`auto_recovery`
+  标记的 `turn_started` 把上一回合终态到本次开始的重试退避计入新回合的 span；用户发起新消息前的
+  空闲不算（那是用户思考，不是会话在工作）。工具执行、HTTP 层重试、恢复退避、子任务运行全部计入。
+  光标只前进不倒退（时钟偏斜只会停摆不会回拨）。无 usage 样本的回合（首轮前即失败）也产出
+  `TurnUsage` 行，其 token 字段为零——行存在的意义是携带 active 时长。
 - **会话内每个回合的耗时读 `GET /v1/threads/{id}/usage` 的 `turn_usage`，不读 llm-rounds**：该聚合
-  路由整份日志重放，逐回合折叠（`TurnUsage`，含 `turn_id`/`samples`/扁平化 `usage`），且与线程总计
+  路由整份日志重放，逐回合折叠（`TurnUsage`，含 `turn_id`/`samples`/扁平化 `usage`/`active_ms`/
+  `gate_suspensions`），且与线程总计
   用同一次折叠，因此 token、费用等可加字段按构造一致。`duration_ms` 采用 `Usage::merge` 的严格聚合：
   只有全部实际 usage 样本都有耗时才求和，任一样本缺失则该回合及线程聚合均为 `None`，不会显示部分和。
   llm-rounds 是有界诊断分页，长会话会把整个

@@ -56,6 +56,12 @@ runtime 每轮结算的 usage 事件写入（`ark-llm` 解析的 provider payloa
 `merge` 对该字段使用严格聚合：仅当全部实际样本都有值时求和，任一样本未计时则聚合保持 None
 （"未知"与 "0" 不混淆）；空的默认累加器不算一个未计时样本。
 
+`TurnUsage.active_ms` / `ThreadUsageResponse.active_ms`（serde default，省略空值）是**活跃时长**
+读数：回合（或整线程）从 `turn_started` 到终态的挂钟时间，扣除停在审批/用户输入门禁上的窗口，
+加计 harness 重试/续跑的回合间退避；由 `ark-server` 的 `ActiveClock` 投影从回合生命周期与门禁
+事件推导（见 `docs/modules/ark-server.md`），`gate_suspensions` 计数被扣除的门禁次数。渲染层不
+自行计时，只消费该字段并在运行中回合上按秒延伸（上限为门禁 `requested_at`）。
+
 `TurnStarted.auto_recovery: u32`（serde default `0`，序列化时省略零值）标记 harness 自动恢复
 回合及其尝试序号：前一个回合因瞬态模型请求失败（`model_request_failed = true`）终结后，恢复调度器
 以同一请求文本重开回合并把 1-based 尝试号写进该字段；普通用户/IM/自动续跑回合保持 `0` 且不出现在

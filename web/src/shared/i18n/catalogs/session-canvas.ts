@@ -26,7 +26,7 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.process.title': ['执行过程', 'Work in progress'],
   'canvas.process.count': ['{count} 步', '{count} steps'],
   'canvas.process.duration': ['耗时 {duration}', '{duration} elapsed'],
-  'canvas.process.durationTitle': ['本回合各次模型调用的实测耗时之和（不含工具执行）', 'Sum of the measured model-call durations in this turn (tool execution excluded)'],
+  'canvas.process.durationTitle': ['本回合活跃时长：从发起到结束的挂钟时间，扣除等你审批/回答的间隔（工具执行、重试、子任务均计入）', 'Active span of this turn: wall clock from start to end minus the waits on your approvals/answers (tool runs, retries and child runs all count)'],
   // Elapsed-time units: the formatter composes them, so no unit word is
   // hardcoded in a component or a pure-Rust/TS helper.
   'canvas.duration.hours': ['{count}时', '{count}h'],
@@ -216,7 +216,7 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.stats.cost': ['费用 {cost}', 'Cost {cost}'],
   'canvas.stats.turnsTitle': ['产生用量的回合数', 'Turns that produced usage'],
   'canvas.stats.roundsTitle': ['已完成模型调用次数', 'Completed model calls'],
-  'canvas.stats.durationTitle': ['各次模型调用的实测耗时之和（不含工具执行）', 'Sum of measured model-call durations (tool execution excluded)'],
+  'canvas.stats.durationTitle': ['会话活跃时长：各回合挂钟时间之和，扣除等你审批/回答的间隔（工具执行、重试、恢复退避、子任务均计入）', "The session's active span: sum of per-turn wall clocks minus the waits on your approvals/answers (tool runs, retries, recovery backoff and child runs all count)"],
   'canvas.stats.cacheTitle': ['供应商报告的提示缓存命中率', 'Provider-reported prompt cache hit rate'],
   'canvas.stats.costTitle': ['供应商报告或运行时核算的费用', 'Provider-reported or runtime-derived cost'],
 
