@@ -353,7 +353,14 @@ describe('items reducer usage and compaction', () => {
       completion_tokens: 1000,
       total_tokens: 10000
     })
-    expect(seeded.usage).toBe(live.usage)
+    // Additive counters keep the live fold (an overwrite would double count
+    // the sample SSE already folded).
+    expect(seeded.usage?.samples).toBe(live.usage?.samples)
+    expect(seeded.usage?.promptTokens).toBe(live.usage?.promptTokens)
+    // But the active span is server-owned: the seed overwrites it, because a
+    // live-first fold can never reconstruct it and null would hide the clock.
+    // The mock seed here carries no active_ms, so the null stays (unknown).
+    expect(seeded.usage?.activeMs).toBeNull()
 
     const fromServer = seedUsage(emptyItemsState(), {
       thread_id: THREAD_ID,
@@ -378,6 +385,24 @@ describe('items reducer usage and compaction', () => {
       lastPromptTokens: null,
       lastRoundTokensPerSec: null
     })
+
+    // The regression behind "耗时不显示": a live `usage` event won the race,
+    // freezing `activeMs` at null; the next HTTP seed must fill it. The
+    // additive counters intentionally keep the live fold (overwriting them
+    // would double count the sample SSE already folded).
+    const backfilled = seedUsage(seeded, {
+      thread_id: THREAD_ID,
+      turns: 3,
+      samples: 9,
+      turn_usage: [],
+      prompt_tokens: 9000,
+      completion_tokens: 1000,
+      total_tokens: 10000,
+      active_ms: 442_467
+    })
+    expect(backfilled.usage?.samples).toBe(live.usage?.samples)
+    expect(backfilled.usage?.promptTokens).toBe(live.usage?.promptTokens)
+    expect(backfilled.usage?.activeMs).toBe(442_467)
   })
 })
 

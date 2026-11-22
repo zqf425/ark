@@ -40,6 +40,11 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
   const streamError = useCodeSessionStore((s) => s.streamError)
   const lastCompaction = useCodeSessionStore((s) => s.lastCompaction)
   const [stats, setStats] = useState<Stats>(EMPTY_STATS)
+  // The seed also back-fills the active-span channel (see `seedUsage`): a live
+  // `usage` event that won the race leaves `activeMs` null, and without this
+  // refresh the strip would never show a clock for the thread.
+  const noteThreadUsage = useCodeSessionStore((s) => s.noteThreadUsage)
+  const noteThreadRounds = useCodeSessionStore((s) => s.noteThreadRounds)
 
   useEffect(() => {
     if (!threadId) {
@@ -54,11 +59,13 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
     void getThreadUsage(threadId, controller.signal).then((usage) => {
       if (controller.signal.aborted) return
       setStats({ owner: threadId, turns: usage.turns, roundsCount: usage.samples })
+      noteThreadUsage(usage)
+      noteThreadRounds(usage)
     }).catch(() => {
       // Keep the last verified numbers: a diagnostics outage is not zero usage.
     })
     return () => controller.abort()
-  }, [threadId, samples])
+  }, [threadId, samples, noteThreadUsage, noteThreadRounds])
 
   if (!threadId) return null
   const visible = stats.owner === threadId ? stats : null
@@ -70,8 +77,6 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
   // from the active turn's anchor; a pending gate freezes it, because the
   // user is thinking and the clock does not run against them.
   const activeTurnId = useCodeSessionStore((s) => s.activeTurnId)
-  const allRounds = useCodeSessionStore((s) => s.rounds)
-  const turnLastEventAt = useCodeSessionStore((s) => (activeTurnId ? s.turnLastEventAt[activeTurnId] ?? null : null))
   // The gate's `requested_at` is the freeze instant: the clock may run up to
   // it, never past it. Earliest pending gate wins (one gate at a time by
   // construction, but the earliest is the safe bound).
@@ -83,11 +88,37 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
     ].filter((ms) => Number.isFinite(ms))
     return stamps.length > 0 ? Math.min(...stamps) : null
   })
+  const turnLastEventAt = useCodeSessionStore((s) => (activeTurnId ? s.turnLastEventAt[activeTurnId] ?? null : null))
   const nowMs = useClockTick(activeTurnId != null)
-  const seedMs = usage?.activeMs ?? null
+  // Total active span, derived from the store's per-turn rows (the seed's
+  // `turn_usage` rows merged with live-only rows). The thread aggregate's
+  // `active_ms` is only a fallback for older stores without per-turn rows:
+  // summing rows handles the running turn directly — a seeded turn extends
+  // from its server span, a live-only turn contributes its live estimate —
+  // which is exactly the "890+ calls showed 2 minutes" fix: the old code
+  // replaced the total with the live estimate alone and dropped the history.
+  const allRounds = useCodeSessionStore((s) => s.rounds)
+  const hasPerTurnRows = allRounds.length > 0
   const liveMs =
     activeTurnId != null ? liveActiveMs(allRounds, activeTurnId, nowMs, turnLastEventAt, gatePendingSince) : null
-  const totalMs = liveMs ?? seedMs ?? 0
+  const seedMs = usage?.activeMs ?? null
+  const totalMs = (() => {
+    if (hasPerTurnRows) {
+      // Sum every turn: settled turns use their server span; the running turn
+      // uses its live estimate (server span + extension, frozen at a gate).
+      let settled = 0
+      let running = 0
+      for (const row of allRounds) {
+        if (row.turnId === activeTurnId) running = liveMs ?? 0
+        else settled += Math.max(0, row.activeMs ?? 0)
+      }
+      return settled + running
+    }
+    // Older fold without per-turn rows: the thread aggregate is all we have,
+    // extended live if a turn is in flight (its span is inside the seed).
+    if (liveMs != null) return Math.max(seedMs ?? 0, liveMs)
+    return seedMs ?? 0
+  })()
   const totalClock = useDurationFormat(totalMs, roundsCount != null && totalMs > 0)
 
   const number = (value: number): string => new Intl.NumberFormat(locale).format(value)

@@ -75,5 +75,5 @@ export const createItemsSlice: StateCreator<ItemsSlice, [], [], ItemsSlice> = (s
 
   noteThreadUsage: (usage) => set(seedUsage(get(), usage)),
 
-  noteThreadRounds: (response) => set({ rounds: roundsFromTurnUsage(response) })
+  noteThreadRounds: (response) => set({ rounds: roundsFromTurnUsage(response, get().rounds) })
 })

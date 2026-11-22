@@ -23,7 +23,13 @@ vi.mock('../api/threads-api', () => ({
       prompt_tokens: 0,
       completion_tokens: 0,
       total_tokens: 0,
-      // 30m 45s: the session's active span across all turns.
+      // 30m 45s: the session's active span across all turns. `turn_usage`
+      // mirrors the same fold per turn, which the seed replays into the
+      // store's rounds channel (overwriting pre-seeded fixtures).
+      turn_usage: [
+        { turn_id: '00000000-0000-0000-0000-000000000001', samples: 1, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, active_ms: 645_000 },
+        { turn_id: '00000000-0000-0000-0000-000000000002', samples: 2, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, active_ms: 1_200_000 }
+      ],
       active_ms: 1_845_000
     })
 }))
@@ -99,13 +105,19 @@ describe('SessionStatsBar total duration format', () => {
     })
 
     const harness = await mountWithProviders(<SessionStatsBar threadId="00000000-0000-0000-0000-0000000000ff" />)
+    // The seed refetch fires after mount; its `turn_usage` knows nothing
+    // about T3, so the live row survives the merge and the two disjoint
+    // spans simply add: 30m45s (seed) + 10m30s (live turn) = 41m15s.
     await vi.waitFor(() => {
       expect(harness.host.textContent).toContain('耗时')
     })
-    expect(harness.host.textContent).toContain('10分30秒')
+    expect(harness.host.textContent).toContain('41分15秒')
 
+    await vi.waitFor(() => {
+      expect(harness.host.textContent).toContain('耗时')
+    })
     // A pending approval freezes the live extension at its requested_at: the
-    // printed clock stays 10分30秒 even as wall time passes.
+    // printed clock stays 41分15秒 even as wall time passes.
     useCodeSessionStore.setState({
       approvals: {
         a1: {
@@ -120,6 +132,45 @@ describe('SessionStatsBar total duration format', () => {
     })
     // Let the 1s tick fire at least twice after the gate appeared.
     await new Promise((resolve) => setTimeout(resolve, 2_100))
-    expect(harness.host.textContent).toContain('10分30秒')
+    expect(harness.host.textContent).toContain('41分15秒')
+  })
+
+  it('keeps the settled history on the clock while a new turn runs', async () => {
+    // The "890+ calls showed 2 minutes" regression: the live estimate covers
+    // only the running turn, and the seed merge keeps live-only rows, so the
+    // total is the sum of every turn's row — settled turns on their server
+    // span, the running turn on its live estimate. Here the mocked seed's
+    // turn_usage does not list T3/T_OLD: 30m45s (seed) + 110min (T_OLD) +
+    // 6min + ~1min live (T3) ≈ 2时27分45秒; jsdom jitter means the exact
+    // seconds vary, so assert the hours/minutes shape only.
+    const T_OLD = '00000000-0000-0000-0000-000000000004'
+    const T3 = '00000000-0000-0000-0000-000000000003'
+    useCodeSessionStore.setState({
+      activeTurnId: T3,
+      turnState: { [T3]: 'running' },
+      rounds: [
+        { turnId: T_OLD, durationMs: 0, activeMs: 110 * 60_000 },
+        { turnId: T3, durationMs: 0, activeMs: 6 * 60_000 }
+      ],
+      turnLastEventAt: { [T3]: Date.now() - 60_000 },
+      usage: {
+        samples: 915,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        costUsd: null,
+        durationMs: 0,
+        activeMs: 116 * 60_000,
+        cacheHitTokens: null,
+        cacheMissTokens: null,
+        lastPromptTokens: null,
+        lastRoundTokensPerSec: null
+      }
+    })
+
+    const harness = await mountWithProviders(<SessionStatsBar threadId="00000000-0000-0000-0000-0000000000ff" />)
+    await vi.waitFor(() => {
+      expect(harness.host.textContent).toContain('耗时 2时27分')
+    })
   })
 })
