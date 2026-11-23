@@ -37,8 +37,14 @@
   持久查看统一由右侧 `ChildRunsPanel` 通过 child-runs API 重新读取。wire 中有界的
   `ThreadDetail.child_completions` 仍可供其他客户端使用，但当前 web 不将其恢复成主画布卡片。
 - 子代理监督只由 `child_activity` 与 `child_completed` 驱动刷新，不能因文本 token delta 重复请求
-  child-runs；排队与运行同样必须显示为用户文案。已决审批和用户输入在当前页面会话中保留为历史
-  卡片。刷新后的待处理 gate 只可来自服务端的 runtime 快照，web 不得从历史 item 猜测仍可提交的 gate id。
+  child-runs；排队与运行同样必须显示为用户文案。已决审批在当前页面会话中保留为历史卡片。用户输入
+  gate 分两种形态：待回答的 pending 卡来自 `userInputs` 门控通道，钉在流末尾（这是活着的“请回答”入口）；
+  已回答的问答是会话历史，渲染为提问回合内的一行折叠摘要（`AnsweredGateRow`，`ark-answeredgate`），
+  锚点是 store 投影里的持久 `user_input` item（`user_input_resolved` 折叠为
+  `keyed_item_id("user_input:{request_id}")`，`status: completed`，`text` 为提问、`detail` 为回答），
+  因此回合结束后流末尾不再堆叠已回答卡，切换会话或刷新后（detail 重建投影）问答记录仍在原回合可见。
+  流末尾只渲染 pending 的用户输入卡（`userInputCards` + pending 过滤）。刷新后的待处理 gate 只可来自
+  服务端的 runtime 快照，web 不得从历史 item 猜测仍可提交的 gate id。
 - detail 返回 `runtime` 时，web 在以 detail watermark 建立 SSE 前将 active turn 和其中的待处理 gate seed
   到本地状态；SSE terminal/resolved 事件仍是后续状态的权威更新。
 - Code 右侧的 Plan、Changes、File、Terminal 均调用服务端 API。`GET /v1/threads/{id}/files` 仍是

@@ -107,6 +107,35 @@ export function userInputCards(view: Pick<ItemsSnapshot, 'userInputs'>): Pending
   return Object.values(view.userInputs).sort((a, b) => Date.parse(a.requested_at) - Date.parse(b.requested_at))
 }
 
+/**
+ * Answered user-input rows anchored into their own turns, in stream order.
+ *
+ * A settled gate is history, not a live control: pinning every answered card
+ * below the newest turn kept a stale "需要你的输入 / 已回答" panel glued to
+ * the bottom forever. The durable transcript already folds the gate into a
+ * `user_input` row inside its turn (ark-store projects `user_input_*` to
+ * `keyed_item_id("user_input:{request_id}")`), so this projection walks
+ * `itemOrder`: the summary renders where the conversation asked the question,
+ * and survives a seed-from-detail just like any other row. Pending gates stay
+ * rendered from `userInputCards` at the stream bottom — they are the live
+ * "answer me" surface. The turn anchor itself is resolved by TurnBlock off its
+ * own `group.items` (memoized turn groups make the per-turn filter O(rows of
+ * that turn) on identity change only); this selector is the canvas-wide
+ * projection for callers that need the anchored rows as a list.
+ */
+export function answeredGateCards(
+  view: ItemView
+): Array<{ turnId: TurnId; itemId: ItemId; item: ThreadItem }> {
+  const cards: Array<{ turnId: TurnId; itemId: ItemId; item: ThreadItem }> = []
+  for (const itemId of view.itemOrder) {
+    const item = view.itemsById[itemId]
+    if (item && item.kind === 'user_input' && item.status === 'completed') {
+      cards.push({ turnId: item.turn_id, itemId, item })
+    }
+  }
+  return cards
+}
+
 /** True while any item still streams — used to disable send and show a caret. */
 export function hasLiveItems(view: ItemView): boolean {
   return view.itemOrder.some((itemId: ItemId) => {

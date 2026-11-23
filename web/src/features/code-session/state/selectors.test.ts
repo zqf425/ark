@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { approvalCards, groupByTurn, hasLiveItems, splitInheritedPrefix, userInputCards } from './selectors'
+import { answeredGateCards, approvalCards, groupByTurn, hasLiveItems, splitInheritedPrefix, userInputCards } from './selectors'
 import { emptyItemsState } from './items-reducer'
 
 describe('gate card selectors', () => {
@@ -31,6 +31,41 @@ describe('gate card selectors', () => {
 
     expect(userInputCards(state)).toHaveLength(1)
     expect(userInputCards(state)[0]?.answer).toBe('main')
+  })
+
+  it('anchors completed user_input items into their own turns, in stream order', () => {
+    const TURN_A = '00000000-0000-0000-0000-00000000000a'
+    const TURN_B = '00000000-0000-0000-0000-00000000000b'
+    const GATE_A = '00000000-0000-0000-0000-0000000000g1'
+    const GATE_B = '00000000-0000-0000-0000-0000000000g2'
+    const state = emptyItemsState()
+    state.itemOrder = [GATE_A, GATE_B]
+    state.itemsById = {
+      [GATE_A]: {
+        item_id: GATE_A,
+        turn_id: TURN_A,
+        kind: 'user_input',
+        status: 'completed',
+        created_at: '2026-10-28T00:00:00Z',
+        text: 'pick a branch',
+        detail: 'main'
+      },
+      [GATE_B]: {
+        item_id: GATE_B,
+        turn_id: TURN_B,
+        kind: 'user_input',
+        // A gate still waiting for its answer must not render as history.
+        status: 'streaming',
+        created_at: '2026-10-28T00:00:01Z',
+        text: 'pick a tag'
+      }
+    }
+
+    const cards = answeredGateCards(state)
+    expect(cards).toHaveLength(1)
+    expect(cards[0]?.turnId).toBe(TURN_A)
+    expect(cards[0]?.item.text).toBe('pick a branch')
+    expect(cards[0]?.item.detail).toBe('main')
   })
 })
 

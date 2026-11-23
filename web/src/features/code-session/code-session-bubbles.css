@@ -497,3 +497,88 @@
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--ark-accent-dim);
 }
+
+/* ---------- answered input-gate summary row ---------- */
+
+/*
+ * One collapsed line per answered user-input gate, anchored into its turn
+ * (see AnsweredGateRow). Quiet by design: the settled Q&A is history, so the
+ * row borrows the folded-summary language of ark-foldedtools rather than the
+ * live gate card's attention-drawing shell. Expansion reveals the verbatim
+ * prompt and answer.
+ */
+.ark-answeredgate {
+  border: 1px dashed var(--ark-border-muted);
+  border-radius: var(--ark-radius);
+  background: var(--ark-card-soft);
+  font-size: 12px;
+  transition: border-color 120ms ease;
+}
+
+.ark-answeredgate:hover,
+.ark-answeredgate[open] {
+  border-style: solid;
+  border-color: var(--ark-border);
+}
+
+.ark-answeredgate__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--ark-text-dim);
+  list-style: none;
+  min-width: 0;
+}
+
+/* The native marker duplicates the custom chevron; keep only ours. */
+.ark-answeredgate__head::-webkit-details-marker {
+  display: none;
+}
+
+.ark-answeredgate__chevron {
+  flex: none;
+  font-size: 10px;
+  color: var(--ark-text-faint);
+  transition: transform 120ms ease;
+}
+
+.ark-answeredgate[open] .ark-answeredgate__chevron {
+  transform: rotate(90deg);
+}
+
+.ark-answeredgate__label {
+  flex: none;
+  color: var(--ark-ok);
+}
+
+.ark-answeredgate__preview {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.ark-answeredgate__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 12px 10px;
+}
+
+.ark-answeredgate__question,
+.ark-answeredgate__answer {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12.5px;
+}
+
+.ark-answeredgate__question {
+  color: var(--ark-text-dim);
+}
+
+.ark-answeredgate__answer {
+  color: var(--ark-ok);
+}

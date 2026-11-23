@@ -160,7 +160,15 @@ export function ThreadStream({
     [groups]
   )
   const approvals = useMemo(() => approvalCards({ approvals: approvalsById }), [approvalsById])
+  // The live gate channel renders only *pending* prompts at the stream bottom.
+  // Answered ones are conversation history: they anchor into their own turn
+  // (TurnBlock renders the durable `user_input` item as one collapsed summary
+  // row) where the question was asked, so the bottom never accumulates a stack
+  // of settled "需要你的输入" cards, and the answer survives a thread switch
+  // (detail seed rebuilds it from the durable row) instead of vanishing with
+  // the in-memory channel.
   const userInputs = useMemo(() => userInputCards({ userInputs: userInputsById }), [userInputsById])
+    .filter((request) => request.status === 'pending')
   const live = useMemo(() => hasLiveItems(visibleItemView), [visibleItemView])
 
   const { scrollRef, contentRef, atBottom, scrollToBottom } = useStickToBottom(threadId)

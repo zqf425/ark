@@ -40,6 +40,7 @@ import {
 import { threadWritePaths } from '../tool-file'
 import { useEchoSafeToggle } from './use-echo-safe-toggle'
 import { UserBubble, AssistantBubble, FinalReplyCard, ReasoningBlock } from './MessageBubble'
+import { AnsweredGateRow } from './AnsweredGateRow'
 import { ToolCard } from './ToolCard'
 import { ErrorRow, NoticeRow, ToolResultRow } from './ErrorRow'
 import { describeError } from '../../../shared/api/error-describe'
@@ -302,6 +303,13 @@ export const TurnBlock = memo(function TurnBlock({
   // turn settles, so a finished turn always folds down to its answer.
   const { open, onToggle } = useEchoSafeToggle(live)
   const userText = userTextOfTurn(group)
+  // Answered input gates of this turn, folded into one quiet summary row under
+  // the answer. Keyed by phase: a row opened mid-run closes when the turn
+  // settles, where the answer is the newest row anyway.
+  const answeredGates = useMemo(
+    () => group.items.filter((item) => item.kind === 'user_input' && item.status === 'completed'),
+    [group.items]
+  )
 
   return (
     <div className="ark-turn" id={`ark-turn-${group.turnId}`}>
@@ -369,6 +377,11 @@ export const TurnBlock = memo(function TurnBlock({
             writablePaths={writtenPaths}
             turnMs={process.length === 0 ? activeMs ?? turnMs : undefined}
           />
+        </ErrorBoundary>
+      ))}
+      {answeredGates.map((item) => (
+        <ErrorBoundary key={`${live ? 'running' : 'settled'}-${item.item_id}`} label={t('thread.canvas.boundaryRow')}>
+          <AnsweredGateRow item={item} />
         </ErrorBoundary>
       ))}
       <ErrorBoundary label={t('thread.canvas.boundaryRewind')}>
