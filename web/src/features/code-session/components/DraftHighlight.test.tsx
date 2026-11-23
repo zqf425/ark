@@ -64,6 +64,29 @@ describe('DraftHighlight', () => {
     expect(harness.host.querySelectorAll('.ark-mention')).toHaveLength(1)
   })
 
+  it('进行中的 token 位于草稿中间时保留后文且渲染结束', async () => {
+    const text = '前文 /pd 后文'
+    harness = await mountWithProviders(
+      <DraftHighlight text={text} skills={SKILLS} token={{ start: 3, end: 6, query: 'pd' }} />
+    )
+    expect(harness.host.querySelector('.ark-mention--typing')?.textContent).toBe('/pd')
+    expect(harness.text()).toBe(`${text}\u200b`)
+  })
+
+  it('已完成提及之前的分段不影响后续 token 的全局坐标', async () => {
+    const text = '/pdf 完成，再跑 /ku 后文'
+    const start = text.indexOf('/ku')
+    harness = await mountWithProviders(
+      <DraftHighlight text={text} skills={SKILLS} token={{ start, end: start + 3, query: 'ku' }} />
+    )
+    const chips = harness.host.querySelectorAll('.ark-mention')
+    expect(chips).toHaveLength(2)
+    expect(chips[0]?.textContent).toBe('/pdf')
+    expect(chips[1]?.textContent).toBe('/ku')
+    expect(chips[1]?.classList.contains('ark-mention--typing')).toBe(true)
+    expect(harness.text()).toBe(`${text}\u200b`)
+  })
+
   it('芯片文字逐字等于 token,镜像芯片不渲染图标', async () => {
     harness = await mountWithProviders(
       <DraftHighlight text="/kun-new-session 跑一下" skills={SKILLS} token={null} />

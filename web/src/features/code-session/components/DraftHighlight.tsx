@@ -44,39 +44,34 @@ export const DraftHighlight = memo(function DraftHighlight({
 }): JSX.Element | null {
   if (!text) return null
   const segments = skills && skills.length > 0 ? splitSkillMentions(text, skills) : [{ kind: 'text' as const, value: text }]
+  let segmentStart = 0
 
   return (
     <div className="ark-composer__editor-font ark-composer__highlight" aria-hidden="true">
       {segments.map((segment, index) => {
+        const start = segmentStart
+        const end = start + segment.value.length
+        segmentStart = end
         if (segment.kind === 'mention') {
           return <MirrorMention key={`m-${index}-${segment.value}`} value={segment.value} typing={false} />
         }
-        // Plain text may still contain the open token; chip it when present.
-        if (token && segment.value.length > token.start) {
-          const parts: JSX.Element[] = []
-          let cursor = 0
-          let offset = 0
-          // Walk the segment, splitting at token bounds relative to the draft.
-          while (cursor < segment.value.length) {
-            const segStartGlobal = offset
-            const segEndGlobal = offset + (segment.value.length - cursor)
-            if (segEndGlobal > token.start && segStartGlobal < token.end) {
-              const before = segment.value.slice(cursor, Math.max(0, token.start - segStartGlobal))
-              if (before) parts.push(<span key={`t-${index}-${parts.length}`}>{before}</span>)
-              const overlapStart = Math.max(cursor, token.start - segStartGlobal)
-              const overlapEnd = Math.min(segment.value.length, token.end - segStartGlobal)
-              const overlap = segment.value.slice(overlapStart, overlapEnd)
-              if (overlap) {
-                parts.push(<MirrorMention key={`k-${index}-${parts.length}`} value={overlap} typing />)
-              }
-              cursor = overlapEnd
-            } else {
-              const until = segEndGlobal <= token.start ? segment.value.length - cursor : token.start - segStartGlobal
-              parts.push(<span key={`t-${index}-${parts.length}`}>{segment.value.slice(cursor, cursor + until)}</span>)
-              cursor += until
-            }
-          }
-          return <span key={`s-${index}`}>{parts}</span>
+        // The token uses draft-global offsets while this segment is local. A
+        // direct three-way split guarantees progress and keeps text after a
+        // token in the middle of the draft; the previous cursor loop could
+        // remain forever at token.end and freeze the WebKit main thread.
+        if (token && token.start < end && token.end > start) {
+          const tokenStart = Math.max(0, token.start - start)
+          const tokenEnd = Math.min(segment.value.length, token.end - start)
+          const before = segment.value.slice(0, tokenStart)
+          const overlap = segment.value.slice(tokenStart, tokenEnd)
+          const after = segment.value.slice(tokenEnd)
+          return (
+            <span key={`s-${index}`}>
+              {before}
+              {overlap ? <MirrorMention value={overlap} typing /> : null}
+              {after}
+            </span>
+          )
         }
         return <span key={`s-${index}`}>{segment.value}</span>
       })}
