@@ -274,6 +274,7 @@ impl AgentTurnRunner {
         let plan = ark_server::plan(&self.store.replay_events(job.thread_id, 0).await?);
         let thread = self.store.get_thread(job.thread_id).await?;
         let (source_text, user_text) = turn_source_texts(&job.source);
+        let user_text = without_duplicate_recovery_text(&job.source, &history, user_text);
         let workspace = self.workspace_for_runtime(&thread.runtime)?;
         let snapshot = self.config.snapshot();
         let gates = gate_broker_for_turn(
@@ -497,14 +498,64 @@ impl AgentTurnRunner {
 
 /// Split the turn source into the skill-resolution text and the user message
 /// text (an auto-continuation has neither; an IM message behaves like explicit
-/// user input — requirements/im-channels.md). A recovery re-persists the
-/// failed request's text, so it behaves like explicit user input.
+/// user input — requirements/im-channels.md). A recovery resends the failed
+/// request's text, so it behaves like explicit user input for skill resolution
+/// and for the model request; whether it also becomes a durable user row is
+/// decided by [`without_duplicate_recovery_text`].
 fn turn_source_texts(source: &TurnSource) -> (String, Option<String>) {
     match source {
         TurnSource::User(text) | TurnSource::Scheduled(text) => (text.clone(), Some(text.clone())),
         TurnSource::Im { text, .. } => (text.clone(), Some(text.clone())),
         TurnSource::AutoRecovery { text, .. } => (text.clone(), Some(text.clone())),
         TurnSource::AutoContinuation => (String::new(), None),
+    }
+}
+
+/// Drop a recovery turn's user text when it would repeat the request that is
+/// already the last row of the replayed history.
+///
+/// A recovery is a *resumption* of a request the thread already carries: the
+/// failed turn persisted the user message before its model call died, and
+/// `conversation_history` replays it. Re-pushing the same text as the new
+/// turn's opening row made every attempt add a second, identical user bubble
+/// to the transcript and a second identical `User` message to the model seed —
+/// one retyped request looked like N requests (a real thread showed the same
+/// question four times, once per attempt). The model-visible request is
+/// unchanged either way: the retry only ever needed the text once.
+///
+/// The suppression is deliberately narrow:
+/// * only a *recovery* is affected — a user, IM or scheduled turn always
+///   persists its message, because the user may legitimately repeat a text;
+/// * the trailing history row must be that user message, i.e. the request was
+///   never answered. A trailing assistant/tool row means the previous request
+///   already completed and this text is a new repetition, so it persists;
+/// * attachment previews ride the message content but not the item text, so a
+///   row that equals the text or opens with `text\n` counts as present.
+///
+/// Anything else — a rewind that dropped the row, a fork cut mid-turn — still
+/// persists the text, keeping the recovery a true resumption.
+pub(super) fn without_duplicate_recovery_text(
+    source: &TurnSource,
+    history: &[ark_ports::ModelMessage],
+    user_text: Option<String>,
+) -> Option<String> {
+    let TurnSource::AutoRecovery { text, .. } = source else {
+        return user_text;
+    };
+    let duplicated = history.last().is_some_and(|message| {
+        if message.role != ark_ports::ModelRole::User {
+            return false;
+        }
+        message.content == *text
+            || message
+                .content
+                .strip_prefix(text.as_str())
+                .is_some_and(|rest| rest.starts_with('\n'))
+    });
+    if duplicated {
+        None
+    } else {
+        user_text
     }
 }
 

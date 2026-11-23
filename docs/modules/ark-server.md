@@ -49,7 +49,10 @@
   或 sandbox，也不会写入伪用户消息。
 - 回合因模型请求失败（`model_request_failed`，网关抖动/断流/流超时）终结时，`service::recovery`
   调度自动恢复：以同一请求文本（`TurnSource::AutoRecovery`）重开回合，退避 5s/10s/20s，最多 3 次；
-  尝试号写入 `turn_started.auto_recovery`，恢复回合先写一条 Notice 说明自动重试原因。连续模型失败达
+  尝试号写入 `turn_started.auto_recovery`，恢复回合先写一条 Notice 说明自动重试原因。恢复是**续跑**
+  而非新请求：失败回合已把用户消息落盘并在重放历史末尾出现，`arkd` 组合根据此不再重复 `push_user_message`
+  （见 [arkd](arkd.md)），因此一个用户请求在会话流里只有一条用户气泡，恢复只追加 Notice 与 Error 行。
+  连续模型失败达
   `RECOVERY_MODEL_FAILURE_STREAK_LIMIT`（与 continuation 熔断同值）即暂停该线程恢复，任何用户回合或
   非模型终态重置计数；日志不可读时 fail-closed。工具/策略失败与预算耗尽的失败保持终态，仍由用户决定
   是否重发——恢复只覆盖"请求是好的、通道是坏的"这一种形态。

@@ -79,6 +79,16 @@ per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启
 不调用 `push_user`，因此不会伪造用户消息；其 provider、workspace、预算、sandbox 和 gates 与普通父回合
 走同一路径。
 
+自动恢复（`TurnSource::AutoRecovery`）同样复用 `AgentTurnRunner`，但它重发的是**线程里已有的请求**：
+失败回合在模型调用死掉前已经把用户消息落盘，`conversation_history` 会把它重放为末尾 `User` 行。
+因此组合根在 `prepare_parent_turn` 里先经 `without_duplicate_recovery_text` 判断：若重放历史以该请求
+文本结尾（完全相等，或以 `文本\n` 开头——附件预览拼在消息 content 但不是 item 文本），就**不再**
+`push_user_message`，恢复回合只写 Notice 与 `turn_started.auto_recovery`。否则每次尝试都会多出一条
+重复的用户气泡（实测一个线程里同一问题出现 4 次，即 1 次原始 + 3 次恢复），模型种子也会多出一条
+重复 `User` 消息。抑制条件刻意收窄：只作用于恢复；末尾行必须是该用户消息（已被回答则说明这是一次新的
+重复发言，仍要落盘）；历史里没有该文本（rewind/fork 截断）时仍落盘，保证恢复是真续跑。用户、IM、
+Scheduled 回合永不去重。
+
 父回合使用 `InteractiveGates`，该实例同时注入 `AppState` 的 HTTP handler 与 `AgentTurnRunner` 的
 `ReactorConfig`。仅 `serve` 的显式 `TurnSource::User` 直接使用它；headless `run` 的所有回合，以及
 `serve` 中的 `TurnSource::Scheduled`、`TurnSource::Im`、`AutoContinuation`、`AutoRecovery`，在每回合

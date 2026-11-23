@@ -73,9 +73,10 @@ pub enum TurnSource {
     AutoContinuation,
     /// Harness recovery: the previous turn died on a transient model-request
     /// failure and the supervisor is retrying the same request automatically.
-    /// Carries the failed request's text (re-persisted as the user message, so
-    /// the retry is a true resumption) and the 1-based attempt number written
-    /// onto the durable `turn_started`.
+    /// Carries the failed request's text and the 1-based attempt number written
+    /// onto the durable `turn_started`. The text reseeds the model request but
+    /// is not re-persisted as a second user message when the replay already
+    /// ends with it (the failed turn wrote it), so one request stays one bubble.
     AutoRecovery { text: String, attempt: u32 },
 }
 

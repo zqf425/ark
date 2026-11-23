@@ -4,7 +4,7 @@ use super::history::conversation_history;
 use super::tools::{build_child_tools, build_tools};
 use super::turns::{
     abort_interrupted_turns, completion_inbox, finish_parent_turn, gate_broker_for_turn,
-    gates_for_turn, user_message_with_attachments,
+    gates_for_turn, user_message_with_attachments, without_duplicate_recovery_text,
 };
 use super::*;
 
@@ -774,6 +774,103 @@ fn user_message_carries_previews_in_content_and_images_in_parts() {
     let plain = user_message_with_attachments("hello".into(), &Default::default());
     assert!(plain.images.is_empty());
     assert_eq!(plain.content, "hello");
+}
+
+/// A recovery turn must not re-persist a request the thread already carries.
+///
+/// The failed turn wrote the user message before its model call died, and the
+/// replay hands it back as the trailing `User` row. Pushing the same text again
+/// made one question render once per attempt (a real thread: the same question
+/// four times) and duplicated it in the model seed.
+#[test]
+fn recovery_skips_the_user_text_the_history_already_ends_with() {
+    let source = TurnSource::AutoRecovery {
+        text: "为什么同一条消息反复出现".into(),
+        attempt: 1,
+    };
+    let history = vec![ModelMessage::user("为什么同一条消息反复出现")];
+
+    assert_eq!(
+        without_duplicate_recovery_text(&source, &history, Some(source_text_for(&source))),
+        None
+    );
+}
+
+/// An attachment preview rides the message content but not the item text, so
+/// the trailing row is `request\n[attachment ...]`. That is still the same
+/// request and must not be re-persisted as a second bubble.
+#[test]
+fn recovery_treats_a_preview_suffixed_trailing_row_as_the_same_request() {
+    let source = TurnSource::AutoRecovery {
+        text: "look at this".into(),
+        attempt: 2,
+    };
+    let history = vec![ModelMessage::user("look at this\n[attachment: a.png]")];
+
+    assert_eq!(
+        without_duplicate_recovery_text(&source, &history, Some("look at this".into())),
+        None
+    );
+}
+
+/// The suppression is narrow: a request the model already answered is a new
+/// repetition when the user sends it again, and a recovery whose row was cut
+/// (rewind/fork) must still persist the text or the retry would answer nothing.
+#[test]
+fn recovery_still_persists_text_the_history_does_not_hold() {
+    let source = TurnSource::AutoRecovery {
+        text: "same words".into(),
+        attempt: 1,
+    };
+
+    let answered = vec![
+        ModelMessage::user("same words"),
+        ModelMessage::assistant("an answer"),
+    ];
+    assert_eq!(
+        without_duplicate_recovery_text(&source, &answered, Some("same words".into())),
+        Some("same words".into())
+    );
+
+    let empty: Vec<ModelMessage> = Vec::new();
+    assert_eq!(
+        without_duplicate_recovery_text(&source, &empty, Some("same words".into())),
+        Some("same words".into())
+    );
+}
+
+/// Only a recovery is deduplicated: a user, IM or scheduled turn always
+/// persists its message, because the user may legitimately repeat a text and
+/// the transcript must show every send.
+#[test]
+fn explicit_turns_always_persist_their_user_text() {
+    let history = vec![ModelMessage::user("again")];
+    let sources = [
+        TurnSource::User("again".into()),
+        TurnSource::Scheduled("again".into()),
+        TurnSource::Im {
+            channel_id: "c".into(),
+            chat_id: "chat".into(),
+            text: "again".into(),
+        },
+    ];
+    for (index, source) in sources.iter().enumerate() {
+        assert_eq!(
+            without_duplicate_recovery_text(source, &history, Some("again".into())),
+            Some("again".into()),
+            "explicit source #{index} must keep its user row"
+        );
+    }
+}
+
+fn source_text_for(source: &TurnSource) -> String {
+    match source {
+        TurnSource::AutoRecovery { text, .. }
+        | TurnSource::User(text)
+        | TurnSource::Scheduled(text)
+        | TurnSource::Im { text, .. } => text.clone(),
+        TurnSource::AutoContinuation => String::new(),
+    }
 }
 
 #[test]

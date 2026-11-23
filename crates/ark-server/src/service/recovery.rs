@@ -11,8 +11,10 @@
 //! Policy:
 //! * only `model_request_failed` terminations schedule a recovery — tool,
 //!   policy and panic failures stay terminal;
-//! * the same request text is re-persisted as the user message, so the retry
-//!   is a true resumption (the old attempt's durable trail stays intact);
+//! * the same request text is resent, so the retry is a true resumption (the
+//!   old attempt's durable trail stays intact). The failed turn already
+//!   persisted that user message, so the recovery runner suppresses the
+//!   duplicate re-persist and the transcript keeps one bubble per request;
 //! * attempts follow [`RECOVERY_DELAYS`]; each attempt is written onto the
 //!   durable `turn_started` via `auto_recovery`, so the log shows how much
 //!   automatic work one user request consumed;
