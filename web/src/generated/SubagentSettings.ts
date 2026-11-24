@@ -10,7 +10,8 @@
 export type SubagentSettings = { enabled: boolean, max_concurrency: number, 
 /**
  * Start a parent continuation after background child completions.
- * Disabled by default because enabling it permits additional model calls.
+ * Enabled by default so delegated work is synthesized without another
+ * user prompt; disabling it leaves completions in the notification inbox.
  */
 auto_continue: boolean, 
 /**

@@ -70,10 +70,10 @@ JSON 里。消费方据此区分"用户发的消息"与"harness 重放的上一�
 `TuningSettings` 的首次启动默认值是 `max_rounds=1000`、`max_tokens=0`（不限）和
 `max_tool_calls=1000`；它是设置页面与运行时配置的共享 wire 基线，其余字段保持类型定义的默认值。
 
-`SubagentSettings.auto_continue` 是显式 opt-in 的 wire 配置，serde default 为 `false`，保证旧配置不会
-产生额外模型调用；Rust 生成的 TypeScript 使用同名 snake_case 字段。
-`SubagentSettings.default_background` 的 serde default 为 `true`：缺省旧配置保持"委派不阻塞主会话"
-的默认行为，而不是回落到阻塞等待的前台派发。
+`SubagentSettings.auto_continue` 的 serde default 为 `true`，默认及旧配置缺失值都会在后台 child 完成后
+启动父 continuation，无需用户再次输入；显式 `false` 保留仅通知模式。Rust 生成的 TypeScript 使用同名
+snake_case 字段。`SubagentSettings.default_background` 的 serde default 同样为 `true`：缺省旧配置保持
+“委派不阻塞主会话”的默认行为，而不是回落到阻塞等待的前台派发。
 
 后台子代理终态使用 `child_completed` 事件传递稳定 `notification_id`、状态、摘要/错误和用量；
 消费者按通知 ID 去重，不得把 child 的完整原始转录复制到父线程。父回合正常完成后以

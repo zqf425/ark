@@ -6,6 +6,8 @@
 > `127.0.0.1:18791` 而阻塞，按第 2 节不得停掉用户进程制造条件，故不宣称完成。
 > 尚需真实模型行为才能触发的交互（steer/中断、审批与输入闸门、子代理全生命周期、
 > 自动续跑批次、四个右侧面板、会话级覆盖）如实标注为未覆盖，见「验收记录 D」。
+> 默认后台委派与 `auto_continue` 默认开启已由单元测试覆盖，但本次默认值变化尚未重新执行真实模型与
+> 浏览器验收；历史「默认关闭」证据只证明开关往返，不代表当前默认行为已经复验。
 > 本需求只承接真实交互、桌面冷启动与全仓质量问题，不重复已经完成的功能开发。
 
 ## 目标
@@ -22,7 +24,9 @@
 - 定时任务真实交互：设置页创建定时任务→到点自动运行→设置页查看最近结果并打开生成线程；含启停开关与「立即运行」的失败路径（总开关关闭/任务停用/运行中冲突 409）；
 - 普通回合发送、运行中 steer、中断，以及审批和用户输入 gate 的成功、重复、过期和取消路径；
 - 子代理前台/后台启动、排队、完成、失败、abort、steer、resume、摘要跳转和用量展示；
-- `subagents.auto_continue` 默认关闭时不产生额外模型调用；显式开启后，多个完成通知合并、每批最多 8 条、正常确认后继续排空，中断/归档/删除/关闭配置后不再自动续跑；
+- 子代理默认后台委派与 `subagents.auto_continue` 默认开启：显式用户输入应把实质任务交给后台 child，
+  完成后无需用户再次提示即自动汇总；关闭 auto-continue 时不产生额外模型调用。多个完成通知合并、每批最多
+  8 条、正常确认后继续排空，中断/归档/删除/关闭配置后不再自动续跑；
 - Plan、Changes、File、Terminal 的真实数据、空态、错误态与刷新恢复；
 - runtime tuning、会话级 workspace/provider/model/权限覆盖、provider 模型目录、MCP、Skills、语言/字号/主题的保存、生效和失败提示；
 - SSE 断线重连、页面刷新和线程切换后，活动回合及待处理 gate 与服务端状态一致。
@@ -85,7 +89,7 @@ Playwright Chromium 驱动真实页面，结论取自真实 HTTP 状态码与真
 | SSE 空 backlog 首帧 | 通过（修复后首帧 2.4ms；修复前 75s 零字节） | `release-browser-run3/EVIDENCE-sse-first-frame.md` |
 | 空闲线程不再周期性误重连 | 通过（修复后 95s 内订阅数恒为 1） | `release-browser-run3/EVIDENCE-idle-reconnect-fixed.md` |
 | 设置页 runtime tuning 与子 agent 投影 | 通过 | `release-browser-run3/EVIDENCE-settings-runtime.md` |
-| `subagents.auto_continue` 默认关闭与开关往返 | 通过（含服务端热更新） | `release-browser-run3/EVIDENCE-auto-continue-toggle.md` |
+| `subagents.auto_continue` 开关往返 | 历史默认关闭场景通过；当前默认开启待复验 | `release-browser-run3/EVIDENCE-auto-continue-toggle.md` |
 | provider / Skills / MCP 真实数据与空态 | 通过 | `release-browser-run3/EVIDENCE-settings-{providers-empty,skills,mcp}.md` |
 
 期间发现并修复的两个产品缺陷（均经 DSH 修复、回归测试与 Claude 只读检视闭环）：

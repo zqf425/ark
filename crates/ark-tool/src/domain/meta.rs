@@ -49,7 +49,7 @@ pub const TOOL_METAS: [ToolMeta; 13] = [
     },
     ToolMeta {
         name: "delegate_task",
-        description: "Hand one bounded sub-task to a child run and read its final answer",
+        description: "Delegate one bounded sub-task to a child run; background dispatch returns a child id and delivers the final answer through a completion notice, while foreground dispatch waits for the answer",
         // Delegation itself writes nothing: the child's own tools carry their
         // own sandbox decisions, and the runtime enforces the concurrency budget.
         baseline: SandboxDecision::ReadOnly,

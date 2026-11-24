@@ -292,7 +292,12 @@ impl AgentTurnRunner {
             .await?;
         let sandbox = self.sandbox_for_runtime(&thread.runtime, &snapshot)?;
         let tools = self.tools_for_job(job, &workspace);
-        let seed = self.parent_seed(&workspace, history, &source_text, inbox, &plan);
+        let delegation = super::turn_common::delegation_policy_message(
+            self.unattended,
+            &job.source,
+            &snapshot.subagents,
+        );
+        let seed = self.parent_seed(&workspace, history, &source_text, inbox, &plan, delegation);
         let provider = resolve_thread_provider(
             &self.providers,
             thread.runtime.provider_id.as_deref(),
@@ -464,8 +469,8 @@ impl AgentTurnRunner {
     }
 
     /// Assemble the parent turn's seed: static prefix, replayed history, then
-    /// the dynamic tail (skills, project instructions, memory, completion
-    /// inbox, thread plan).
+    /// the dynamic tail (skills, project instructions, delegation policy,
+    /// memory, completion inbox, thread plan).
     ///
     /// Only the static prefix may enter the prompt cache; everything after it
     /// changes between turns, so it must stay out of the prefix. The plan is
@@ -477,12 +482,16 @@ impl AgentTurnRunner {
         source_text: &str,
         inbox: &CompletionInbox,
         plan: &ark_contract::PlanView,
+        delegation: Option<ModelMessage>,
     ) -> Vec<ModelMessage> {
         let resolution = self.skills.resolve_for_turn(source_text);
         let mut seed_messages = super::turn_common::seed_prefix(workspace);
         seed_messages.extend(history);
         seed_messages.extend(super::turn_common::skill_tail(&resolution, true));
         super::turn_common::push_project_instructions(workspace, &mut seed_messages);
+        if let Some(message) = delegation {
+            seed_messages.push(message);
+        }
         if let Some(message) = crate::memory_seed::seed_for_turn(self.memory.as_ref()) {
             seed_messages.push(message);
         }

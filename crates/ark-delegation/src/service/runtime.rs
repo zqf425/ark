@@ -252,7 +252,7 @@ impl DelegationRuntime {
 
     /// Create the child session and its `queued` record.
     pub async fn prepare(&self, request: SubagentRequest) -> Result<PreparedChild> {
-        self.core.prepare(request).await
+        self.core.prepare(request, true).await
     }
 
     /// Run a prepared child to a terminal state under a runtime-owned supervisor.
@@ -268,7 +268,7 @@ impl DelegationRuntime {
     /// already completed, still active — is decided here and surfaces as an
     /// error, so the client never gets an accepted-but-doomed resume.
     pub async fn prepare_child(&self, request: SubagentRequest) -> Result<ChildId> {
-        let mut prepared = self.core.prepare(request).await?;
+        let mut prepared = self.core.prepare(request, true).await?;
         let child_id = prepared.record.child_id;
         // Claim the parked slot first. Installing the handle only for the winner
         // keeps a rejected duplicate from replacing the control tokens of a run
@@ -306,14 +306,14 @@ impl DelegationRuntime {
     /// Dropping this caller only drops the oneshot receiver. The supervisor and
     /// worker remain owned by Tokio and still persist a terminal record.
     pub async fn delegate(&self, request: SubagentRequest) -> Result<SubagentOutcome> {
-        let prepared = self.core.prepare(request).await?;
+        let prepared = self.core.prepare(request, false).await?;
         self.await_supervised(self.start_supervised(prepared)).await
     }
 
     /// Start a detached child and return only after its durable queued record and
     /// control handle both exist.
     pub async fn delegate_background(&self, request: SubagentRequest) -> Result<ChildId> {
-        let prepared = self.core.prepare(request).await?;
+        let prepared = self.core.prepare(request, true).await?;
         let child = prepared.record.child_id;
         drop(self.start_supervised(prepared));
         Ok(child)

@@ -36,6 +36,9 @@ cursor }`，端口自有的落盘类型，同 `ThreadMeta` 先例，不进 ts_ex
   语义必须保持一致，任何水位/backlog 语义变更必须同时评估两者。
 - `SessionStore::replay_child_completion_events` 只返回 `child_completed` 与
   `child_completion_acknowledged`，供收件箱和线程详情投影使用；不得为此克隆完整转录事件历史。
+- `ChildRunRecord.notify_parent` 是端口持久化字段，不是 wire 类型：后台派发与 HTTP resume 为 `true`，
+  同步前台派发为 `false`，旧记录缺失时默认 `true`。它决定终态能否进入父 completion inbox，不能只放在
+  进程内 `PreparedChild` 上，否则 hydrate 会把已同步返回的结果再次补投给父会话。
 - `SessionStore::replay_interaction_events` 只返回 turn 起止与 approval/user-input 生命周期，供 detail 恢复
   使用；是否仍可操作必须再由进程内 `InteractiveGates` waiter 快照判断。
 - `SessionStore::replay_attachment_events` 只返回 `attachment_associated`，是线程详情投影、回合起点授权与

@@ -349,7 +349,9 @@
   不把 provider、MCP 或 runtime 配置逻辑回流到 Code 会话状态或 `ark-agent`。
 - 运行调优参数按运行时语义分组呈现（回合与 token / 工具保护 / 上下文与压缩 / 流式传输 /
   权限档位），wire 键保持 `TuningSettings` 不变；子代理文案同样对齐（启用子 Agent 委派、单会话并行
-  子 Agent 上限）。设置页新增只读「插件与能力」section：`GET /v1/runtime/capabilities`（能力 pills 与
+  子 Agent 上限）。`SubagentSection` 直接展示运行时 `auto_continue` 与 `default_background` 值，两者默认均为
+  `true`；中英文说明明确主会话默认后台委派并自动汇总，关闭 auto-continue 后只保留通知、等待用户再次
+  输入，不在前端另算默认策略。设置页新增只读「插件与能力」section：`GET /v1/runtime/capabilities`（能力 pills 与
   页面/面板目录计数）、`GET /v1/runtime/plugins`（插件贡献与失败/跳过警示）、`GET /v1/runtime/tools`
   （该路由在 Rust 侧仍是未建模 JSON，前端经 `web-only.ts` 的视图类型渲染，Rust 建模后应迁移到生成
   类型）。`/v1/runtime/tuning` 与 `/v1/runtime/model-providers` 是运行时的 501 占位路由，不是缺口。

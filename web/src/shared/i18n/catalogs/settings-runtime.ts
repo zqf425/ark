@@ -56,11 +56,11 @@ export const SETTINGS_RUNTIME_MESSAGES = {
 
   'settings.subagents.title': ['子 Agent', 'Subagents'],
   'settings.subagents.descLoading': ['并行子 agent 的开关与并发上限。', 'The switch and concurrency limit for parallel subagents.'],
-  'settings.subagents.description': ['并行子 agent、并发上限与后台完成后的自动续跑。', 'Parallel subagents, concurrency limits, and automatic continuation after background completion.'],
+  'settings.subagents.description': ['主会话默认将实质任务委派给后台子代理，保留交互并在完成后自动汇总。', 'Substantive work is delegated to background subagents by default; the main session stays interactive and synthesizes their results automatically.'],
   'settings.subagents.enabledLabel': ['启用子 Agent 委派', 'Enable subagent delegation'],
   'settings.subagents.toggleHint': ['开关切换即保存。', 'Toggling saves immediately.'],
   'settings.subagents.autoContinue.label': ['子代理完成后自动续跑', 'Auto-continue after a child completes'],
-  'settings.subagents.autoContinue.hint': ['默认关闭；开启后会产生额外模型调用。', 'Off by default; enabling it permits additional model calls.'],
+  'settings.subagents.autoContinue.hint': ['默认开启：后台子代理完成后会自动唤醒主会话汇总；关闭后仅保留完成通知，需你再次输入。', 'On by default: completed background children wake the main session to synthesize their results; disabling it keeps completion notices until you send another input.'],
   'settings.subagents.autoContinue.enabled': ['开启自动续跑', 'Enable automatic continuation'],
   'settings.subagents.autoContinue.disabled': ['关闭自动续跑', 'Disable automatic continuation'],
   'settings.subagents.autoContinue.runtime': ['当前自动续跑值', 'Current auto-continue value'],

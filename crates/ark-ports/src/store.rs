@@ -79,6 +79,18 @@ pub struct ChildRunRecord {
     /// How many times this run was resumed on its original session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_count: Option<u32>,
+    /// Whether completion must enter the parent inbox. Foreground results are
+    /// returned directly to the waiting turn and must not schedule another one.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub notify_parent: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 impl ChildRunRecord {
@@ -108,6 +120,7 @@ impl ChildRunRecord {
             usage: None,
             tool_invocations: None,
             resume_count: None,
+            notify_parent: true,
         }
     }
 

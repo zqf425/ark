@@ -23,9 +23,10 @@ HTTP 配置与子代理配置保存都回写该路径。`AppState::new` 默认�
 
 `default_autonomy` 是未设置会话覆盖时使用的 `Hot` 全局默认值。它只接受 `strict`、`workspace_write` 或向后兼容的 `unattended`；非法 patch 会被事务性拒绝，不得静默回退。
 
-`subagents.auto_continue` 是 `Hot` 布尔开关，默认及旧配置缺失值均为 `false`。仅当
+`subagents.auto_continue` 是 `Hot` 布尔开关，默认及旧配置缺失值均为 `true`。仅当
 `subagents.enabled` 与 `subagents.auto_continue` 同时为 `true` 时，server 才扫描持久 completion inbox
-并调度符合条件的父线程；关闭任一开关会立即取消进程内待调度 continuation，不影响已开始回合。
+并调度符合条件的父线程；关闭任一开关会立即取消进程内待调度 continuation，不影响已开始回合。默认开启意味着
+后台 child 完成后会产生额外的父模型调用用于汇总，用户可在设置页显式关闭。
 
 `approvals` 配置节整体为 `Hot`：规则表和 `on_unattended` 都在每个父回合入口从同一当前快照读取，
 只影响后续回合。`serve` 的显式 User 回合使用交互 gate；headless、Scheduled、IM、自动 continuation 与

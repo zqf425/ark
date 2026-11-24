@@ -757,7 +757,24 @@ async fn child_activity_events_are_published_on_the_parent_stream() {
         "the parent stream must carry the child lifecycle"
     );
 }
-
+#[tokio::test]
+async fn a_foreground_child_returns_its_result_without_a_completion_notification() {
+    let harness = harness_async(FakeExecutor::new("foreground report"), (true, 2, 4)).await;
+    let outcome = harness
+        .runtime
+        .delegate(harness.request("wait for the answer"))
+        .await
+        .unwrap();
+    assert_eq!(outcome.summary.as_deref(), Some("foreground report"));
+    assert!(!harness.latest(outcome.child_id).await.notify_parent);
+    harness.runtime.hydrate().await.unwrap();
+    let events = SessionStore::replay_events(&*harness.store, harness.parent, 0)
+        .await
+        .unwrap();
+    assert!(!events
+        .iter()
+        .any(|event| event.kind().as_str() == "child_completed"));
+}
 #[tokio::test]
 async fn a_background_child_publishes_a_terminal_completion_notification() {
     let harness = harness_async(FakeExecutor::new("final report"), (true, 2, 4)).await;
