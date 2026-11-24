@@ -1,5 +1,5 @@
 /**
- * Subagent section: enabled, concurrency, and explicit auto-continue opt-in.
+ * Subagent section: background dispatch, concurrency, and auto-continuation.
  *
  * The runtime hard-limits concurrency to 1–8; the input is clamped here too so
  * the user sees the limit instead of a rejected save. A `rejected` answer is
@@ -24,7 +24,7 @@ export function SubagentSection({ settings }: { settings: SettingsApi }): JSX.El
   const toast = useToast()
   const { config, saving, save } = settings
   const [enabled, setEnabled] = useState(false)
-  const [autoContinue, setAutoContinue] = useState(false)
+  const [autoContinue, setAutoContinue] = useState(true)
   const [defaultBackground, setDefaultBackground] = useState(true)
   const [concurrency, setConcurrency] = useState('2')
   const [rejection, setRejection] = useState<{ reason: string; restartRequired: string[] } | null>(null)

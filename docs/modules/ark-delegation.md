@@ -12,8 +12,8 @@
 
 派发模式默认不阻塞主会话：`subagents.default_background`（Hot，默认 `true`）让 `delegate_task`
 在模型未显式传 `background` 时走 `delegate_background`，父回合立即继续；完成摘要经持久
-`child_completed` 通知与收件箱回传父线程。模型显式 `background: false` 或恢复路径仍保持前台
-等待结果契约；该默认只改派发入口，不改变并发预算、记录与取消语义。
+`child_completed` 通知与收件箱回传父线程。模型显式 `background: false` 保持前台等待结果契约，
+HTTP resume 仍走后台结果通道。该默认只改派发入口，不改变并发预算、记录与取消语义。
 
 ## 分层上下文压缩
 
@@ -31,11 +31,14 @@
 父回合中断不代表子任务被遗弃：运行时必须显式取消子任务、等待/兜底落终态。队列满、执行失败、
 持久化异常都只影响该子任务，不得毒化后续队列。
 
-终态记录写入后，运行时向父线程发布带稳定通知 ID 的 `child_completed` 事件，供 SSE/UI 和后续
-主线程收件箱消费。hydrate 会补发缺失通知，但去重探针只经 `replay_child_completion_events` 的窄
-投影扫描父线程的完成词汇（`child_completed`/`child_completion_acknowledged`），既避免重复投递，
-也避免为匹配一个事件克隆整条转录。事件持久化成功后还会向进程内 broadcast 通道发送父 thread id；
-该通道只负责唤醒 server supervisor，丢失或 lag 时由持久 inbox 扫描恢复，不能成为通知真源。
+`ChildRunRecord.notify_parent` 持久化结果回传模式：后台派发和 HTTP resume 为 `true`，同步前台派发为
+`false`；旧记录缺省按 `true` 恢复。只有 `notify_parent=true` 的后台终态记录写入后，运行时才向父线程
+发布带稳定通知 ID 的 `child_completed` 事件，供 SSE/UI 和后续主线程收件箱消费。前台最终答案已经由
+工具结果返回当前父模型，不再进入 completion inbox，避免重复汇总。hydrate 会补发缺失通知，但去重探针只经
+`replay_child_completion_events` 的窄投影扫描父线程的完成词汇（`child_completed`/
+`child_completion_acknowledged`），既避免重复投递，也避免为匹配一个事件克隆整条转录。事件持久化成功后
+还会向进程内 broadcast 通道发送父 thread id；该通道只负责唤醒 server supervisor，丢失或 lag 时由持久
+inbox 扫描恢复，不能成为通知真源。
 
 ## 验证
 

@@ -71,7 +71,11 @@ impl RuntimeCore {
     ///
     /// This is the only place a child id is minted, so depth policy, directory
     /// creation and the first log record can never drift apart.
-    pub(super) async fn prepare(&self, request: SubagentRequest) -> Result<PreparedChild> {
+    pub(super) async fn prepare(
+        &self,
+        request: SubagentRequest,
+        notify_parent: bool,
+    ) -> Result<PreparedChild> {
         let policy = self.policy.policy();
         if !policy.enabled {
             return Err(ArkError::new(
@@ -88,7 +92,9 @@ impl RuntimeCore {
 
         // Resume path: continue an interrupted run on its original session.
         if let Some(child_id) = request.resume_child_id {
-            return self.prepare_resume(child_id, request, prompt, policy).await;
+            return self
+                .prepare_resume(child_id, request, prompt, policy, notify_parent)
+                .await;
         }
 
         let child_id = ChildId::new();
@@ -113,6 +119,7 @@ impl RuntimeCore {
         record.model = request.model.clone();
         record.provider_id = request.provider_id.clone();
         record.autonomy = request.autonomy.clone();
+        record.notify_parent = notify_parent;
         self.store.append_child_run(record.clone()).await?;
         self.lock_known().insert(child_id, record.clone());
         self.publish_activity(&record).await;
@@ -130,6 +137,7 @@ impl RuntimeCore {
         request: SubagentRequest,
         prompt: String,
         policy: SubagentPolicy,
+        notify_parent: bool,
     ) -> Result<PreparedChild> {
         // Claim the resume atomically. Every resume reads `known`, so doing the
         // "not active" check and inserting the new `queued` record under one
@@ -166,6 +174,7 @@ impl RuntimeCore {
             record.summary = None;
             record.resume_count = Some(resume_count);
             record.prompt = Some(prompt.clone());
+            record.notify_parent = notify_parent;
             // Reserve before the awaited append: `known` now reports `queued`.
             known.insert(child_id, record.clone());
             (existing, record)
@@ -399,7 +408,7 @@ impl RuntimeCore {
     /// parent can receive an actionable notification without reading the child
     /// transcript. The id is stable across a retry of the same run state.
     async fn publish_completion(&self, record: &ChildRunRecord) {
-        if record.is_active() {
+        if record.is_active() || !record.notify_parent {
             return;
         }
         // `children/runs.jsonl` is the authority: only announce a terminal

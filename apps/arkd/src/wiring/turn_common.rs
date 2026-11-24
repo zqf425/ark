@@ -43,6 +43,40 @@ pub(crate) fn skill_tail(
     messages
 }
 
+/// Parent-only policy for explicit interactive input.
+///
+/// It belongs to the dynamic tail: putting it in the shared prefix would change
+/// child prompt-cache bytes and tell a child to use a tool it does not have.
+/// Headless and system-origin turns stay out so shutdown cannot orphan a child
+/// and completion notifications cannot trigger another delegation loop.
+pub(crate) fn delegation_policy_message(
+    unattended: bool,
+    source: &TurnSource,
+    settings: &ark_contract::SubagentSettings,
+) -> Option<ModelMessage> {
+    if unattended || !settings.enabled || !settings.default_background {
+        return None;
+    }
+    if !matches!(
+        source,
+        TurnSource::User(_) | TurnSource::Im { .. } | TurnSource::AutoRecovery { .. }
+    ) {
+        return None;
+    }
+    Some(ModelMessage::system(
+        "[delegation policy]\n\
+         For substantive coding, investigation, or multi-step execution, delegate the work \
+         to background subagents by default. Call `delegate_task` without a `background` \
+         override (or with `background: true`), and split independent work into parallel \
+         child tasks. Keep the main session responsible for planning, user communication, \
+         and final synthesis; acknowledge delegated work briefly and do not repeat it. \
+         Handle simple conversation, clarification, and trivial lookups directly. Use \
+         foreground delegation only when the user explicitly requires a blocking result. \
+         Treat child completion notifications as results to synthesize, not as new tasks \
+         to delegate again.",
+    ))
+}
+
 /// Canonicalize an explicit or inherited workspace override, or fall back.
 ///
 /// `explicit` (a per-session override) wins over `inherited` (the parent's

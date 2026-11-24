@@ -39,8 +39,9 @@
 - `/v1/shutdown`、Ctrl-C 和任务 panic 走同一收敛流程：先阻止新的 completion wakeup，再取消待调度
   continuation 与活动回合，等待有限时间、落终态并清理 registry。
 - 后台 child 的持久 `child_completed` 成功写入后会唤醒 per-thread continuation supervisor。
-  `subagents.auto_continue` 默认关闭；仅当它与 `subagents.enabled` 同时开启时，同一父线程 250 ms 内的
-  通知共享一个可取消 debounce，关闭任一开关会立即取消待调度 continuation。
+  `subagents.auto_continue` 默认开启；仅当它与 `subagents.enabled` 同时开启时，同一父线程 250 ms 内的
+  通知共享一个可取消 debounce，关闭任一开关会立即取消待调度 continuation。默认开启会使后台完成产生
+  额外父模型调用用于汇总，显式关闭才回到仅通知模式。
   `turn.pre_start` 钩子在取 `workspace_gate` 之前调用（回调可能回打受保护路由，持 gate await 会自死锁）；
   钩子拒绝则该自动续跑不排程。取 gate 后复核 active turn、归档/删除、shutdown、配置和未确认 inbox。中断、删除、
   归档会取消并抑制迟到 wakeup；下一次显式用户回合或取消归档解除抑制，中断抑制还会从父线程持久终态

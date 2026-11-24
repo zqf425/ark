@@ -247,7 +247,7 @@ fn admin(tools: &mut Vec<McpToolDoc>) {
             "Hot-update subagent settings (same ApplyResult semantics as config_apply).",
             "POST",
             "/v1/subagents/config",
-            json!({ "body": dto_body("SubagentSettings (auto_continue defaults to false and must be explicit opt-in)") }),
+            json!({ "body": dto_body("SubagentSettings (auto_continue and default_background default to true; set either false to disable automatic synthesis or non-blocking dispatch)") }),
             &["body"],
         ),
         tool(

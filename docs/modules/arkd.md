@@ -208,9 +208,16 @@ gate 按回合来源选择：交互 User 回合注入 `InteractiveGates`；无�
 项目指令文件（[需求设计](../requirements/project-instructions.md)）由
 `ark-workspace::project_instructions_seed`（唯一发现与截断宿主）在回合生效工作区根按
 `AGENTS.md` → `CLAUDE.md` → `README.md` 优先级取第一个命中文件，读为**动态尾部的一条
-`[project instructions]` system 消息**（父路径在 skills 之后、memory 之前；子路径在角色行之后、
+`[project instructions]` system 消息**（父路径在 skills 之后、委派策略与 memory 之前；子路径在角色行之后、
 skill tail 之前）。不进入静态前缀（工作区相关文本会破坏 prompt-cache 字节稳定不变量）；
 读取失败、非 UTF-8、空文件按未命中处理并记 warn；UTF-8 字节数限 32 KiB，按字符边界截断。
+
+默认委派策略由 `delegation_policy_message` 按运行时模式、`TurnSource` 与当回合 `SubagentSettings`
+快照映射为一条 `[delegation policy]` 动态 system 消息：仅 `serve` 的 User、IM、AutoRecovery 且子代理启用、
+`default_background=true` 时注入。它要求实质编码、调查和多步骤执行默认后台委派，主会话保留计划、沟通与
+最终汇总；简单对话和微小查询直接处理。headless、Scheduled、AutoContinuation、禁用子代理与关闭默认后台
+均不注入。该消息位于项目指令之后、memory 与 completion inbox 之前，绝不进入父/子共享静态前缀，也不
+出现在 child seed 中，因此既保持 prompt-cache 字节稳定，也不会诱导没有 `delegate_task` 的 child 再次委派。
 
 持久计划（goal + todos）同样走动态尾部：`run_turn` 每回合从线程事件流重投影 `PlanView`
 （`ark_server::plan`），经 `history::plan_seed_message` 以

@@ -184,8 +184,9 @@ pub struct SubagentSettings {
     #[ts(as = "f64")]
     pub max_concurrency: u32,
     /// Start a parent continuation after background child completions.
-    /// Disabled by default because enabling it permits additional model calls.
-    #[serde(default)]
+    /// Enabled by default so delegated work is synthesized without another
+    /// user prompt; disabling it leaves completions in the notification inbox.
+    #[serde(default = "default_true")]
     pub auto_continue: bool,
     /// Dispatch `delegate_task` in the background unless the model explicitly
     /// passes `background: false` (requirements/background-subagent-completion).
@@ -196,8 +197,8 @@ pub struct SubagentSettings {
     pub default_background: bool,
 }
 
-/// serde default for `default_background`: absent legacy values keep the
-/// non-blocking behaviour instead of falling back to a blocking parent turn.
+/// serde default for the background delegation switches: absent legacy values
+/// keep the non-blocking dispatch and automatic result synthesis behaviour.
 fn default_true() -> bool {
     true
 }
@@ -245,7 +246,7 @@ impl Default for SubagentSettings {
         Self {
             enabled: true,
             max_concurrency: 2,
-            auto_continue: false,
+            auto_continue: true,
             default_background: true,
         }
     }
@@ -433,10 +434,14 @@ mod tests {
     }
 
     #[test]
-    fn auto_continue_is_disabled_by_default_and_for_legacy_json() {
-        assert!(!SubagentSettings::default().auto_continue);
+    fn auto_continue_is_enabled_by_default_and_for_legacy_json() {
+        assert!(SubagentSettings::default().auto_continue);
         let settings: SubagentSettings =
             serde_json::from_str(r#"{"enabled":true,"max_concurrency":2}"#).unwrap();
-        assert!(!settings.auto_continue);
+        assert!(settings.auto_continue);
+        let disabled: SubagentSettings =
+            serde_json::from_str(r#"{"enabled":true,"max_concurrency":2,"auto_continue":false}"#)
+                .unwrap();
+        assert!(!disabled.auto_continue);
     }
 }

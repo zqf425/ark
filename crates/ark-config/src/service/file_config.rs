@@ -218,7 +218,7 @@ mod tests {
 
         assert_eq!(config, RuntimeConfig::default());
         assert_eq!(config.subagents.max_concurrency, 2);
-        assert!(!config.subagents.auto_continue);
+        assert!(config.subagents.auto_continue);
         assert!(logs.contains("WARN"), "expected a warning line: {logs}");
         assert!(logs.contains("config.json does not fully match"), "{logs}");
         assert!(logs.contains("defaulted=[port, data_dir"), "{logs}");

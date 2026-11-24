@@ -36,6 +36,8 @@
   `background` 参数优先；缺省时读取注入的 `SubagentPolicySource` 的 `default_background`（Hot，
   对应 `subagents.default_background`，默认开启=后台派发）；未注入策略源时保持前台默认。
   恢复（`resumeChildId`，优先级高于 `background`）始终走前台结果契约；两者均复用同一端口边界。
+  后台派发立即返回 child id，最终答案经完成通知回传；前台与工具恢复直接返回最终答案，不发布父 completion
+  通知，避免同一结果再次触发自动汇总。
 - `request_user_input` 是无法独立执行的门面工具：schema 为 `{"prompt": string, required}`，
   `execute` 返回结构化错误；生产执行路径永远不会走到它，因为 agent 在派发前拦截该调用并交给用户输入 gate。
 - `web_fetch`（需求见 [web-fetch-tool](../requirements/web-fetch-tool.md)）只消费注入的
