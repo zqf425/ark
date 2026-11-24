@@ -3,6 +3,7 @@
 pub mod checkpoint;
 pub mod completion;
 pub mod hygiene;
+pub mod replay;
 pub mod token;
 
 pub use checkpoint::ContextCheckpoint;
@@ -12,7 +13,12 @@ pub use completion::{
     RECOVERY_MODEL_FAILURE_STREAK_LIMIT,
 };
 pub use hygiene::{HistoryHygiene, HygieneReport};
+pub use replay::model_history;
 pub use token::TokenEstimator;
+
+#[cfg(test)]
+#[path = "checkpoint_evidence_tests.rs"]
+mod checkpoint_evidence_tests;
 
 #[cfg(test)]
 mod checkpoint_tests {

@@ -33,7 +33,7 @@ use crate::service::ImService;
 pub const SHUTDOWN_CANCEL_REASON: &str = ark_common::CancelReason::Shutdown.as_durable_str();
 
 mod turn_registry;
-pub use turn_registry::TurnRegistry;
+pub use turn_registry::{CompactionReservation, TurnRegistry};
 
 /// Terminal outcome a turn run reported (design §7.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -566,6 +566,31 @@ mod tests {
             .try_register(thread, TurnId::new(), CancelToken::new())
             .is_none());
         assert_eq!(registry.active_for(thread).unwrap().turn_id, first);
+    }
+
+    #[test]
+    fn compaction_reservation_excludes_turns_and_releases_on_drop() {
+        let registry = Arc::new(TurnRegistry::new());
+        let thread = ThreadId::new();
+        let reservation = registry
+            .reserve_compaction(thread)
+            .expect("idle thread accepts compaction");
+        assert!(registry
+            .try_register(thread, TurnId::new(), CancelToken::new())
+            .is_none());
+        assert!(registry.reserve_compaction(thread).is_none());
+        drop(reservation);
+        assert!(registry
+            .try_register(thread, TurnId::new(), CancelToken::new())
+            .is_some());
+    }
+
+    #[test]
+    fn active_turn_cannot_be_manually_compacted() {
+        let registry = Arc::new(TurnRegistry::new());
+        let thread = ThreadId::new();
+        registry.try_register(thread, TurnId::new(), CancelToken::new());
+        assert!(registry.reserve_compaction(thread).is_none());
     }
 
     #[test]

@@ -14,6 +14,9 @@
 - 路径归一化的唯一实现为 `ark_common::path::normalize`；其它 crate 和前端不得复制逻辑。
 - Windows `canonicalize` 产生的 verbatim 前缀由 `ark_common::path::strip_verbatim` 在归一化入口统一移除；盘符和 UNC 路径均以非 verbatim 形式参与比较。
 - 文本写入必须 UTF-8 无 BOM，原子写入由 `write_text_atomic` 完成。
+- `context::compaction_threshold` 是 provider 压缩阈值算术的唯一宿主：先以饱和减法预留
+  `max_output_tokens`，再按 80% 计算，极小窗口至少返回 1。`ark-llm` 与 `ark-server` 手动压缩
+  都调用它，不得在调用方复制比例公式。
 - `ArkErrorCode` 是错误码的唯一枚举，`http_status` 紧跟枚举定义，使得新增一个 code 时必须同时决定
   它的传输状态码，不可能只加变体不加状态：`ValidationError` 400、`Unauthorized` 401、`NotFound` 404、
   `Conflict` 409、`ModelRequestFailed` 502、`ToolExecutionFailed` 500、`RuntimeUnavailable` 503、

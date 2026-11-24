@@ -125,7 +125,7 @@ pub async fn compact(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let thread_id = parse_thread(&id)?;
-    match crate::service::ensure_checkpoint(&state.store, thread_id).await? {
+    match crate::service::ensure_checkpoint(&state, thread_id).await? {
         crate::service::CompactionOutcome::Created {
             turn_id,
             checkpoint,
@@ -282,6 +282,44 @@ mod tests {
         .await
         .expect_err("a foreign thread must not read another thread's turn");
         assert_eq!(error.0.code, ark_common::ArkErrorCode::NotFound);
+    }
+
+    #[tokio::test]
+    async fn manual_compaction_conflicts_with_an_active_turn() {
+        let dir = test_dir();
+        let state = state(dir.path(), Arc::new(CountingRunner(AtomicUsize::new(0))));
+        let thread = state.store.create_thread("compact").await.expect("thread");
+        state
+            .turns
+            .try_register(thread.thread_id, TurnId::new(), CancelToken::new())
+            .expect("active turn");
+
+        let error = compact(State(state), Path(thread.thread_id.to_string()))
+            .await
+            .expect_err("manual compaction must not race a turn");
+
+        assert_eq!(error.0.code, ark_common::ArkErrorCode::Conflict);
+    }
+
+    #[tokio::test]
+    async fn manual_compaction_persists_a_marked_checkpoint() {
+        let dir = test_dir();
+        let state = state(dir.path(), Arc::new(CountingRunner(AtomicUsize::new(0))));
+        let thread = state.store.create_thread("compact").await.expect("thread");
+
+        let response = compact(State(state.clone()), Path(thread.thread_id.to_string()))
+            .await
+            .expect("idle thread compacts");
+        assert!(response.0["checkpoint"]
+            .as_str()
+            .expect("checkpoint text")
+            .starts_with("[context checkpoint"));
+        let items = state
+            .store
+            .read_items(thread.thread_id)
+            .await
+            .expect("items");
+        assert!(items.iter().any(|item| item.is_context_checkpoint()));
     }
 
     #[test]

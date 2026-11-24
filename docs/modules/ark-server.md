@@ -36,6 +36,11 @@
 - `workspace_gate` 是全进程串行启动门，锁内只做注册表变更与必要的轻量存在性检查，不得 await
   磁盘 I/O 或全量事件回放。附件授权（`authorize_turn_attachments`，回放整段事件日志）在取锁前
   完成；`get_thread` 单文件存在性检查与删除路由共用同一 gate，保留在锁内以避免删除竞态。
+- 手动 `/compact` 在 gate 内通过 `TurnRegistry::reserve_compaction` 预留线程压缩位，活动回合或已有
+  压缩预留时返回 `Conflict`；预留同时阻止新回合与第二次压缩，随后释放 gate，全量历史读取、checkpoint
+  生成和持久 Notice 写入均在磁盘 I/O 期间不持 gate。RAII 守卫在成功、错误和取消路径都释放预留。
+  手动路径复用 `ark_agent::model_history` 与 checkpoint 提取规则，并按当前 provider 阈值限制 checkpoint；
+  下一回合的完整请求预算仍由自动压缩按实际工具 schema 和动态 seed 计算。
 - `/v1/shutdown`、Ctrl-C 和任务 panic 走同一收敛流程：先阻止新的 completion wakeup，再取消待调度
   continuation 与活动回合，等待有限时间、落终态并清理 registry。
 - 后台 child 的持久 `child_completed` 成功写入后会唤醒 per-thread continuation supervisor。

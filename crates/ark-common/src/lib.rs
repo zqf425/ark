@@ -9,6 +9,7 @@
 pub mod autonomy;
 pub mod cancel;
 pub mod child_run;
+pub mod context;
 pub mod encoding;
 pub mod error;
 pub mod ids;
@@ -20,6 +21,7 @@ pub mod usage;
 pub use autonomy::Autonomy;
 pub use cancel::CancelReason;
 pub use child_run::ChildRunStatus;
+pub use context::compaction_threshold;
 pub use encoding::{
     decode, decode_to_string, read_json_file, read_json_file_opt, read_text, read_text_file,
     read_text_opt, strip_bom_bytes, strip_bom_str, try_stream_utf8_lines, utf8_bytes_no_bom,

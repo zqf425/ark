@@ -1,4 +1,4 @@
-use ark_ports::{ModelMessage, ModelRole};
+use ark_ports::{ModelMessage, ModelRole, ToolCallRef};
 
 /// Prefix every generated checkpoint starts with. `ModelMessage` carries no
 /// marker field, so identity at the in-memory layer is this prefix *combined
@@ -9,6 +9,7 @@ pub(crate) const CHECKPOINT_PREFIX: &str = "[context checkpoint";
 
 const MAX_USER_LINE_CHARS: usize = 240;
 const MAX_FAILURE_LINE_CHARS: usize = 240;
+const MAX_TOOL_EVIDENCE_CHARS: usize = 240;
 const MAX_SECTION_LINES: usize = 40;
 /// How many of the oldest `[user requests]` lines survive when the section
 /// overflows its quota. The earliest request carries the thread's original
@@ -41,6 +42,8 @@ pub struct ContextCheckpoint {
     identifiers: Vec<String>,
     /// Failure evidence: errors, rejected attempts, stack-trace lines.
     failures: Vec<String>,
+    /// Bounded typed evidence from tool calls and their results.
+    tool_evidence: Vec<String>,
 }
 
 impl ContextCheckpoint {
@@ -75,11 +78,59 @@ impl ContextCheckpoint {
             // over every line. A dedicated Tool arm processed the same text a
             // second time and double-counted every tool error (rendered
             // `(repeated x4)` for two occurrences, review S2's root cause).
+            for call in &message.tool_calls {
+                push_bounded(
+                    &mut out.tool_evidence,
+                    tool_call_evidence(call),
+                    MAX_TOOL_EVIDENCE_CHARS,
+                );
+            }
+            if message.role == ModelRole::Tool {
+                if let Some(evidence) = tool_result_evidence(message) {
+                    push_bounded(&mut out.tool_evidence, evidence, MAX_TOOL_EVIDENCE_CHARS);
+                }
+            }
             for identifier in identifiers_in(text) {
                 push_unique(&mut out.identifiers, identifier);
             }
         }
         out
+    }
+
+    /// Extract a chained checkpoint without recounting the prior retained tail.
+    ///
+    /// A checkpoint is persisted after the current tail, so that tail must be
+    /// represented in the checkpoint even though it remains verbatim in memory.
+    /// The rendered retained-tail count and fingerprint let the next boundary
+    /// skip those same raw rows only when they are actually present. A replayed
+    /// turn starts after the checkpoint, so its new rows must never be skipped.
+    pub fn from_compaction_history(messages: &[ModelMessage]) -> Self {
+        let Some(index) = messages.iter().rposition(is_generated_checkpoint) else {
+            return Self::from_messages(messages);
+        };
+        let retained = checkpoint_retained_tail(messages[index].content.as_str());
+        let suffix = &messages[index + 1..];
+        let retained_rows: Vec<&ModelMessage> = suffix
+            .iter()
+            .filter(|message| message.role != ModelRole::System)
+            .take(retained.map_or(0, |(count, _)| count))
+            .collect();
+        let skip = retained.filter(|(count, fingerprint)| {
+            retained_rows.len() == *count
+                && retained_tail_fingerprint(retained_rows.iter().copied()) == *fingerprint
+        });
+        let mut source = vec![messages[index].clone()];
+        let mut tail_rows = 0usize;
+        for message in suffix {
+            if message.role != ModelRole::System {
+                tail_rows += 1;
+                if skip.is_some_and(|(count, _)| tail_rows <= count) {
+                    continue;
+                }
+            }
+            source.push(message.clone());
+        }
+        Self::from_messages(&source)
     }
 
     /// Build structured facts from durable text rows. Also used by the manual
@@ -133,6 +184,7 @@ impl ContextCheckpoint {
                     section = CheckpointSection::Entries;
                 }
                 "[failed attempts - do not repeat]" => section = CheckpointSection::Failures,
+                "[tool evidence]" => section = CheckpointSection::ToolEvidence,
                 "[remembered identifiers]" => section = CheckpointSection::Identifiers,
                 _ if line.starts_with('[') && line.ends_with(']') => {
                     section = CheckpointSection::None;
@@ -179,6 +231,13 @@ impl ContextCheckpoint {
                                 push_failure(&mut self.failures, content, MAX_FAILURE_LINE_CHARS);
                             }
                         }
+                        (CheckpointSection::ToolEvidence, Some(content)) => {
+                            push_bounded(
+                                &mut self.tool_evidence,
+                                content.to_owned(),
+                                MAX_TOOL_EVIDENCE_CHARS,
+                            );
+                        }
                         (CheckpointSection::Identifiers, Some(content)) => {
                             push_unique(&mut self.identifiers, content.to_owned());
                         }
@@ -202,6 +261,9 @@ impl ContextCheckpoint {
         for line in other.failures {
             push_failure(&mut self.failures, &line, MAX_FAILURE_LINE_CHARS);
         }
+        for line in other.tool_evidence {
+            push_bounded(&mut self.tool_evidence, line, MAX_TOOL_EVIDENCE_CHARS);
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -209,6 +271,7 @@ impl ContextCheckpoint {
             && self.identifiers.is_empty()
             && self.user_lines.is_empty()
             && self.failures.is_empty()
+            && self.tool_evidence.is_empty()
     }
 
     /// Extract the durable plan rows (the `Goal:` line and the `- [ ]`/`- [~]`/`- [x]`
@@ -318,6 +381,15 @@ impl ContextCheckpoint {
                     .map(|line| format!("- {line}")),
             );
         }
+        if !self.tool_evidence.is_empty() {
+            lines.push("[tool evidence]".to_string());
+            lines.extend(
+                self.tool_evidence
+                    .iter()
+                    .take(MAX_SECTION_LINES)
+                    .map(|line| format!("- {line}")),
+            );
+        }
         if !self.identifiers.is_empty() {
             lines.push("[remembered identifiers]".to_string());
             lines.extend(
@@ -376,6 +448,7 @@ impl ContextCheckpoint {
         const USER: &str = "[user requests]";
         const ENTRIES: &str = "[goals / constraints / decisions]";
         const FAILURES: &str = "[failed attempts - do not repeat]";
+        const TOOL_EVIDENCE: &str = "[tool evidence]";
         const IDENTIFIERS: &str = "[remembered identifiers]";
         let mut lines = Vec::new();
         for line in self.bounded_user_lines() {
@@ -386,6 +459,9 @@ impl ContextCheckpoint {
         }
         for failure in self.failures.iter().take(MAX_SECTION_LINES) {
             lines.push((FAILURES, format!("- {failure}")));
+        }
+        for evidence in self.tool_evidence.iter().take(MAX_SECTION_LINES) {
+            lines.push((TOOL_EVIDENCE, format!("- {evidence}")));
         }
         for identifier in self.identifiers.iter().take(MAX_SECTION_LINES) {
             lines.push((IDENTIFIERS, format!("- {identifier}")));
@@ -424,6 +500,7 @@ enum CheckpointSection {
     UserRequests,
     Entries,
     Failures,
+    ToolEvidence,
     Identifiers,
 }
 
@@ -565,11 +642,72 @@ fn bump_failure_count(entry: &mut String) {
     *entry = format!("{text} (repeated x{})", count.max(1) + 1);
 }
 
-fn push_bounded(vec: &mut Vec<String>, value: String, max_chars: usize) {
-    if value.chars().count() > max_chars || vec.contains(&value) {
-        return;
+fn tool_call_evidence(call: &ToolCallRef) -> String {
+    const KEYS: [&str; 7] = ["path", "file", "command", "query", "url", "pattern", "cwd"];
+    let mut args = Vec::new();
+    for key in KEYS {
+        let Some(value) = call.arguments.get(key) else {
+            continue;
+        };
+        let text = match value {
+            serde_json::Value::String(value) => value.clone(),
+            serde_json::Value::Bool(value) => value.to_string(),
+            serde_json::Value::Number(value) => value.to_string(),
+            _ => continue,
+        };
+        args.push(format!("{key}={}", truncate_middle(&text, 80)));
+        if args.len() == 4 {
+            break;
+        }
     }
-    vec.push(value);
+    if args.is_empty() {
+        call.name.clone()
+    } else {
+        format!("{}({})", call.name, args.join(", "))
+    }
+}
+
+fn tool_result_evidence(message: &ModelMessage) -> Option<String> {
+    let name = truncate_middle(message.name.as_deref().unwrap_or("tool"), 80);
+    let summary = message
+        .content
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?;
+    if is_failure_line(summary) {
+        return None;
+    }
+    let budget = MAX_TOOL_EVIDENCE_CHARS
+        .saturating_sub(name.chars().count() + 9)
+        .max(1);
+    Some(format!(
+        "{name} result: {}",
+        truncate_middle(summary, budget)
+    ))
+}
+
+fn truncate_middle(value: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() <= max_chars {
+        return value.to_string();
+    }
+    let marker = "[... truncated ...]";
+    if max_chars <= marker.chars().count() {
+        return marker.chars().take(max_chars).collect();
+    }
+    let head = max_chars / 4;
+    let tail = max_chars - head - marker.chars().count();
+    let mut out: String = chars[..head].iter().collect();
+    out.push_str(marker);
+    out.extend(chars[chars.len() - tail..].iter());
+    out
+}
+
+fn push_bounded(vec: &mut Vec<String>, value: String, max_chars: usize) {
+    let value = truncate_middle(&value, max_chars);
+    if !vec.contains(&value) {
+        vec.push(value);
+    }
 }
 
 /// The todo title behind one plan line, for last-wins folding: a `Goal:` line
@@ -728,6 +866,39 @@ fn identifiers_in(text: &str) -> Vec<String> {
 
 pub(crate) fn is_generated_checkpoint(message: &ModelMessage) -> bool {
     message.role == ModelRole::System && message.content.starts_with(CHECKPOINT_PREFIX)
+}
+
+fn checkpoint_retained_tail(text: &str) -> Option<(usize, u64)> {
+    text.lines().find_map(|line| {
+        let value = line
+            .strip_prefix("[retained tail already summarized: ")?
+            .strip_suffix(']')?;
+        let (count, fingerprint) = value.split_once("; fingerprint: ")?;
+        Some((
+            count.parse().ok()?,
+            u64::from_str_radix(fingerprint, 16).ok()?,
+        ))
+    })
+}
+
+pub(crate) fn retained_tail_fingerprint<'a>(
+    messages: impl IntoIterator<Item = &'a ModelMessage>,
+) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for message in messages {
+        let bytes = serde_json::to_vec(message).expect("model messages serialize");
+        hash = fingerprint_bytes(hash, &(bytes.len() as u64).to_le_bytes());
+        hash = fingerprint_bytes(hash, &bytes);
+    }
+    hash
+}
+
+fn fingerprint_bytes(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn is_short_quoted_value(value: &str) -> bool {

@@ -184,15 +184,11 @@ Unicode 字符）与 checkbox 渲染（`[ ]`/`[~]`/`[x]`）以 `ark_server` 根�
 每次调用从 config 快照现读 `hooks`（`Hot`）。exit 2 拦截、其他失败放行、post stdout 回注的
 语义只在这一处实现。
 
-回合种子中的 `conversation_history` 把工具行投影回模型上下文。store 投影把 `ToolCallStarted` +
-`ToolCallFinished` 折叠为单个内嵌 output 的 `ToolCall` 条目（见 ark-store 设计），因此这里直接消费该条目：
-终态（Completed/Failed）条目将调用折叠进上一条 assistant 消息的 `tool_calls`（无文本时新建空内容
-assistant 行），后接一条截断到 16 KiB UTF-8 字节的 `ModelRole::Tool` 结果消息（Failed 条目结果内容为空
-兜底）；非终态（Streaming 等）条目不回放，投影顺序保持 durable items 的时间顺序。
-带 `ContextCheckpoint` 标记（`ThreadItem::marker`，ark-contract 定义）的 `Notice` 条目回放为 system
-消息；判定经 `ThreadItem::is_context_checkpoint`，它同时以 `[context checkpoint` 前缀兜底识别 marker 出现之前持久化的 Notice 条目（含 `: no structured
-facts extracted` 与 `: truncated` 两个变体）。判定 gated 在 `Notice` kind 上：用户消息可以打出任意
-前缀，永远不算检查点；也不得改回裸前缀匹配，改渲染格式同样会让历史识别静默失效。
+回合种子中的 `conversation_history` 委托给 `ark_agent::model_history`，由 agent 模块统一完成 durable
+item 到模型历史的角色保持投影。store 已把 `ToolCallStarted` + `ToolCallFinished` 折叠为内嵌 output 的
+`ToolCall`；投影保留 assistant 的 `tool_calls`，后接 UTF-8 安全截断到 16 KiB 的 `ModelRole::Tool` 结果。
+只有带 `ItemMarker::ContextCheckpoint` 的 `Notice` 才回放为 system checkpoint，普通 Notice 和用户/工具
+文本中的同前缀内容不参与识别。非终态 `ToolCall` 不回放，时间顺序不变。
 
 审批规则（[需求设计](../requirements/approval-rules.md)）在回合入口接线：父路径与子路径都用
 `ark_tool::ApprovalPolicy` 包装既有 autonomy 策略（每回合用配置快照构造，规则属 Hot）；reactor 侧
