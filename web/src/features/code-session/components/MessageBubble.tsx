@@ -277,16 +277,26 @@ export const FinalReplyCard = memo(function FinalReplyCard({
   )
 })
 
-/** Reasoning is collapsed by default and visually subordinate. */
+/**
+ * Reasoning as a timeline entry: the summary reads "已思考 · <one-line
+ * preview>" once settled ("思考中" while streaming), so a folded trace still
+ * shows what each thinking stretch was about. The full text stays verbatim in
+ * the fold body; the preview collapses whitespace and never rewrites it.
+ */
 export const ReasoningBlock = memo(function ReasoningBlock({ item }: { item: ThreadItem }): JSX.Element {
   const { t, locale } = useI18n()
+  const streaming = item.status === 'streaming' || item.status === 'pending'
+  const text = item.text ?? ''
+  const preview = text.trim().replace(/\s+/g, ' ').slice(0, 90)
   return (
     <details className="ark-reasoning">
       <summary className="ark-reasoning__summary">
-        {t('canvas.reasoning')}
+        <span className="ark-reasoning__status" aria-hidden="true" />
+        <span className="ark-reasoning__label">{streaming ? t('canvas.activity.thinking') : t('canvas.reasoning.done')}</span>
+        {preview ? <span className="ark-reasoning__preview">{preview}</span> : null}
         <span className="ark-reasoning__meta">{formatClock(item.created_at, locale)}</span>
       </summary>
-      <pre className="ark-reasoning__body">{item.text ?? ''}</pre>
+      <pre className="ark-reasoning__body">{text}</pre>
     </details>
   )
 })

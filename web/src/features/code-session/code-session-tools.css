@@ -61,14 +61,16 @@
 }
 
 .ark-tool__headtoggle {
-  flex: 0 1 auto;
+  /* The family label + name are the scan target: never shrink them, or their
+     flex:none children overflow the collapsed box and paint over the digest.
+     The digest alone absorbs narrow widths via its ellipsis. */
+  flex: none;
   border: 0;
   background: none;
   padding: 0;
   cursor: pointer;
   font: inherit;
   color: inherit;
-  min-width: 0;
 }
 
 .ark-tool__head:hover,
@@ -136,10 +138,76 @@
 .ark-tool__name,
 .ark-toolresult__name {
   font-family: var(--ark-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ark-text-dim);
+  flex: none;
+}
+
+/* Localized meaning label ("终端命令", "读取文件"): the primary scan target of
+   a timeline row; the raw mono tool name rides along quieter for precision. */
+.ark-tool__family {
+  flex: none;
   font-size: 12px;
   font-weight: 600;
   color: var(--ark-text);
+}
+
+/* ---------- lifecycle status node (timeline rail) ---------- */
+
+/* One node vocabulary for every activity surface: tool rows, the live
+   activity mirror and the running process header. Filled discs for settled
+   verdicts (check / cross knocked out of the disc), a spinning arc while the
+   call runs. The disc's own background covers the rail line behind it. */
+.ark-tool__status {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+
+.ark-tool__status::before {
+  content: '';
+  display: block;
+  width: 10px;
+  height: 10px;
+  background-color: currentColor;
+  -webkit-mask: center / contain no-repeat var(--ark-status-glyph, none);
+  mask: center / contain no-repeat var(--ark-status-glyph, none);
+}
+
+.ark-tool__status--ok {
+  background: var(--ark-ok);
+  color: var(--ark-bg-raised);
+  --ark-status-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+}
+
+.ark-tool__status--fail {
+  background: var(--ark-error);
+  color: var(--ark-bg-raised);
+  --ark-status-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E");
+}
+
+.ark-tool__status--live {
+  background: var(--ark-bg-raised);
+  box-shadow: 0 0 0 2px var(--ark-bg-raised);
+  color: var(--ark-accent);
+  --ark-status-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round'%3E%3Cpath d='M12 3a9 9 0 1 0 9 9'/%3E%3C/svg%3E");
+}
+
+.ark-tool__status--live::before {
+  width: 12px;
+  height: 12px;
+  animation: ark-status-spin 0.9s linear infinite;
+}
+
+@keyframes ark-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .ark-tool__meta,
@@ -147,6 +215,16 @@
   font-size: 11px;
   color: var(--ark-text-faint);
   font-family: var(--ark-mono);
+}
+
+/* Verdict and duration stay on one line; a squeezed chip must not wrap its
+   word into a vertical column when the canvas is narrow. */
+.ark-tool__head .ark-chip,
+.ark-toolresult__head .ark-chip,
+.ark-tool__meta,
+.ark-toolresult__meta {
+  flex: none;
+  white-space: nowrap;
 }
 
 /* One-line argument digest in the collapsed header: quiet mono, clipped. */
@@ -193,6 +271,12 @@
 .ark-tool__filechip:hover {
   border-color: var(--ark-border);
   background: var(--ark-bg-hover);
+}
+
+/* The chip already carries the file identity; repeating the raw tool name
+   beside it spends width the chip needs to stay readable when narrow. */
+.ark-tool__head:has(.ark-tool__filechip) .ark-tool__name {
+  display: none;
 }
 
 .ark-tool__filechip-name {
@@ -345,4 +429,70 @@
   color: var(--ark-text-faint);
   font-size: 12px;
   padding: 2px 0;
+}
+
+/* ---------- timeline rows inside the process card ---------- */
+
+/* Inside the work trace a tool call is a timeline entry, not a card-in-card:
+   the rail (code-session-stream.css) carries the structure, the status node
+   sits on it, and the row itself stays chrome-free until hovered or opened.
+   Standalone cards (child-run viewer) keep the bordered treatment above. */
+.ark-process .ark-tool,
+.ark-process .ark-toolresult {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: var(--ark-radius-sm);
+}
+
+.ark-process .ark-tool:hover,
+.ark-process .ark-tool.is-open,
+.ark-process .ark-toolresult:hover {
+  border-color: transparent;
+}
+
+.ark-process .ark-tool__head {
+  padding: 3px 6px 3px 0;
+  gap: 8px;
+}
+
+.ark-process .ark-tool__head:hover {
+  background: var(--ark-bg-hover);
+  border-radius: var(--ark-radius-sm);
+}
+
+/* The row click is the fold affordance; the status node owns the rail slot,
+   so a per-row chevron would only add noise. */
+.ark-process .ark-tool__chevron {
+  display: none;
+}
+
+.ark-process .ark-tool__icon {
+  width: 18px;
+  height: 18px;
+  background: transparent;
+}
+
+.ark-process .ark-tool__icon::before {
+  width: 12px;
+  height: 12px;
+}
+
+/* Verdict reads as a quiet word next to the row, not a second pill. */
+.ark-process .ark-tool .ark-chip {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+/* Call ids are diagnostics; the timeline row spends its width on meaning. */
+.ark-process .ark-tool__callid {
+  display: none;
+}
+
+.ark-process .ark-tool__body {
+  border-top: 0;
+  background: transparent;
+  margin-left: 24px;
+  padding: 2px 6px 8px 0;
 }

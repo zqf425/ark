@@ -55,7 +55,7 @@ function LiveActivityRow({
     const trail = reasoningTrail(item.text ?? '')
     return (
       <div className="ark-liveactivity" role="status">
-        <span className="ark-dot ark-dot--live" aria-hidden="true" />
+        <span className="ark-tool__status ark-tool__status--live" aria-hidden="true" />
         <span className="ark-liveactivity__label">{t('canvas.activity.thinking')}</span>
         {elapsed ? <span className="ark-liveactivity__meta">{elapsed}</span> : null}
         {trail ? <span className="ark-liveactivity__trail">{trail}</span> : null}
@@ -65,7 +65,7 @@ function LiveActivityRow({
   if (item.kind === 'tool_call') {
     return (
       <div className="ark-liveactivity" role="status">
-        <span className="ark-dot ark-dot--live" aria-hidden="true" />
+        <span className="ark-tool__status ark-tool__status--live" aria-hidden="true" />
         <span className="ark-liveactivity__label">
           {t('canvas.activity.tool', { tool: item.tool?.tool ?? '' })}
         </span>
@@ -75,7 +75,7 @@ function LiveActivityRow({
   }
   return (
     <div className="ark-liveactivity" role="status">
-      <span className="ark-dot ark-dot--live" aria-hidden="true" />
+      <span className="ark-tool__status ark-tool__status--live" aria-hidden="true" />
       <span className="ark-liveactivity__label">{t('canvas.activity.writing')}</span>
       {elapsed ? <span className="ark-liveactivity__meta">{elapsed}</span> : null}
     </div>

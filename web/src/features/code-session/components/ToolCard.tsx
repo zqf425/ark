@@ -18,17 +18,39 @@ function statusClass(item: ThreadItem, tool: ToolPayload): string {
 }
 
 /**
- * Tool-family glyph class, resolved from the tool name: mainstream agent
- * activity rows give every entry a recognizable icon so a long turn scans by
- * shape. Unknown names fall back to the wrench disc.
+ * Tool family, resolved from the tool name: mainstream agent activity rows
+ * give every entry a recognizable icon and a localized meaning label
+ * ("终端命令", "读取文件") so a long turn scans by shape before the raw name.
+ * Unknown names fall back to the wrench disc.
  */
-function toolIconClass(tool: string): string {
+type ToolFamily = 'read' | 'write' | 'exec' | 'search' | 'generic'
+
+function toolFamily(tool: string): ToolFamily {
   const name = tool.toLowerCase()
-  if (/(^|_)(read|view|open|list|show|fetch|get|download)(_|$)/.test(name)) return 'ark-tool__icon--read'
-  if (/(^|_)(write|edit|patch|apply|create|save|upload|move|rename)(_|$)/.test(name)) return 'ark-tool__icon--write'
-  if (/(^|_)(bash|exec|run|command|shell|terminal|cmd|powershell)(_|$)/.test(name)) return 'ark-tool__icon--exec'
-  if (/(^|_)(search|grep|find|glob|query|scan|web_search)(_|$)/.test(name)) return 'ark-tool__icon--search'
-  return 'ark-tool__icon--generic'
+  if (/(^|_)(read|view|open|list|show|fetch|get|download)(_|$)/.test(name)) return 'read'
+  if (/(^|_)(write|edit|patch|apply|create|save|upload|move|rename)(_|$)/.test(name)) return 'write'
+  if (/(^|_)(bash|exec|run|command|shell|terminal|cmd|powershell)(_|$)/.test(name)) return 'exec'
+  if (/(^|_)(search|grep|find|glob|query|scan|web_search)(_|$)/.test(name)) return 'search'
+  return 'generic'
+}
+
+const FAMILY_LABEL_KEY: Record<ToolFamily, MessageKey> = {
+  read: 'canvas.tool.family.read',
+  write: 'canvas.tool.family.write',
+  exec: 'canvas.tool.family.exec',
+  search: 'canvas.tool.family.search',
+  generic: 'canvas.tool.family.generic'
+}
+
+/**
+ * Lifecycle status node on the process card's timeline rail: green check for
+ * a succeeded call, red cross for a failed one, spinning arc while it runs.
+ * A settled call without an `ok` verdict reads as completed (check).
+ */
+function statusGlyphClass(item: ThreadItem, tool: ToolPayload): string {
+  if (tool.ok === false) return 'ark-tool__status ark-tool__status--fail'
+  if (item.status === 'streaming' || item.status === 'pending') return 'ark-tool__status ark-tool__status--live'
+  return 'ark-tool__status ark-tool__status--ok'
 }
 
 /**
@@ -101,6 +123,7 @@ export const ToolCard = memo(function ToolCard({ item }: { item: ThreadItem }): 
   const digest = argsDigest(args)
   const hasBody = Boolean(args || tool.output || item.detail)
   const target = toolTargetPath(tool)
+  const family = toolFamily(tool.tool)
 
   return (
     <div className={`ark-tool${open ? ' is-open' : ''}`}>
@@ -109,10 +132,12 @@ export const ToolCard = memo(function ToolCard({ item }: { item: ThreadItem }): 
           (validateDOMNesting) and break the outer click semantics. */}
       <div className="ark-tool__head">
         <button type="button" className="ark-tool__headtoggle" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+          <span className={statusGlyphClass(item, tool)} aria-hidden="true" />
           <span className="ark-tool__chevron" aria-hidden="true">
             {open ? '▾' : '▸'}
           </span>
-          <span className={`ark-tool__icon ${toolIconClass(tool.tool)}`} aria-hidden="true" />
+          <span className={`ark-tool__icon ark-tool__icon--${family}`} aria-hidden="true" />
+          <span className="ark-tool__family">{t(FAMILY_LABEL_KEY[family])}</span>
           <span className="ark-tool__name">{tool.tool}</span>
         </button>
         {target ? <FileChip path={target.path} name={target.name} dir={target.dir} /> : null}
