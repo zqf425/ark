@@ -24,9 +24,11 @@ use ark_agent::{
 use ark_common::{Result, ThreadId, TurnId};
 use ark_config::{ConfigStore, RuntimeConfig};
 use ark_obs::UsageRecorder;
+#[cfg(test)]
+use ark_ports::ModelRole;
 use ark_ports::{
-    BaseServices, EventSink, ModelClient, ModelMessage, ModelRole, SandboxPolicy, SessionStore,
-    ToolCallRef, ToolOutput, ToolRegistryPort,
+    BaseServices, EventSink, ModelClient, ModelMessage, SandboxPolicy, SessionStore, ToolOutput,
+    ToolRegistryPort,
 };
 use ark_store::{AttachmentStore, FileSessionStore, StoreConfig, DEFAULT_MAX_ATTACHMENT_BYTES};
 use ark_tool::{ApprovalPolicy, Autonomy, BuiltinSandboxPolicy, RegistryToolRunner, ToolRegistry};

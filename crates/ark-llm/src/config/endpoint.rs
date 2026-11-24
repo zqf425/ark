@@ -137,11 +137,10 @@ impl ProviderConfig {
     /// instead — compaction must never be disabled just because the window is
     /// unknown, or the prompt would grow unbounded.
     pub fn compaction_threshold(&self) -> Option<u64> {
-        let usable = self
-            .effective_context_window()
-            .saturating_sub(self.max_tokens.map(u64::from).unwrap_or(0))
-            .max(1);
-        Some(((usable as f64 * COMPACTION_TRIGGER_RATIO) as u64).max(1))
+        Some(ark_common::compaction_threshold(
+            self.effective_context_window(),
+            self.max_tokens.map(u64::from).unwrap_or(0),
+        ))
     }
 
     /// The context window this provider compacts against.

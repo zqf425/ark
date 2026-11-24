@@ -2,6 +2,7 @@
 //! note while keeping the system prefix and the recent tail verbatim.
 
 use super::*;
+use crate::context::checkpoint::retained_tail_fingerprint;
 
 /// Prefix of the in-memory plan restate row pushed by `compact_history`.
 /// Marker identity for the retain that deduplicates restates across repeated
@@ -52,83 +53,139 @@ impl Reactor {
         }))
     }
 
-    /// Keep the system prefix and the newest messages; fold the rest away.
-    ///
-    /// The checkpoint summarises the whole non-prefix history, *including* the
-    /// kept tail: the next turn replays only the checkpoint plus rows written
-    /// after it, so the tail must be represented in the note rather than
-    /// assumed to survive verbatim. This turn still sees the tail in full.
+    /// Keep every non-generated system row, then fold the oldest dialogue under
+    /// a complete request budget. The durable checkpoint includes the retained
+    /// tail because the next turn replays only rows after its boundary.
     pub(super) fn compact_history(&mut self, keep_recent: usize) -> (u32, Option<String>) {
-        let system_count = self
-            .history
-            .iter()
-            .take_while(|message| {
-                TokenEstimator::is_system(message) && !is_generated_checkpoint(message)
-            })
-            .count();
-        let keep = keep_recent.max(1);
-        if self.history.len() <= system_count + keep {
+        let parts = partition_history(&self.history);
+        if parts.foldable.len() < 2 {
             return (0, None);
         }
-        // Never split a `tool_calls` row from its results: a kept tail that
-        // starts with a tool result has no declaring assistant row, and every
-        // provider rejects that request. Walking the split back to the nearest
-        // non-tool row keeps whole call/result pairs on one side of the
-        // boundary; the fold still covers them in the checkpoint.
-        let mut split = self.history.len() - keep;
-        while split > system_count && self.history[split].role == ModelRole::Tool {
-            split -= 1;
+        let checkpoint = crate::context::ContextCheckpoint::from_compaction_history(&self.history);
+        let plan = checkpoint.plan_restate();
+        let estimator = TokenEstimator::new();
+        let mut fixed_tokens = estimator.estimate_request(&self.fixed_request(&parts.protected));
+        if let Some(plan) = &plan {
+            fixed_tokens += estimator.estimate_message(&ModelMessage::system(plan.clone()));
         }
-        let removed = (split - system_count) as u32;
-        if removed == 0 {
-            // The whole foldable region is one call/result run: there is
-            // nothing to fold without splitting a pair, so report a no-op
-            // instead of appending a checkpoint that summarises nothing.
-            return (0, None);
-        }
-        let mut next: Vec<ModelMessage> = self.history[..system_count].to_vec();
-        let checkpoint =
-            crate::context::ContextCheckpoint::from_messages(&self.history[system_count..]);
-        let compacted_note = format!("[{removed} earlier messages compacted]");
-        let checkpoint_budget = self
+        let target = self
             .machine
             .limits()
             .context_limit_tokens
-            .saturating_sub(TokenEstimator::new().estimate_text(&compacted_note));
+            .saturating_sub(COMPACTION_SAFETY_TOKENS);
+        let note_reserve = estimator.estimate_text(&checkpoint_bookkeeping(
+            parts.foldable.len(),
+            parts.foldable.len(),
+            0,
+        ));
+        let checkpoint_budget = target.saturating_sub(fixed_tokens + note_reserve + 4);
+        let checkpoint_text = checkpoint.render_with_token_limit(checkpoint_budget);
+        let checkpoint_cost = estimator.estimate_message(&ModelMessage::system(format!(
+            "{checkpoint_text}\n{}",
+            checkpoint_bookkeeping(parts.foldable.len(), parts.foldable.len(), 0)
+        )));
+        let tail_budget = target.saturating_sub(fixed_tokens + checkpoint_cost);
+        let Some(retained) =
+            legal_tail_count(&parts.foldable, keep_recent.max(1), tail_budget, &estimator)
+        else {
+            return (0, None);
+        };
+        let removed = parts.foldable.len() - retained;
         let rendered = format!(
-            "{}\n{compacted_note}",
-            checkpoint.render_with_token_limit(checkpoint_budget)
+            "{checkpoint_text}\n{}",
+            checkpoint_bookkeeping(
+                removed,
+                retained,
+                retained_tail_fingerprint(&parts.foldable[parts.foldable.len() - retained..])
+            )
         );
-        next.push(ModelMessage::system(rendered.clone()));
-        next.extend_from_slice(&self.history[split..]);
-        // Restate the durable plan as the last in-memory row. A mid-turn
-        // compaction leaves the turn-seed plan inside the checkpoint note at
-        // the fold boundary; as the tool loop appends rows the note drifts
-        // out of the model's recency window and the objective loses its
-        // near-position attention (Manus-style recitation). This row is
-        // memory-only: it is never journalled, so the next turn rebuilds its
-        // own seed and `plan_seed_message` re-emits the current plan at the
-        // tail. A previous restate that `keep_recent` kept inside the
-        // retained window must be dropped here: hygiene only collapses
-        // ADJACENT duplicate system rows, and kept messages would separate
-        // the two rows, leaving a stale copy in front (review N1b) — the
-        // marker-based retain is the guarantee, and the marker cannot match
-        // the turn-seed header (it carries an extra
-        // `- current objective and progress` suffix, review M1), so a seed
-        // row inside the stable prefix survives. The rebuild itself never
-        // loses plan content: `from_messages` already re-absorbed every
-        // folded plan line into the checkpoint entries. "Near the tail" is
-        // adapter-relative: the OpenAI chat and responses families keep the
-        // row as the last message, while the Anthropic adapter hoists system
-        // rows into the top-level `system` field — still high-attention, but
-        // not the literal tail.
-        next.retain(|message| {
-            !(message.role == ModelRole::System && message.content.starts_with(PLAN_RESTATE_PREFIX))
-        });
-        if let Some(plan) = checkpoint.plan_restate() {
-            next.push(ModelMessage::system(plan));
+        self.history = parts.protected;
+        self.history.push(ModelMessage::system(rendered.clone()));
+        self.history
+            .extend_from_slice(&parts.foldable[parts.foldable.len() - retained..]);
+        if let Some(plan) = plan {
+            self.history.push(ModelMessage::system(plan));
         }
-        self.history = next;
-        (removed, Some(rendered))
+        (removed as u32, Some(rendered))
     }
+
+    fn fixed_request(&self, protected: &[ModelMessage]) -> ModelRequest {
+        let mut request = self.request();
+        let staged = request.messages.split_off(self.history.len());
+        request.messages = protected.to_vec();
+        request.messages.extend(staged);
+        request
+    }
+}
+
+const COMPACTION_SAFETY_TOKENS: u64 = 1_024;
+
+fn checkpoint_bookkeeping(removed: usize, retained: usize, fingerprint: u64) -> String {
+    format!(
+        "[{removed} earlier messages compacted]\n[retained tail already summarized: {retained}; fingerprint: {fingerprint:016x}]"
+    )
+}
+
+struct CompactionParts {
+    protected: Vec<ModelMessage>,
+    foldable: Vec<ModelMessage>,
+}
+
+fn partition_history(history: &[ModelMessage]) -> CompactionParts {
+    let checkpoint_start = history
+        .iter()
+        .rposition(is_generated_checkpoint)
+        .map_or(0, |index| index + 1);
+    let mut parts = CompactionParts {
+        protected: history[..checkpoint_start]
+            .iter()
+            .filter(|message| {
+                message.role == ModelRole::System
+                    && !is_generated_checkpoint(message)
+                    && !message.content.starts_with(PLAN_RESTATE_PREFIX)
+            })
+            .cloned()
+            .collect(),
+        foldable: Vec::new(),
+    };
+    for message in &history[checkpoint_start..] {
+        if is_generated_checkpoint(message) {
+            continue;
+        }
+        if message.role == ModelRole::System {
+            if !message.content.starts_with(PLAN_RESTATE_PREFIX) {
+                parts.protected.push(message.clone());
+            }
+        } else {
+            parts.foldable.push(message.clone());
+        }
+    }
+    parts
+}
+
+fn legal_tail_count(
+    messages: &[ModelMessage],
+    requested: usize,
+    budget: u64,
+    estimator: &TokenEstimator,
+) -> Option<usize> {
+    let maximum = requested.min(messages.len().saturating_sub(1));
+    for count in (1..=maximum).rev() {
+        let mut start = messages.len() - count;
+        while start > 0 && messages[start].role == ModelRole::Tool {
+            start -= 1;
+        }
+        if start == 0 {
+            continue;
+        }
+        let count = messages.len() - start;
+        let cost: u64 = messages[start..]
+            .iter()
+            .map(|message| estimator.estimate_message(message))
+            .sum();
+        if cost <= budget {
+            return Some(count);
+        }
+    }
+    None
 }

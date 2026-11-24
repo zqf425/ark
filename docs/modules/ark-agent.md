@@ -39,39 +39,41 @@ HTTP 侧批准一条策略表明确拒绝的调用。
 - 回合在模型请求失败（`model_request_failed = true`）终结时，由 ark-server 的恢复调度器自动重试同一请求：退避计划 5s/10s/20s（`recovery::RECOVERY_DELAYS`），尝试次数写进 `turn_started.auto_recovery`；连续模型失败达到 `RECOVERY_MODEL_FAILURE_STREAK_LIMIT` 时暂停该线程的自动恢复，任何用户回合或非模型终态重置计数。恢复回合在会话流写一条 Notice item 说明自动重试原因；它不为已在历史末尾的同一条用户请求再写 `UserMessage`（由 `arkd` 组合根去重，见 [arkd](arkd.md)），因此模型上下文与用户气泡都不会随重试次数增长。工具/策略类失败与耗尽尝试预算后的失败保持终态，仍需用户介入。
 - 只读工具的并发批默认不设上限；`tuning.max_parallel_tool_calls > 0` 时批内调用被切成顺序 chunk，批内并发不超过该值，批间顺序不变。
 - 每轮模型可见历史必须已经落盘；每个工具调用必须与终态结果配对。历史修复只按配对合法性裁剪：携带 `tool_calls` 的 assistant 行即使 `content` 为空也必须保留（chat-completions 的标准形态），只有既无文本又无 `tool_calls` 的空行才删除。
-- 压缩保留 system 前缀和 `keep_recent_messages` 条末尾消息的原始内容；被折叠消息生成的 checkpoint
-  链式继承：折叠区内旧 checkpoint 的四个段整体吸收进新 checkpoint（`[user requests]` 保真迁移、
-  结构化行归入 goals、段标题与 `[N earlier messages compacted]` 账目行不再重排）——纯文本用户
-  请求不匹配任何结构化前缀，不链式继承则第二次压缩会静默丢掉最早的目标请求（实测会话 cb274b9d
-  由此失忆）。吸收必须幂等且不 bump 计数：手动 `/compact` 每次重读全部 items,重复吸收同一条
-  失败证据不得虚增复发次数。预算截断的优先级为用户请求 → 结构化事实 → 失败证据 → 标识符：
-  标识符是可达碎片，最先被裁；截断渲染为每段重放段标题（否则截断代被再吸收时无段 bullet 全部
-  丢失，链条在该代断开）；用户请求段超配额时保最旧 6 条与最新若干条，中段以
-  `[N middle user requests folded]` 显式声明丢弃。失败证据只收真实诊断行：词边界匹配
-  （`failed:` 接受、`failedValue` 拒绝）叠加代码形态拒绝（序列化 JS 行以 `,`/`;` 结尾且冒号后
-  是标识符/字面量，如 `failed: null,`、`Failure: null,`；尾分号/`instanceof`/裸 ` => `；
-  rustc 的反引号签名诊断保留），数字变体仅在计数语境归并（数字 run 前最近 token 以
-  `count`/`actual`/`got`/`expected`/`实际` 等**后缀**匹配，组合词 `actionCount` 同样触发；
-  错误码 `A3/A4`、HTTP `401/500`、路径版本 `v2/v3` 等语义数字保持独立），归并
-  计数以 ` (repeated xN)` 后缀呈现（字面 `[xN]` 数据不受影响）。并受 `context_limit_tokens` 约束。
-  后续压缩会替换已有 checkpoint，不会把它当作稳定 system 前缀累积。预算不足时 checkpoint 明示已裁剪，且只在 UTF-8 字符边界裁剪；`compaction_completed` 复用
-  `removed_items` 报告折叠消息数，并报告 checkpoint 字符数。回合种子尾部的持久计划行
-  （`[thread plan - current objective and progress]` 的 `Goal:` 与 `- [ ]`/`- [~]`/`- [x]`
-  checkbox 行）同样被识别为结构化事实：checkpoint 摘要整个历史（含种子尾部），把这些行带上
-  才能让回合内压缩不丢失未完成待办。折叠区含计划行时，`compact_history` 还会把
-  `checkpoint.plan_restate()`（计划行从**整个** entries 过滤后再截独立配额 `MAX_PLAN_LINES`，
-  最新目标行最先输出不被配额截断，配额截断显式标注；同一待办的状态变体与前后目标按标题
-  **后出现者胜**，标题剥离用精确 marker 前缀而非字符集，避免吃掉标题首字符）作为尾部 system
-  消息 push 到保留尾部之后（先按 `PLAN_RESTATE_PREFIX`＝`"[thread plan]\n"` 剔除旧 restate
-  再 push——该标记**不匹配**种子标题（种子多 `- current objective and progress` 后缀），
-  稳定前缀区的种子行永不误删；hygiene 的相邻重复折叠只是兜底，剔除本身是唯一性保证）。
-  这是纯内存行为，不落 journal，下一回合重建种子时由 `plan_seed_message` 在种子尾给出当前计划，
-  因此不会跨回合堆叠。"尾部近因"是适配器相对的：OpenAI chat/responses 族保留为最后一条消息，
-  Anthropic 族会把 system 行提升进顶层 `system` 字段（仍是高注意力位置，但不是字面尾部）。
-  已知限制：来自项目指令或工具输出的任意 markdown checkbox 行同样会被识别为计划行
-  （`is_structured_line` 自 master 起如此），带待办清单的 README 可能被提升进 restate——
-  状态变体折叠保证不会自相矛盾，但第三方待办可能混入"当前计划"；按来源过滤需行级来源标记，
-  留待独立需求评估。
+- 压缩先分离动态保护 system 消息、可折叠对话和最近尾部：最新 generated checkpoint 之前的全部
+  非 generated system 行、其后的全部普通 system 行均保持原样，旧 checkpoint 与计划 seed 进入摘要来源，
+  旧计划 restate 不重复保留。项目指令、skill、memory、委派策略、完成收件箱和计划 seed 因而不会被折叠，
+  也不进入 prompt-cache 静态前缀。最新 checkpoint 是重摘要边界，链式吸收只处理其后新增的原始消息，
+  同一失败证据不会因连续压缩重复计数。
+- checkpoint 由用户请求、结构化事实、失败证据、typed 工具证据和标识符组成。工具证据保留工具名、
+  `path`/`file`/`command`/`query`/`url`/`pattern`/`cwd` 标量参数及成功结果的有界首行；失败结果只进入
+  失败证据，避免重复。成功工具结果一旦退出保留尾部，就不再复制完整输出，而是外化为这些有界证据，
+  原事件仍保留在权威日志中。超长单行用户请求按有界头尾保留并标记截断，不再整条丢弃。
+- 折叠区内旧 checkpoint 的五个段整体吸收进新 checkpoint（`[user requests]` 保真迁移、结构化行归入
+  goals、段标题与账目行不再重排）——纯文本用户请求不匹配任何结构化前缀，不链式继承则第二次压缩会
+  静默丢掉最早的目标请求。checkpoint 必须摘要当前保留尾部，因为下一回合只从持久边界之后重放；
+  渲染同时记录 `[retained tail already summarized: N; fingerprint: …]`，仅当最新 checkpoint 后确实存在
+  指纹匹配的 N 条原始尾部时才跳过它们，避免同一失败证据再次累计，也避免跨回合误跳过新消息。吸收必须
+  幂等且不 bump 计数：手动 `/compact` 每次重读全部 items，重复吸收同一条失败证据不得虚增复发次数。
+  预算截断的优先级为用户请求 → 结构化事实 → 失败证据 → 工具证据 → 标识符：标识符是可达碎片，最先被裁；截断渲染为每段重放段标题，保证
+  后续代仍能正确吸收。用户请求段超配额时保最旧 6 条与最新若干条，中段以
+  `[N middle user requests folded]` 显式声明丢弃。失败证据只收真实诊断行：词边界匹配（`failed:` 接受、
+  `failedValue` 拒绝）叠加代码形态拒绝（序列化 JS 行以 `,`/`;` 结尾且冒号后是标识符/字面量，如
+  `failed: null,`、`Failure: null,`；尾分号/`instanceof`/裸 ` => `；rustc 的反引号签名诊断保留），
+  数字变体仅在计数语境归并（数字 run 前最近 token 以 `count`/`actual`/`got`/`expected`/`实际`
+  等**后缀**匹配，组合词 `actionCount` 同样触发；错误码 `A3/A4`、HTTP `401/500`、路径版本
+  `v2/v3` 等语义数字保持独立），归并计数以 ` (repeated xN)` 后缀呈现（字面 `[xN]` 数据不受影响）。
+  并受 `context_limit_tokens` 约束。后续压缩会替换已有 checkpoint，不会把它当作稳定 system 前缀累积。
+  预算不足时 checkpoint 明示已裁剪，且只在 UTF-8 字符边界裁剪；`compaction_completed` 复用
+  `removed_items` 报告折叠消息数，并报告 checkpoint 字符数。
+- 回合种子的持久计划行（`[thread plan - current objective and progress]` 的 `Goal:` 与
+  `- [ ]`/`- [~]`/`- [x]` checkbox 行）同时作为保护上下文与 checkpoint 来源：seed 原样保留，checkpoint
+  也提取它，折叠区含计划行时 `compact_history` 还会把 `checkpoint.plan_restate()` 作为尾部 system 消息。
+  计划重述从**整个** entries 过滤后按 `MAX_PLAN_LINES` 截独立配额，最新目标行最先输出，状态变体与前后
+  目标按标题**后出现者胜**，标题剥离使用精确 marker 前缀；先剔除 `PLAN_RESTATE_PREFIX` 标记的旧
+  restate，该标记不匹配 seed 标题。这是纯内存行为，不落 journal，下一回合由 `plan_seed_message` 重建。
+  “尾部近因”是适配器相对的：OpenAI chat/responses 族保留为最后一条消息，Anthropic 族会把 system
+  行提升进顶层 `system` 字段。已知限制：来自项目指令或工具输出的任意 markdown checkbox 行也会被识别
+  为计划行；按来源过滤需行级来源标记，留待独立需求评估。
 - 压缩判定使用唯一估算器 `TokenEstimator`，它必须计入 `tool_calls` 的 `call_id`/`name`/`arguments`
   与每条消息的图片部分（按固定 `IMAGE_PART_TOKENS` 计，不按 base64 长度计——视觉模型按几何计费）：
   编码会话的体积主要来自工具参数（一次 `write` 携带整个文件、一次 `bash` 携带整个脚本），只计 `content`
@@ -84,6 +86,11 @@ HTTP 侧批准一条策略表明确拒绝的调用。
   会滞后一轮（用的是本轮输出产生之前的数字）。判定用 `>=`：配置值本身就是触发点。
 - `max_compactions` 只约束**未能把前缀压回阈值以下**的压缩（无可折叠项，或保留尾部本身就超阈值），
   用于阻断死循环；压回阈值以下的压缩不计入，因此长回合可以随自身增长反复折叠，不会在阈值处被预算判死。
+- 压缩按完整请求估算分配预算：静态 system 前缀、动态保护上下文、工具 schema、staged steering、
+  checkpoint、计划重述、最近尾部、消息/请求 framing 和 1024 token 安全余量都计入同一阈值。
+- 最近尾部同时受 `keep_recent_messages` 与剩余 token 预算约束，在预算内选择最大合法后缀；不能以
+  孤立 `Tool` 结果开头，必要时回退到声明调用的 assistant 行。若连合法最小尾部与 checkpoint 都无法装下，
+  不生成空边界，交由预算状态机返回 `ContextExhausted`。
 - 压缩切分点按 call/result 配对回退：若 `keep_recent` 落在 `tool` 行上，切分点前移到最后一条
   非 `tool` 行，保证保留尾部不会出现「没有声明者」的孤儿 tool result（provider 会拒收）；
   整段可折叠区只有一组调用时报告 `removed_items = 0`，不落空边界。

@@ -500,7 +500,7 @@ fn compaction_restates_the_plan_at_the_history_tail() {
 
     let (removed, _) = reactor.compact_history(2);
 
-    assert_eq!(removed, 3);
+    assert_eq!(removed, 2);
     let last = reactor.history.last().expect("history keeps rows");
     assert_eq!(last.role, ModelRole::System);
     assert!(last.content.contains("Goal: repair the parser"));
@@ -567,8 +567,8 @@ fn repeated_compaction_keeps_exactly_one_plan_restate() {
         .filter(|message| message.content.contains("Goal: ship it"))
         .count();
     assert_eq!(
-        plan_restates, 2,
-        "one occurrence in the checkpoint note + one tail restate: {:?}",
+        plan_restates, 3,
+        "one protected seed, one checkpoint note and one tail restate: {:?}",
         reactor.history
     );
     let tail_restates = reactor
@@ -693,14 +693,14 @@ fn compaction_never_deletes_a_kept_seed_plan_row() {
             ))
             .collect::<Vec<_>>()
     );
-    // The folded region holds no plan rows (the seed is in the prefix), so a
-    // restate would be noise — None is the correct outcome here.
+    // The protected seed still supplies plan facts, so a fresh tail restate is
+    // expected even though the seed itself was never folded.
     let restates = reactor
         .history
         .iter()
         .filter(|message| message.content.starts_with("[thread plan]\n"))
         .count();
-    assert_eq!(restates, 0);
+    assert_eq!(restates, 1);
 }
 
 /// A `tool` role row answering `call_id`, the shape the provider requires.
@@ -862,3 +862,6 @@ fn assistant_tool_call_history_is_legal_hygiene() {
         "recorded assistant turn must satisfy history hygiene"
     );
 }
+
+#[path = "reactor_compaction_tests.rs"]
+mod compaction_tests;

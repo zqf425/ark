@@ -37,6 +37,9 @@ struct TurnRegistryState {
     slots: HashMap<TurnId, TurnSlot>,
     /// Terminal turn ids in finish order; the front is evicted first.
     finished: VecDeque<TurnId>,
+    /// Threads whose manual checkpoint snapshot is in progress. Turn
+    /// registration checks this under the same lock as active-slot lookup.
+    compactions: std::collections::HashSet<ThreadId>,
 }
 
 impl TurnRegistryState {
@@ -44,6 +47,7 @@ impl TurnRegistryState {
         Self {
             slots: HashMap::new(),
             finished: VecDeque::new(),
+            compactions: std::collections::HashSet::new(),
         }
     }
 }
@@ -52,6 +56,17 @@ struct TurnSlot {
     summary: TurnSummary,
     cancel: CancelToken,
     steering: Arc<SteerQueue>,
+}
+
+pub struct CompactionReservation {
+    registry: Arc<TurnRegistry>,
+    thread_id: ThreadId,
+}
+
+impl Drop for CompactionReservation {
+    fn drop(&mut self) {
+        self.registry.lock().compactions.remove(&self.thread_id);
+    }
 }
 
 impl Default for TurnRegistry {
@@ -96,10 +111,11 @@ impl TurnRegistry {
         cancel: CancelToken,
     ) -> Option<TurnRegistration> {
         let mut guard = self.lock();
-        let busy = guard
-            .slots
-            .values()
-            .any(|slot| slot.summary.thread_id == thread_id && slot.summary.ended_at.is_none());
+        let busy = guard.compactions.contains(&thread_id)
+            || guard
+                .slots
+                .values()
+                .any(|slot| slot.summary.thread_id == thread_id && slot.summary.ended_at.is_none());
         if busy {
             return None;
         }
@@ -134,6 +150,29 @@ impl TurnRegistry {
             .values()
             .find(|slot| slot.summary.thread_id == thread_id && slot.summary.ended_at.is_none())
             .map(|slot| slot.summary.clone())
+    }
+
+    /// Reserve one thread for a manual checkpoint snapshot. The caller holds
+    /// `workspace_gate` only while acquiring this lease; disk I/O happens after
+    /// releasing that gate, while turn registration remains excluded.
+    pub fn reserve_compaction(
+        self: &Arc<Self>,
+        thread_id: ThreadId,
+    ) -> Option<CompactionReservation> {
+        let mut guard = self.lock();
+        let busy = guard.compactions.contains(&thread_id)
+            || guard
+                .slots
+                .values()
+                .any(|slot| slot.summary.thread_id == thread_id && slot.summary.ended_at.is_none());
+        if busy {
+            return None;
+        }
+        guard.compactions.insert(thread_id);
+        Some(CompactionReservation {
+            registry: Arc::clone(self),
+            thread_id,
+        })
     }
 
     /// Every thread that currently has an in-flight turn.
