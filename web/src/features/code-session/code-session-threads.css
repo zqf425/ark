@@ -1,12 +1,11 @@
 /**
- * Thread rail: the glass sidebar's session list (rows, search, scope, footer)
- * plus per-turn rewind controls. Row styling follows the sidebar:
- * 8px-radius rows, tinted hover, active row with an inset ring.
+ * Thread rail: the flat sidebar's session ledger (rows, search, scope, footer)
+ * plus per-turn rewind controls. Project headings divide the list; the active
+ * session repeats the execution timeline's left status rail.
  *
  * Part of the Code screen stylesheet; split to stay under the 1000-line
- * per-file limit (design §7.10.2). Code-session.css is the entry. Colors come
- * from styles/tokens.css (theme.css for dark) only — a literal hex here is a
- * review blocker because it breaks light/dark parity.
+ * per-file limit (design §7.10.2). Colors come from styles/tokens.css
+ * (theme.css for dark) only.
  */
 
 /* ---------- thread list ---------- */
@@ -25,31 +24,29 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 14px 12px 6px;
+  padding: 14px 12px 10px;
   flex: none;
 }
 
 .ark-threadlist__head-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
-/* 「定时任务」 entry: a quiet ghost pill next to the primary new-thread CTA, so
-   it never competes with the main action. */
 .ark-threadlist__schedule {
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
   border: 1px solid transparent;
   border-radius: var(--ark-radius-sm);
   background: transparent;
   color: var(--ark-text-dim);
   cursor: pointer;
-  font-size: 12px;
-  padding: 4px 8px;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
@@ -73,7 +70,7 @@
 .ark-threadlist__title {
   margin: 0;
   font-weight: 650;
-  font-size: 13px;
+  font-size: 13.5px;
   color: var(--ark-text);
   letter-spacing: -0.01em;
 }
@@ -100,7 +97,7 @@
 .ark-threadlist__nav {
   display: flex;
   flex-direction: column;
-  padding: 2px 8px;
+  padding: 2px 6px 14px;
   gap: 1px;
 }
 
@@ -110,11 +107,10 @@
   gap: 2px;
   align-items: stretch;
   width: 100%;
-  border: 0;
   border-radius: var(--ark-radius-sm);
-  background: none;
   color: var(--ark-text);
   text-align: left;
+  position: relative;
 }
 
 .ark-threadrow:hover {
@@ -123,7 +119,18 @@
 
 .ark-threadrow.is-active {
   background: var(--ark-sidebar-row-active);
-  box-shadow: inset 0 0 0 1px var(--ark-sidebar-row-ring);
+}
+
+.ark-threadrow.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 20px;
+  border-radius: 2px;
+  background: var(--ark-accent);
+  transform: translateY(-50%);
 }
 
 .ark-threadrow__main {
@@ -137,12 +144,12 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: 3px;
   flex: 1 1 auto;
   min-width: 0;
   border: 0;
   background: none;
-  padding: 7px 9px;
+  padding: 8px 6px 8px 10px;
   cursor: pointer;
   color: inherit;
   text-align: left;
@@ -151,7 +158,7 @@
 .ark-threadrow__title {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-size: 12.5px;
   font-weight: 500;
   max-width: 100%;
@@ -160,14 +167,43 @@
   white-space: nowrap;
 }
 
-.ark-threadrow.is-active .ark-threadrow__title {
-  color: var(--ark-accent);
+.ark-threadrow__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  font-size: 10.5px;
+  color: var(--ark-text-faint);
+  white-space: nowrap;
 }
 
-/* Busy marker: a small arc that spins while the runtime has a turn in flight
-   for this thread. Hidden from motion-sensitive users via the global
-   prefers-reduced-motion override in global.css (duration collapses, the
-   static arc stays visible). */
+.ark-threadrow__fork {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ark-text-dim);
+}
+
+.ark-threadrow__fork svg {
+  flex: none;
+}
+
+.ark-threadrow__archived {
+  padding: 0 5px;
+  border-radius: var(--ark-radius-sm);
+  background: var(--ark-bg-inset);
+}
+.ark-threadrow__select:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: -2px;
+  border-radius: var(--ark-radius-sm);
+}
+
 .ark-threadrow__spinner {
   display: inline-flex;
   flex: none;
@@ -206,19 +242,46 @@
   align-self: center;
   flex: 0 0 auto;
   width: 24px;
-  height: 32px;
+  height: 30px;
   margin-right: 4px;
   border: 0;
   border-radius: var(--ark-radius-sm);
   background: none;
   color: var(--ark-text-faint);
   cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.ark-threadrow:hover .ark-threadrow__kebab,
+.ark-threadrow:focus-within .ark-threadrow__kebab,
+.ark-threadrow.is-active .ark-threadrow__kebab,
+.ark-threadrow__kebab[aria-expanded='true'] {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .ark-threadrow__kebab {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ark-threadrow__kebab {
+    transition: none;
+  }
 }
 
 .ark-threadrow__kebab:hover:not(:disabled),
 .ark-threadrow__kebab[aria-expanded='true'] {
   color: var(--ark-text);
   background: var(--ark-bg-hover);
+}
+
+.ark-threadrow__kebab:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: -2px;
+  opacity: 1;
 }
 
 .ark-threadrow__kebab:disabled {
@@ -233,29 +296,35 @@
   z-index: 60;
   display: flex;
   flex-direction: column;
-  min-width: 168px;
-  padding: 4px;
+  min-width: 180px;
+  padding: 5px;
   gap: 2px;
   background: var(--ark-bg-raised);
-  border: 1px solid var(--ark-border);
-  border-radius: var(--ark-radius-sm);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  border: 1px solid var(--ark-border-strong);
+  border-radius: var(--ark-radius);
+  box-shadow: var(--ark-shadow-card);
 }
 
 .ark-threadrow__menu button {
   border: 0;
   background: none;
-  padding: 6px 10px;
+  padding: 7px 9px;
   border-radius: var(--ark-radius-sm);
   color: var(--ark-text);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
 
-.ark-threadrow__menu button:hover:not(:disabled) {
+.ark-threadrow__menu button:hover:not(:disabled),
+.ark-threadrow__menu button:focus-visible {
   background: var(--ark-bg-hover);
+}
+
+.ark-threadrow__menu button:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: -2px;
 }
 
 .ark-threadrow__menu button:disabled {
@@ -264,6 +333,9 @@
 }
 
 .ark-threadrow__menu .is-danger {
+  margin-top: 3px;
+  border-top: 1px solid var(--ark-border-muted);
+  border-radius: 0 0 var(--ark-radius-sm) var(--ark-radius-sm);
   color: var(--ark-error);
 }
 
@@ -293,6 +365,12 @@
   gap: 1px;
 }
 
+.ark-projectgroup + .ark-projectgroup {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--ark-sidebar-divider);
+}
+
 /* The header row wraps the toggle button and the per-project actions so the
    buttons can sit at the trailing edge without nesting buttons (invalid HTML). */
 .ark-projectgroup__row {
@@ -309,13 +387,11 @@
   min-width: 0;
   border: 0;
   background: none;
-  /* Project rows are scannable anchors in the rail: more vertical padding and
-     a larger face than session rows so groups stay visually distinct. */
-  padding: 8px 9px;
+  padding: 7px 8px;
   border-radius: var(--ark-radius-sm);
   color: var(--ark-text-dim);
   font: inherit;
-  font-size: 14px;
+  font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
@@ -334,6 +410,12 @@
 .ark-projectgroup__row:hover .ark-projectgroup__actions,
 .ark-projectgroup__row:focus-within .ark-projectgroup__actions {
   opacity: 1;
+}
+
+@media (hover: none) {
+  .ark-projectgroup__actions {
+    opacity: 1;
+  }
 }
 
 .ark-projectgroup__action {
@@ -389,22 +471,12 @@
 
 .ark-projectgroup__label {
   flex: none;
-  max-width: 40%;
+  max-width: 60%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
   color: var(--ark-text);
-}
-
-.ark-projectgroup__parent {
-  flex: none;
-  max-width: 20%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ark-text-faint);
-  font-size: 12px;
 }
 
 .ark-projectgroup__meta {
@@ -416,27 +488,19 @@
   justify-content: flex-end;
 }
 
-.ark-projectgroup__hint {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ark-text-faint);
-  font-size: 11px;
-  direction: rtl;
-}
-
 .ark-projectgroup__count {
   flex: none;
   color: var(--ark-text-faint);
-  font-size: 11px;
+  font-family: var(--ark-mono);
+  font-size: 10px;
 }
 
-/* Sessions sit slightly indented under their project. */
+/* Sessions sit slightly indented under their project ledger heading. */
 .ark-projectgroup__threads {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding-left: 14px;
+  padding-left: 8px;
 }
 
 /* ---------- search + scope ---------- */
@@ -444,31 +508,32 @@
 .ark-threadlist__controls {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 2px 10px 8px;
+  gap: 9px;
+  padding: 0 12px 10px;
 }
 
 .ark-threadlist__search {
   display: flex;
   align-items: center;
   width: 100%;
-  gap: 6px;
+  gap: 7px;
+  height: 30px;
   padding: 0 9px;
-  border: 1px solid transparent;
+  border: 1px solid var(--ark-sidebar-divider);
   border-radius: var(--ark-radius-sm);
   background: var(--ark-sidebar-field-bg);
+  color: var(--ark-text-faint);
   transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 
 .ark-threadlist__search:focus-within {
   border-color: var(--ark-accent-dim);
   background: var(--ark-bg-raised);
-  box-shadow: 0 0 0 3px var(--ark-selection);
+  box-shadow: 0 0 0 3px var(--ark-accent-soft);
 }
 
-.ark-threadlist__search-icon {
-  font-size: 14px;
-  color: var(--ark-text-faint);
+.ark-threadlist__search > svg {
+  flex: none;
 }
 
 .ark-threadlist__search input {
@@ -478,10 +543,8 @@
   outline: 0;
   background: transparent;
   color: var(--ark-text);
-  padding: 7px 0;
+  padding: 6px 0;
   font-size: 12px;
-  /* Drop the WebKit native search-field paint: it draws its own light
-     background over the glass field in the dark theme. */
   appearance: none;
   -webkit-appearance: none;
 }
@@ -492,16 +555,22 @@
 
 .ark-threadlist__scope {
   display: flex;
-  gap: 12px;
+  gap: 4px;
+  border-bottom: 1px solid var(--ark-sidebar-divider);
 }
 
 .ark-threadlist__scope button {
-  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 1;
   border: 0;
+  border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--ark-text-faint);
   cursor: pointer;
-  padding: 2px 0;
+  padding: 4px 6px 7px;
   text-align: left;
   font-size: 11.5px;
 }
@@ -512,22 +581,46 @@
 
 .ark-threadlist__scope button.is-active {
   color: var(--ark-accent);
+  border-bottom-color: var(--ark-accent);
   font-weight: 550;
+}
+
+.ark-threadlist__scope button:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: 1px;
+  border-radius: 2px 2px 0 0;
 }
 
 .ark-threadlist__scope span {
   color: var(--ark-text-faint);
+  font-family: var(--ark-mono);
+  font-size: 10px;
+  font-weight: 400;
 }
 
 .ark-threadlist__foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  gap: 8px;
+  padding: 9px 12px;
   border-top: 1px solid var(--ark-sidebar-divider);
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--ark-text-faint);
   flex: none;
+}
+
+.ark-threadlist__foot .ark-linkbtn {
+  font-size: 10.5px;
+  text-decoration: none;
+}
+
+.ark-threadlist__foot .ark-linkbtn:hover {
+  color: var(--ark-accent);
+}
+
+.ark-threadlist__count {
+  font-family: var(--ark-mono);
 }
 
 /* ---------- rewind control ---------- */

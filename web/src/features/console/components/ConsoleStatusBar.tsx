@@ -34,22 +34,19 @@ export function ConsoleStatusBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
     <footer className="console-status">
       <button
         type="button"
-        className="console-status__item console-status__ok"
+        className="console-status__button console-status__ok"
         onClick={() => void refresh()}
         title={refreshLabel}
         aria-label={refreshLabel}
-        style={{ border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', padding: 0 }}
       >
         <span className={`console-dot ${dotClass}`} aria-hidden="true" />
         {onlineLabelText}
       </button>
 
-      <span aria-hidden="true">·</span>
       <span className="console-status__item console-status__item--ellipsis" title={meta.workspacePath ?? ''}>
         <b>{meta.workspacePath ?? t('console.top.workspace')}</b>
       </span>
 
-      <span aria-hidden="true">·</span>
       <span className="console-status__item">
         {meta.changeCount > 0
           ? t('console.status.changes', { count: meta.changeCount })
@@ -58,19 +55,17 @@ export function ConsoleStatusBar({ meta }: { meta: ConsoleMeta }): JSX.Element {
 
       <span className="console-status__grow" />
 
-      <span aria-hidden="true">·</span>
-      <span className="console-status__item">{version ?? '—'}</span>
+      <span className="console-status__item console-status__version">{version ?? '—'}</span>
 
-      <span aria-hidden="true">·</span>
       <button
         type="button"
-        className="console-status__item"
+        className="console-status__button console-status__command"
         onClick={() => setCommandOpen(true)}
         title={t('console.status.commandHint')}
-        style={{ border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', padding: 0 }}
+        aria-label={t('console.status.commandHint')}
       >
         <kbd className="console-kbd">⌘K</kbd>
-        {t('console.status.commandHint')}
+        <span>{t('console.status.commandHint')}</span>
       </button>
     </footer>
   )

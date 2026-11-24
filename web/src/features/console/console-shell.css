@@ -41,8 +41,8 @@
 .console-topbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 12px;
+  gap: 8px;
+  padding: 0 14px;
   border-bottom: 1px solid var(--console-line);
   background: var(--ark-bg-canvas);
   min-width: 0;
@@ -52,7 +52,8 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  padding-right: 4px;
+  padding-right: 8px;
+  border-right: 1px solid var(--console-line-soft);
   flex: none;
 }
 
@@ -104,14 +105,14 @@
 .console-chip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--console-line);
-  border-radius: var(--ark-radius);
-  background: var(--ark-bg-raised);
-  color: var(--ark-text);
-  font-size: 12px;
+  gap: 6px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--ark-radius-sm);
+  background: transparent;
+  color: var(--ark-text-dim);
+  font-size: 11.5px;
   white-space: nowrap;
   cursor: default;
 }
@@ -122,7 +123,7 @@ button.console-chip {
 
 button.console-chip:hover {
   background: var(--ark-bg-hover);
-  border-color: var(--console-line-strong);
+  color: var(--ark-text);
 }
 
 .console-chip__path {
@@ -146,21 +147,23 @@ button.console-chip:hover {
 .console-search {
   display: flex;
   align-items: center;
-  gap: 9px;
-  width: min(34vw, 400px);
-  height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--console-line);
-  border-radius: var(--ark-radius);
+  gap: 8px;
+  width: min(32vw, 360px);
+  height: 27px;
+  padding: 0 8px;
+  border: 1px solid var(--console-line-soft);
+  border-radius: var(--ark-radius-sm);
   background: var(--ark-bg-inset);
   color: var(--ark-text-faint);
-  font-size: 12px;
+  font-size: 11.5px;
   cursor: pointer;
   text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
 }
 
 .console-search:hover {
   border-color: var(--console-line-strong);
+  background: var(--ark-bg-raised);
 }
 
 .console-search__label {
@@ -201,14 +204,11 @@ button.console-chip:hover {
   display: flex;
   align-items: center;
   gap: 7px;
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--ark-accent);
-  border-radius: 20px;
-  background: var(--ark-accent-soft);
-  color: var(--ark-accent);
-  font-size: 11px;
-  font-weight: 600;
+  height: 24px;
+  padding: 0 4px;
+  color: var(--ark-text-dim);
+  font-size: 11.5px;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -223,6 +223,19 @@ button.console-chip:hover {
 .console-dot--live {
   background: var(--ark-accent);
   box-shadow: 0 0 0 3px var(--ark-accent-soft);
+  animation: console-live-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes console-live-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .console-dot--live {
+    animation: none;
+  }
 }
 
 .console-dot--warn {
@@ -295,7 +308,7 @@ button.console-chip:hover {
 .console-sidebar-collapse {
   position: absolute;
   right: 8px;
-  bottom: 10px;
+  bottom: 38px;
   width: 22px;
   height: 22px;
   display: inline-flex;
@@ -414,12 +427,12 @@ button.console-chip:hover {
 .console-status {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 12px;
   padding: 0 12px;
   border-top: 1px solid var(--console-line);
   background: var(--ark-bg-canvas);
   color: var(--ark-text-faint);
-  font-size: 11px;
+  font-size: 10.5px;
   white-space: nowrap;
   min-width: 0;
 }
@@ -446,6 +459,70 @@ button.console-chip:hover {
 
 .console-status b {
   color: var(--ark-text-dim);
-  font-weight: 600;
+  font-weight: 500;
+}
+
+.console-status__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.console-status__button:hover {
+  color: var(--ark-text);
+}
+
+.console-status__button:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.console-status__version {
+  font-family: var(--ark-mono);
+}
+
+.console-status__command {
+  color: var(--ark-text-dim);
+}
+
+@media (max-width: 760px) {
+  .console-status__command span {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .console-topbar {
+    gap: 6px;
+    padding: 0 10px;
+  }
+
+  .console-topbar > .console-chip:not(button),
+  .console-search__label,
+  .console-search__keys {
+    display: none;
+  }
+
+  .console-chip__path {
+    max-width: 12ch;
+  }
+
+  .console-search {
+    width: 30px;
+    padding: 0 7px;
+    flex: none;
+  }
+
+  .console-topbar__spacer {
+    min-width: 0;
+  }
 }
 

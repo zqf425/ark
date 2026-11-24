@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, EmptyState, ErrorBoundary, useToast } from '../../../shared/ui'
+import { Button, EmptyState, ErrorBoundary, Icon, useToast } from '../../../shared/ui'
 import type { ThreadSummary } from '../../../shared/contracts'
 import { formatRelative } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
@@ -66,10 +66,9 @@ function ThreadRow({
       setMenuOpen(true)
       return
     }
-    // 5 entries at ~32px plus padding; text height varies with the locale, so
-    // this stays an estimate -- a few pixels of slack are harmless, an
-    // unclickable delete item is not.
-    const MENU_HEIGHT = 176
+    // Five 32px entries plus padding and separators; text height varies with
+    // the locale, so keep enough slack to avoid an unclickable delete item.
+    const MENU_HEIGHT = 184
     const left = Math.max(8, rect.right - 168)
     const viewportFloor = window.innerHeight - 8
     if (rect.bottom + 4 + MENU_HEIGHT > viewportFloor) {
@@ -154,16 +153,16 @@ function ThreadRow({
           </span>
           <span className="ark-threadrow__meta">
             <time>{formatRelative(activityKeyOf(thread), t)}</time>
-            {typeof thread.last_seq === 'number' ? <span>seq {thread.last_seq}</span> : null}
             {thread.forked_from ? (
               <span
                 className="ark-threadrow__fork"
                 title={sourceTitle ? t('thread.row.forkedFrom', { title: sourceTitle }) : t('thread.row.forked')}
               >
+                <Icon name="branch" size={11} />
                 {sourceTitle ? t('thread.row.forkedFrom', { title: sourceTitle }) : t('thread.row.forked')}
               </span>
             ) : null}
-            {thread.archived ? <span>{t('thread.row.archived')}</span> : null}
+            {thread.archived ? <span className="ark-threadrow__archived">{t('thread.row.archived')}</span> : null}
           </span>
         </button>
         <button
@@ -371,18 +370,7 @@ export function ThreadListPanel(): JSX.Element {
             aria-label={t('thread.list.scheduleHint')}
             onClick={() => setScheduleOpen(true)}
           >
-            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
-              <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.7" />
-              <path
-                d="M12 7.8V12l2.9 1.8"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <span>{t('thread.list.schedule')}</span>
+            <Icon name="clock" size={14} />
           </button>
           <Button variant="primary" size="sm" disabled={busy} onClick={() => void create()}>
             {busy ? t('thread.list.creating') : t('thread.list.create')}
@@ -392,7 +380,7 @@ export function ThreadListPanel(): JSX.Element {
 
       <div className="ark-threadlist__controls">
         <label className="ark-threadlist__search">
-          <span className="ark-threadlist__search-icon" aria-hidden="true">⌕</span>
+          <Icon name="search" size={13} />
           <input
             type="search"
             value={query}
@@ -459,18 +447,7 @@ export function ThreadListPanel(): JSX.Element {
                       <span className="ark-projectgroup__label" title={group.path || undefined}>
                         {group.label}
                       </span>
-                      {group.parent ? <span className="ark-projectgroup__parent">{group.parent}</span> : null}
                       <span className="ark-projectgroup__meta">
-                        {group.path ? (
-                          <span
-                            className="ark-projectgroup__hint"
-                            title={group.path}
-                          >
-                            {group.path}
-                          </span>
-                        ) : (
-                          <span title={t('thread.list.defaultProjectHint')} />
-                        )}
                         <span className="ark-projectgroup__count">
                           {t('thread.list.groupCount', { count: group.threads.length })}
                         </span>

@@ -15,7 +15,7 @@ export type SettingsSectionProps = {
   children: ReactNode
 }
 
-/** One titled card. Section state is always owned by the caller. */
+/** One ruled settings section. Section state is always owned by the caller. */
 export function SettingsSection({ title, desc, actions, children }: SettingsSectionProps): JSX.Element {
   return (
     <section className="ark-settings__section">

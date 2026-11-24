@@ -1,47 +1,54 @@
 /**
- * Settings screen components (design §7.10.2), restyled after the
- * SettingsCard: 18px cards with a ruled header, 14px controls with an accent
- * focus ring, and recessed wells for nested lists.
+ * Settings components: ruled sections, compact form controls and recessed
+ * editing wells. The page uses the same hairline/status language as the live
+ * execution timeline rather than a stack of floating cards.
  *
  * Layout lives in settings-agent.css. Tokens come from styles/tokens.css
- * (theme.css for dark) only: this file must not introduce a palette of its
- * own. Shared primitives (.ark-btn / .ark-chip / .ark-tabs) are still owned
- * by shared/ui.
+ * (theme.css for dark) only. Shared primitives stay owned by shared/ui.
  */
 
 /* ---------- section card ---------- */
 
 .ark-settings__section {
-  border: 1px solid var(--ark-border-muted);
-  border-radius: var(--ark-radius-xl);
-  background: var(--ark-card-strong);
-  box-shadow: var(--ark-shadow-ctl);
-  padding: 14px 18px 18px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+  min-width: 0;
+}
+
+.ark-settings__section + .ark-settings__section {
+  padding-top: 22px;
+  border-top: 1px solid var(--ark-border-muted);
 }
 
 .ark-settings__head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 2px 2px 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 0 0 12px;
   border-bottom: 1px solid var(--ark-border-muted);
 }
 
 .ark-settings__title {
   margin: 0;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 620;
   color: var(--ark-text);
 }
 
 .ark-settings__desc {
+  grid-column: 1 / -1;
   margin: 0;
-  font-size: 12.5px;
+  font-size: 12px;
+  line-height: 1.55;
   color: var(--ark-text-faint);
+}
+
+.ark-settings__head > .ark-card__actions {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
 }
 
 .ark-settings__row {
@@ -57,8 +64,8 @@
 
 .ark-settings__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
 }
 
 /* Appearance preferences always share one row; only collapse on narrow cards. */
@@ -133,14 +140,19 @@
 .ark-field__select {
   width: 100%;
   min-width: 0;
+  min-height: 34px;
   background: var(--ark-card-strong);
   border: 1px solid var(--ark-border);
-  border-radius: var(--ark-radius-lg);
-  padding: 7px 11px;
+  border-radius: var(--ark-radius);
+  padding: 7px 10px;
   color: var(--ark-text);
   font-size: 13px;
-  box-shadow: var(--ark-shadow-ctl);
+  line-height: 1.4;
   transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.ark-field__input::placeholder {
+  color: var(--ark-text-placeholder);
 }
 
 .ark-field__input:focus-visible,
@@ -149,6 +161,10 @@
   outline: none;
   border-color: var(--ark-accent-dim);
   box-shadow: 0 0 0 3px var(--ark-accent-soft);
+}
+
+.ark-field__input[aria-invalid='true'] {
+  border-color: var(--ark-error);
 }
 
 .ark-field__input:disabled,
@@ -185,15 +201,15 @@
 .ark-field__area {
   width: 100%;
   resize: vertical;
-  min-height: 56px;
+  min-height: 72px;
   background: var(--ark-card-strong);
   border: 1px solid var(--ark-border);
-  border-radius: var(--ark-radius-lg);
-  padding: 8px 11px;
+  border-radius: var(--ark-radius);
+  padding: 8px 10px;
   color: var(--ark-text);
   font-family: var(--ark-mono);
   font-size: 12px;
-  box-shadow: var(--ark-shadow-ctl);
+  line-height: 1.55;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
@@ -233,7 +249,21 @@
 .ark-settings__list {
   display: flex;
   flex-direction: column;
+  border-top: 1px solid var(--ark-border-muted);
+}
+
+.ark-settings__list > .ark-card {
+  border: 0;
+  border-bottom: 1px solid var(--ark-border-muted);
+  border-radius: 0;
+  background: transparent;
+  padding: 14px 0;
   gap: 10px;
+}
+
+.ark-settings__list > .ark-card:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
 }
 
 /* Vertical stack for a section's editable blocks (memory forms, skill config). */
@@ -269,6 +299,8 @@
 }
 
 .ark-card__name {
+  font-family: var(--ark-mono);
+  font-size: 12.5px;
   font-weight: 600;
   overflow-wrap: anywhere;
   color: var(--ark-text);
@@ -276,9 +308,11 @@
 
 .ark-card__meta {
   display: flex;
-  gap: 12px;
+  gap: 6px 14px;
   flex-wrap: wrap;
-  font-size: 11.5px;
+  font-family: var(--ark-mono);
+  font-size: 11px;
+  line-height: 1.55;
   color: var(--ark-text-dim);
 }
 
@@ -288,9 +322,27 @@
 
 .ark-card__actions {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
   margin-left: auto;
+}
+
+.ark-settings__list > .ark-card .ark-card__actions .ark-btn {
+  padding: 3px 7px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ark-text-dim);
+}
+
+.ark-settings__list > .ark-card .ark-card__actions .ark-btn:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--ark-bg-hover);
+  color: var(--ark-text);
+}
+
+.ark-settings__list > .ark-card .ark-card__actions .ark-btn--danger {
+  color: var(--ark-error);
 }
 
 .ark-card__foot {
@@ -305,32 +357,34 @@
 .ark-settings__group {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .ark-settings__group + .ark-settings__group {
   border-top: 1px solid var(--ark-border-muted);
-  padding-top: 14px;
+  padding-top: 18px;
 }
 
 .ark-settings__subhead {
   margin: 0;
   font-size: 12.5px;
-  font-weight: 600;
-  color: var(--ark-text-dim);
+  font-weight: 620;
+  color: var(--ark-text);
 }
 
 /* ---------- notices ---------- */
 
 .ark-settings__notice {
   border: 1px solid transparent;
+  border-left: 3px solid currentColor;
   background: var(--ark-warn-wash);
-  border-radius: var(--ark-radius-lg);
+  border-radius: var(--ark-radius-sm);
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12.5px;
+  font-size: 12px;
+  line-height: 1.55;
   color: var(--ark-warn);
 }
 
@@ -355,14 +409,23 @@
 
 .ark-kv {
   display: grid;
-  grid-template-columns: minmax(96px, max-content) 1fr;
-  gap: 5px 12px;
+  grid-template-columns: minmax(112px, max-content) minmax(0, 1fr);
+  gap: 0 16px;
   margin: 0;
-  font-size: 12.5px;
+  border-top: 1px solid var(--ark-border-muted);
+  font-size: 12px;
+}
+
+.ark-kv__k,
+.ark-kv__v {
+  min-width: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--ark-border-muted);
 }
 
 .ark-kv__k {
   color: var(--ark-text-faint);
+  font-size: 11.5px;
 }
 
 .ark-kv__v {
@@ -423,7 +486,7 @@
   display: inline-block;
   padding: 12px;
   border-radius: 12px;
-  background: #fff;
+  background: var(--ark-im-qr-surface);
   line-height: 0;
 }
 

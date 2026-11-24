@@ -126,8 +126,11 @@ export function SettingsPage(): JSX.Element {
               aria-current={section.id === activeSection ? 'page' : undefined}
               onClick={() => setActiveSection(section.id)}
             >
-              <span>{t(section.labelKey)}</span>
-              <small>{t(section.detailKey)}</small>
+              <span className="ark-settings__nav-icon"><Icon name={section.icon} size={15} /></span>
+              <span className="ark-settings__nav-copy">
+                <span>{t(section.labelKey)}</span>
+                <small>{t(section.detailKey)}</small>
+              </span>
             </button>
           ))}
         </nav>
@@ -151,7 +154,7 @@ export function SettingsPage(): JSX.Element {
               title={t('settings.backToWorkbench')}
             >
               <Icon name="undo" size={13} />
-              {t('settings.backToWorkbench')}
+              <span className="ark-settings__back-label">{t('settings.backToWorkbench')}</span>
             </button>
           </header>
           {body}

@@ -12,4 +12,19 @@ describe('settings navigation', () => {
     expect(isSettingsSection('im')).toBe(true)
     expect(isSettingsSection('unknown')).toBe(false)
   })
+
+  it('gives every settings section a distinct scannable icon', () => {
+    expect(SETTINGS_SECTIONS.map((section) => section.icon)).toEqual([
+      'settings',
+      'terminal',
+      'layers',
+      'code',
+      'plugin',
+      'memory',
+      'clock',
+      'chat',
+      'spark'
+    ])
+    expect(new Set(SETTINGS_SECTIONS.map((section) => section.icon)).size).toBe(SETTINGS_SECTIONS.length)
+  })
 })
