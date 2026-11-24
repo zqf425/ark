@@ -335,16 +335,24 @@ export const TurnBlock = memo(function TurnBlock({
           onToggle={onToggle}
         >
           <summary className="ark-process__head">
-            <span className={`ark-dot ${live ? 'ark-dot--live' : 'ark-dot--idle'}`} aria-hidden="true" />
-            <span className="ark-process__title">{t('canvas.process.title')}</span>
+            {live ? (
+              <span className="ark-tool__status ark-tool__status--live" aria-hidden="true" />
+            ) : (
+              <span className="ark-dot ark-dot--idle" aria-hidden="true" />
+            )}
+            <span className="ark-process__title">
+              {live ? t('canvas.process.running') : t('canvas.process.title')}
+            </span>
             <span className="ark-process__meta">{t('canvas.process.count', { count: process.length })}</span>
             {/* Measured model time of this turn, right after the step count
                 it qualifies. It reads as part of the header's summary line
                 rather than a right-aligned badge, and the reply card below
-                stays about the answer. */}
-            {turnClock.labelled ? (
+                stays about the answer. While running the clock is the bare
+                live span ("正在执行中 · 2分12秒"); settled it keeps the
+                labelled "耗时 …" form the duration contract pins. */}
+            {(live ? turnClock.span : turnClock.labelled) ? (
               <span className="ark-process__duration" title={t('canvas.process.durationTitle')}>
-                {turnClock.labelled}
+                {live ? turnClock.span : turnClock.labelled}
               </span>
             ) : null}
           </summary>

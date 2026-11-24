@@ -16,6 +16,7 @@ import {
 } from '../state/selectors'
 import { TurnBlock } from './TurnBlock'
 import { LiveActivity } from './LiveActivity'
+import { ChildActivityBanner, ChildActivityHint } from './ChildActivityBanner'
 import { ApprovalCard } from './ApprovalCard'
 import { UserInputCard } from './UserInputCard'
 import { Composer } from './Composer'
@@ -269,6 +270,9 @@ export function ThreadStream({
         </Button>
       </header>
       <SessionStatsBar threadId={threadId} />
+      {/* Active background children stay visible above the canvas even while
+          the stream scrolls; the durable list lives in the subagents panel. */}
+      <ChildActivityBanner threadId={threadId} />
       <div className="ark-stream__scroll" ref={scrollRef}>
         {/* Inner wrapper exists so a single ResizeObserver can see content
             growth; the flex gaps are inherited so the layout is unchanged. */}
@@ -348,6 +352,7 @@ export function ThreadStream({
         unsent draft (ready to be sent to the new one).
       */}
       <div className="ark-composer-stack">
+        <ChildActivityHint threadId={threadId} />
         <Composer key={threadId ?? ''} threadId={threadId} />
       </div>
     </section>

@@ -92,7 +92,10 @@
 - 本回合的模型耗时显示在**过程卡头部行**、紧跟步数之后（`ark-process__duration` 排在
   `ark-process__meta` 之后，故整行读作“执行过程 · 47 步 · 耗时 10分45秒”）：实测耗时是描述"本回合
   做了什么"的那一行的成本，属于摘要行，不贴最右（头部 `::after` 箭头仍由自己的 `margin-left: auto`
-  独占右端），也不放进"最终回复"答案卡的右下角操作行。**没有过程卡**的回合（单轮问答、无工具/思考行）
+  独占右端），也不放进"最终回复"答案卡的右下角操作行。运行中头部标题改读“正在执行中”
+  （`canvas.process.running`，参考 Qoder），耗时显示为**纯时长**（`turnClock.span`，如
+  “正在执行中 · 5 步 · 2分12秒”）；结束后标题回落“执行过程”、耗时恢复带“耗时”标签的形态
+  （`turnClock.labelled`，时长文案契约的钉子不变）。**没有过程卡**的回合（单轮问答、无工具/思考行）
   把同一耗时交给回复卡标题行（`ark-reply__head` 内的 `ark-reply__duration`），耗时不会因为无可折叠
   步骤而消失；两种情况都不出现在 `ark-reply__foot` 操作行。数值与会话统计条总耗时同源（同一
   `state/rounds.ts` 折叠），因此"各轮次之和 = 统计条总耗时"成立；无已记录轮次时不显示。
@@ -122,11 +125,20 @@
   渲染正是本仓禁止的漂移。旧的 `m:ss` 辅助函数（原 `formatDuration`）在统计条改用同一文案后已无
   调用方，随改动删除，不保留死代码。**会话统计条的总耗时与回合耗时用同一文案**，因此“各轮次之和 =
   统计条总耗时”不仅数值相等、读起来也一致。
-- 工具卡头部带工具族图标盘（`ark-tool__icon`，22px 圆角方块 + CSS mask 单色图标）：按工具名
-  归入 read/write/exec/search 四族，未知名回落 wrench，与主流 agent 的活动行一致让长回合可按
-  形状扫读；折叠头部新增单行参数摘要（`ark-tool__digest`，取首个参数 `key=value` 截断省略，
-  只读 `formatToolArguments` 已格式化文本、不新增第二套序列化）；过程卡与工具卡展开体统一
-  `--ark-bg-raised` 微底色，头部 hover 反馈。写文件类工具卡（`write`/`edit`）在头部追加
+- 工具行按主流 agent（参考 Qoder）的**时间线活动行**呈现，不再是卡中卡：过程卡 body 左侧一条
+  竖直导轨（`ark-process__body::before`），每行以一枚生命周期状态节点（`ark-tool__status`）落在
+  导轨上——成功绿底对勾盘 / 失败红底叉盘 / 运行中强调色旋转弧（`--ok`/`--fail`/`--live`，节点自带
+  不透明底盘遮住导轨线，避免线穿过图标）。节点词汇由工具行、实时活动行与运行中过程卡头共用。
+  状态节点之后是工具族图标盘（`ark-tool__icon`，read/write/exec/search 四族 + wrench 回落）与
+  **本地化族标签**（`ark-tool__family`，"终端命令/读取文件/编辑文件/搜索内容/工具调用"，族判定唯一
+  宿主 `toolFamily`），原始 mono 工具名（`ark-tool__name`）弱化随行供精确核对；宽度契约：族标签与
+  工具名（`headtoggle` flex:none）、判定词与耗时（nowrap）不被压缩，窄宽度只由 digest 的省略号吸收
+  （实测窄画布下 headtoggle 可缩曾让 flex:none 子元素溢出叠印在 digest 上）；存在文件芯片时隐藏原始
+  工具名（`head:has(filechip)`），把宽度让给芯片，避免芯片被挤成只剩 padding 的空壳；折叠头部保留单行
+  参数摘要（`ark-tool__digest`，取首个参数 `key=value` 截断省略，只读 `formatToolArguments` 已格式化
+  文本、不新增第二套序列化）。过程卡内的工具行去掉边框/底色/阴影与 per-row chevron（整行点击即折叠
+  开关，状态节点占据导轨槽），call_id 诊断字段在时间线内隐藏、成功/失败判定退化为无 pill 的安静词；
+  独立工具卡（子代理查看器）仍保留上方带边框的处理。写文件类工具卡（`write`/`edit`）在头部追加
   文件芯片（`ark-tool__filechip`，需求见
   [tool-file-preview](../requirements/tool-file-preview.md)）：路径提取的唯一宿主是
   `code-session/tool-file.ts` 纯函数（只认结构化 `path` 参数，`bash` 等间接写入不猜），
@@ -134,6 +146,10 @@
   折叠切换；`selectFile` 是显式"打开该文件"意图，检查器收起时同时展开（只切 Tab 不展开
   曾把收起态下的芯片变成死按钮）；因此头部拆为行容器 + 内层折叠按钮（`ark-tool__headtoggle`），
   避免 button 嵌套 button 的非法 DOM；无路径的工具卡渲染不变。
+  思考行（`ReasoningBlock`）同为时间线条目：导轨上一枚强调色火花节点（`ark-reasoning__status`），
+  摘要读作"已思考 · <单行预览>"（流式中为"思考中"，`canvas.reasoning.done`），标签单独成 span 并
+  nowrap（裸文本节点作匿名 flex item 会在窄画布竖排），预览折叠空白且不改写
+  原文，全文仍逐字留在折叠体；过程卡内去掉左侧强调竖线与 chevron，由导轨与火花节点取代。
   助手**正文**里的文件路径同样可点（需求见
   [prose-path-links](../requirements/prose-path-links.md)）：`renderMarkdown` 第二参
   接收本回合 write/edit 的路径白名单（`code-session/tool-file.ts` 的 `threadWritePaths`
@@ -198,7 +214,18 @@
   item 显示"正在生成"；数据完全来自已折叠的 item 投影（`activeTurnId` + 最新 streaming item），不新增
   wire 契约、不与 Rust 双实现。动机：过程卡位于助手消息上方，画布自动吸底时它在视野外，纯思考阶段
   画布毫无变化，健康流会被误读为卡死；该行让用户能实时感知推理方向并及时 steer。回合结束后随
-  `turnState` 离开 running 而消失，历史仍归过程卡。
+  `turnState` 离开 running 而消失，历史仍归过程卡。行首的旋转弧复用工具行的状态节点
+  （`ark-tool__status--live`），不再自持脉冲点。
+- 后台子代理在会话列有两处常驻可见表面（参考 Qoder）：画布上方（统计条之下、滚动区之外）的
+  `ChildActivityBanner` 列出本线程活跃子代理（脉冲点 + 「后台」tag + label + 实时时长
+  “子 Agent 正在执行 2分49秒”，超过 3 个折叠为一条“另有 N 个”），点击任一行
+  `openPanel('subagents')` 打开检查器子代理面板（终止/补充/恢复仍在那里）；composer 上方
+  `ChildActivityHint` 显示“N 个任务在后台运行 · 你可以继续发消息”。两者共用
+  `hooks/use-child-activity.ts` 的模块级缓存（按 thread id + `childRunRevision` 键，与
+  `use-thread-skills` 同形）：并发挂载共享一次 `GET /v1/child-runs` 请求，只在
+  `child_activity`/`child_completed` 推进 revision 时重读，不随 token delta 刷新；失败不清空
+  已有快照，过期响应不得覆盖新 revision 的条目。时长由 `childRunDuration` + `useDurationFormat`
+  每秒 tick（仅有活跃子代理时走表）。横幅不新增 wire 契约，也不在 store 维护第二份子代理列表。
 - 错误只在**中断处**展示：终态 `turn_failed` 由服务端投影为该回合的持久 `error` 条目
   （见 [ark-store](ark-store.md)），以普通 item 行内联渲染在失败回合内，历史回放一致；渲染器不为
   `turn_failed`/`error`/`transient_retry` 维护独立的"最近错误"页脚通道或常驻画布底部的错误块。

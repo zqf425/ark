@@ -419,6 +419,78 @@
   color: var(--ark-text-faint);
   font-family: var(--ark-mono);
   font-size: 11px;
+  margin-left: auto;
+  flex: none;
+  white-space: nowrap;
+}
+
+/* The verdict word must not wrap into a vertical column on narrow canvases;
+   the preview alone absorbs the squeeze. */
+.ark-reasoning__label {
+  flex: none;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* One-line preview of what the stretch was about ("已思考 · …"): quiet,
+   clipped, never a rewrite — the fold body keeps the verbatim text. */
+.ark-reasoning__preview {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ark-text-faint);
+  font-size: 12px;
+}
+
+/* Spark node on the timeline rail, same slot as a tool row's status node. */
+.ark-reasoning__status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--ark-bg-raised);
+  box-shadow: 0 0 0 2px var(--ark-bg-raised);
+  color: var(--ark-accent);
+}
+
+.ark-reasoning__status::before {
+  content: '';
+  display: block;
+  width: 11px;
+  height: 11px;
+  background-color: currentColor;
+  -webkit-mask: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linejoin='round'%3E%3Cpath d='M12 3c.6 4.6 2.4 6.7 7 8-4.6 1.3-6.4 3.4-7 8-.6-4.6-2.4-6.7-7-8 4.6-1.3 6.4-3.4 7-8z'/%3E%3C/svg%3E");
+  mask: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linejoin='round'%3E%3Cpath d='M12 3c.6 4.6 2.4 6.7 7 8-4.6 1.3-6.4 3.4-7 8-.6-4.6-2.4-6.7-7-8 4.6-1.3 6.4-3.4 7-8z'/%3E%3C/svg%3E");
+}
+
+/* Inside the process card the reasoning block is a timeline entry: the rail
+   replaces the accent rule, the spark node replaces the chevron. */
+.ark-process .ark-reasoning {
+  border-left: 0;
+  padding-left: 0;
+}
+
+.ark-process .ark-reasoning__summary {
+  padding: 3px 6px 3px 0;
+  border-radius: var(--ark-radius-sm);
+}
+
+.ark-process .ark-reasoning__summary:hover {
+  background: var(--ark-bg-hover);
+}
+
+.ark-process .ark-reasoning__summary::before {
+  display: none;
+}
+
+.ark-process .ark-reasoning__body {
+  margin-left: 24px;
 }
 
 .ark-reasoning__body {

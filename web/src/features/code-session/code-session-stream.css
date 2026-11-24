@@ -195,6 +195,8 @@
 .ark-process__title {
   font-weight: 600;
   color: var(--ark-text);
+  flex: none;
+  white-space: nowrap;
 }
 
 .ark-process.is-live .ark-process__title {
@@ -205,6 +207,8 @@
   font-size: 11px;
   color: var(--ark-text-faint);
   font-family: var(--ark-mono);
+  flex: none;
+  white-space: nowrap;
 }
 
 /* Measured model time of the turn, inline after the step count: it belongs to
@@ -214,15 +218,43 @@
   font-size: 11px;
   color: var(--ark-text-dim);
   font-family: var(--ark-mono);
+  flex: none;
+  white-space: nowrap;
 }
 
 .ark-process__body {
   border-top: 1px solid var(--ark-border-muted);
-  padding: 10px 12px;
+  /* Left padding places the 16px status nodes' center on the rail (20px + 1px
+     half-width): rows read as one vertical timeline, Qoder-style. */
+  padding: 8px 12px 10px 13px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
   background: var(--ark-bg-raised);
+  position: relative;
+}
+
+/* The timeline rail: one quiet vertical line behind the status nodes. Nodes
+   carry their own opaque disc, so the line never strikes through an icon. */
+.ark-process__body::before {
+  content: '';
+  position: absolute;
+  left: 20px;
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--ark-border-muted);
+}
+
+/* Rows without a rail node of their own (narration, results, errors, notices,
+   the fold summary) align to the content column right of the rail. */
+.ark-process .ark-toolresult,
+.ark-process .ark-errorrow,
+.ark-process .ark-notice,
+.ark-process .ark-msg,
+.ark-process .ark-foldedtools {
+  margin-left: 24px;
 }
 
 /* Folded earlier-steps summary row inside the process card: quieter than a
@@ -318,11 +350,8 @@
   color: var(--ark-text-dim);
 }
 
-.ark-liveactivity .ark-dot {
+.ark-liveactivity .ark-tool__status {
   align-self: center;
-  flex: none;
-  width: 7px;
-  height: 7px;
 }
 
 .ark-liveactivity__label {
@@ -333,6 +362,7 @@
 
 .ark-liveactivity__meta {
   flex: none;
+  white-space: nowrap;
   font-family: var(--ark-mono);
   font-size: 11px;
   color: var(--ark-text-faint);
@@ -354,4 +384,102 @@
   to {
     opacity: 1;
   }
+}
+
+/* ---------- background-child banner + composer hint ---------- */
+
+/* Active subagent runs stay visible above the canvas while the stream scrolls
+   (Qoder-referenced layout). The durable list with abort/steer/resume lives in
+   the inspector's subagents panel; a row click is the way there. */
+.ark-childbanner {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px max(24px, calc((100% - var(--ark-canvas-width)) / 2));
+  border-bottom: 1px solid var(--ark-border-muted);
+  background: var(--ark-card-soft);
+}
+
+.ark-childbanner__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 4px 8px;
+  border-radius: var(--ark-radius-sm);
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ark-text-dim);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ark-childbanner__row:hover {
+  background: var(--ark-bg-hover);
+}
+
+.ark-childbanner__row .ark-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+}
+
+.ark-childbanner__tag {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--ark-accent);
+  background: var(--ark-accent-soft);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.ark-childbanner__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+  color: var(--ark-text);
+}
+
+.ark-childbanner__state {
+  margin-left: auto;
+  flex: none;
+  white-space: nowrap;
+  font-family: var(--ark-mono);
+  font-size: 11px;
+  color: var(--ark-text-faint);
+}
+
+.ark-childbanner__more {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--ark-text-faint);
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: var(--ark-radius-sm);
+}
+
+.ark-childbanner__more:hover {
+  color: var(--ark-accent);
+  background: var(--ark-bg-hover);
+}
+
+/* The main conversation stays usable while children run: one quiet centered
+   line above the composer, same vocabulary as the banner. */
+.ark-childhint {
+  margin: 0;
+  padding: 4px 24px 6px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--ark-text-faint);
 }
