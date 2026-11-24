@@ -49,7 +49,7 @@ function thread(id: string, title: string): ThreadSummary {
 }
 
 /** Install a deterministic viewport the component can measure against. */
-function installViewport(width: number, height: number): void {
+function installViewport(width: number, height: number, kebabBottom = 72): void {
   Object.defineProperty(window, 'innerWidth', { value: width, configurable: true })
   Object.defineProperty(window, 'innerHeight', { value: height, configurable: true })
   Element.prototype.getBoundingClientRect = function (): DOMRect {
@@ -62,7 +62,7 @@ function installViewport(width: number, height: number): void {
     if (bottomRow) {
       return makeRect(window.innerHeight - 36, window.innerHeight - 4)
     }
-    return makeRect(40, 72)
+    return makeRect(kebabBottom - 32, kebabBottom)
   }
 }
 
@@ -119,6 +119,20 @@ describe('ThreadRow kebab menu placement', () => {
     expect(Number.isNaN(top)).toBe(true)
     const viewportFloor = window.innerHeight - 8
     expect(viewportFloor - bottom).toBeCloseTo(window.innerHeight - 36 - 4, 0)
+  })
+
+  it('flips upwards when the remaining space only fits the old menu estimate', async () => {
+    installViewport(1024, 700, 508)
+    harness = await mountWithProviders(<ThreadListPanel />)
+    const kebab = harness.host.querySelector<HTMLButtonElement>('.ark-threadrow__kebab')!
+    await act(async () => {
+      kebab.click()
+    })
+
+    const menu = document.querySelector<HTMLElement>('.ark-threadrow__menu')
+    expect(menu).not.toBeNull()
+    expect(Number.isNaN(parseFloat(menu!.style.top))).toBe(true)
+    expect(Number.isNaN(parseFloat(menu!.style.bottom))).toBe(false)
   })
 
   it('keeps opening downwards for rows with room below', async () => {
