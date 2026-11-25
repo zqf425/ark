@@ -1,0 +1,172 @@
+/**
+ * Trace analysis section (requirements/trace-analysis.md).
+ *
+ * Reuses the settings section/card language; everything here is layout over
+ * tokens — no literal colours, and every font size carries `--ark-scale`.
+ */
+
+/* ---------- metric cards ---------- */
+
+.ark-trace__metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.ark-trace__metric {
+  padding: 8px 10px;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius);
+  background: var(--ark-bg-inset);
+}
+
+.ark-trace__metric span {
+  display: block;
+  font-size: calc(11px * var(--ark-scale));
+  color: var(--ark-text-faint);
+}
+
+.ark-trace__metric b {
+  display: block;
+  margin-top: 2px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- charts ---------- */
+
+.ark-trace__charts {
+  display: grid;
+  gap: 14px;
+}
+
+.ark-trace__block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ark-border-muted);
+}
+
+.ark-trace__block h4 {
+  margin: 0;
+  font-size: calc(12px * var(--ark-scale));
+  font-weight: 620;
+  color: var(--ark-text-dim);
+}
+
+.ark-trace__bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ark-trace__hbar {
+  display: grid;
+  grid-template-columns: minmax(80px, 180px) minmax(0, 1fr) 3ch;
+  align-items: center;
+  gap: 8px;
+}
+
+.ark-trace__hbar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ark-mono);
+  font-size: calc(11.5px * var(--ark-scale));
+  color: var(--ark-text-dim);
+}
+
+.ark-trace__hbar-track {
+  display: block;
+  width: 100%;
+  height: 8px;
+}
+
+.ark-trace__hbar-value {
+  font-size: calc(11.5px * var(--ark-scale));
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ark-text);
+}
+
+.ark-trace__vbars {
+  display: block;
+  width: 100%;
+  height: 72px;
+}
+
+/* ---------- tables ---------- */
+
+.ark-trace__table {
+  overflow-x: auto;
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius);
+}
+
+.ark-trace__table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: calc(12px * var(--ark-scale));
+}
+
+.ark-trace__table th,
+.ark-trace__table td {
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--ark-border-muted);
+  vertical-align: top;
+}
+
+.ark-trace__table th {
+  font-size: calc(11px * var(--ark-scale));
+  font-weight: 500;
+  color: var(--ark-text-faint);
+  background: var(--ark-bg-raised);
+  white-space: nowrap;
+}
+
+.ark-trace__table tr:last-child td {
+  border-bottom: 0;
+}
+
+.ark-trace__table td.is-mono,
+.ark-trace__table .is-mono {
+  font-family: var(--ark-mono);
+}
+
+.ark-trace__table td.is-digest {
+  max-width: 320px;
+  overflow-wrap: anywhere;
+  color: var(--ark-text-dim);
+}
+
+.ark-trace__table td.is-fail {
+  color: var(--ark-error);
+}
+
+/* Correlated runtime errors under one failed call: a quiet block, not a row. */
+.ark-trace__error-runtime {
+  display: block;
+  margin-top: 2px;
+  color: var(--ark-text-dim);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- picker + actions ---------- */
+
+.ark-trace__picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 460px;
+}
+
+.ark-trace__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  border-top: 1px solid var(--ark-border-muted);
+}

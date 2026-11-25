@@ -8,6 +8,7 @@ export type SettingsSectionId =
   | 'integrations'
   | 'plugins'
   | 'memory'
+  | 'trace'
   | 'schedules'
   | 'im'
   | 'skills'
@@ -35,6 +36,11 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'integrations', group: 'capabilities', icon: 'code', labelKey: 'settings.nav.integrations.label', detailKey: 'settings.nav.integrations.detail' },
   { id: 'plugins', group: 'capabilities', icon: 'plugin', labelKey: 'settings.nav.plugins.label', detailKey: 'settings.nav.plugins.detail' },
   { id: 'memory', group: 'capabilities', icon: 'memory', labelKey: 'settings.nav.memory.label', detailKey: 'settings.nav.memory.detail' },
+  // No `chart` shape exists in Icon.tsx; `layers` (stacked planes) is the
+  // closest existing glyph for a stats/analytics entry until a chart icon is
+  // added to the shared set. The nav test pins every icon as distinct, so this
+  // cannot silently collide with another section.
+  { id: 'trace', group: 'capabilities', icon: 'layers', labelKey: 'settings.nav.trace.label', detailKey: 'settings.nav.trace.detail' },
   { id: 'schedules', group: 'automation', icon: 'clock', labelKey: 'settings.nav.schedules.label', detailKey: 'settings.nav.schedules.detail' },
   { id: 'im', group: 'automation', icon: 'chat', labelKey: 'settings.nav.im.label', detailKey: 'settings.nav.im.detail' },
   { id: 'skills', group: 'capabilities', icon: 'spark', labelKey: 'settings.nav.skills.label', detailKey: 'settings.nav.skills.detail' }

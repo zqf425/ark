@@ -47,11 +47,13 @@ use crate::{
     SkillsSettings, SteerChildRequest, SubagentSettings, SwitchWorkspaceRequest, TaskSchedule,
     TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadExport, ThreadItem,
     ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSkillsResponse,
-    ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest, TuningSettings,
-    TurnRequest, TurnSummary, TurnUsage, UiCatalog, UpdateImChannelRequest, UpdateMemoryRequest,
-    UpdateScheduleRequest, UpdateThreadRequest, UsageResponse, WorkspaceChange,
-    WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile,
-    WorkspaceFilePreview, WorkspaceStatus, WorkspaceValidateResponse, WorkspaceView,
+    ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest, ToolStat,
+    TraceErrorEntry, TraceRuntimeError, TraceSlowCall, TraceStatsResponse, TuningSettings,
+    TurnRequest, TurnStat, TurnSummary, TurnUsage, UiCatalog, UpdateImChannelRequest,
+    UpdateMemoryRequest, UpdateScheduleRequest, UpdateThreadRequest, UsageResponse,
+    WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
+    WorkspaceDiffFile, WorkspaceFilePreview, WorkspaceStatus, WorkspaceValidateResponse,
+    WorkspaceView,
 };
 use ark_common::{
     ArkErrorCode, ArkErrorPayload, AttachmentId, ChildId, ItemId, ThreadId, TurnId, Usage,
@@ -119,6 +121,13 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     LlmRound::export_all_to(dir)?;
     LlmRoundError::export_all_to(dir)?;
     LlmRoundsResponse::export_all_to(dir)?;
+    // ---- trace analysis (requirements/trace-analysis.md) ----
+    TraceStatsResponse::export_all_to(dir)?;
+    TurnStat::export_all_to(dir)?;
+    ToolStat::export_all_to(dir)?;
+    TraceSlowCall::export_all_to(dir)?;
+    TraceErrorEntry::export_all_to(dir)?;
+    TraceRuntimeError::export_all_to(dir)?;
     SessionResumeResponse::export_all_to(dir)?;
     ReviewRequest::export_all_to(dir)?;
     ThreadExport::export_all_to(dir)?;
@@ -281,6 +290,12 @@ const ROOT_NAMES: &[&str] = &[
     "LlmRound",
     "LlmRoundError",
     "LlmRoundsResponse",
+    "TraceStatsResponse",
+    "TurnStat",
+    "ToolStat",
+    "TraceSlowCall",
+    "TraceErrorEntry",
+    "TraceRuntimeError",
     "SessionResumeResponse",
     "ReviewRequest",
     "ThreadExport",

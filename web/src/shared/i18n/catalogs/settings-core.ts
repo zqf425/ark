@@ -46,6 +46,8 @@ export const SETTINGS_CORE_MESSAGES = {
   'settings.nav.schedules.detail': ['提示词与触发节奏', 'Prompts and cadences'],
   'settings.nav.skills.label': ['Skills', 'Skills'],
   'settings.nav.skills.detail': ['已发现的能力', 'Discovered capabilities'],
+  'settings.nav.trace.label': ['链路分析', 'Trace analysis'],
+  'settings.nav.trace.detail': ['会话统计与 AI 分析', 'Session statistics and AI analysis'],
 
   /** Error-boundary labels on the settings page. */
   'settings.boundary.general': ['通用设置崩溃', 'General settings crashed'],
@@ -55,5 +57,6 @@ export const SETTINGS_CORE_MESSAGES = {
   'settings.boundary.mcp': ['MCP 设置崩溃', 'MCP settings crashed'],
   'settings.boundary.plugins': ['插件设置崩溃', 'Plugin settings crashed'],
   'settings.boundary.schedules': ['定时任务设置崩溃', 'Scheduled-task settings crashed'],
-  'settings.boundary.skills': ['Skills 设置崩溃', 'Skills settings crashed']
+  'settings.boundary.skills': ['Skills 设置崩溃', 'Skills settings crashed'],
+  'settings.boundary.trace': ['链路分析设置崩溃', 'Trace analysis settings crashed']
 } as const

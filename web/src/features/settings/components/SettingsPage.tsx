@@ -19,6 +19,7 @@ import { ProvidersSection } from './ProvidersSection'
 import { McpSection } from './McpSection'
 import { PluginsSection } from './PluginsSection'
 import { MemorySection } from './MemorySection'
+import { TraceSection } from './TraceSection'
 import { SkillsSection } from './SkillsSection'
 import { ScheduleSection } from './ScheduleSection'
 import { ImSection } from './ImSection'
@@ -26,6 +27,7 @@ import { SETTINGS_SECTIONS, SETTINGS_SECTION_GROUPS, type SettingsSectionId } fr
 import '../settings.css'
 import '../settings-import-dialog.css'
 import '../settings-agent.css'
+import '../settings-trace.css'
 
 export function SettingsPage(): JSX.Element {
   const { t } = useI18n()
@@ -87,6 +89,12 @@ export function SettingsPage(): JSX.Element {
         return (
           <ErrorBoundary label={t('settings.boundary.memory')}>
             <MemorySection />
+          </ErrorBoundary>
+        )
+      case 'trace':
+        return (
+          <ErrorBoundary label={t('settings.boundary.trace')}>
+            <TraceSection />
           </ErrorBoundary>
         )
       case 'skills':

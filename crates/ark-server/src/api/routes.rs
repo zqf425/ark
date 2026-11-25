@@ -213,6 +213,12 @@ fn diagnostics_routes() -> Router<AppState> {
             "/v1/threads/{id}/usage",
             get(crate::api::handlers::diagnostics::thread_usage),
         )
+        // Trace analysis (requirements/trace-analysis.md): same replay-based,
+        // read-only projection class as the usage route beside it.
+        .route(
+            "/v1/threads/{id}/trace-stats",
+            get(crate::api::handlers::trace_stats::trace_stats),
+        )
         .route(
             "/v1/debug/llm-rounds",
             get(crate::api::handlers::diagnostics::llm_rounds),

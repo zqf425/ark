@@ -213,8 +213,12 @@ fn total_gate_suspensions(turns: &[TurnUsage]) -> u64 {
 }
 
 /// Per-turn active-time span derived from the lifecycle and gate events.
+///
+/// Fields stay private; readers go through the accessor methods, which keeps
+/// the cross-handler reuse surface (`trace_stats`) down to the readouts
+/// themselves.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct TurnSpan {
+pub(crate) struct TurnSpan {
     active_ms: u64,
     gate_suspensions: u64,
 }
@@ -237,9 +241,9 @@ struct TurnSpan {
 /// measures up to the last event timestamp seen: for a live thread that is
 /// "now" to within one event, and for a dead log it is the honest last word.
 #[derive(Debug, Default)]
-struct ActiveClock {
+pub(crate) struct ActiveClock {
     /// Spans per turn, keyed in first-seen order by the caller.
-    turns: HashMap<TurnId, TurnSpan>,
+    pub(crate) turns: HashMap<TurnId, TurnSpan>,
     /// The turn currently on the clock, if any.
     open_turn_id: Option<TurnId>,
     /// When the currently open turn is a harness retry/continuation, the end
@@ -258,7 +262,7 @@ struct ActiveClock {
 }
 
 impl ActiveClock {
-    fn observe(&mut self, event: &RuntimeEvent) {
+    pub(crate) fn observe(&mut self, event: &RuntimeEvent) {
         if let Some(timestamp) = event_timestamp(event) {
             self.last_event_at = Some(timestamp);
         }
@@ -355,7 +359,7 @@ impl ActiveClock {
     /// A gate held open at this point keeps the clock frozen: the window from
     /// the gate's open event to "now" is exactly the user wait the readout
     /// exists to exclude.
-    fn finish(mut self) -> ActiveSpan {
+    pub(crate) fn finish(mut self) -> ActiveSpan {
         if !self.open_gate {
             if let Some(at) = self.last_event_at {
                 self.bank(at);
@@ -369,11 +373,18 @@ impl ActiveClock {
     }
 }
 
+impl TurnSpan {
+    /// Folded wall-clock time of this turn, in milliseconds.
+    pub(crate) fn active_ms(&self) -> u64 {
+        self.active_ms
+    }
+}
+
 /// Result of the [`ActiveClock`] fold: per-turn spans plus the thread total.
 #[derive(Debug, Default)]
-struct ActiveSpan {
-    turns: HashMap<TurnId, TurnSpan>,
-    total_ms: u64,
+pub(crate) struct ActiveSpan {
+    pub(crate) turns: HashMap<TurnId, TurnSpan>,
+    pub(crate) total_ms: u64,
 }
 
 /// Timestamp of any event that can advance the clock's "now" horizon.
@@ -383,7 +394,7 @@ struct ActiveSpan {
 /// for a live fold that is what makes the clock advance between terminal
 /// events. Pure rendering noise (deltas, items) stays out: the horizon only
 /// needs to be fresh to within one UI-visible event.
-fn event_timestamp(event: &RuntimeEvent) -> Option<DateTime<Utc>> {
+pub(crate) fn event_timestamp(event: &RuntimeEvent) -> Option<DateTime<Utc>> {
     match event {
         RuntimeEvent::TurnStarted { timestamp, .. }
         | RuntimeEvent::TurnCompleted { timestamp, .. }

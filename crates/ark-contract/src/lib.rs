@@ -17,6 +17,7 @@ pub mod event;
 pub mod im;
 pub mod item;
 pub mod schedule;
+pub mod trace_stats;
 /// TypeScript binding generation (design §6.1).
 ///
 /// Test-only: it writes into `web/src/generated/`, and the checked-in output is
@@ -80,4 +81,8 @@ pub use schedule::{
     ScheduledTaskListResponse, TaskSchedule, UpdateScheduleRequest, DEFAULT_SCHEDULE_AUTONOMY,
     DEFAULT_TIME_OF_DAY, MAX_EVERY_MINUTES, MAX_SCHEDULED_TASKS, MIN_EVERY_MINUTES,
     SCHEDULE_RUN_HISTORY_LIMIT, SCHEDULE_TITLE_MAX_BYTES,
+};
+pub use trace_stats::{
+    ToolStat, TraceErrorEntry, TraceRuntimeError, TraceSlowCall, TraceStatsResponse, TurnStat,
+    TRACE_SLOW_CALLS_LIMIT,
 };
