@@ -37,7 +37,10 @@
   磁盘 I/O 或全量事件回放。附件授权（`authorize_turn_attachments`，回放整段事件日志）在取锁前
   完成；`get_thread` 单文件存在性检查与删除路由共用同一 gate，保留在锁内以避免删除竞态。
 - `/v1/shutdown`、Ctrl-C 和任务 panic 走同一收敛流程：先阻止新的 completion wakeup，再取消待调度
-  continuation 与活动回合，等待有限时间、落终态并清理 registry。
+  continuation 与活动回合，等待有限时间、落终态并清理 registry。HTTP 入口返回 202，表示停机已受理而非
+  进程已退出；`service::serve::DRAIN_TIMEOUT` 当前为 10 秒，超时后记录仍未结束的 parent/child 工作。
+  桌面宿主据此等待最多 12 秒；超时会强杀子进程及其专属进程组，子进程提前退出也会清理该组残余后代
+  （见 [ark-desktop](ark-desktop.md)）。
 - 后台 child 的持久 `child_completed` 成功写入后会唤醒 per-thread continuation supervisor。
   `subagents.auto_continue` 默认开启；仅当它与 `subagents.enabled` 同时开启时，同一父线程 250 ms 内的
   通知共享一个可取消 debounce，关闭任一开关会立即取消待调度 continuation。默认开启会使后台完成产生
@@ -285,3 +288,12 @@ generation，客户端必须丢弃 generation 已变的旧响应。
 `/v1/memory` 的 GET、POST、PATCH、DELETE 及 `/v1/memory/diagnostics` 仅解包 HTTP 并调用
 `MemoryService`。服务未装配时返回 `runtime_unavailable`/503；输入和不存在 id 的错误保持端口的
 结构化错误码，handler 不复制持久化或校验规则。
+
+## 验证
+
+- `cargo test -p ark-server diagnostics::tests` 覆盖 usage 折叠、LLM round 诊断和 `ActiveClock` 的
+  completed/failed/aborted 终态、gate 排除与时钟偏移路径。
+- `cargo test -p ark-server shutdown` 覆盖停机取消与迟到 completion wakeup 抑制；真实 listener 的
+  优雅停机还需验证 202 响应后进程在 drain 预算内退出。
+- core 验证在 workspace check 后执行 `cargo clippy --workspace --all-targets -- -D warnings`；
+  diagnostics 的终态匹配显式忽略不参与计时的 `turn_id`，保证该门禁不被未使用绑定阻断。

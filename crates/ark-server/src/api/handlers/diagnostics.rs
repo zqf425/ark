@@ -306,15 +306,9 @@ impl ActiveClock {
                 self.cursor = Some(self.cursor.map_or(*timestamp, |held| held.max(*timestamp)));
                 self.open_gate = false;
             }
-            RuntimeEvent::TurnCompleted {
-                turn_id, timestamp, ..
-            }
-            | RuntimeEvent::TurnFailed {
-                turn_id, timestamp, ..
-            }
-            | RuntimeEvent::TurnAborted {
-                turn_id, timestamp, ..
-            } => {
+            RuntimeEvent::TurnCompleted { timestamp, .. }
+            | RuntimeEvent::TurnFailed { timestamp, .. }
+            | RuntimeEvent::TurnAborted { timestamp, .. } => {
                 if !self.open_gate {
                     self.bank(*timestamp);
                 }
