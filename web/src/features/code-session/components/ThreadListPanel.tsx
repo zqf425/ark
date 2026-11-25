@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, EmptyState, ErrorBoundary, Icon, useToast } from '../../../shared/ui'
 import type { ThreadSummary } from '../../../shared/contracts'
-import { formatRelative } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../state/store'
 import { useThreadList } from '../hooks/use-thread-list'
 import { useThreadRunning } from '../hooks/use-thread-running'
-import { activityKeyOf } from '../state/threads-slice'
-import { exportThread } from '../api/threads-api'
 import { getWorkspaceView } from '../../settings/api/workspace-api'
 import { filterThreadsWithWorkspace, type ThreadListScope } from './thread-list-filter'
 import { groupThreadsByProject, workspaceBasename, type ThreadProject } from './thread-projects'
+import { ProjectGroupMenu, RunningDot, ThreadMeta, ThreadRowMenu, menuAnchorOf } from './ThreadListMenus'
 import { ScheduleCreateDialog } from './ScheduleCreateDialog'
+
+type MenuAnchor = ReturnType<typeof menuAnchorOf>
 
 function ThreadRow({
   thread,
@@ -28,74 +28,18 @@ function ThreadRow({
   thread: ThreadSummary
   active: boolean
   busy: boolean
+  sourceTitle?: string
   onSelect: () => void
   onRename: (title: string) => Promise<void>
   onArchive: () => Promise<void>
   onRestore: () => Promise<void>
   onFork: () => Promise<void>
   onDelete: () => Promise<void>
-  /** Title of the source thread, when this row is a fork. */
-  sourceTitle?: string
 }): JSX.Element {
   const { t } = useI18n()
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(thread.title)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [menuPos, setMenuPos] = useState<{ top: number | null; bottom: number | null; left: number }>({
-    top: 0,
-    bottom: null,
-    left: 0
-  })
-  const kebabRef = useRef<HTMLButtonElement | null>(null)
-  const menuRef = useRef<HTMLDivElement | null>(null)
-
-  /**
-   * Anchor the menu to the kebab button; fixed positioning avoids row clipping.
-   *
-   * Rows near the bottom of the viewport have no room below for the menu, and
-   * the delete item (the menu's last entry) would fall outside the window --
-   * unreachable clicks read as "this session cannot be deleted". When the
-   * estimated menu box would cross the viewport's bottom edge, anchor the
-   * menu to the kebab's top edge via `bottom` and grow it upwards instead.
-   * The left clamp doubles as the right-edge protection on a narrow rail.
-   */
-  const openMenu = (): void => {
-    const rect = kebabRef.current?.getBoundingClientRect()
-    if (!rect) {
-      setMenuPos({ top: 0, bottom: null, left: 0 })
-      setMenuOpen(true)
-      return
-    }
-    // Five 32px entries plus padding and separators; text height varies with
-    // the locale, so keep enough slack to avoid an unclickable delete item.
-    const MENU_HEIGHT = 184
-    const left = Math.max(8, rect.right - 168)
-    const viewportFloor = window.innerHeight - 8
-    if (rect.bottom + 4 + MENU_HEIGHT > viewportFloor) {
-      setMenuPos({ top: null, bottom: Math.max(8, viewportFloor - rect.top + 4), left })
-    } else {
-      setMenuPos({ top: rect.bottom + 4, bottom: null, left })
-    }
-    setMenuOpen(true)
-  }
-
-  useEffect(() => {
-    if (!menuOpen) return
-    const onPointerDown = (event: MouseEvent): void => {
-      const target = event.target as Node
-      if (menuRef.current?.contains(target) || kebabRef.current?.contains(target)) return
-      setMenuOpen(false)
-    }
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setMenuOpen(false)
-    }
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [menuOpen])
+  const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null)
 
   const submitRename = async (): Promise<void> => {
     const next = title.trim()
@@ -108,78 +52,27 @@ function ThreadRow({
     setEditing(false)
   }
 
-  /** Close the menu, then surface failures (e.g. a failed export) visibly. */
-  const runMenuAction = (action: () => Promise<void>): void => {
-    setMenuOpen(false)
-    void action().catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error)
-      window.alert(t('thread.row.actionFailed', { message }))
-    })
-  }
-
   return (
     <div className={`ark-threadrow${active ? ' is-active' : ''}`}>
       <div className="ark-threadrow__main">
         <button type="button" className="ark-threadrow__select" onClick={onSelect} title={thread.title}>
           <span className="ark-threadrow__title">
-            {thread.running ? (
-              <span
-                className="ark-threadrow__spinner"
-                role="status"
-                aria-label={t('thread.row.running')}
-                title={t('thread.row.running')}
-              >
-                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false">
-                  <circle
-                    cx="12"
-                    cy="12"
-                    r="9"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeOpacity="0.25"
-                    strokeWidth="2.5"
-                  />
-                  <path
-                    d="M21 12a9 9 0 0 0-9-9"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </span>
-            ) : null}
+            {thread.running ? <RunningDot /> : null}
             {thread.title || t('thread.row.untitled')}
           </span>
-          <span className="ark-threadrow__meta">
-            <time>{formatRelative(activityKeyOf(thread), t)}</time>
-            {thread.forked_from ? (
-              <span
-                className="ark-threadrow__fork"
-                title={sourceTitle ? t('thread.row.forkedFrom', { title: sourceTitle }) : t('thread.row.forked')}
-              >
-                <Icon name="branch" size={11} />
-                {sourceTitle ? t('thread.row.forkedFrom', { title: sourceTitle }) : t('thread.row.forked')}
-              </span>
-            ) : null}
-            {thread.archived ? <span className="ark-threadrow__archived">{t('thread.row.archived')}</span> : null}
-          </span>
+          <ThreadMeta thread={thread} sourceTitle={sourceTitle} />
         </button>
         <button
           type="button"
-          ref={kebabRef}
+          data-menu-trigger
           className="ark-threadrow__kebab"
           aria-label={t('thread.row.menu')}
           aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          disabled={busy && !menuOpen}
-          onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
+          aria-expanded={menuAnchor !== null}
+          disabled={busy && menuAnchor === null}
+          onClick={(event) => setMenuAnchor((current) => current ? null : menuAnchorOf(event.currentTarget))}
         >
-          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
-            <circle cx="12" cy="5" r="1.9" fill="currentColor" />
-            <circle cx="12" cy="12" r="1.9" fill="currentColor" />
-            <circle cx="12" cy="19" r="1.9" fill="currentColor" />
-          </svg>
+          <Icon name="more" size={14} />
         </button>
       </div>
       {editing ? (
@@ -192,80 +85,32 @@ function ThreadRow({
             onChange={(event) => setTitle(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') void submitRename()
-              if (event.key === 'Escape') {
-                setEditing(false)
-                setTitle(thread.title)
-              }
+              if (event.key === 'Escape') { setEditing(false); setTitle(thread.title) }
             }}
           />
-          <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void submitRename()}>
-            {t('common.save')}
-          </button>
-          <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => setEditing(false)}>
-            {t('common.cancel')}
-          </button>
+          <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => void submitRename()}>{t('common.save')}</button>
+          <button type="button" className="ark-linkbtn" disabled={busy} onClick={() => setEditing(false)}>{t('common.cancel')}</button>
         </div>
       ) : null}
-      {menuOpen ? (
-        <div
-          ref={menuRef}
-          className="ark-threadrow__menu"
-          role="menu"
-          style={
-            menuPos.top === null
-              ? { bottom: menuPos.bottom ?? 0, left: menuPos.left }
-              : { top: menuPos.top, left: menuPos.left }
-          }
-        >
-          <button
-            type="button"
-            role="menuitem"
-            disabled={busy}
-            onClick={() => {
-              setMenuOpen(false)
-              setTitle(thread.title)
-              setEditing(true)
-            }}
-          >
-            {t('thread.row.rename')}
-          </button>
-          <button type="button" role="menuitem" disabled={busy} onClick={() => runMenuAction(onFork)}>
-            {t('thread.row.fork')}
-          </button>
-          {thread.archived ? (
-            <button type="button" role="menuitem" disabled={busy} onClick={() => runMenuAction(onRestore)}>
-              {t('thread.row.restore')}
-            </button>
-          ) : (
-            <button type="button" role="menuitem" disabled={busy} onClick={() => runMenuAction(onArchive)}>
-              {t('thread.row.archive')}
-            </button>
-          )}
-          <button
-            type="button"
-            role="menuitem"
-            disabled={busy}
-            title={t('thread.row.exportHint')}
-            onClick={() => runMenuAction(() => exportThread(thread.thread_id, thread.title))}
-          >
-            {t('thread.row.export')}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="is-danger"
-            disabled={busy}
-            onClick={() => runMenuAction(onDelete)}
-          >
-            {t('thread.row.delete')}
-          </button>
-        </div>
+      {menuAnchor ? (
+        <ThreadRowMenu
+          anchor={menuAnchor}
+          thread={thread}
+          busy={busy}
+          sourceTitle={sourceTitle}
+          onRename={() => { setTitle(thread.title); setEditing(true) }}
+          onFork={onFork}
+          onArchive={onArchive}
+          onRestore={onRestore}
+          onDelete={onDelete}
+          onClose={() => setMenuAnchor(null)}
+        />
       ) : null}
     </div>
   )
 }
 
-/** Left column: thread list plus the only "new thread" action. */
+/** Left column: thread list, search, scope and the only "new thread" action. */
 export function ThreadListPanel(): JSX.Element {
   const { t } = useI18n()
   const toast = useToast()
@@ -274,47 +119,47 @@ export function ThreadListPanel(): JSX.Element {
   const listStatus = useCodeSessionStore((s) => s.listStatus)
   const listError = useCodeSessionStore((s) => s.listError)
   const { create, deleteProject, select, refresh, rename, archive, restore, remove, fork, busy } = useThreadList()
-  // Busy markers: the active thread from the live turn reducer, the rest from
-  // a slow list poll (see the hook's docs).
   useThreadRunning(activeThreadId)
   const [scope, setScope] = useState<ThreadListScope>('recent')
   const [query, setQuery] = useState('')
-  /** The scheduled-task entry opens a dialog; the rail itself never navigates. */
   const [scheduleOpen, setScheduleOpen] = useState(false)
-  /**
-   * The runtime's active workspace root: the fallback grouping key for
-   * threads without an override (same resolution order as a turn) and the
-   * first group in the rail.
-   */
+  const [headMenu, setHeadMenu] = useState<MenuAnchor | null>(null)
+  const [projectMenu, setProjectMenu] = useState<string | null>(null)
+  const [projectAnchor, setProjectAnchor] = useState<MenuAnchor | null>(null)
   const [activeWorkspace, setActiveWorkspace] = useState('')
+  const searchRef = useRef<HTMLInputElement | null>(null)
+
   useEffect(() => {
     let cancelled = false
-    void getWorkspaceView()
-      .then((view) => {
-        if (!cancelled) setActiveWorkspace(view.active?.path ?? '')
-      })
-      .catch(() => {
-        // Without the view the rail keeps grouping by overrides only.
-      })
-    return () => {
-      cancelled = true
-    }
+    void getWorkspaceView().then((view) => {
+      if (!cancelled) setActiveWorkspace(view.active?.path ?? '')
+    }).catch(() => undefined)
+    return () => { cancelled = true }
   }, [])
-  /** Collapsed project paths; the default group starts expanded with the rest. */
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null
+      const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable
+      if (event.key === '/' && !typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault()
+        searchRef.current?.focus()
+      }
+      if (event.key === 'Escape' && document.activeElement === searchRef.current) {
+        setQuery('')
+        searchRef.current?.blur()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
-  const visibleThreads = useMemo(
-    () => filterThreadsWithWorkspace(threads, query, scope),
-    [threads, query, scope]
-  )
+  const visibleThreads = useMemo(() => filterThreadsWithWorkspace(threads, query, scope), [threads, query, scope])
   const groups = useMemo(() => {
     const { default: fallback, projects } = groupThreadsByProject(visibleThreads, activeWorkspace)
     const list: ThreadProject[] = []
-    if (fallback.threads.length > 0) {
-      list.push({ ...fallback, label: t('thread.list.defaultProject') })
-    }
-    // Groups are built from already-filtered rows, so every group has at least
-    // one matching thread; the header itself must not be filtered by the
-    // needle or a title hit would hide its project.
+    if (fallback.threads.length > 0) list.push({ ...fallback, label: t('thread.list.defaultProject') })
     list.push(...projects)
     return list
   }, [visibleThreads, activeWorkspace, t])
@@ -331,17 +176,11 @@ export function ThreadListPanel(): JSX.Element {
     })
   }
 
-  /** Create a session whose workspace override starts at this project. */
   const handleProjectCreate = async (path: string): Promise<void> => {
     const created = await create(path)
     if (created) toast.push('success', t('thread.list.groupCreateDone', { title: workspaceBasename(path) }))
   }
 
-  /**
-   * Sweep one project's settled sessions. The server owns the "settled"
-   * verdict and reports skipped (running) ids; the confirm counts only the
-   * rows currently visible in this group, the toast states the real outcome.
-   */
   const handleProjectDelete = async (group: ThreadProject): Promise<void> => {
     const path = group.path.trim()
     if (!path || group.threads.length === 0) return
@@ -359,19 +198,18 @@ export function ThreadListPanel(): JSX.Element {
   return (
     <aside className="ark-threadlist">
       <header className="ark-threadlist__head">
-        <div>
-          <h1 className="ark-threadlist__title">{t('thread.list.title')}</h1>
-        </div>
+        <h1 className="ark-threadlist__title">{t('thread.list.title')}</h1>
         <div className="ark-threadlist__head-actions">
-          <button
-            type="button"
-            className="ark-threadlist__schedule"
-            title={t('thread.list.scheduleHint')}
-            aria-label={t('thread.list.scheduleHint')}
-            onClick={() => setScheduleOpen(true)}
-          >
-            <Icon name="clock" size={14} />
+          {query ? <span className="ark-threadlist__count">{t('thread.list.matches', { count: visibleThreads.length })}</span> : null}
+          <button type="button" data-menu-trigger className="ark-threadlist__more" aria-label={t('thread.row.menu')} aria-haspopup="menu" aria-expanded={headMenu !== null} onClick={(event) => setHeadMenu((current) => current ? null : menuAnchorOf(event.currentTarget))}>
+            <Icon name="more" size={14} />
           </button>
+          {headMenu ? (
+            <div className="ark-threadrow__menu" role="menu">
+              <button type="button" role="menuitem" onClick={() => { setHeadMenu(null); setScheduleOpen(true) }}>{t('thread.list.schedule')}</button>
+              <button type="button" role="menuitem" onClick={() => { setHeadMenu(null); void refresh() }}>{t('thread.list.refresh')}</button>
+            </div>
+          ) : null}
           <Button variant="primary" size="sm" disabled={busy} onClick={() => void create()}>
             {busy ? t('thread.list.creating') : t('thread.list.create')}
           </Button>
@@ -382,12 +220,14 @@ export function ThreadListPanel(): JSX.Element {
         <label className="ark-threadlist__search">
           <Icon name="search" size={13} />
           <input
+            ref={searchRef}
             type="search"
             value={query}
             placeholder={t('thread.list.search')}
             aria-label={t('thread.list.search')}
             onChange={(event) => setQuery(event.target.value)}
           />
+          <span className="ark-threadlist__shortcut">{t('thread.list.searchShortcut')}</span>
         </label>
         <div className="ark-threadlist__scope" role="group" aria-label={t('thread.list.scopeAria')}>
           <button type="button" className={scope === 'recent' ? 'is-active' : ''} aria-pressed={scope === 'recent'} onClick={() => setScope('recent')}>
@@ -396,102 +236,61 @@ export function ThreadListPanel(): JSX.Element {
           <button type="button" className={scope === 'archived' ? 'is-active' : ''} aria-pressed={scope === 'archived'} onClick={() => setScope('archived')}>
             {t('thread.list.scopeArchived')} <span>{archivedCount}</span>
           </button>
+          <button type="button" className="ark-threadlist__refresh" title={t('thread.list.refresh')} aria-label={t('thread.list.refresh')} onClick={() => void refresh()}>
+            <Icon name="undo" size={13} />
+          </button>
         </div>
       </div>
 
       <div className="ark-threadlist__body">
-        {listStatus === 'loading' && threads.length === 0 ? (
-          <p className="ark-threadlist__hint">{t('thread.list.loading')}</p>
-        ) : null}
+        {listStatus === 'loading' && threads.length === 0 ? <p className="ark-threadlist__hint">{t('thread.list.loading')}</p> : null}
         {listStatus === 'error' ? (
           <div className="ark-threadlist__hint is-error">
             <span>{listError}</span>
-            <button type="button" className="ark-linkbtn" onClick={() => void refresh()}>
-              {t('common.retry')}
-            </button>
+            <button type="button" className="ark-linkbtn" onClick={() => void refresh()}>{t('common.retry')}</button>
           </div>
         ) : null}
-        {listStatus === 'ready' && threads.length === 0 ? (
-          <EmptyState title={t('thread.list.emptyTitle')} hint={t('thread.list.emptyHint')} />
-        ) : null}
+        {listStatus === 'ready' && threads.length === 0 ? <EmptyState title={t('thread.list.emptyTitle')} hint={t('thread.list.emptyHint')} /> : null}
         {listStatus === 'ready' && threads.length > 0 && visibleThreads.length === 0 ? (
-          <EmptyState
-            title={t('thread.list.noMatchTitle')}
-            hint={query ? t('thread.list.noMatchQueryHint') : t('thread.list.noMatchScopeHint')}
-          />
+          <EmptyState title={t('thread.list.noMatchTitle')} hint={query ? t('thread.list.noMatchQueryHint') : t('thread.list.noMatchScopeHint')} />
         ) : null}
 
         <ErrorBoundary label={t('thread.list.boundary')}>
           <nav className="ark-threadlist__nav" aria-label={t('thread.list.projectsAria')}>
             {groups.map((group) => {
               const isCollapsed = collapsed.has(group.path)
+              const isMenuOpen = projectMenu === group.path
               return (
                 <section key={group.path || '__default__'} className="ark-projectgroup">
                   <div className="ark-projectgroup__row">
-                    <button
-                      type="button"
-                      className="ark-projectgroup__head"
-                      aria-expanded={!isCollapsed}
-                      aria-label={t('thread.list.groupToggle', { title: group.label })}
-                      onClick={() => toggleProject(group.path)}
-                    >
-                      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
-                        <path
-                          d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h9A1.5 1.5 0 0 1 21 10v7.5A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-10Z"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.6"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                      <span className="ark-projectgroup__label" title={group.path || undefined}>
-                        {group.label}
-                      </span>
+                    <button type="button" className="ark-projectgroup__head" aria-expanded={!isCollapsed} aria-label={t('thread.list.groupToggle', { title: group.label })} onClick={() => toggleProject(group.path)}>
+                      <Icon name="folder" size={14} />
+                      <span className="ark-projectgroup__label" title={group.path || undefined}>{group.label}</span>
                       <span className="ark-projectgroup__meta">
-                        <span className="ark-projectgroup__count">
-                          {t('thread.list.groupCount', { count: group.threads.length })}
-                        </span>
+                        <span className="ark-projectgroup__count">{t('thread.list.groupCount', { count: group.threads.length })}</span>
                       </span>
                     </button>
                     {group.path ? (
                       <span className="ark-projectgroup__actions">
                         <button
                           type="button"
+                          data-menu-trigger
                           className="ark-projectgroup__action"
-                          title={t('thread.list.groupCreate', { title: group.label })}
-                          aria-label={t('thread.list.groupCreate', { title: group.label })}
-                          disabled={busy}
-                          onClick={() => void handleProjectCreate(group.path)}
+                          aria-label={t('thread.row.menu')}
+                          aria-haspopup="menu"
+                          aria-expanded={isMenuOpen}
+                          onClick={(event) => { setProjectAnchor((current) => current && projectMenu === group.path ? null : menuAnchorOf(event.currentTarget)); setProjectMenu((current) => current === group.path ? null : group.path) }}
                         >
-                          <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false">
-                            <path
-                              d="M12 5v14M5 12h14"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                            />
-                          </svg>
+                          <Icon name="more" size={13} />
                         </button>
-                        <button
-                          type="button"
-                          className="ark-projectgroup__action is-danger"
-                          title={t('thread.list.groupDelete', { title: group.label })}
-                          aria-label={t('thread.list.groupDelete', { title: group.label })}
-                          disabled={busy || group.threads.length === 0}
-                          onClick={() => void handleProjectDelete(group)}
-                        >
-                          <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false">
-                            <path
-                              d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m3 0-.8 12.05A2 2 0 0 1 15.2 21H8.8a2 2 0 0 1-2-1.95L6 7m4 4v6m4-6v6"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.7"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                        </button>
+                        <ProjectGroupMenu
+                          anchor={isMenuOpen ? projectAnchor : null}
+                          group={group}
+                          busy={busy}
+                          onCreate={() => void handleProjectCreate(group.path)}
+                          onDelete={() => void handleProjectDelete(group)}
+                          onClose={() => setProjectMenu(null)}
+                        />
                       </span>
                     ) : null}
                   </div>
@@ -505,23 +304,13 @@ export function ThreadListPanel(): JSX.Element {
                           busy={busy}
                           sourceTitle={thread.forked_from ? titlesById.get(thread.forked_from) : undefined}
                           onSelect={() => select(thread.thread_id)}
-                          onRename={async (title) => {
-                            await rename(thread.thread_id, title)
-                          }}
-                          onFork={async () => {
-                            await fork(thread.thread_id)
-                          }}
-                          onArchive={async () => {
-                            if (await archive(thread.thread_id)) setScope('archived')
-                          }}
-                          onRestore={async () => {
-                            if (await restore(thread.thread_id)) setScope('recent')
-                          }}
+                          onRename={async (title) => { await rename(thread.thread_id, title) }}
+                          onFork={async () => { await fork(thread.thread_id) }}
+                          onArchive={async () => { if (await archive(thread.thread_id)) setScope('archived') }}
+                          onRestore={async () => { if (await restore(thread.thread_id)) setScope('recent') }}
                           onDelete={async () => {
                             const name = thread.title || t('thread.row.untitled')
-                            if (window.confirm(t('thread.row.deleteConfirm', { title: name }))) {
-                              await remove(thread.thread_id)
-                            }
+                            if (window.confirm(t('thread.row.deleteConfirm', { title: name }))) await remove(thread.thread_id)
                           }}
                         />
                       ))}
@@ -533,15 +322,6 @@ export function ThreadListPanel(): JSX.Element {
           </nav>
         </ErrorBoundary>
       </div>
-
-      <footer className="ark-threadlist__foot">
-        <button type="button" className="ark-linkbtn" onClick={() => void refresh()}>
-          {t('thread.list.refresh')}
-        </button>
-        <span className="ark-threadlist__count">
-          {t('thread.list.count', { visible: visibleThreads.length, total: threads.length })}
-        </span>
-      </footer>
 
       {scheduleOpen ? <ScheduleCreateDialog onClose={() => setScheduleOpen(false)} /> : null}
     </aside>

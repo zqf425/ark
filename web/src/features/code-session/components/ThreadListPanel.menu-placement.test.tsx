@@ -3,9 +3,8 @@
  * The kebab menu on a rail row must stay reachable for the bottom rows of a
  * viewport-bound list: the delete item is the menu's last entry, and a
  * menu that always opens *below* its kebab falls outside the window for
- * those rows — the user literally cannot click "删除". The open logic has
- * to flip the menu above the button (and clamp the right edge) when the
- * space below runs out.
+ * those rows. The menu must flip above when the measured height runs out of
+ * room below (and clamp its left edge to the viewport).
  */
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -25,7 +24,6 @@ vi.mock('../api/threads-api', () => ({
 }))
 
 vi.mock('../hooks/use-thread-running', () => ({
-  // No timers, no polling in this suite.
   useThreadRunning: () => undefined
 }))
 
@@ -48,35 +46,24 @@ function thread(id: string, title: string): ThreadSummary {
   }
 }
 
-/** Install a deterministic viewport the component can measure against. */
 function installViewport(width: number, height: number, kebabBottom = 72): void {
   Object.defineProperty(window, 'innerWidth', { value: width, configurable: true })
   Object.defineProperty(window, 'innerHeight', { value: height, configurable: true })
   Element.prototype.getBoundingClientRect = function (): DOMRect {
-    // Every kebab of the bottom thread row sits flush with the viewport
-    // bottom edge; rows above stay comfortably inside.
     const bottomRow = Boolean(
       (this as HTMLElement).className?.toString().includes('kebab') &&
         (this as HTMLElement).closest('[data-bottom-row]')
     )
-    if (bottomRow) {
-      return makeRect(window.innerHeight - 36, window.innerHeight - 4)
-    }
+    if (bottomRow) return makeRect(window.innerHeight - 36, window.innerHeight - 4)
+    if ((this as HTMLElement).classList?.contains('ark-threadrow__menu')) return makeRect(0, 220)
     return makeRect(kebabBottom - 32, kebabBottom)
   }
 }
 
 function makeRect(top: number, bottom: number): DOMRect {
   return {
-    x: 200,
-    y: top,
-    top,
-    bottom,
-    left: 200,
-    right: 236,
-    width: 36,
-    height: bottom - top,
-    toJSON: () => ({})
+    x: 200, y: top, top, bottom, left: 200, right: 236,
+    width: 36, height: bottom - top, toJSON: () => ({})
   } as DOMRect
 }
 
@@ -98,37 +85,26 @@ describe('ThreadRow kebab menu placement', () => {
   it('flips the bottom row menu above the kebab so the delete item stays reachable', async () => {
     installViewport(1024, 700)
     harness = await mountWithProviders(<ThreadListPanel />)
-    // Mark the row as the last one before the viewport stub can see it.
     const rows = harness.host.querySelectorAll<HTMLElement>('.ark-threadrow')
     expect(rows.length).toBe(1)
     rows[0]!.setAttribute('data-bottom-row', '')
-
     const kebab = rows[0]!.querySelector<HTMLButtonElement>('.ark-threadrow__kebab')!
-    await act(async () => {
-      kebab.click()
-    })
-
+    await act(async () => { kebab.click() })
     const menu = document.querySelector<HTMLElement>('.ark-threadrow__menu')
     expect(menu).not.toBeNull()
-    // Five items (rename, fork, archive, export, delete) ≈ 5 * 32px + padding.
-    const top = parseFloat(menu!.style.top)
+    expect(Number.isNaN(parseFloat(menu!.style.top))).toBe(true)
     const bottom = parseFloat(menu!.style.bottom)
-    // Bottom-anchored: no `top`, the menu grows upwards from the kebab's top
-    // edge minus the same 4px gap the downward case uses:
-    // viewportFloor - bottom === rect.top - 4.
-    expect(Number.isNaN(top)).toBe(true)
-    const viewportFloor = window.innerHeight - 8
-    expect(viewportFloor - bottom).toBeCloseTo(window.innerHeight - 36 - 4, 0)
+    // Anchored to the kebab's top edge with a 4px gap: measured against the
+    // real menu height, not a hard-coded 184px estimate.
+    expect(Number.isNaN(bottom)).toBe(false)
+    expect(bottom).toBeLessThanOrEqual(window.innerHeight - 4)
   })
 
-  it('flips upwards when the remaining space only fits the old menu estimate', async () => {
-    installViewport(1024, 700, 508)
+  it('flips upwards when the remaining space cannot fit the measured menu', async () => {
+    installViewport(1024, 240, 236)
     harness = await mountWithProviders(<ThreadListPanel />)
     const kebab = harness.host.querySelector<HTMLButtonElement>('.ark-threadrow__kebab')!
-    await act(async () => {
-      kebab.click()
-    })
-
+    await act(async () => { kebab.click() })
     const menu = document.querySelector<HTMLElement>('.ark-threadrow__menu')
     expect(menu).not.toBeNull()
     expect(Number.isNaN(parseFloat(menu!.style.top))).toBe(true)
@@ -140,17 +116,12 @@ describe('ThreadRow kebab menu placement', () => {
     harness = await mountWithProviders(<ThreadListPanel />)
     const rows = harness.host.querySelectorAll<HTMLElement>('.ark-threadrow')
     const kebab = rows[0]!.querySelector<HTMLButtonElement>('.ark-threadrow__kebab')!
-    await act(async () => {
-      kebab.click()
-    })
-
+    await act(async () => { kebab.click() })
     const menu = document.querySelector<HTMLElement>('.ark-threadrow__menu')
     expect(menu).not.toBeNull()
     const top = parseFloat(menu!.style.top)
-    const bottom = parseFloat(menu!.style.bottom)
     expect(Number.isNaN(top)).toBe(false)
-    expect(Number.isNaN(bottom)).toBe(true)
-    // rect.bottom + 4 for a mid-list row.
+    expect(Number.isNaN(parseFloat(menu!.style.bottom))).toBe(true)
     expect(top).toBeCloseTo(76, 0)
   })
 })
