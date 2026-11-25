@@ -14,7 +14,8 @@
 `item_id`，旧日志缺字段时回退 `ark_common::keyed_item_id("turn_failed:{turn_id}")`，
 `status=failed`，text 为失败原因，归属该回合），这是渲染器在**中断处**
 内联展示失败原因的唯一数据源，live 流与重启/压缩后的回放因此渲染一致。工具与用户输入事件同样
-优先使用 wire `item_id`，稳定 ID 只在 `ark-common` 生成。`TurnAborted` 不投影条目
+优先使用 wire `item_id`，稳定 ID 只在 `ark-common` 生成；writer 在加载旧日志和追加新事件时统一
+回填缺失字段，使 replay、subscribe 与 child events 的消费者不会收到 `None`。`TurnAborted` 不投影条目
 （主动中断无失败语义）。`Error` 事件仍按 `error:{seq}` 投影为独立条目，`transient_retry` 只进
 事件日志，不投影渲染行。
 

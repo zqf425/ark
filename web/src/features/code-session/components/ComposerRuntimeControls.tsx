@@ -702,9 +702,9 @@ export function ModelPicker({ threadId, stagedRuntime, onStagedChange }: Runtime
       }
       header={visionUnsupported ? <p className="ark-mpm__hint">{t('session.runtime.visionUnsupported')}</p> : null}
       onSelect={(selection) => {
-        // merge_runtime keeps omitted fields, so echoing the stored runtime
-        // applies the new pair without clearing autonomy/workspace overrides.
-        const patch = { ...(stagedRuntime ?? persisted.runtime), provider_id: selection.providerId, model: selection.model }
+        // Both the staged callback and the thread PATCH merge omitted fields;
+        // send only the pair the operator actually changed.
+        const patch = { provider_id: selection.providerId, model: selection.model }
         if (staged) stagedApply(patch)
         else void apply(patch)
       }}
@@ -719,7 +719,7 @@ export function ModelPicker({ threadId, stagedRuntime, onStagedChange }: Runtime
               close()
               // Empty string is the documented "unset": the runtime drops it
               // and falls back to the provider's configured reasoning effort.
-              const patch = { ...(stagedRuntime ?? persisted.runtime), reasoning_effort: '' }
+              const patch = { reasoning_effort: '' }
               if (staged) stagedApply(patch)
               else void apply(patch)
             }}
@@ -736,7 +736,7 @@ export function ModelPicker({ threadId, stagedRuntime, onStagedChange }: Runtime
               aria-selected={reasoningValue === value}
               onClick={() => {
                 close()
-                const patch = { ...(stagedRuntime ?? persisted.runtime), reasoning_effort: value }
+                const patch = { reasoning_effort: value }
                 if (staged) stagedApply(patch)
                 else void apply(patch)
               }}

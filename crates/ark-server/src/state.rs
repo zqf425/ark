@@ -510,6 +510,7 @@ fn terminal_event(thread_id: ThreadId, turn_id: TurnId, end: &TurnEnd) -> Runtim
             timestamp: Utc::now(),
             message: message.clone(),
             model_request_failed: *model_request_failed,
+            item_id: Some(ark_common::keyed_item_id(&format!("turn_failed:{turn_id}"))),
         },
         TurnEnd::Aborted(reason) => RuntimeEvent::TurnAborted {
             seq: 0,

@@ -60,13 +60,19 @@ export function useThreadRuntime(
 
   const reload = useCallback(async (): Promise<void> => {
     if (!threadId) return
+    const request = useCodeSessionStore.getState().beginThreadRuntime(threadId)
     try {
       const detail = await getThread(threadId)
       if (currentRef.current === threadId) {
-        useCodeSessionStore.getState().setThreadRuntime(threadId, { ...detail.runtime })
+        useCodeSessionStore.getState().setThreadRuntime(threadId, { ...detail.runtime }, request)
       }
     } catch (error) {
-      onErrorRef.current?.(error)
+      if (
+        currentRef.current === threadId &&
+        useCodeSessionStore.getState().isThreadRuntimeCurrent(request)
+      ) {
+        onErrorRef.current?.(error)
+      }
     }
   }, [threadId])
 

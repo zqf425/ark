@@ -67,6 +67,10 @@ runtime 每轮结算的 usage 事件写入（`ark-llm` 解析的 provider payloa
 事件推导（见 `docs/modules/ark-server.md`），`gate_suspensions` 计数被扣除的门禁次数。渲染层不
 自行计时，只消费该字段并在运行中回合上按秒延伸（上限为门禁 `requested_at`）。
 
+`ThreadUsageResponse.last_seq: Option<u64>`（serde default，省略空值）是本次聚合覆盖的权威事件日志
+水位，供渲染层区分 HTTP 已包含的 live usage 样本与仍需重放的 SSE 样本。空日志为 `None`；旧服务端
+不返回该字段时，兼容客户端只能退回请求时的样本数基线，不能把 lifetime `samples` 当成实时尾部覆盖数。
+
 `TurnStarted.auto_recovery: u32`（serde default `0`，序列化时省略零值）标记 harness 自动恢复
 回合及其尝试序号：前一个回合因瞬态模型请求失败（`model_request_failed = true`）终结后，恢复调度器
 以同一请求文本重开回合并把 1-based 尝试号写进该字段；普通用户/IM/自动续跑回合保持 `0` 且不出现在

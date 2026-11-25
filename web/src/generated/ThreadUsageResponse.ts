@@ -26,6 +26,10 @@ turns: number,
  */
 samples: number, 
 /**
+ * Durable log watermark covered by this aggregate.
+ */
+last_seq?: number, 
+/**
  * Per-turn breakdown, oldest first: the authoritative source for every
  * per-turn readout (the turn header's clock). Not a page — this route
  * replays the whole log, so a long session reports all of its turns.

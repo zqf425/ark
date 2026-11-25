@@ -14,17 +14,22 @@ import type { ItemId, ItemKind, RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot,
 import {
   commitDraft,
   draftApprovals,
+  draftChildRunStatuses,
   draftItemOrder,
   draftItems,
   draftOf,
+  draftPlan,
+  draftPendingGateCounts,
+  draftRoundIndex,
   draftTurnLastEventAt,
   draftTurnState,
   draftUserInputs,
   sameItemContent,
   type ItemsDraft
 } from './items-draft'
-import { foldUsage } from './usage'
+import { appendUsageTail, foldUsage, usageTailHasSeq } from './usage'
 import { appendRound } from './rounds'
+import { projectToolCall, projectUserInput } from './item-projection'
 import type { CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
 
 export function emptyItemsState(): ItemsSnapshot {
@@ -38,14 +43,25 @@ export function emptyItemsState(): ItemsSnapshot {
     userInputs: {},
     childRunRevision: 0,
     childRunActiveCount: 0,
+    childRunStatuses: {},
     workbenchRevision: 0,
     rewindRevision: 0,
     rewoundFromSeq: null,
     usage: null,
+    usageTurns: null,
+    usageRequest: null,
+    usageTail: null,
+    usageSeedSeq: 0,
     roundWindow: null,
     lastCompaction: null,
     rounds: [],
-    turnLastEventAt: {}
+    roundIndex: {},
+    pendingGateCounts: {},
+    turnLastEventAt: {},
+    changedItemIds: [],
+    itemOrderChanged: false,
+    liveItemCount: 0,
+    plan: { todos: [] }
   }
 }
 
@@ -55,99 +71,12 @@ const DELTA_ITEM_KIND: Partial<Record<RuntimeEvent['kind'], ItemKind>> = {
   assistant_reasoning_delta: 'reasoning'
 }
 
-/**
- * Deterministic `ItemId` for one turn's terminal failure, mirroring the Rust
- * `keyed_item_id("turn_failed:{turn_id}")` (ark-store domain/items.rs): FNV-1a
- * over the namespace string, hi/lo halves seeded with the offset basis pairs,
- * packed into a UUID with the custom-variant bits forced. The server stores the
- * error item under this id in `items.jsonl`, so the live-folded row and the
- * replayed row are the same item and a seed merge never duplicates it.
- */
-const FNV_BASIS_HI = 0xcbf29ce484222325n
-const FNV_BASIS_LO = 0x84222325cbf29ce4n
-const FNV_PRIME = 0x100000001b3n
-
-function fnv1a(bytes: Uint8Array, seed: bigint): bigint {
-  let hash = seed
-  for (const byte of bytes) {
-    hash ^= BigInt(byte)
-    hash = (hash * FNV_PRIME) & 0xffffffffffffffffn
-  }
-  return hash
-}
-
-function turnFailedItemId(turnId: TurnId): ItemId {
-  const namespace = new TextEncoder().encode(`turn_failed:${turnId}`)
-  const hi = fnv1a(namespace, FNV_BASIS_HI)
-  const lo = fnv1a(namespace, FNV_BASIS_LO)
-  const view = new DataView(new ArrayBuffer(16))
-  view.setBigUint64(0, hi)
-  view.setBigUint64(8, lo)
-  const bytes = new Uint8Array(view.buffer)
-  bytes[6] = (bytes[6]! & 0x0f) | 0x80
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}` as ItemId
-}
-
-/**
- * Deterministic `ItemId` for a live tool call, mirroring the Rust
- * `keyed_item_id("tool_call:{call_id}")` (ark-store domain/items.rs). The
- * realtime SSE channel carries bare `tool_call_started`/`finished` events —
- * the server folds them into the durable items projection, but nothing on the
- * wire turns them into `item_created` snapshots — so the renderer must fold
- * them identically or a turn that just ran vanishes from the live canvas
- * (tool cards, prose path whitelist, all of it) until a full detail reload.
- */
-function toolCallItemId(callId: string): ItemId {
-  const namespace = new TextEncoder().encode(`tool_call:${callId}`)
-  const hi = fnv1a(namespace, FNV_BASIS_HI)
-  const lo = fnv1a(namespace, FNV_BASIS_LO)
-  const view = new DataView(new ArrayBuffer(16))
-  view.setBigUint64(0, hi)
-  view.setBigUint64(8, lo)
-  const bytes = new Uint8Array(view.buffer)
-  bytes[6] = (bytes[6]! & 0x0f) | 0x80
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}` as ItemId
-}
-
-/**
- * Fold a bare `tool_call_started`/`finished` event into the same `tool_call`
- * item the server's projector would store. Field semantics mirror
- * `apply_tool_started`/`apply_tool_finished` (ark-store domain/items.rs):
- * started = streaming + arguments, finished = ok/duration/output + completed.
- * A `finished` for an unseen call creates the row (the started frame can be
- * lost to a reconnect window); a `started` after `finished` never downgrades
- * the settled row.
- */
 function foldToolCall(
   draft: ItemsDraft,
   event: Extract<RuntimeEvent, { kind: 'tool_call_started' | 'tool_call_finished' }>
 ): void {
-  const id = toolCallItemId(event.call_id)
-  const existing = currentItem(draft, id)
-  const started = event.kind === 'tool_call_started'
-  const tool = {
-    call_id: event.call_id,
-    tool: event.tool,
-    arguments: 'arguments' in event ? (event.arguments ?? undefined) : existing?.tool?.arguments,
-    output: started ? existing?.tool?.output : (event.output || existing?.tool?.output),
-    ok: started ? existing?.tool?.ok : (event.ok ?? existing?.tool?.ok),
-    duration_ms: started ? existing?.tool?.duration_ms : (event.duration_ms ?? existing?.tool?.duration_ms)
-  }
-  const item: ThreadItem = {
-    item_id: id,
-    turn_id: event.turn_id,
-    kind: 'tool_call',
-    status: started ? (existing?.status ?? 'streaming') : 'completed',
-    created_at: existing?.created_at ?? event.timestamp,
-    text: existing?.text,
-    detail: started ? existing?.detail : (event.detail ?? existing?.detail),
-    tool
-  }
-  upsertItem(draft, item)
+  const id = event.item_id!
+  upsertItem(draft, projectToolCall(event, currentItem(draft, id)))
 }
 
 /**
@@ -160,6 +89,53 @@ const MIN_STREAM_WINDOW_SECONDS = 0.3
 /** Epoch ms of a runtime event timestamp (ISO 8601 from the wire). */
 function eventMs(timestamp: string): number {
   return Date.parse(timestamp)
+}
+
+function currentTurnState(draft: ItemsDraft, turnId: TurnId): TurnState | undefined {
+  return draft.turnState ? draft.turnState[turnId] : draft.base.turnState[turnId]
+}
+
+function ensureRound(draft: ItemsDraft, turnId: TurnId): void {
+  const position = (draft.roundIndex ?? draft.base.roundIndex)[turnId]
+  if (position !== undefined && draft.rounds[position]?.turnId === turnId) return
+  draftRoundIndex(draft)[turnId] = draft.rounds.length
+  draft.rounds = [...draft.rounds, { turnId, durationMs: 0, activeMs: 0 }]
+}
+
+function turnHasPendingGate(draft: ItemsDraft, turnId: TurnId): boolean {
+  return ((draft.pendingGateCounts ?? draft.base.pendingGateCounts)[turnId] ?? 0) > 0
+}
+
+function changePendingGateCount(draft: ItemsDraft, turnId: TurnId, delta: 1 | -1): void {
+  const counts = draftPendingGateCounts(draft)
+  const next = (counts[turnId] ?? 0) + delta
+  if (next > 0) counts[turnId] = next
+  else delete counts[turnId]
+}
+
+/** Bank active wall time before advancing the anchor; gate waits never accrue. */
+function advanceActiveClock(draft: ItemsDraft, turnId: TurnId, timestamp: string): void {
+  const at = eventMs(timestamp)
+  if (!Number.isFinite(at)) return
+  const state = currentTurnState(draft, turnId)
+  if (state === 'running' || state === 'aborting') {
+    ensureRound(draft, turnId)
+    const anchors = draftTurnLastEventAt(draft)
+    const previous = anchors[turnId]
+    if (previous != null && at > previous && !turnHasPendingGate(draft, turnId)) {
+      const position = (draft.roundIndex ?? draft.base.roundIndex)[turnId]!
+      const round = draft.rounds[position]!
+      draft.rounds = draft.rounds.slice()
+      draft.rounds[position] = { ...round, activeMs: (round.activeMs ?? 0) + at - previous }
+    }
+    if (previous == null || at >= previous) anchors[turnId] = at
+    return
+  }
+  // The anchor describes the newest event even before a turn-state row exists;
+  // a mid-turn mount can still establish a live clock from it.
+  const anchors = draftTurnLastEventAt(draft)
+  const previous = anchors[turnId]
+  if (previous == null || at >= previous) anchors[turnId] = at
 }
 
 /**
@@ -196,6 +172,16 @@ function currentItem(draft: ItemsDraft, itemId: ItemId): ThreadItem | undefined 
   return draft.itemsById ? draft.itemsById[itemId] : draft.base.itemsById[itemId]
 }
 
+const isLiveItem = (item: ThreadItem): boolean =>
+  item.status === 'pending' || item.status === 'streaming'
+
+function noteItemWritten(draft: ItemsDraft, item: ThreadItem, previous?: ThreadItem): void {
+  if (previous && isLiveItem(previous) !== isLiveItem(item)) {
+    draft.liveItemCount += isLiveItem(item) ? 1 : -1
+  }
+  draft.changedItemIds.push(item.item_id)
+}
+
 /**
  * Snapshot events are authoritative, but a snapshot may be partial (status-only
  * `item_updated`). Field-level merge keeps accumulated text in that case.
@@ -208,6 +194,8 @@ function upsertItem(draft: ItemsDraft, item: ThreadItem): void {
   if (!existing) {
     draftItems(draft)[item.item_id] = item
     draftItemOrder(draft).push(item.item_id)
+    if (isLiveItem(item)) draft.liveItemCount += 1
+    noteItemWritten(draft, item)
     return
   }
 
@@ -222,6 +210,7 @@ function upsertItem(draft: ItemsDraft, item: ThreadItem): void {
   }
   if (sameItemContent(existing, merged)) return
   draftItems(draft)[item.item_id] = merged
+  noteItemWritten(draft, merged, existing)
 }
 
 function appendDelta(
@@ -230,18 +219,20 @@ function appendDelta(
 ): void {
   const existing = currentItem(draft, event.item_id)
   if (existing) {
-    draftItems(draft)[event.item_id] = {
+    const updated: ThreadItem = {
       ...existing,
       text: (existing.text ?? '') + event.delta,
       status: existing.status === 'pending' ? 'streaming' : existing.status
     }
+    draftItems(draft)[event.item_id] = updated
+    noteItemWritten(draft, updated, existing)
     return
   }
 
   // The runtime normally creates the item first; if a delta wins the race we
   // materialise a streaming row so no token is silently dropped.
   const kind = DELTA_ITEM_KIND[event.kind] ?? 'assistant_message'
-  draftItems(draft)[event.item_id] = {
+  const created: ThreadItem = {
     item_id: event.item_id,
     turn_id: event.turn_id,
     kind,
@@ -249,10 +240,14 @@ function appendDelta(
     created_at: event.timestamp,
     text: event.delta
   }
+  draftItems(draft)[event.item_id] = created
   draftItemOrder(draft).push(event.item_id)
+  draft.liveItemCount += 1
+  noteItemWritten(draft, created)
 }
 
 function setTurn(draft: ItemsDraft, turnId: TurnId, state: TurnState): void {
+  ensureRound(draft, turnId)
   draftTurnState(draft)[turnId] = state
   const terminal = state === 'completed' || state === 'failed' || state === 'aborted'
   if (terminal && draft.activeTurnId === turnId) draft.activeTurnId = null
@@ -260,29 +255,65 @@ function setTurn(draft: ItemsDraft, turnId: TurnId, state: TurnState): void {
 
 /** Statuses after which a child run no longer counts as active for the badge. */
 const TERMINAL_CHILD_STATUSES = new Set(['completed', 'failed', 'aborted', 'ended'])
+const childStatusActive = (status: string | undefined): boolean =>
+  status !== undefined && (status === 'queued' || status === 'running' || !TERMINAL_CHILD_STATUSES.has(status))
+
+function noteChildStatus(draft: ItemsDraft, childId: string, status: string): void {
+  const statuses = draftChildRunStatuses(draft)
+  const wasActive = childStatusActive(statuses[childId])
+  statuses[childId] = status
+  if (wasActive !== childStatusActive(status)) {
+    draft.childRunActiveCount += childStatusActive(status) ? 1 : -1
+  }
+}
 
 /** Seed history from `GET /v1/threads/{id}`. */
 export function seedFromItems(
   items: ThreadItem[],
   lastSeq: number,
-  runtime: ThreadRuntimeSnapshot
+  runtime: ThreadRuntimeSnapshot,
+  snapshotAt: number = Date.now(),
+  previous?: ItemsSnapshot
 ): ItemsSnapshot {
   const draft = draftOf(emptyItemsState())
   draft.lastSeq = lastSeq
   for (const item of items) upsertItem(draft, item)
   if (runtime.active_turn) {
-    draft.activeTurnId = runtime.active_turn.turn_id
+    const turnId = runtime.active_turn.turn_id
+    const continuing = previous?.activeTurnId === turnId && previous.lastSeq <= lastSeq
+    draft.activeTurnId = turnId
     // An active registry entry can only be running or aborting. Keep an
     // unknown future wire string actionable as running rather than inventing a
     // terminal state in the browser.
-    draftTurnState(draft)[runtime.active_turn.turn_id] =
+    draftTurnState(draft)[turnId] =
       runtime.active_turn.state === 'aborting' ? 'aborting' : 'running'
+    if (continuing && previous) {
+      // A mid-turn detail reload is the same clock, not a new mount. Reusing
+      // these channels keeps banked active time, the newest event anchor and
+      // the in-flight model window stable across the authoritative item reload.
+      draft.rounds = previous.rounds
+      draft.roundIndex = previous.roundIndex
+      draft.turnLastEventAt = previous.turnLastEventAt
+      draft.roundWindow = previous.roundWindow
+      ensureRound(draft, turnId)
+    } else {
+      ensureRound(draft, turnId)
+      if (Number.isFinite(snapshotAt)) {
+        // The turn started before this detail was read. Continuing from that
+        // timestamp would bank the whole elapsed turn again and stretch the first
+        // post-mount streaming round across history the user already saw.
+        draftTurnLastEventAt(draft)[turnId] = snapshotAt
+        draft.roundWindow = null
+      }
+    }
   }
   for (const approval of runtime.pending_approvals) {
     draftApprovals(draft)[approval.approval_id] = { ...approval, status: 'pending' }
+    changePendingGateCount(draft, approval.turn_id, 1)
   }
   for (const request of runtime.pending_user_inputs) {
     draftUserInputs(draft)[request.request_id] = { ...request, status: 'pending' }
+    changePendingGateCount(draft, request.turn_id, 1)
   }
   return commitDraft(draft)
 }
@@ -295,24 +326,35 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
   // A frame at or below the seeded watermark is history the authoritative
   // detail snapshot already contains. Folding it again appended the same text
   // delta a second time and double-counted usage — the duplicated-message
-  // symptom. Drop it without allocating a new state object.
-  if (event.seq <= state.lastSeq) return state
+  // symptom. Drop it without allocating a new state object. A usage frame may
+  // arrive below a newer frame while its HTTP owner is in flight; retain that
+  // unseen suffix once, in the tail, so response coverage can replay it by seq.
+  const request = state.usageRequest
+  const latePendingUsage =
+    event.kind === 'usage' &&
+    request !== null &&
+    event.seq <= state.lastSeq &&
+    event.seq > request.seq &&
+    event.seq > state.usageSeedSeq &&
+    !usageTailHasSeq(state.usageTail, event.seq)
+  if (event.seq <= state.lastSeq && !latePendingUsage) return state
   const draft = draftOf(state)
   if (event.seq > draft.lastSeq) draft.lastSeq = event.seq
   // Workbench panels subscribe to this revision instead of `lastSeq`: the
   // latter advances on every streamed token, which made each token trigger
   // ~6 full HTTP reloads. Only these events change a server projection.
   if (WORKBENCH_EVENT_KINDS.has(event.kind)) draft.workbenchRevision += 1
-  // The live active-clock tick extends a running turn's server-reported span
-  // from the newest event the renderer saw for that turn. Every turn-scoped
-  // event carries `turn_id`; thread-scoped ones (child activity, heartbeats)
-  // do not and contribute no anchor.
-  if ('turn_id' in event) {
-    const at = eventMs(event.timestamp)
-    if (Number.isFinite(at)) draftTurnLastEventAt(draft)[event.turn_id] = at
-  }
+  // Bank active time before moving the anchor. Gate-resolution frames resume
+  // from their own timestamp; thread-scoped events carry no turn clock.
+  if ('turn_id' in event) advanceActiveClock(draft, event.turn_id, event.timestamp)
 
   switch (event.kind) {
+    case 'thread_created':
+    case 'thread_updated':
+      // The stream layer folds these into rail rows; the transcript still
+      // advances its watermark so replay deduplication remains monotonic.
+      return commitDraft(draft)
+
     case 'item_created':
     case 'item_updated':
     case 'item_completed':
@@ -336,6 +378,7 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
     case 'turn_started': {
       draft.activeTurnId = event.turn_id
       setTurn(draft, event.turn_id, 'running')
+      advanceActiveClock(draft, event.turn_id, event.timestamp)
       // Seed the round boundary so a first round without visible deltas
       // still measures from the turn start when its `usage` lands.
       draft.roundWindow = { startMs: eventMs(event.timestamp), lastMs: eventMs(event.timestamp) }
@@ -352,14 +395,12 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       // server-side projector folds `turn_failed` into a durable `error`
       // item, but that projection only lives in `items.jsonl` — the live
       // SSE channel carries the bare `turn_failed` event. Materialize the
-      // same row here with the server's deterministic id
-      // (`turn_failed:{turn_id}`, mirrored from the Rust projector) so the
-      // live row and the replayed row are one item: a later seed merge
-      // keeps one row instead of duplicating it.
+      // same row here using the item id supplied by Rust so the live row and
+      // the replayed row are one item.
       setTurn(draft, event.turn_id, 'failed')
       resetDeltaWindow(draft)
       upsertItem(draft, {
-        item_id: turnFailedItemId(event.turn_id),
+        item_id: event.item_id!,
         turn_id: event.turn_id,
         kind: 'error',
         status: 'failed',
@@ -403,6 +444,9 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       return commitDraft(draft)
 
     case 'approval_requested': {
+      const existing = draft.approvals
+        ? draft.approvals[event.approval_id]
+        : draft.base.approvals[event.approval_id]
       const approval: PendingApproval = {
         approval_id: event.approval_id,
         turn_id: event.turn_id,
@@ -412,12 +456,16 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
         requested_at: event.timestamp
       }
       draftApprovals(draft)[event.approval_id] = approval
+      if (existing?.status !== 'pending') changePendingGateCount(draft, event.turn_id, 1)
       return commitDraft(draft)
     }
 
     case 'approval_resolved': {
-      const existing = draft.base.approvals[event.approval_id]
+      const existing = draft.approvals
+        ? draft.approvals[event.approval_id]
+        : draft.base.approvals[event.approval_id]
       if (existing) {
+        if (existing.status === 'pending') changePendingGateCount(draft, existing.turn_id, -1)
         draftApprovals(draft)[event.approval_id] = {
           ...existing,
           status: event.approved ? 'approved' : 'rejected'
@@ -427,6 +475,9 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
     }
 
     case 'user_input_requested': {
+      const existing = draft.userInputs
+        ? draft.userInputs[event.request_id]
+        : draft.base.userInputs[event.request_id]
       const request: PendingUserInput = {
         request_id: event.request_id,
         turn_id: event.turn_id,
@@ -435,31 +486,34 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
         requested_at: event.timestamp
       }
       draftUserInputs(draft)[event.request_id] = request
+      if (existing?.status !== 'pending') changePendingGateCount(draft, event.turn_id, 1)
+      upsertItem(draft, projectUserInput(event))
       return commitDraft(draft)
     }
 
     case 'user_input_resolved': {
-      const existing = draft.base.userInputs[event.request_id]
+      const existing = draft.userInputs
+        ? draft.userInputs[event.request_id]
+        : draft.base.userInputs[event.request_id]
       if (existing) {
+        if (existing.status === 'pending') changePendingGateCount(draft, existing.turn_id, -1)
         draftUserInputs(draft)[event.request_id] = { ...existing, status: 'answered', answer: event.answer }
       }
+      const id = event.item_id!
+      upsertItem(draft, projectUserInput(event, currentItem(draft, id)))
       return commitDraft(draft)
     }
 
     case 'child_completed':
-      // The durable summary lives in the subagent panel (fetched from the
-      // registry) and the instant toast (raised in the stream hook); the item
-      // projection keeps no copy of it.
+      // The durable summary lives in the subagent panel; only lifecycle counts
+      // belong in the transcript projection.
       draft.childRunRevision += 1
+      noteChildStatus(draft, event.child_id, event.status)
       return commitDraft(draft)
 
     case 'child_activity': {
       draft.childRunRevision += 1
-      // The event carries the child's own status, so the badge count tracks it
-      // without a second request. An unknown future wire status counts as
-      // active: a badge that over-reports beats one that hides live work.
-      const active = event.status === 'queued' || event.status === 'running' || !TERMINAL_CHILD_STATUSES.has(event.status)
-      draft.childRunActiveCount = Math.max(0, draft.childRunActiveCount + (active ? 1 : -1))
+      noteChildStatus(draft, event.child_id, event.status)
       return commitDraft(draft)
     }
 
@@ -472,6 +526,13 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
       const tokensPerSec =
         window && seconds >= MIN_STREAM_WINDOW_SECONDS ? event.usage.completion_tokens / seconds : null
       draft.usage = foldUsage(draft.usage, event.usage, tokensPerSec)
+      if (draft.usageRequest) {
+        draft.usageTail = appendUsageTail(draft.usageTail, {
+          seq: event.seq,
+          usage: event.usage,
+          roundTokensPerSec: tokensPerSec
+        })
+      }
       // The same event closes one model round: record its duration (the
       // provider-measured value when present, the client window otherwise)
       // so the turn total covers rounds even before the next HTTP refresh.
@@ -481,8 +542,35 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
           : window && window.lastMs >= window.startMs
             ? window.lastMs - window.startMs
             : 0
-      draft.rounds = appendRound(draft.rounds, { turnId: event.turn_id, durationMs: measuredMs })
+      draft.rounds = appendRound(
+        draft.rounds,
+        { turnId: event.turn_id, durationMs: measuredMs },
+        draftRoundIndex(draft)
+      )
       resetDeltaWindow(draft)
+      return commitDraft(draft)
+    }
+
+    case 'goal_updated': {
+      const plan = draftPlan(draft)
+      plan.goal = event.goal
+      return commitDraft(draft)
+    }
+
+    case 'goal_cleared': {
+      const plan = draftPlan(draft)
+      delete plan.goal
+      return commitDraft(draft)
+    }
+
+    case 'todos_updated': {
+      const plan = draftPlan(draft)
+      plan.todos = event.todos.map((todo) => ({ ...todo }))
+      return commitDraft(draft)
+    }
+
+    case 'todos_cleared': {
+      draftPlan(draft).todos = []
       return commitDraft(draft)
     }
 
@@ -515,18 +603,18 @@ export function markApprovalLocally(
   approved: boolean
 ): ItemsSnapshot {
   const existing = state.approvals[approvalId]
-  if (!existing) return state
-  return {
-    ...state,
-    approvals: { ...state.approvals, [approvalId]: { ...existing, status: approved ? 'approved' : 'rejected' } }
-  }
+  if (!existing || existing.status !== 'pending') return state
+  const draft = draftOf(state)
+  changePendingGateCount(draft, existing.turn_id, -1)
+  draftApprovals(draft)[approvalId] = { ...existing, status: approved ? 'approved' : 'rejected' }
+  return commitDraft(draft)
 }
 
 export function markUserInputLocally(state: ItemsSnapshot, requestId: string, answer: string): ItemsSnapshot {
   const existing = state.userInputs[requestId]
-  if (!existing) return state
-  return {
-    ...state,
-    userInputs: { ...state.userInputs, [requestId]: { ...existing, status: 'answered', answer } }
-  }
+  if (!existing || existing.status !== 'pending') return state
+  const draft = draftOf(state)
+  changePendingGateCount(draft, existing.turn_id, -1)
+  draftUserInputs(draft)[requestId] = { ...existing, status: 'answered', answer }
+  return commitDraft(draft)
 }

@@ -1,13 +1,5 @@
-//! Event -> `ThreadItem` projection (design 7.10.3, 7.4.1 `items.jsonl`).
-//!
-//! This is the *only* place that turns raw events into render rows. Both the
-//! incremental writer path (`items.jsonl`) and the rebuild path
-//! (`project_items(events)`) run this same machine, so "rebuild equals
-//! incremental" is true by construction and is asserted in the tests.
-//!
-//! `apply` is a thin dispatcher: each event family delegates to one small
-//! handler, which keeps every function well under the review limit and makes
-//! the fold order obvious.
+//! Shared event-to-item projection for incremental writes and full rebuilds.
+//! Small per-family handlers keep rebuild and streaming folds identical.
 
 pub use ark_common::keyed_item_id;
 use ark_common::{ItemId, TurnId};
@@ -30,10 +22,7 @@ fn build(id: ItemId, turn: TurnId, kind: ItemKind, at: DateTime<Utc>) -> ThreadI
     item
 }
 
-/// The `ToolCallFinished` fields the projection reads.
-///
-/// Grouped into one value so the handler keeps a single event-shaped argument
-/// instead of nine positional ones.
+/// The `ToolCallFinished` fields the projection reads, grouped as one value.
 struct ToolFinished<'a> {
     call_id: &'a str,
     tool: &'a str,
@@ -43,20 +32,10 @@ struct ToolFinished<'a> {
     detail: Option<&'a str>,
 }
 
-/// One `items.jsonl` line: an item snapshot plus the log positions it covers.
-///
-/// Delta events intentionally do not append rows (a row per delta carried the
-/// accumulated full text and made the file quadratic in the reply length), so
-/// the two sequence numbers are what lets a read rebuild the missing tail:
-///
-/// * `first_seq` — the first event that touched the item; it decides render
-///   order even when only later key points ever wrote a row for it;
-/// * `watermark_seq` — the last event folded into `item`; a read replays a
-///   logged delta only past this point, so text already in the snapshot is
-///   never appended twice.
-///
-/// Rows written before watermarking existed deserialize with both fields at 0;
-/// `is_legacy_shape` sends such files to a full-log rebuild instead.
+/// One snapshot plus its covered event interval; deltas append no rows because
+/// cumulative text would make `items.jsonl` grow quadratically with replies.
+/// `first_seq` preserves render order; `watermark_seq` prevents delta replay
+/// from duplicating text. Legacy rows with both fields at zero require a full rebuild.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemSnapshotRecord {
     #[serde(default)]
@@ -68,10 +47,7 @@ pub struct ItemSnapshotRecord {
 }
 
 impl ItemSnapshotRecord {
-    /// Whether the row carries no position information (pre-watermark file).
-    ///
-    /// Real event seqs start at 1, so 0 can only come from an old row whose
-    /// text already contains every delta — replaying would duplicate it.
+    /// Event seqs start at 1, so zero marks legacy text that already includes every delta.
     pub fn is_legacy_shape(&self) -> bool {
         self.watermark_seq == 0
     }
@@ -150,6 +126,22 @@ pub(crate) fn projected_item_id(event: &RuntimeEvent) -> Option<ItemId> {
         // "N earlier items compacted" card. Keep the event in the log for
         // diagnostics/usage, but never fold it into `items.jsonl`.
         _ => None,
+    }
+}
+
+pub(crate) fn backfill_legacy_item_id(event: &mut RuntimeEvent) {
+    let fallback = projected_item_id(event);
+    match event {
+        RuntimeEvent::ToolCallStarted { item_id, .. }
+        | RuntimeEvent::ToolCallFinished { item_id, .. }
+        | RuntimeEvent::UserInputRequested { item_id, .. }
+        | RuntimeEvent::UserInputResolved { item_id, .. }
+        | RuntimeEvent::TurnFailed { item_id, .. }
+            if item_id.is_none() =>
+        {
+            *item_id = fallback;
+        }
+        _ => {}
     }
 }
 

@@ -3,15 +3,17 @@ import type {
   ItemId,
   PendingApprovalView,
   PendingUserInputView,
+  PlanView,
   ThreadId,
   ThreadItem,
   ThreadSummary,
   TurnId,
+  Usage,
   TurnState
 } from '../../../shared/contracts'
 import type { StreamStatus } from '../api/events-api'
 
-export type { LoadStatus } from '../../../shared/contracts'
+export type { LoadStatus, PlanView } from '../../../shared/contracts'
 
 /**
  * Per-thread usage projection, folded from the runtime's authoritative `usage`
@@ -19,10 +21,9 @@ export type { LoadStatus } from '../../../shared/contracts'
  * client-side proxy for how full the context is; the limit itself is the
  * runtime's derived compaction threshold (80% of the model's declared window).
  *
- * Cache sums follow the same `sum_opt` semantics as `costUsd`: a sample without
- * the counter contributes nothing and the sum stays null until one carries it.
- * The hit rate is only ever derived from the hit/miss pair, never faked from
- * `hit / prompt_tokens` — the same rule the Rust aggregate applies.
+ * Optional counters follow Rust `Usage::merge`: sums skip missing values, but
+ * one incomplete cache pair or unmeasured duration makes the corresponding
+ * aggregate permanently unknown. "Unknown" must never render as zero.
  */
 export type UsageAggregate = {
   samples: number
@@ -30,11 +31,12 @@ export type UsageAggregate = {
   completionTokens: number
   totalTokens: number
   costUsd: number | null
-  /**
-   * Summed measured model-call wall time of every folded sample, milliseconds.
-   * Null until a sample carries one, so "unknown" never renders as `0秒`.
-   */
+  /** Summed measured model-call wall time; null if any sample omitted it. */
   durationMs: number | null
+  durationIncomplete: boolean
+  cacheHitTokens: number | null
+  cacheMissTokens: number | null
+  cacheCountersIncomplete: boolean
   /**
    * Thread's active span from the server fold: every turn's wall clock minus
    * user-gate waits, plus harness recovery/continuation gaps, milliseconds.
@@ -42,8 +44,6 @@ export type UsageAggregate = {
    */
   activeMs: number | null
   lastPromptTokens: number | null
-  cacheHitTokens: number | null
-  cacheMissTokens: number | null
   /** Output speed of the newest model round, measured over its streaming window. */
   lastRoundTokensPerSec: number | null
 }
@@ -59,6 +59,30 @@ export type RoundWindow = {
   lastMs: number
 }
 
+/** One owner ticket for an in-flight thread usage snapshot. */
+export type UsageRequest = {
+  owner: ThreadId
+  /** Store watermark captured before the HTTP request started. */
+  seq: number
+  /** Monotonic across thread switches and detail reloads. */
+  generation: number
+  /** Aggregate sample count at `seq`, used to infer response coverage. */
+  baseSamples: number
+}
+
+/** Live samples retained only while their snapshot owner is in flight. */
+export type UsageTailSample = {
+  seq: number
+  usage: Usage
+  roundTokensPerSec: number | null
+}
+
+/** Persistent newest-first tail: appending one sample never copies its history. */
+export type UsageTailNode = {
+  sample: UsageTailSample
+  next: UsageTailNode | null
+}
+
 /**
  * Renderer fold of the authoritative per-turn timings. Seeded from
  * `GET /v1/threads/{id}/usage` and extended by live `usage` events; see
@@ -69,8 +93,8 @@ export type RoundTiming = {
   /** Sum of measured model-call wall time in this turn, milliseconds. */
   durationMs: number
   /**
-   * Active span (wall clock minus user-gate waits) as the server folded it;
-   * `null` until an HTTP seed reports it. Live ticks extend it in place.
+   * Server-reported or reducer-banked active span (wall clock minus user-gate
+   * waits), milliseconds; null only before a clock can be established.
    */
   activeMs: number | null
 }
@@ -115,6 +139,8 @@ export type ItemsSnapshot = {
    * authoritative list from the API.
    */
   childRunActiveCount: number
+  /** Latest lifecycle status per child, used to count unique active children. */
+  childRunStatuses: Record<string, string>
   /**
    * Advances only for events that change a server-side workbench projection
    * (plan, changes, file, terminal). Panels subscribe to this instead of
@@ -131,16 +157,36 @@ export type ItemsSnapshot = {
   rewoundFromSeq: number | null
   /** Aggregated `usage` events; null until the first sample or thread seed. */
   usage: UsageAggregate | null
+  /** Server-reported turn count for the current aggregate. */
+  usageTurns: number | null
+  /** Newest usage request; stale HTTP responses cannot write this projection. */
+  usageRequest: UsageRequest | null
+  /** Samples received after `usageRequest.seq`, discarded when the owner settles. */
+  usageTail: UsageTailNode | null
+  /** Highest request watermark incorporated by an HTTP usage seed. */
+  usageSeedSeq: number
   /** Streaming window of the in-flight model round; null between rounds. */
   roundWindow: RoundWindow | null
   /** Per-turn clocks (snapshot-seeded, live-extended). */
   rounds: RoundTiming[]
+  /** O(1) turn-id to row lookup; maintained alongside `rounds`. */
+  roundIndex: Record<TurnId, number>
+  /** Number of unresolved gates per turn; avoids scanning approval history. */
+  pendingGateCounts: Record<TurnId, number>
   /**
    * Newest event timestamp (epoch ms) the renderer saw per turn. The live
    * active-clock tick extends a running turn's server-reported span from this
    * anchor; terminal turns never read it.
    */
   turnLastEventAt: Record<TurnId, number>
+  /** Item ids written by the newest delta; empty for control-only events. */
+  changedItemIds: ItemId[]
+  /** Whether the newest delta inserted rows and invalidated grouping order. */
+  itemOrderChanged: boolean
+  /** Constant-time transcript-liveness signal maintained by the reducer. */
+  liveItemCount: number
+  /** Streamed plan projection; server refetches remain authoritative. */
+  plan: PlanView
   /** Newest compaction notice, cleared on rewind with the rest of the projection. */
   lastCompaction: CompactionNotice | null
 }

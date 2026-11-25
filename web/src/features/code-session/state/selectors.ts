@@ -17,7 +17,9 @@ import type { ItemsSnapshot, PendingApproval, PendingUserInput } from './types'
 export type ItemView = Pick<ItemsSnapshot, 'itemOrder' | 'itemsById'>
 
 /** Channels needed to group rows into their turns. */
-export type TurnView = ItemView & Pick<ItemsSnapshot, 'turnState'>
+export type TurnView = ItemView &
+  Pick<ItemsSnapshot, 'turnState'> &
+  Partial<Pick<ItemsSnapshot, 'changedItemIds' | 'itemOrderChanged'>>
 
 export type TurnGroup = {
   turnId: TurnId
@@ -25,18 +27,34 @@ export type TurnGroup = {
   state: ItemsSnapshot['turnState'][TurnId] | undefined
 }
 
-/**
- * Group rows into their turns in `itemOrder`.
- *
- * A group whose rows and state match `previous` elementwise is reused verbatim,
- * so the caller's `React.memo` turn block keeps its identity while other turns
- * stream. The comparison is O(rows) reference checks, which is the price of
- * skipping the render of every untouched row.
- */
-export function groupByTurn(view: TurnView, previous?: readonly TurnGroup[]): TurnGroup[] {
+/** Update only turns named by the reducer's changed-item set, in O(groups + changed rows). */
+function updateTurnGroups(view: TurnView, previous: readonly TurnGroup[]): TurnGroup[] {
+  const changedTurns = new Set<TurnId>()
+  const replacements = new Map<ItemId, ThreadItem>()
+  for (const itemId of view.changedItemIds ?? []) {
+    const item = view.itemsById[itemId]
+    if (item) {
+      changedTurns.add(item.turn_id)
+      replacements.set(itemId, item)
+    }
+  }
+  return previous.map((group) => {
+    const state = view.turnState[group.turnId]
+    if (!changedTurns.has(group.turnId) && state === group.state) return group
+    const items = changedTurns.has(group.turnId)
+      ? group.items.map((item) => replacements.get(item.item_id) ?? item)
+      : group.items
+    return { turnId: group.turnId, items, state }
+  })
+}
+
+/** Rebuild server order while retaining every structurally unchanged group. */
+function rebuildTurnGroups(
+  view: TurnView,
+  previous: readonly TurnGroup[]
+): TurnGroup[] {
   const groups: TurnGroup[] = []
   const index = new Map<TurnId, TurnGroup>()
-
   for (const itemId of view.itemOrder) {
     const item = view.itemsById[itemId]
     if (!item) continue
@@ -48,22 +66,42 @@ export function groupByTurn(view: TurnView, previous?: readonly TurnGroup[]): Tu
     }
     group.items.push(item)
   }
-
-  if (!previous || previous.length === 0) return groups
-
-  const previousById = new Map<TurnId, TurnGroup>()
-  for (const group of previous) previousById.set(group.turnId, group)
-  return groups.map((group) => (sameGroup(previousById.get(group.turnId), group) ? (previousById.get(group.turnId) as TurnGroup) : group))
+  const prior = new Map(previous.map((group) => [group.turnId, group]))
+  return groups.map((group) => {
+    const old = prior.get(group.turnId)
+    const unchanged =
+      old !== undefined &&
+      old.state === group.state &&
+      old.items.length === group.items.length &&
+      old.items.every((item, at) => item === group.items[at])
+    return unchanged ? old : group
+  })
 }
 
-function sameGroup(previous: TurnGroup | undefined, next: TurnGroup): boolean {
-  if (!previous) return false
-  if (previous.state !== next.state) return false
-  if (previous.items.length !== next.items.length) return false
-  for (let i = 0; i < next.items.length; i += 1) {
-    if (previous.items[i] !== next.items[i]) return false
+/**
+ * Group rows into turns. Insertions rebuild the order once; later deltas use
+ * reducer metadata to retain every untouched group without scanning the stream.
+ * `previousView` lets callers validate that the guarded fast path still has the
+ * same ordered-row channel.
+ */
+export function groupByTurn(
+  view: TurnView,
+  previous?: readonly TurnGroup[],
+  previousView?: TurnView
+): TurnGroup[] {
+  if (previous?.length && view.changedItemIds && view.itemOrderChanged !== true) {
+    const sameOrder = previousView?.itemOrder === view.itemOrder
+    // The normal streaming path carries the prior view and the same ordered
+    // channel; its length already proves the group count without walking every
+    // historical turn. Callers without that cache retain the defensive check.
+    const previousCount = sameOrder
+      ? view.itemOrder.length
+      : previous.reduce((count, group) => count + group.items.length, 0)
+    if (sameOrder && previousCount === view.itemOrder.length) {
+      return updateTurnGroups(view, previous)
+    }
   }
-  return true
+  return rebuildTurnGroups(view, previous ?? [])
 }
 
 /** Flattened stream in display order (used by the scroll manager). */
@@ -136,10 +174,7 @@ export function answeredGateCards(
   return cards
 }
 
-/** True while any item still streams — used to disable send and show a caret. */
-export function hasLiveItems(view: ItemView): boolean {
-  return view.itemOrder.some((itemId: ItemId) => {
-    const item = view.itemsById[itemId]
-    return item !== undefined && (item.status === 'pending' || item.status === 'streaming')
-  })
+/** True while any item still streams — uses the reducer's constant-time count. */
+export function hasLiveItems(view: ItemView & Pick<ItemsSnapshot, 'liveItemCount'>): boolean {
+  return view.liveItemCount > 0
 }

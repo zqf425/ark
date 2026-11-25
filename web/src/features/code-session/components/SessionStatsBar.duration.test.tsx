@@ -7,16 +7,17 @@
  * excluded).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { installBrowserStubs, mountWithProviders } from '../../../shared/testing/react-harness'
+import { installBrowserStubs, mountWithProviders, settle } from '../../../shared/testing/react-harness'
 import { useCodeSessionStore } from '../state/store'
+import { getThreadUsage } from '../api/threads-api'
 
 installBrowserStubs()
 
 // The strip seeds its counters over HTTP; the total it prints is the
 // aggregate's own `active_ms`, which is what this test pins.
 vi.mock('../api/threads-api', () => ({
-  getThreadUsage: () =>
-    Promise.resolve({
+  getThreadUsage: vi.fn(async () =>
+    ({
       thread_id: '00000000-0000-0000-0000-0000000000ff',
       turns: 2,
       samples: 3,
@@ -31,7 +32,7 @@ vi.mock('../api/threads-api', () => ({
         { turn_id: '00000000-0000-0000-0000-000000000002', samples: 2, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, active_ms: 1_200_000 }
       ],
       active_ms: 1_845_000
-    })
+    }))
 }))
 
 const { SessionStatsBar } = await import('./SessionStatsBar')
@@ -41,7 +42,8 @@ const T2 = '00000000-0000-0000-0000-000000000002'
 
 describe('SessionStatsBar total duration format', () => {
   afterEach(() => {
-    useCodeSessionStore.setState({ rounds: [], usage: null, turnLastEventAt: {} })
+    useCodeSessionStore.setState({ rounds: [], usage: null, usageTurns: null, turnLastEventAt: {} })
+    vi.mocked(getThreadUsage).mockClear()
     document.body.innerHTML = ''
   })
 
@@ -53,6 +55,7 @@ describe('SessionStatsBar total duration format', () => {
         { turnId: T1, durationMs: 645_000, activeMs: 645_000 },
         { turnId: T2, durationMs: 1_200_000, activeMs: 1_200_000 }
       ],
+      usageTurns: 2,
       usage: {
         samples: 3,
         promptTokens: 0,
@@ -63,13 +66,15 @@ describe('SessionStatsBar total duration format', () => {
         activeMs: 1_845_000,
         cacheHitTokens: null,
         cacheMissTokens: null,
+        cacheCountersIncomplete: true,
+        durationIncomplete: true,
         lastPromptTokens: null,
         lastRoundTokensPerSec: null
       }
     })
 
     const harness = await mountWithProviders(<SessionStatsBar threadId="00000000-0000-0000-0000-0000000000ff" />)
-    // Let the HTTP seed settle so the rounds segment renders.
+    // The pre-seeded aggregate and per-turn rows render without another HTTP read.
     await vi.waitFor(() => {
       expect(harness.host.textContent).toContain('耗时')
     })
@@ -87,8 +92,13 @@ describe('SessionStatsBar total duration format', () => {
     useCodeSessionStore.setState({
       activeTurnId: T3,
       turnState: { [T3]: 'running' },
-      rounds: [{ turnId: T3, durationMs: 0, activeMs: 600_000 }],
+      rounds: [
+        { turnId: T1, durationMs: 645_000, activeMs: 645_000 },
+        { turnId: T2, durationMs: 1_200_000, activeMs: 1_200_000 },
+        { turnId: T3, durationMs: 0, activeMs: 600_000 }
+      ],
       turnLastEventAt: { [T3]: Date.now() - 30_000 },
+      usageTurns: 2,
       usage: {
         samples: 1,
         promptTokens: 0,
@@ -99,15 +109,16 @@ describe('SessionStatsBar total duration format', () => {
         activeMs: 600_000,
         cacheHitTokens: null,
         cacheMissTokens: null,
+        cacheCountersIncomplete: true,
+        durationIncomplete: true,
         lastPromptTokens: null,
         lastRoundTokensPerSec: null
       }
     })
 
     const harness = await mountWithProviders(<SessionStatsBar threadId="00000000-0000-0000-0000-0000000000ff" />)
-    // The seed refetch fires after mount; its `turn_usage` knows nothing
-    // about T3, so the live row survives the merge and the two disjoint
-    // spans simply add: 30m45s (seed) + 10m30s (live turn) = 41m15s.
+    // The seeded rows contain the settled 30m45s history; the live T3 row adds
+    // 10m30s, so the two disjoint spans sum to 41m15s.
     await vi.waitFor(() => {
       expect(harness.host.textContent).toContain('耗时')
     })
@@ -137,22 +148,23 @@ describe('SessionStatsBar total duration format', () => {
 
   it('keeps the settled history on the clock while a new turn runs', async () => {
     // The "890+ calls showed 2 minutes" regression: the live estimate covers
-    // only the running turn, and the seed merge keeps live-only rows, so the
-    // total is the sum of every turn's row — settled turns on their server
-    // span, the running turn on its live estimate. Here the mocked seed's
-    // turn_usage does not list T3/T_OLD: 30m45s (seed) + 110min (T_OLD) +
-    // 6min + ~1min live (T3) ≈ 2时27分45秒; jsdom jitter means the exact
-    // seconds vary, so assert the hours/minutes shape only.
+    // only the running turn, while seeded and live-only settled rows keep the
+    // full history. Here 30m45s (seed) + 110min (T_OLD) + 6min + ~1min live
+    // (T3) ≈ 2时27分45秒; jsdom jitter means the exact seconds vary, so assert
+    // the hours/minutes shape only.
     const T_OLD = '00000000-0000-0000-0000-000000000004'
     const T3 = '00000000-0000-0000-0000-000000000003'
     useCodeSessionStore.setState({
       activeTurnId: T3,
       turnState: { [T3]: 'running' },
       rounds: [
+        { turnId: T1, durationMs: 645_000, activeMs: 645_000 },
+        { turnId: T2, durationMs: 1_200_000, activeMs: 1_200_000 },
         { turnId: T_OLD, durationMs: 0, activeMs: 110 * 60_000 },
         { turnId: T3, durationMs: 0, activeMs: 6 * 60_000 }
       ],
       turnLastEventAt: { [T3]: Date.now() - 60_000 },
+      usageTurns: 2,
       usage: {
         samples: 915,
         promptTokens: 0,
@@ -163,6 +175,8 @@ describe('SessionStatsBar total duration format', () => {
         activeMs: 116 * 60_000,
         cacheHitTokens: null,
         cacheMissTokens: null,
+        cacheCountersIncomplete: true,
+        durationIncomplete: true,
         lastPromptTokens: null,
         lastRoundTokensPerSec: null
       }
@@ -172,5 +186,36 @@ describe('SessionStatsBar total duration format', () => {
     await vi.waitFor(() => {
       expect(harness.host.textContent).toContain('耗时 2时27分')
     })
+  })
+
+  it('does not replay the full usage log when a live sample arrives', async () => {
+    useCodeSessionStore.setState({
+      usageTurns: 2,
+      usage: {
+        samples: 1,
+        promptTokens: 100,
+        completionTokens: 10,
+        totalTokens: 110,
+        costUsd: null,
+        durationMs: 10,
+        durationIncomplete: false,
+        activeMs: 1_000,
+        cacheHitTokens: 80,
+        cacheMissTokens: 20,
+        cacheCountersIncomplete: false,
+        lastPromptTokens: 100,
+        lastRoundTokensPerSec: null
+      }
+    })
+    const h = await mountWithProviders(<SessionStatsBar threadId="00000000-0000-0000-0000-0000000000ff" />)
+    await settle()
+    useCodeSessionStore.setState((state) => ({
+      usage: state.usage ? { ...state.usage, samples: state.usage.samples + 1 } : null
+    }))
+    await settle()
+
+    expect(getThreadUsage).not.toHaveBeenCalled()
+    expect(h.host.textContent).toContain('2 次调用')
+    await h.unmount()
   })
 })

@@ -67,6 +67,76 @@ fn open_refuses_a_log_with_mid_file_garbage_without_modifying_it() {
 }
 
 #[test]
+fn open_backfills_legacy_item_ids_for_replay() {
+    let dir = TempDir::new("writer-open-legacy-item-id");
+    let thread = ThreadId::new();
+    let turn = TurnId::new();
+    let paths = ThreadPaths::new(dir.path().join("thread"));
+    crate::store::fs_util::ensure_dir(paths.dir()).unwrap();
+    let legacy = RuntimeEvent::ToolCallStarted {
+        seq: 1,
+        thread_id: thread,
+        turn_id: turn,
+        item_id: None,
+        timestamp: Utc::now(),
+        call_id: "legacy-call".into(),
+        tool: "read".into(),
+        arguments: serde_json::json!({}),
+    };
+    std::fs::write(paths.events_jsonl(), encode_event(&legacy).unwrap()).unwrap();
+
+    let state = WriterState::open(
+        thread,
+        paths,
+        StoreLimits::for_tests(),
+        Arc::new(MemoryDiagnostics::new()),
+    )
+    .unwrap();
+    let replayed = state.replay(0);
+
+    assert_eq!(replayed.len(), 1);
+    match &replayed[0] {
+        RuntimeEvent::ToolCallStarted { item_id, .. } => assert_eq!(
+            *item_id,
+            Some(ark_common::keyed_item_id("tool_call:legacy-call"))
+        ),
+        other => panic!("unexpected replayed event: {other:?}"),
+    }
+}
+
+#[test]
+fn append_backfills_legacy_item_ids_before_fanout() {
+    let dir = TempDir::new("writer-append-legacy-item-id");
+    let thread = ThreadId::new();
+    let turn = TurnId::new();
+    let mut state = state(&dir, thread);
+    let mut subscription = state.snapshot_and_subscribe(0).unwrap();
+    let legacy = RuntimeEvent::ToolCallStarted {
+        seq: 0,
+        thread_id: thread,
+        turn_id: turn,
+        item_id: None,
+        timestamp: Utc::now(),
+        call_id: "legacy-call".into(),
+        tool: "read".into(),
+        arguments: serde_json::json!({}),
+    };
+
+    let stored = state.append(legacy).unwrap();
+    let fanned_out = subscription.live.try_recv().unwrap();
+
+    for event in [stored, fanned_out] {
+        match event {
+            RuntimeEvent::ToolCallStarted { item_id, .. } => assert_eq!(
+                item_id,
+                Some(ark_common::keyed_item_id("tool_call:legacy-call"))
+            ),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn compaction_keeps_an_unacknowledged_child_completion() {
     let dir = TempDir::new("completion-compaction");
     let thread = ThreadId::new();

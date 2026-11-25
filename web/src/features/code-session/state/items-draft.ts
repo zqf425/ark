@@ -13,7 +13,7 @@
  * object, so the row memo still bails out.
  */
 import type { ItemId, ThreadItem, TurnId, TurnState } from '../../../shared/contracts'
-import type { CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput, RoundTiming, RoundWindow, UsageAggregate } from './types'
+import type { CompactionNotice, ItemsSnapshot, PendingApproval, PendingUserInput, PlanView, RoundTiming, RoundWindow, UsageAggregate, UsageRequest, UsageTailNode } from './types'
 
 export type ItemsDraft = {
   base: ItemsSnapshot
@@ -26,14 +26,25 @@ export type ItemsDraft = {
   userInputs: Record<string, PendingUserInput> | null
   childRunRevision: number
   childRunActiveCount: number
+  childRunStatuses: Record<string, string> | null
   workbenchRevision: number
   rewindRevision: number
   rewoundFromSeq: number | null
   usage: UsageAggregate | null
+  usageTurns: number | null
+  usageRequest: UsageRequest | null
+  usageTail: UsageTailNode | null
+  usageSeedSeq: number
   roundWindow: RoundWindow | null
   lastCompaction: CompactionNotice | null
   rounds: RoundTiming[]
-  turnLastEventAt: Record<TurnId, number>
+  roundIndex: Record<TurnId, number> | null
+  pendingGateCounts: Record<TurnId, number> | null
+  turnLastEventAt: Record<TurnId, number> | null
+  changedItemIds: ItemId[]
+  itemOrderChanged: boolean
+  liveItemCount: number
+  plan: PlanView | null
 }
 
 export function draftOf(base: ItemsSnapshot): ItemsDraft {
@@ -48,24 +59,61 @@ export function draftOf(base: ItemsSnapshot): ItemsDraft {
     userInputs: null,
     childRunRevision: base.childRunRevision,
     childRunActiveCount: base.childRunActiveCount,
+    childRunStatuses: null,
     workbenchRevision: base.workbenchRevision,
     rewindRevision: base.rewindRevision,
     rewoundFromSeq: base.rewoundFromSeq,
     usage: base.usage,
+    usageTurns: base.usageTurns,
+    usageRequest: base.usageRequest,
+    usageTail: base.usageTail,
+    usageSeedSeq: base.usageSeedSeq,
     roundWindow: base.roundWindow,
     lastCompaction: base.lastCompaction,
     rounds: base.rounds,
-    turnLastEventAt: base.turnLastEventAt
+    roundIndex: null,
+    pendingGateCounts: null,
+    turnLastEventAt: null,
+    changedItemIds: [],
+    itemOrderChanged: false,
+    liveItemCount: base.liveItemCount,
+    plan: null
   }
 }
 
+const recordDepths = new WeakMap<object, number>()
+const MAX_RECORD_LAYERS = 64
+
+function materializeRecord<T>(record: Record<string, T>): Record<string, T> {
+  const layers: Record<string, T>[] = []
+  let layer: object | null = record
+  while (layer && layer !== Object.prototype) {
+    layers.push(layer as Record<string, T>)
+    layer = Object.getPrototypeOf(layer)
+  }
+  return Object.assign({}, ...layers.reverse())
+}
+
+/** O(1) writes over a prior map, with periodic bounded-depth folding. */
+function draftRecord<T>(base: Record<string, T>): Record<string, T> {
+  const depth = recordDepths.get(base) ?? 0
+  const next =
+    depth >= MAX_RECORD_LAYERS
+      ? materializeRecord(base)
+      : (Object.create(base) as Record<string, T>)
+  recordDepths.set(next, depth >= MAX_RECORD_LAYERS ? 1 : depth + 1)
+  return next
+}
+
+/** O(1) delta writes over the prior map, with periodic bounded-depth folding. */
 export function draftItems(draft: ItemsDraft): Record<ItemId, ThreadItem> {
-  draft.itemsById ??= { ...draft.base.itemsById }
+  draft.itemsById ??= draftRecord(draft.base.itemsById)
   return draft.itemsById
 }
 
 export function draftItemOrder(draft: ItemsDraft): ItemId[] {
   draft.itemOrder ??= [...draft.base.itemOrder]
+  draft.itemOrderChanged = true
   return draft.itemOrder
 }
 
@@ -84,10 +132,30 @@ export function draftUserInputs(draft: ItemsDraft): Record<string, PendingUserIn
   return draft.userInputs
 }
 
+export function draftChildRunStatuses(draft: ItemsDraft): Record<string, string> {
+  draft.childRunStatuses ??= { ...draft.base.childRunStatuses }
+  return draft.childRunStatuses
+}
+
+export function draftPlan(draft: ItemsDraft): PlanView {
+  draft.plan ??= { ...draft.base.plan, todos: [...draft.base.plan.todos] }
+  return draft.plan
+}
+
 /** Copy-on-write channel for the per-turn newest-event timestamps. */
 export function draftTurnLastEventAt(draft: ItemsDraft): Record<TurnId, number> {
-  draft.turnLastEventAt ??= { ...draft.base.turnLastEventAt }
+  draft.turnLastEventAt ??= draftRecord(draft.base.turnLastEventAt)
   return draft.turnLastEventAt
+}
+
+export function draftRoundIndex(draft: ItemsDraft): Record<TurnId, number> {
+  draft.roundIndex ??= { ...draft.base.roundIndex }
+  return draft.roundIndex
+}
+
+export function draftPendingGateCounts(draft: ItemsDraft): Record<TurnId, number> {
+  draft.pendingGateCounts ??= { ...draft.base.pendingGateCounts }
+  return draft.pendingGateCounts
 }
 
 export function commitDraft(draft: ItemsDraft): ItemsSnapshot {
@@ -102,16 +170,27 @@ export function commitDraft(draft: ItemsDraft): ItemsSnapshot {
     userInputs: draft.userInputs ?? base.userInputs,
     childRunRevision: draft.childRunRevision,
     childRunActiveCount: draft.childRunActiveCount,
+    childRunStatuses: draft.childRunStatuses ?? base.childRunStatuses,
     workbenchRevision: draft.workbenchRevision,
     rewindRevision: draft.rewindRevision,
     rewoundFromSeq: draft.rewoundFromSeq,
     usage: draft.usage,
+    usageTurns: draft.usageTurns,
+    usageRequest: draft.usageRequest,
+    usageTail: draft.usageTail,
+    usageSeedSeq: draft.usageSeedSeq,
     // `roundWindow` is a value field, not a copy-on-write channel: null means
     // "window reset", so it must not fall back to the base snapshot here.
     roundWindow: draft.roundWindow,
     lastCompaction: draft.lastCompaction,
     rounds: draft.rounds,
-    turnLastEventAt: draft.turnLastEventAt ?? base.turnLastEventAt
+    roundIndex: draft.roundIndex ?? base.roundIndex,
+    pendingGateCounts: draft.pendingGateCounts ?? base.pendingGateCounts,
+    turnLastEventAt: draft.turnLastEventAt ?? base.turnLastEventAt,
+    changedItemIds: draft.changedItemIds,
+    itemOrderChanged: draft.itemOrderChanged,
+    liveItemCount: draft.liveItemCount,
+    plan: draft.plan ?? base.plan
   }
 }
 

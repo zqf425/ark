@@ -12,17 +12,19 @@
  * control is the interrupt button — until the user starts a draft, at which
  * point it is replaced by the running-action pair: a steer/queue
  * delivery picker plus a submit button for the chosen mode. Queued drafts
- * flush automatically when the turn ends, in order. Message state is local:
- * the runtime owns conversation state, and the user's own message returns as
- * a `ThreadItem`. The unsent draft itself lives in the session store keyed by
- * thread id, so switching threads (which remounts this component) keeps each
- * thread's draft instead of dropping it.
+ * flush automatically when the turn ends, in order, retrying failed starts
+ * while idle. Message state is local: the runtime owns conversation state,
+ * and the user's own message returns as a `ThreadItem`. Drafts and ID-based
+ * queues live in the session store keyed by thread id, so switching threads
+ * (which remounts this component) keeps each thread's pending input instead
+ * of dropping it.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../../../shared/i18n'
 import { translateNow } from '../../../shared/i18n/current'
 import { describeError } from '../../../shared/api/error-describe'
 import { useCodeSessionStore } from '../state/store'
+import type { QueuedMessage } from '../state/runtime-slice'
 import { useTurn } from '../hooks/use-turn'
 import { useRuntimeSkills, useThreadSkills } from '../hooks/use-thread-skills'
 import { associateAttachment, uploadAttachment } from '../api/attachments-api'
@@ -37,6 +39,9 @@ import { CopyButton } from '../../../shared/ui/copy'
 const MAX_ROWS = 8
 /** Base64 of a file is ~4/3 of its bytes; keep uploads inside the runtime cap. */
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+/** Stable missing-queue view so unrelated store updates do not wake the composer. */
+const EMPTY_QUEUE: QueuedMessage[] = []
+const QUEUE_RETRY_MS = 500
 
 /** A picked (uploaded, not yet sent) attachment; `mime` drives image previews. */
 type PickedAttachment = { id: string; name: string; mime?: string }
@@ -246,6 +251,10 @@ export function Composer({
   const draftText = useCodeSessionStore((s) => (threadId ? (s.drafts[threadId] ?? '') : (s.drafts[NEW_TASK_DRAFT_KEY] ?? '')))
   const setDraft = useCodeSessionStore((s) => s.setDraft)
   const clearDraft = useCodeSessionStore((s) => s.clearDraft)
+  const queued = useCodeSessionStore((s) => (threadId ? (s.queuedMessages[threadId] ?? EMPTY_QUEUE) : EMPTY_QUEUE))
+  const queueMessage = useCodeSessionStore((s) => s.queueMessage)
+  const removeQueuedMessage = useCodeSessionStore((s) => s.removeQueuedMessage)
+  const dequeueMessage = useCodeSessionStore((s) => s.dequeueMessage)
   const streamStatus = useCodeSessionStore((s) => s.streamStatus)
   const commandError = useCodeSessionStore((s) => s.commandError)
   const setCommandError = useCodeSessionStore((s) => s.setCommandError)
@@ -253,12 +262,9 @@ export function Composer({
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
 
-  // Locally queued drafts: filled by 「排队」 during a live turn, flushed in
-  // order when the turn ends (the effect below watches the live transition).
-  const [queued, setQueued] = useState<string[]>([])
-  // Running-action delivery mode: choosing a mode
-  // never submits the draft; it is applied on Enter or the send button. Reset
-  // to steer when the draft empties so a fresh draft starts as a steer.
+  // Per-thread queued drafts: filled by 「排队」 during a live turn, flushed in
+  // order while idle. A failed head remains queued and retries after a short
+  // delay once the stream is open again.
   const [deliveryMode, setDeliveryMode] = useState<RunningDeliveryMode>('steer')
   const [attachments, setAttachments] = useState<PickedAttachment[]>([])
   const [uploading, setUploading] = useState(false)
@@ -334,24 +340,42 @@ export function Composer({
     if (node && draftText) resize(node)
   }, [threadId])
 
-  // A live→idle transition is the queue's drain signal. One message per drain:
-  // the turn this triggers ends later and drains the next one the same way.
-  const wasLive = useRef(false)
+  // Only one queue head may be in flight. The id guard makes a late completion
+  // harmless if the user removed that head or appended an identical message.
+  const draining = useRef<{ threadId: string; id: QueuedMessage['id'] } | null>(null)
+  const retryAt = useRef<{ threadId: string; id: QueuedMessage['id']; at: number } | null>(null)
+  const [queueRetryVersion, setQueueRetryVersion] = useState(0)
+  const queuedHead = queued[0]
+  useEffect(() => () => {
+    draining.current = null
+    retryAt.current = null
+  }, [threadId])
+
   useEffect(() => {
-    if (wasLive.current && !live && queued[0] !== undefined) {
-      const first = queued[0]
-      // Dequeue only after the send is accepted: a failed drain stays in the
-      // queue (with the command error shown) so the text is never lost.
-      void send(first).then((ok) => {
-        if (!ok) return
-        setQueued((current) => {
-          const index = current.indexOf(first)
-          return index === -1 ? current : [...current.slice(0, index), ...current.slice(index + 1)]
-        })
-      })
+    if (!threadId || live || draft || streamStatus !== 'open' || !queuedHead) return
+    if (draining.current) return
+    const retry = retryAt.current
+    if (retry?.threadId === threadId && retry.id === queuedHead.id && retry.at > Date.now()) {
+      const timer = window.setTimeout(
+        () => setQueueRetryVersion((version) => version + 1),
+        retry.at - Date.now()
+      )
+      return () => window.clearTimeout(timer)
     }
-    wasLive.current = live
-  }, [live, queued, send])
+
+    const request = { threadId, id: queuedHead.id }
+    draining.current = request
+    void send(queuedHead.text, []).then((ok) => {
+      if (draining.current === request) {
+        draining.current = null
+        if (!ok) retryAt.current = { ...request, at: Date.now() + QUEUE_RETRY_MS }
+        setQueueRetryVersion((version) => version + 1)
+      }
+      // An accepted delivery is removed by identity even after a thread switch;
+      // a replacement head (including duplicate text) cannot be consumed by it.
+      if (ok) dequeueMessage(threadId, queuedHead.id)
+    })
+  }, [draft, dequeueMessage, live, queueRetryVersion, queuedHead, send, streamStatus, threadId])
 
   // The delivery chooser is bound to the running state: a fresh turn defaults
   // back to steer, resetting the delivery picker.
@@ -435,8 +459,8 @@ export function Composer({
 
   const queueDraft = (): void => {
     const text = draftText.trim()
-    if (!text) return
-    setQueued((current) => [...current, text])
+    if (!text || !threadId) return
+    queueMessage(threadId, text)
     resetInput()
   }
 
@@ -602,12 +626,12 @@ export function Composer({
 
       {queued.length > 0 ? (
         <div className="ark-composer__queue" role="list" aria-label={t('canvas.composer.queuedAria')}>
-          {queued.map((text, index) => (
-            <span key={`${index}-${text.slice(0, 12)}`} className="ark-chip" role="listitem">
-              {t('canvas.composer.queuedChip', { index: index + 1 })} {text.slice(0, 40)}
-              {text.length > 40 ? '…' : ''}
+          {queued.map((message, index) => (
+            <span key={message.id} className="ark-chip" role="listitem">
+              {t('canvas.composer.queuedChip', { index: index + 1 })} {message.text.slice(0, 40)}
+              {message.text.length > 40 ? '…' : ''}
               <CopyButton
-                text={text}
+                text={message.text}
                 label={t('canvas.copy.queued')}
                 copiedLabel={t('canvas.copy.copied')}
                 className="ark-chip__copy"
@@ -616,7 +640,9 @@ export function Composer({
                 type="button"
                 className="ark-composer__dismiss"
                 aria-label={t('canvas.composer.queuedRemove', { index: index + 1 })}
-                onClick={() => setQueued((current) => current.filter((_, at) => at !== index))}
+                onClick={() => {
+                  if (threadId) removeQueuedMessage(threadId, message.id)
+                }}
               >
                 ×
               </button>

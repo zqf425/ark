@@ -590,6 +590,10 @@ pub struct ThreadUsageResponse {
     /// Individual model rounds folded in.
     #[ts(as = "f64")]
     pub samples: u64,
+    /// Durable log watermark covered by this aggregate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub last_seq: Option<u64>,
     /// Per-turn breakdown, oldest first: the authoritative source for every
     /// per-turn readout (the turn header's clock). Not a page — this route
     /// replays the whole log, so a long session reports all of its turns.
