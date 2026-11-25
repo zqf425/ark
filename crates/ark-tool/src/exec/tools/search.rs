@@ -309,17 +309,17 @@ fn scan_file(
         Err(_) => return,
     };
     let lines: Vec<&str> = text.lines().collect();
-    let (haystack_needle, haystack_lines) = if query.ignore_case {
-        (
-            query.needle.to_lowercase(),
-            lines.iter().map(|l| l.to_lowercase()).collect::<Vec<_>>(),
-        )
-    } else {
-        (
-            query.needle.clone(),
-            lines.iter().map(|l| l.to_string()).collect(),
-        )
-    };
+    // `ignore_case` folds only ASCII in the hot path: per-byte ASCII folding is
+    // length- and char-boundary-preserving, so a byte offset found on the folded
+    // line maps 1:1 onto the original line. Full Unicode `to_lowercase` can
+    // change byte length (ẞ U+1E9E → ß, İ U+0130 → i + combining dot), which
+    // silently shifted `hit_at` off its match and made `cut_line` cut a long
+    // line around the wrong column — offsets must be measured on the line
+    // `cut_line` actually slices. Lines searched under full folding therefore
+    // remap the folded byte offset onto the original line instead.
+    let ascii_fold = query.needle.is_ascii();
+    let lowered_needle = query.needle.to_lowercase();
+    let ascii_needle = ascii_fold_str(&query.needle);
     // Mark every line to emit exactly once: ':' for a real match, '-' for
     // context. Adjacent context windows overlap, so a single marker vector
     // deduplicates them while keeping the match marker authoritative. `limit`
@@ -330,15 +330,29 @@ fn scan_file(
     let mut emit: Vec<Option<char>> = vec![None; lines.len()];
     let mut hit_at: Vec<usize> = vec![0; lines.len()];
     let needle_chars = query.needle.chars().count();
-    for (index, line) in haystack_lines.iter().enumerate() {
+    for (index, line) in lines.iter().enumerate() {
         if query.matched.get() >= query.limit {
             break;
         }
-        let Some(byte_at) = line.find(&haystack_needle) else {
+        // Locate on folded text, but anchor on the original line: `hit_at`
+        // indexes `lines[index]`, which `cut_line` slices.
+        let hit_char = if !query.ignore_case {
+            line.find(&query.needle)
+                .map(|byte_at| line[..byte_at].chars().count())
+        } else if ascii_fold {
+            ascii_fold_str(line)
+                .find(&ascii_needle)
+                .map(|byte_at| line[..byte_at].chars().count())
+        } else {
+            line.to_lowercase()
+                .find(&lowered_needle)
+                .map(|folded_at| original_char_offset(line, folded_at))
+        };
+        let Some(hit_char) = hit_char else {
             continue;
         };
         query.matched.set(query.matched.get() + 1);
-        hit_at[index] = line[..byte_at].chars().count();
+        hit_at[index] = hit_char;
         let start = index.saturating_sub(query.context);
         let end = index
             .saturating_add(query.context)
@@ -402,6 +416,41 @@ fn char_to_byte(line: &str, index: usize) -> usize {
         .nth(index)
         .map(|(byte, _)| byte)
         .unwrap_or(line.len())
+}
+
+/// Lowercase ASCII bytes in place; other bytes pass through untouched.
+///
+/// Used by the `ignore_case` fast path: unlike full `to_lowercase`, ASCII
+/// folding never changes byte length or char boundaries, so byte offsets found
+/// on the folded text stay valid on the original.
+fn ascii_fold_str(text: &str) -> String {
+    let mut bytes = text.as_bytes().to_vec();
+    bytes.make_ascii_lowercase();
+    // Per-byte ASCII folding cannot split a UTF-8 sequence (all folded bytes
+    // stay < 0x80), so the result is still valid UTF-8.
+    String::from_utf8(bytes).expect("ASCII folding keeps UTF-8 validity")
+}
+
+/// Map a char offset in `line.to_lowercase()` back onto `line`.
+///
+/// Full Unicode folding can change byte lengths (ẞ U+1E9E → ß, İ U+0130 →
+/// i + combining dot), so folded text is not a byte image of the original.
+/// Walking both texts in lockstep by char keeps the mapping exact: emit one
+/// original char per folded char, and repeat original chars that folded into
+/// several (İ → i + U+0307 needs one original char for two folded chars).
+fn original_char_offset(line: &str, folded_at: usize) -> usize {
+    let folded = line.to_lowercase();
+    let mut folded_chars = folded[..folded_at].chars().count();
+    let mut original_chars = 0usize;
+    for original in line.chars() {
+        if folded_chars == 0 {
+            break;
+        }
+        let produced = original.to_lowercase().count();
+        folded_chars = folded_chars.saturating_sub(produced);
+        original_chars += 1;
+    }
+    original_chars
 }
 
 #[cfg(test)]
@@ -808,6 +857,68 @@ mod tests {
         // file shows as `gen.js`; the point is that the ignored directory was
         // still searched instead of silently yielding nothing.
         assert_eq!(out.content, "gen.js:1:needle\n");
+    }
+
+    #[tokio::test]
+    async fn ignore_case_keeps_the_cut_window_on_the_match_when_folding_expands_chars() {
+        let dir = temp_workspace("grep-fold-offset");
+        // Case 1: length-changing chars in the LINE, ASCII needle — the
+        // per-byte ASCII fast path must anchor the offset on the original
+        // line instead of the folded one.
+        let line = format!("{}dotted{}", "İ".repeat(300), "z".repeat(500));
+        std::fs::write(dir.join("fold.txt"), &line).unwrap();
+        let out = GrepTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "DOTTED", "ignore_case": true })),
+            )
+            .await
+            .unwrap();
+        assert!(out.ok, "{}", out.content);
+        assert!(
+            out.content.contains("dotted"),
+            "the cut window must still contain the match: {}",
+            out.content
+        );
+
+        // Case 2: length-changing chars in the NEEDLE — full folding runs,
+        // and its folded char offset must be remapped onto the original line.
+        let line = format!("{}İdotted{}", "İ".repeat(300), "z".repeat(500));
+        std::fs::write(dir.join("folded-needle.txt"), &line).unwrap();
+        let out = GrepTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "İDOTTED", "ignore_case": true })),
+            )
+            .await
+            .unwrap();
+        assert!(out.ok, "{}", out.content);
+        assert!(
+            out.content.contains("dotted"),
+            "the cut window must still contain the match: {}",
+            out.content
+        );
+    }
+
+    #[tokio::test]
+    async fn ignore_case_ascii_fast_path_still_matches_case_variants() {
+        let dir = temp_workspace("grep-ascii-fold");
+        std::fs::write(
+            dir.join("a.txt"),
+            "getExecType()\nGETEXECTYPE()\ngetexectype()\n",
+        )
+        .unwrap();
+        let out = GrepTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "GetExecType", "ignore_case": true })),
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.content.lines().count(), 3, "{}", out.content);
+        assert!(out.content.contains("a.txt:1:getExecType()"));
+        assert!(out.content.contains("a.txt:2:GETEXECTYPE()"));
+        assert!(out.content.contains("a.txt:3:getexectype()"));
     }
 
     #[tokio::test]
