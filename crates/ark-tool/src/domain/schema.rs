@@ -140,7 +140,7 @@ fn bash_session_schema() -> serde_json::Value {
         serde_json::json!({
             "command": { "type": "string", "description": "Shell command to run in the persistent session; a leading `cd <dir>` advances the session working directory for later calls (a target containing an unexpanded `$` variable is not tracked; environment variables are NOT persisted across calls)" },
             "timeout_ms": { "type": "integer", "minimum": 1, "description": "Hard timeout in milliseconds; ignored when run_in_background is true" },
-            "run_in_background": { "type": "boolean", "description": "Start the command detached and return a task id immediately; poll output with bash_output" },
+            "run_in_background": { "type": "boolean", "description": "Start the command detached and return a shell task id immediately; poll output with bash_output" },
         }),
         &["command"],
     )
@@ -149,7 +149,7 @@ fn bash_session_schema() -> serde_json::Value {
 fn bash_output_schema() -> serde_json::Value {
     object(
         serde_json::json!({
-            "task_id": { "type": "string", "description": "Task id previously returned by bash_session with run_in_background" },
+            "task_id": { "type": "string", "description": "Background shell task id returned by bash_session with run_in_background=true. Only that namespace is accepted: a delegate_task child run id is not a shell task id and is rejected here; a child's answer arrives in a completion notice instead" },
         }),
         &["task_id"],
     )
@@ -158,7 +158,7 @@ fn bash_output_schema() -> serde_json::Value {
 fn bash_kill_schema() -> serde_json::Value {
     object(
         serde_json::json!({
-            "task_id": { "type": "string", "description": "Task id to terminate; killing an already-finished task is a no-op" },
+            "task_id": { "type": "string", "description": "Background shell task id from bash_session with run_in_background=true to terminate (not a delegate_task child run id); killing an already-finished task is a no-op" },
         }),
         &["task_id"],
     )
@@ -172,7 +172,7 @@ fn delegate_task_schema() -> serde_json::Value {
             "model": { "type": "string", "description": "Model override; defaults to the parent turn's model. A model outside the provider's inventory is rejected at dispatch with the list of served models, so pass a `provider_id` that actually serves this model id" },
             "provider_id": { "type": "string", "description": "Provider override; defaults to the parent turn's provider. `model` and `provider_id` are a pair: overriding only the model keeps the parent's provider, which fails when that provider does not serve the model" },
             "autonomy": { "type": "string", "enum": autonomy_values_for_schema(), "description": "Permission override; defaults to the parent thread's permission" },
-            "background": { "type": "boolean", "description": "Force the dispatch mode: true returns after the child is queued and keeps it running under the runtime supervisor, false waits for the child's final answer. Absent means the configured default (subagents.default_background, usually background)." },
+            "background": { "type": "boolean", "description": "Force the dispatch mode: true returns after the child is queued and keeps it running under the runtime supervisor, false waits for the child's final answer. Absent means the configured default (subagents.default_background, usually background). The id returned in background mode is a sub-agent child run id, not a shell task id: never poll it with bash_output or bash_kill, the child's answer arrives in a completion notice." },
             "resumeChildId": { "type": "string", "description": "Resume this interrupted child on its existing session instead of creating a new child" },
         }),
         &["prompt"],
@@ -303,6 +303,36 @@ mod schema_tests {
                 .iter()
                 .map(|level| level.as_str())
                 .collect::<Vec<_>>()
+        );
+    }
+
+    /// The tool catalogue is the first place a model can learn that a child run
+    /// id is not a shell task id; the descriptions must say so, not only the
+    /// runtime error.
+    #[test]
+    fn the_shell_task_and_child_run_id_namespaces_are_documented_in_the_schemas() {
+        let output = super::bash_output();
+        let kill = super::bash_kill();
+        let delegate = super::delegate_task();
+        assert!(
+            output["properties"]["task_id"]["description"]
+                .as_str()
+                .is_some_and(|text| text.contains("delegate_task")),
+            "{output}"
+        );
+        assert!(
+            kill["properties"]["task_id"]["description"]
+                .as_str()
+                .is_some_and(|text| text.contains("delegate_task")),
+            "{kill}"
+        );
+        assert!(
+            delegate["properties"]["background"]["description"]
+                .as_str()
+                .is_some_and(
+                    |text| text.contains("bash_output") && text.contains("completion notice")
+                ),
+            "{delegate}"
         );
     }
 }

@@ -34,12 +34,12 @@ pub const TOOL_METAS: [ToolMeta; 13] = [
     },
     ToolMeta {
         name: "bash_kill",
-        description: "Terminate one background shell task started with bash_session; idempotent",
+        description: "Terminate one background shell task started with bash_session; idempotent. Takes a bash_session task id, not a delegate_task child run id",
         baseline: SandboxDecision::NeedsApproval,
     },
     ToolMeta {
         name: "bash_output",
-        description: "Read new output of one background shell task and its running/finished state",
+        description: "Read new output of one background shell task and its running/finished state. Takes a bash_session run_in_background task id only: a delegate_task child run id is a different namespace and is rejected here",
         baseline: SandboxDecision::ReadOnly,
     },
     ToolMeta {
@@ -49,7 +49,7 @@ pub const TOOL_METAS: [ToolMeta; 13] = [
     },
     ToolMeta {
         name: "delegate_task",
-        description: "Delegate one bounded sub-task to a child run; background dispatch returns a child id and delivers the final answer through a completion notice, while foreground dispatch waits for the answer",
+        description: "Delegate one bounded sub-task to a child run; background dispatch returns a child run id and delivers the final answer through a completion notice, while foreground dispatch waits for the answer. That child run id is not a shell task id: it cannot be polled with bash_output/bash_kill, only a bash_session run_in_background task id can",
         // Delegation itself writes nothing: the child's own tools carry their
         // own sandbox decisions, and the runtime enforces the concurrency budget.
         baseline: SandboxDecision::ReadOnly,

@@ -558,9 +558,7 @@ impl Tool for BashOutputTool {
 impl BashOutputTool {
     fn snapshot(&self, task_id: &ShellTaskId) -> ToolOutput {
         let Some(snapshot) = self.session.task_output(task_id) else {
-            return ToolOutput::err(format!(
-                "unknown task id `{task_id}`: the task never started, was evicted, or the runtime restarted"
-            ));
+            return ToolOutput::err(unknown_task_message("bash_output", task_id));
         };
         let mut body = String::new();
         if snapshot.dropped_prefix {
@@ -619,12 +617,29 @@ impl Tool for BashKillTool {
 impl BashKillTool {
     fn kill(&self, task_id: &ShellTaskId) -> ToolOutput {
         if !self.session.kill_task(task_id) {
-            return ToolOutput::err(format!(
-                "unknown task id `{task_id}`: the task never started, was evicted, or the runtime restarted"
-            ));
+            return ToolOutput::err(unknown_task_message("bash_kill", task_id));
         }
         ToolOutput::ok(format!("task {task_id} terminated"))
     }
+}
+
+/// Structured error for an id this manager never registered.
+///
+/// The message is a contract, not prose: the only id that may appear in
+/// `task_id` is one returned by `bash_session(run_in_background=true)` in this
+/// process. `delegate_task` hands back a *child run* id, which belongs to
+/// another namespace -- a model that mixes them up reads the old wording as
+/// "the child failed" and redoes the work in the main thread (observed), so the
+/// rejection states the two namespaces and the delivery path of each.
+fn unknown_task_message(tool: &str, task_id: &ShellTaskId) -> String {
+    format!(
+        "unknown task id `{task_id}` for {tool}: this tool only accepts a background shell task \
+         id returned by bash_session(run_in_background=true) in this process; the task never \
+         started, was evicted, or the runtime restarted. A delegate_task child run id is a \
+         different namespace and cannot be polled with bash_output or bash_kill: the child's \
+         final answer arrives in a completion notice, so wait for it instead of re-running the \
+         work"
+    )
 }
 
 /// POSIX shell invocation for detached tasks. The foreground and background

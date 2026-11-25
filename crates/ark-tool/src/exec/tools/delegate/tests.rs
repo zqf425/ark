@@ -272,6 +272,51 @@ async fn background_returns_the_queued_child_without_using_foreground_delegate()
 }
 
 #[tokio::test]
+async fn the_background_acknowledgement_warns_that_the_child_id_is_not_a_shell_task_id() {
+    // A model that reads "queued in the background" as a detached shell task can
+    // poll the child id with `bash_output`, get `unknown task id`, and conclude
+    // the delegation failed -- then redo the work in the main thread (observed).
+    // The acknowledgement therefore has to name both namespaces and the actual
+    // delivery path of the child's answer.
+    let outcome = completed("unused foreground answer");
+    let child = outcome.child_id;
+    let runner = FakeRunner::new(true, outcome);
+    let tool = DelegateTaskTool::new(runner);
+
+    let out = tool
+        .execute(
+            &ctx(),
+            ToolArgs(serde_json::json!({ "prompt": "scan", "background": true })),
+        )
+        .await
+        .unwrap();
+
+    let content = out.content.as_str();
+    assert!(content.contains(&child.to_string()), "{content}");
+    assert!(
+        content.contains("not a shell task id"),
+        "the child id must be labelled as its own namespace: {content}"
+    );
+    assert!(
+        content.contains("do not pass it to bash_output"),
+        "the acknowledgement must forbid bash_output polling: {content}"
+    );
+    assert!(
+        content.contains("completion notice"),
+        "the acknowledgement must name how the answer actually arrives: {content}"
+    );
+    assert!(
+        content.contains("bash_session(run_in_background=true)"),
+        "the acknowledgement must name the id namespace bash_output does accept: {content}"
+    );
+    // The machine-readable detail line keeps its contract; only `content` grew.
+    assert_eq!(
+        out.detail.as_deref(),
+        Some(format!("child={child} status=queued").as_str())
+    );
+}
+
+#[tokio::test]
 async fn resume_child_id_takes_precedence_over_background() {
     let resumed = ChildId::new();
     let runner = FakeRunner::new(true, completed("resumed answer"));

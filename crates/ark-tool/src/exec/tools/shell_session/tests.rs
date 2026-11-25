@@ -420,6 +420,17 @@ mod tool_tests {
             .unwrap();
         assert!(!out.ok);
         assert!(out.content.contains("unknown task id"));
+        // The rejection must teach the two namespaces: a model that passed a
+        // delegate_task child id has to learn that the answer arrives as a
+        // completion notice instead of re-running the work itself.
+        assert!(
+            out.content.contains("bash_session(run_in_background=true)"),
+            "{}",
+            out.content
+        );
+        assert!(out.content.contains("delegate_task"), "{}", out.content);
+        assert!(out.content.contains("completion notice"), "{}", out.content);
+        assert!(out.content.contains("bash_output"), "{}", out.content);
     }
 
     #[tokio::test]
@@ -434,6 +445,14 @@ mod tool_tests {
             .await
             .unwrap();
         assert!(!out.ok);
+        assert!(out.content.contains("unknown task id"));
+        assert!(out.content.contains("bash_kill"), "{}", out.content);
+        assert!(
+            out.content.contains("bash_session(run_in_background=true)"),
+            "{}",
+            out.content
+        );
+        assert!(out.content.contains("delegate_task"), "{}", out.content);
     }
 
     #[tokio::test]

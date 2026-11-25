@@ -38,6 +38,14 @@
   恢复（`resumeChildId`，优先级高于 `background`）始终走前台结果契约；两者均复用同一端口边界。
   后台派发立即返回 child id，最终答案经完成通知回传；前台与工具恢复直接返回最终答案，不发布父 completion
   通知，避免同一结果再次触发自动汇总。
+- **child run id 与 shell task id 是两个命名空间，不能混用**（当前实现）：`delegate_task` 后台派发
+  返回的是子运行 id（UUID），只能等完成通知回传最终答案；`bash_output`/`bash_kill` 只接受
+  `bash_session(run_in_background=true)` 在**本进程**内返回的 `task_N` 任务 id。两套 id 都会在工具
+  目录层（`domain/schema.rs` 的 `bash_output`/`bash_kill`/`delegate_task` 参数说明、
+  `domain/meta.rs` 的 `ToolMeta.description`）说明归属，运行时再各覆盖一次：后台派发成功回执明确
+  写“不要传给 `bash_output`/`bash_kill`，等完成通知”，`bash_output`/`bash_kill` 的未知 id 错误明确
+  写“只接受 shell task id，child run id 走完成通知”。这不是新功能，只防一类实测误用——模型把 child
+  id 当 shell 任务 id 轮询，读到 `unknown task id` 后判定子代理失败并在主线程重复实现。
 - `request_user_input` 是无法独立执行的门面工具：schema 为 `{"prompt": string, required}`，
   `execute` 返回结构化错误；生产执行路径永远不会走到它，因为 agent 在派发前拦截该调用并交给用户输入 gate。
 - `web_fetch`（需求见 [web-fetch-tool](../requirements/web-fetch-tool.md)）只消费注入的
@@ -83,7 +91,9 @@
   进程组并立即返回 task_id）、
   `bash_output`（按绝对逻辑字节 offset 增量返回输出与 running/finished 状态；环形缓冲丢弃前缀后仍以
   `base_offset + retained_len` 推进，不能把 offset 当当前 `VecDeque` 下标）、`bash_kill`
-  （组信号 + direct kill 兜底，幂等）。`ShellSessionManager` 是进程内运行态（不入盘、不进
+  （组信号 + direct kill 兜底，幂等）。两者的 `task_id` 命名空间只有本 manager 的 `task_N`；未知 id
+  的结构化错误同时说明两个 id 命名空间的归属与 child 结果的实际回传路径（见上一条 `delegate_task`
+  条目）。`ShellSessionManager` 是进程内运行态（不入盘、不进
   契约）：环境变量**不**跨调用保持（Windows 无可移植 shell 协议，需求 §2 显式记录）；
   输出环形缓冲 64 KiB 超限丢最旧并打标记；任务数是 16 的硬上限，满额时先淘汰最旧已完成任务，
   若 16 个任务都仍在运行则新建后台任务返回结构化错误，绝不插入第 17 个。
@@ -122,6 +132,12 @@ pattern 拒绝（含交替 `|` 场景）、`literal: true` 时含元字符的 pa
 
 `web_fetch` 另有跳转回归（假出口，无网络）：301 后跟随并再次请求新 URL、302 指向私有地址时第二跳
 被拒且从未发起请求、超过 5 跳预算返回结构化错误、3xx 缺 `Location` 时渲染该状态码。
+
+id 命名空间的文案回归：后台派发回执必须同时含 child id、`not a shell task id`、
+`do not pass it to bash_output`、`completion notice` 与 `bash_session(run_in_background=true)`，
+且 `detail` 仍保持 `child=… status=queued` 契约；`bash_output`/`bash_kill` 的未知 id 错误必须含
+`delegate_task`、`completion notice`（`bash_output`）；`domain::schema` 的
+`bash_output`/`bash_kill` 参数说明与 `delegate_task` 的 `background` 说明必须点名另一套 id。
 
 `edit` 另有行尾回归：LF 锚点匹配 CRLF 文件、CRLF 文件编辑后仍是 CRLF、LF 文件编辑后仍是 LF、
 原生 CRLF 锚点同样匹配（不会被算成第二个 needle）。

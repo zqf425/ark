@@ -142,9 +142,20 @@ impl DelegateTaskTool {
         }
 
         let child = self.runner.delegate_background(request).await?;
+        // The acknowledgement must name the id's namespace: a model that reads
+        // "queued" as a background shell task polls it with `bash_output`, gets
+        // an unknown-task error and concludes the delegation failed. The child
+        // id and a `bash_session` task id are two namespaces with two delivery
+        // paths, so the message states both.
         Ok(ToolOutput {
             ok: true,
-            content: format!("child run {child} queued in the background"),
+            content: format!(
+                "child run {child} queued in the background\n\
+                 this id is a sub-agent child run id, not a shell task id: do not pass it to \
+                 bash_output or bash_kill. The child's final answer arrives in a completion \
+                 notice when it finishes; only a task id returned by \
+                 bash_session(run_in_background=true) can be polled with bash_output."
+            ),
             detail: Some(format!("child={child} status=queued")),
         })
     }
