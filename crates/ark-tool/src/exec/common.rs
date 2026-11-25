@@ -21,18 +21,68 @@ use crate::policy::truncate::{clamp_timeout, DEFAULT_LIMITS};
 /// 936001de, two calls, 1005 s). Names are judged on every directory **below**
 /// the search root, so an explicit `path` into an ignored directory still
 /// scans it deliberately.
-pub const IGNORED_DIR_NAMES: [&str; 6] = [
+///
+/// The rest of the list is the same class of high-volume, low-signal
+/// directory: language package caches, build systems, editor state and
+/// virtualenvs. A Go/Python or Xcode tree without these was one unlisted
+/// `vendor`/`__pycache__`/`Pods` away from repeating the 410k-file walk.
+/// `site-packages` stays out on purpose: a global interpreter dir is not
+/// inside a repo, and a virtualenv is already covered by `.venv`/`venv`.
+pub const IGNORED_DIR_NAMES: [&str; 21] = [
     "target",
     "node_modules",
     "dist",
     ".git",
     ".tmp",
     ".worktrees",
+    // package managers & language caches
+    "vendor",
+    "__pycache__",
+    ".venv",
+    "venv",
+    // build systems & outputs
+    "build",
+    "out",
+    ".next",
+    ".nuxt",
+    "DerivedData",
+    "Pods",
+    ".gradle",
+    // editor / tooling state
+    ".idea",
+    ".vscode",
+    ".cache",
+    ".sass-cache",
 ];
 
 /// Whether the walkers skip a directory entry with this name.
 pub fn is_ignored_dir_name(name: &str) -> bool {
     IGNORED_DIR_NAMES.contains(&name)
+}
+
+/// Whether a traversed entry still resolves inside the search root.
+///
+/// Shared by the `find` and `grep` walkers. Unix checks directories only:
+/// the walks never follow symlinks, `file_type()` comes from the read_dir
+/// dirent rather than a stat, and a file's parent directory has already been
+/// verified in-root, so a file entry cannot escape without a directory in
+/// its chain having been rejected. Rewriting `is_dir` from the entry's
+/// `FileType` to `path.is_dir()` (stat semantics) would silently drop that
+/// premise. Windows checks every entry: junctions are reparse points without
+/// the name-surrogate bit, so `FileType::is_symlink()` returns false for
+/// them and this check is the only line of defense (design ark-tool.md:15).
+pub fn entry_inside_root(
+    is_dir: bool,
+    path: &std::path::Path,
+    real_root: &std::path::Path,
+) -> bool {
+    if !cfg!(windows) && !is_dir {
+        return true;
+    }
+    match std::fs::canonicalize(path) {
+        Ok(real_path) => real_path.starts_with(real_root),
+        Err(_) => false,
+    }
 }
 
 /// Resolve a tool-supplied path inside the workspace, or fail with validation.
