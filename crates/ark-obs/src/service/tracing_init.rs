@@ -4,9 +4,9 @@
 //! return an error instead of panicking, otherwise a single test that enables
 //! logging would abort the whole test binary.
 
+use super::rotating_file::{RotatingFile, MAX_LOG_BYTES};
 use crate::config::{LogFormat, TracingConfig};
 use std::fmt;
-use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -29,7 +29,7 @@ pub fn try_init_tracing(config: &TracingConfig) -> Result<TracingGuard, String> 
     install(config, console_writer(config.stderr()))
 }
 
-/// Install tracing to the configured console stream and an append-only file.
+/// Install tracing to the configured console stream and an automatically rotated file.
 pub fn try_init_tracing_with_file(
     config: &TracingConfig,
     path: impl AsRef<Path>,
@@ -37,10 +37,7 @@ pub fn try_init_tracing_with_file(
     if let Some(parent) = path.as_ref().parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path.as_ref())
+    let file = RotatingFile::open(path.as_ref().to_path_buf(), MAX_LOG_BYTES)
         .map_err(|error| error.to_string())?;
     install(
         config,
@@ -92,7 +89,7 @@ fn console_writer(stderr: bool) -> tracing_subscriber::fmt::writer::BoxMakeWrite
 #[derive(Clone)]
 struct TeeMakeWriter {
     stderr: bool,
-    file: Arc<Mutex<File>>,
+    file: Arc<Mutex<RotatingFile>>,
 }
 
 impl<'writer> tracing_subscriber::fmt::MakeWriter<'writer> for TeeMakeWriter {
@@ -108,7 +105,7 @@ impl<'writer> tracing_subscriber::fmt::MakeWriter<'writer> for TeeMakeWriter {
 
 struct TeeWriter {
     stderr: bool,
-    file: Arc<Mutex<File>>,
+    file: Arc<Mutex<RotatingFile>>,
 }
 
 impl Write for TeeWriter {
@@ -242,19 +239,10 @@ mod tests {
 
     #[test]
     fn tee_writer_appends_without_truncating() {
-        let path = std::env::temp_dir().join(format!(
-            "ark-obs-append-{}-{}.log",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock after epoch")
-                .as_nanos()
-        ));
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("arkd.log");
         std::fs::write(&path, b"before\n").expect("seed log");
-        let file = OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .expect("open append-only log");
+        let file = RotatingFile::open(&path, MAX_LOG_BYTES).expect("open append-only log");
         let mut writer = TeeWriter {
             stderr: true,
             file: Arc::new(Mutex::new(file)),
@@ -262,7 +250,6 @@ mod tests {
         writer.write_all(b"after\n").expect("append log");
         writer.flush().expect("flush log");
         assert_eq!(std::fs::read(&path).expect("read log"), b"before\nafter\n");
-        std::fs::remove_file(path).expect("remove owned test log");
     }
 
     #[test]

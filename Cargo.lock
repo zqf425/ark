@@ -204,8 +204,10 @@ version = "0.1.0"
 dependencies = [
  "ark-common",
  "ark-contract",
+ "chrono",
  "serde",
  "serde_json",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]

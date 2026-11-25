@@ -9,5 +9,9 @@ cache 命中率；重复初始化必须返回可控结果而非 panic。
 `<root>/log/arkd.log`。文件以 create+append 打开，不截断已有日志；headless 控制台分支仍写 stderr，
 所以 stdout 只包含模型输出。文件 writer 在进程内用 mutex 串行，初始化时创建父目录。
 
+当前日志达到 10 MiB 时，writer 在同一个写入调用内将其重命名为同目录的
+`arkd-<本地轮转时间 YYYYMMDD-HHMMSS-mmm>[-序号].log`，随后创建新的空 `arkd.log` 继续写入。
+历史轮转日志不自动删除；重命名失败时重新打开当前日志并返回写入错误。
+
 审计持久化、平台指标服务和插件配额属于相邻端口/服务的职责。将来扩展时不得在本 crate 再建立
 一套与事件日志或插件服务竞争的注册表。
