@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildEntry, draftFromView, emptyDraft } from './ProviderDraft'
-import { mergeImportedModels, updateInventoryItem } from './ProviderCatalog'
+import { appendManualModel, mergeImportedModels, updateInventoryItem } from './ProviderCatalog'
 
 describe('provider edit draft', () => {
   it('prefills the stored api key and keeps an existing label on save', () => {
@@ -89,5 +89,32 @@ describe('provider model inventory helpers', () => {
     // Clearing restores "unknown": the key is dropped, not written as null.
     const cleared = updateInventoryItem(patched, 'a', { context_window_tokens: undefined })
     expect(cleared.models[0]).toEqual({ id: 'a' })
+  })
+})
+
+describe('manual model append', () => {
+  it('adds a hand-entered id with no assumed metadata', () => {
+    const draft = { ...emptyDraft(), model: 'default' }
+
+    const appended = appendManualModel(draft, ' custom-model ')
+
+    expect(appended.models).toEqual([{ id: 'custom-model' }])
+  })
+
+  it('backfills an empty default model instead of the inventory', () => {
+    const draft = emptyDraft()
+
+    const appended = appendManualModel(draft, 'first-model')
+
+    expect(appended.model).toBe('first-model')
+    expect(appended.models).toEqual([])
+  })
+
+  it('is a no-op for duplicates of the default or inventory rows', () => {
+    const draft = { ...emptyDraft(), model: 'default', models: [{ id: 'listed' }] }
+
+    expect(appendManualModel(draft, 'default')).toBe(draft)
+    expect(appendManualModel(draft, ' listed ')).toBe(draft)
+    expect(appendManualModel(draft, '')).toBe(draft)
   })
 })

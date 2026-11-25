@@ -154,3 +154,15 @@
 .ark-provider-form__models .ark-importdialog__row {
   flex-wrap: wrap;
 }
+
+/* Hand-entered model row under the inventory: full-width input with the
+   append action right beside it, mirroring the link-button language. */
+.ark-provider-form__manual-model {
+  width: 100%;
+  margin-top: 2px;
+}
+
+.ark-provider-form__models .ark-linkbtn {
+  align-self: flex-start;
+  margin-top: 4px;
+}

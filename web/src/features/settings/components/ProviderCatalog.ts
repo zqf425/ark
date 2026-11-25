@@ -214,6 +214,31 @@ export function mergeImportedModels(
 }
 
 /**
+ * Add one manually entered model id to the draft inventory.
+ *
+ * The import dialog is only reachable after a successful non-empty catalog
+ * fetch, so providers without a usable `/models` route have no path to a
+ * hand-entered model at all; this keeps that path alive. Mirrors the import
+ * rules: the default model is backfilled only when empty, a duplicate of the
+ * default or of an inventory row is a no-op, and unknown metadata stays
+ * unknown — a manual row starts with no window/vision values instead of the
+ * 256K import fallback, because nothing remote was probed here.
+ */
+export function appendManualModel(draft: ProviderDraft, rawId: string): ProviderDraft {
+  const id = rawId.trim()
+  const defaultModel = draft.model.trim()
+  if (!id || id === defaultModel || draft.models.some((item) => item.id === id)) {
+    return draft
+  }
+  if (!defaultModel) {
+    // The empty draft has no default yet: the first hand-entered id becomes
+    // the default model, mirroring the import dialog's backfill rule.
+    return { ...draft, model: id }
+  }
+  return { ...draft, models: [...draft.models, { id }] }
+}
+
+/**
  * Patch one inventory row's metadata in place (the id never changes).
  *
  * Fields the patch does not mention keep their current value; an explicit

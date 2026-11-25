@@ -31,7 +31,9 @@ provider id 的回合经 `resolve(None)` 使用该默认；`resolve_vision(id)` 
 归一化（trim、去重、去掉与默认 `model` 相同的项），超上限整体事务性拒绝而非静默截断。清单只做
 "该供应商可用的模型"登记，回合仍以 `model` 为默认——线程运行时覆盖 `runtime.model` 时由
 `resolve_thread_provider` 用覆盖值替换默认模型，因此清单是新模型进入会话选择器的登记表，不是
-每回合的解析来源。`ProviderView.models` 是该清单的脱敏镜像。
+每回合的解析来源。`ProviderView.models` 是该清单的脱敏镜像。清单登记不依赖目录导入：设置页提供
+手动「新增模型」入口（`appendManualModel`），无 `/models` 路由的供应商也能登记模型；手动行不带
+任何元数据假设（窗口/识图保持 unknown），不套用目录导入的 256K 兜底。
 
 模型目录只在用户点击导入时请求，既可引用已保存条目，也可使用未保存草稿；空草稿密钥/header 会复用
 同 id 的已存机密。目录解析出的 `context_window_tokens` 和 `supports_vision` 只有用户选择模型并保存后才
