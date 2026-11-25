@@ -112,7 +112,9 @@
   --ark-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI',
     'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   --ark-mono: 'SF Mono', 'JetBrains Mono', 'Cascadia Code', SFMono-Regular, Consolas, monospace;
-  --ark-size: 13px;
+  /* --ark-scale multiplies every component font-size; base design is 13px. */
+  --ark-scale: 1.0769;
+  --ark-size: calc(13px * var(--ark-scale));
 
   /* layout */
   --ark-topbar: 46px;
@@ -148,9 +150,9 @@
 }
 
 :root[data-ark-font-size='small'] {
-  --ark-size: 12px;
+  --ark-scale: 0.9231;
 }
 
 :root[data-ark-font-size='large'] {
-  --ark-size: 14px;
+  --ark-scale: 1.2308;
 }

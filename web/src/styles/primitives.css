@@ -25,7 +25,7 @@
 
 .ark-btn--sm {
   padding: 4px 11px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
 }
 
 .ark-btn--md {
@@ -133,7 +133,7 @@
 .ark-empty__hint {
   margin: 0;
   max-width: 34ch;
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
   color: var(--ark-text-faint);
 }
 
@@ -154,7 +154,7 @@
   padding: 9px 10px;
   cursor: pointer;
   border-bottom: 2px solid transparent;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ark-scale));
   font-weight: 500;
 }
 
@@ -184,7 +184,7 @@
   background: var(--ark-accent);
   color: var(--ark-bg);
   font-family: var(--ark-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--ark-scale));
   font-weight: 600;
   line-height: 1;
 }
@@ -199,7 +199,7 @@
   border-radius: 999px;
   border: 1px solid var(--ark-chip-border);
   background: var(--ark-chip-bg);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
   line-height: 17px;
   color: var(--ark-text-dim);
 }
@@ -304,6 +304,6 @@
   margin: 0;
   color: var(--ark-text-dim);
   font-family: var(--ark-mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
   word-break: break-word;
 }

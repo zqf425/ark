@@ -27,6 +27,8 @@ export const SETTINGS_CORE_MESSAGES = {
   'settings.fontSize.small': ['小', 'Small'],
   'settings.fontSize.medium': ['中', 'Medium'],
   'settings.fontSize.large': ['大', 'Large'],
+  'settings.fontSize.previewAria': ['字号预览', 'Font size preview'],
+  'settings.fontSize.previewMessage': ['这是一条示例消息，切换字号后会立即按新大小显示。', 'This is a sample message; it re-renders at the new size as soon as you switch.'],
   'settings.theme.light': ['浅色', 'Light'],
   'settings.theme.dark': ['深色', 'Dark'],
   'settings.theme.system': ['跟随系统', 'System'],
