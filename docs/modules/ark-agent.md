@@ -45,6 +45,21 @@ HTTP 侧批准一条策略表明确拒绝的调用。
   这正是它必须显式声明 `Isolated` 才能并批的原因。`write`/`edit` 仍是 `Exclusive`，逐调用独占一批。
 - 批内并发默认不设上限；`tuning.max_parallel_tool_calls > 0` 时批内调用被切成顺序 chunk，
   批内并发不超过该值，批间顺序不变。执行器只按计划执行，不再叠加第二层信号量限流。
+- 批内结算是流式的（[requirements/parallel-tools-v2](../requirements/parallel-tools-v2-streaming-settlement.md)）：
+  每个调用完成即写配对的 `ToolCallFinished`（不等待同批其余调用），事件落盘顺序为完成顺序——store 投影按
+  keyed item_id 配对，与 Finished 乱序无关；历史行仍在批末按模型提交顺序一次落盘。执行器以单个转发任务驱动
+  批内全部调用，经 `mpsc` 逐条交付（容量 = 批大小，无反压），`run_calls` 是其乱序归并薄包装，双实现不可漂移。
+- 取消保留：取消即 `abort` 转发任务（in-flight 工具 future 被 drop，bash 的 `kill_on_drop` 子进程终止语义由此
+  保留），随后 drain 通道存量——已到达结算通道的结果按真实内容落盘（真实 duration、无 cancel detail），
+  未到达的写 `cancelled before the call completed` 合成行；整批恰好完成时按正常完成收敛。保留结果到达模型的
+  路径是"事件 + 历史行落盘 → 下一回合 seed 重放"，`ToolsSettled` 在中断回合不承载它们（interrupt_input 直接收敛）。
+  select 是逐 item 形态：每收到一条立即结算，任何已收到的结果都不存放在可被取消丢弃的 future 里。
+  spawn 前先查 `is_cancelled`：取消先于批开始时不执行任何工具，但 Started/Finished 配对行仍要落盘。
+  转发任务 panic 经 `join` 上浮：剩余未结算调用写 `tool batch task failed: forwarder panicked` 合成失败行并
+  `tracing::error` 记录；消费者消失时 `send` 失败静默忽略，转发任务继续驱动剩余调用至自然结束。
+  open 配对表是 `BTreeMap<call_id, &ToolCallRequest>`：结算按 call_id 移除（不依赖输出顺序），补偿按剩余键
+  定序迭代；重复 call_id 属畸形输入，消耗式槽位匹配保证两行历史都落、对应关系不作保证。
+  `converge_pending_calls_on_cancel`（AG-03）不持有 open 表，按 pending_calls 与历史行差集工作，不受本语义影响。
 - 每轮模型可见历史必须已经落盘；每个工具调用必须与终态结果配对。历史修复只按配对合法性裁剪：携带 `tool_calls` 的 assistant 行即使 `content` 为空也必须保留（chat-completions 的标准形态），只有既无文本又无 `tool_calls` 的空行才删除。
 - 压缩先分离动态保护 system 消息、可折叠对话和最近尾部：最新 generated checkpoint 之前的全部
   非 generated system 行、其后的全部普通 system 行均保持原样，旧 checkpoint 与计划 seed 进入摘要来源，

@@ -299,7 +299,11 @@ async fn a_cancelled_batch_finishes_every_started_call() {
     let (executions, interrupted) = reactor.run_batch(&batch).await.unwrap();
 
     assert!(interrupted);
-    assert!(executions.is_empty());
+    // v2 (requirements/parallel-tools-v2 §2): the batch always settles every
+    // slot — a hanging runner delivers nothing, so both slots get synthetic
+    // cancel rows and the executions vector is non-empty (it would have been
+    // empty in v1, which aborted the whole batch instead of settling it).
+    assert_eq!(executions.len(), 2);
     let recorded = writer.recorded();
     let started = recorded
         .iter()
@@ -333,6 +337,107 @@ async fn a_cancelled_batch_finishes_every_started_call() {
             "the cancelled call keeps a paired tool history row"
         );
     }
+    assert!(
+        HistoryHygiene::new().is_legal(history),
+        "history must stay provider-legal"
+    );
+}
+
+/// v2 (requirements/parallel-tools-v2 §2.3): a batch cancelled after one call
+/// already delivered its result keeps the real result and only synthesizes a
+/// cancellation row for the call that never settled.
+#[tokio::test]
+async fn a_cancelled_batch_keeps_results_that_reached_settlement() {
+    struct FirstSlowSecondFast;
+    #[async_trait::async_trait]
+    impl ToolRunner for FirstSlowSecondFast {
+        async fn execute(&self, call: &ToolCallRequest) -> Result<ToolOutput> {
+            if call.call_id == "slow" {
+                // Never settles: the cancel must abort this future.
+                std::future::pending::<Result<ToolOutput>>().await
+            } else {
+                Ok(ToolOutput::ok("fast result"))
+            }
+        }
+    }
+    let writer = Arc::new(MemoryWriter::new());
+    let events = crate::exec::TurnEvents::new(ThreadId::new(), TurnId::new());
+    let cancel = CancelToken::new();
+    let mut reactor = Reactor::new(ReactorConfig {
+        model: Arc::new(NoopModel),
+        tools: Arc::new(FirstSlowSecondFast),
+        writer: writer.clone(),
+        gates: Arc::new(AllowAllGates),
+        sandbox: Arc::new(ReadOnlySandbox),
+        events,
+        cancel: cancel.clone(),
+        seed: ModelSeed::default(),
+        machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+        chunk_buffer: 1,
+        concurrency: None,
+        steer_attachment_resolver: None,
+    });
+    let batch = vec![
+        ToolCallRequest::new("slow", "read", serde_json::json!({ "path": "a" })),
+        ToolCallRequest::new("fast", "read", serde_json::json!({ "path": "b" })),
+    ];
+    reactor.record_assistant_turn("", &batch);
+
+    // Start the batch first so the fast call settles into the channel, then
+    // cancel from this task while the slow call hangs. `run_batch` takes
+    // `&mut reactor`, so it runs inside the spawned task; the cancel token is
+    // cloned into the reactor and tripped here afterwards.
+    let runner_handle = tokio::spawn(async move {
+        let result = reactor.run_batch(&batch).await;
+        (reactor, result)
+    });
+    // Give the fast call a beat to settle into the channel, then cancel.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    cancel.cancel();
+    let (reactor, batch_result) = runner_handle.await.unwrap();
+    let (executions, interrupted) = batch_result.unwrap();
+
+    assert!(interrupted);
+    assert_eq!(
+        executions.len(),
+        2,
+        "both calls settle: one real, one synthetic"
+    );
+    let fast = executions
+        .iter()
+        .find(|execution| execution.call_id == "fast")
+        .expect("the fast call keeps its execution");
+    assert!(fast.ok, "the settled call keeps its real result");
+    assert_eq!(fast.content, "fast result");
+    assert_eq!(fast.detail, None, "a kept result is not marked cancelled");
+    let slow = executions
+        .iter()
+        .find(|execution| execution.call_id == "slow")
+        .expect("the hanging call still settles synthetically");
+    assert!(!slow.ok);
+    assert_eq!(
+        slow.detail.as_deref(),
+        Some("cancelled before the call completed")
+    );
+    let recorded = writer.recorded();
+    let fast_finished = recorded
+        .iter()
+        .filter(|event| matches!(event, RuntimeEvent::ToolCallFinished { call_id, .. } if call_id == "fast"))
+        .count();
+    assert_eq!(
+        fast_finished, 1,
+        "exactly one finished row for the kept call"
+    );
+    let history = reactor.history();
+    assert_eq!(
+        history
+            .iter()
+            .filter(|message| message.role == ModelRole::Tool)
+            .map(|message| message.tool_call_id.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("slow"), Some("fast")],
+        "history rows follow submission order even though completion order differs"
+    );
     assert!(
         HistoryHygiene::new().is_legal(history),
         "history must stay provider-legal"
@@ -677,13 +782,25 @@ async fn an_append_failure_closes_already_started_calls_without_executing() {
             _ => None,
         })
         .collect();
+    // v2: the second Started append fails before the batch executes, but the
+    // compensation sweep now closes *both* calls of the batch — c1 because its
+    // start was durable, c2 because its own start failed after c1's and the
+    // started set must not leak a dangling row either way. Only c1's close is
+    // itself durable (the writer fails everything after seq 2), which is the
+    // best-effort contract: compensation failures keep the original error.
     assert_eq!(
         finished,
-        [(
-            "c1",
-            Some("tool event persistence failed before completion")
-        )],
-        "the durable start must not remain orphaned: {recorded:?}"
+        [
+            (
+                "c1",
+                Some("tool event persistence failed before completion")
+            ),
+            (
+                "c2",
+                Some("tool event persistence failed before completion")
+            ),
+        ],
+        "every batch call gets a compensation close attempt: {recorded:?}"
     );
 }
 
