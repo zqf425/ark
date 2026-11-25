@@ -62,7 +62,8 @@
   `GET /v1/debug/llm-rounds`，因此调用数和耗时不会因分页截断变成下限。上下文占用只在输入框工具条的
   context ring 常驻展示：分母取所选模型真实 `context_window_tokens`（未声明时取运行时同源的 256K
   默认窗口），`compaction_threshold_tokens` 仅画为环内压缩刻度/警示线；两者都只供展示，不参与
-  前端运行时决策。provider 限额缓存带 TTL 并定时重取，避免设置修改后永久陈旧。
+  前端运行时决策。占用读数由 HTTP 快照的 `last_valid_prompt_tokens` 恢复，并由 live `usage` 事件更新；
+  全零样本不覆盖已有读数。provider 限额缓存带 TTL 并定时重取，避免设置修改后永久陈旧。
 - 模型输出的 markdown 渲染集中在 `shared/ui` 的 `Markdown`（marked + DOMPurify 消毒后注入）与
   `code-highlight`（文件预览高亮）：模型输出是不可信输入，任何进入 `dangerouslySetInnerHTML` 的
   HTML 必须先经 DOMPurify；这是展示层能力，不与 Rust 侧业务逻辑双实现。markdown 排版对齐主流
@@ -368,8 +369,9 @@
   「新增项目空间」调用 `POST /v1/workspace/pick` 与 `POST /v1/workspace/validate` 后同样只 PATCH 当前
   线程，不调用全局 `POST /v1/workspace/switch`。活跃回合时禁用选择。全局 switch 仅由设置页和 Changes
   面板承载。上下文环弹层展示工具、系统提示、技能、消息、思考、检查点、其他的**结构占比**（渲染行数
-  与字符数）；总量取最近一次权威 `usage` 事件的 `prompt_tokens`，环分母取所选模型真实 context window，
-  压缩 threshold 只作环内刻度。token 估算的唯一宿主仍是 `ark-agent::TokenEstimator`，前端不重算
+  与字符数）；总量取最近一次有效权威 `usage` 事件的正 `prompt_tokens`，全零样本保留前值；无有效读数时
+  显示未知而不是 0。环分母取所选模型真实 context window，压缩 threshold 只作环内刻度。
+  token 估算的唯一宿主仍是 `ark-agent::TokenEstimator`，前端不重算
   token。弹层内「压缩上下文」直接调用
   `POST /v1/threads/{id}/compact`。共享 `ModelProviderMenu` 提供「供应商 → 模型」二级菜单与搜索，
   会话输入框用 `variant="flyout"`：供应商列表常驻、hover/focus 浮出独立滚动的模型卡，避免长模型

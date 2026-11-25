@@ -250,7 +250,7 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.context.threshold': ['压缩阈值 {tokens}', 'Compaction threshold {tokens}'],
   'canvas.context.window': ['上下文窗口 {tokens}', 'Context window {tokens}'],
   'canvas.context.thresholdNote': ['（压缩阈值 {tokens}，超过后自动折叠历史）', ' (compaction threshold {tokens}; history folds past it)'],
-  'canvas.context.estimateHint': ['总量来自最近一次权威 usage 事件；结构占比按已渲染行数与字符数计算，不是 token 估算。', 'The total comes from the latest authoritative usage event; the structure shows rendered rows and characters, not a token estimate.'],
+  'canvas.context.estimateHint': ['总量来自最近一次有效权威 usage 事件；结构占比按已渲染行数与字符数计算，不是 token 估算。', 'The total comes from the latest valid authoritative usage event; the structure shows rendered rows and characters, not a token estimate.'],
 
   'canvas.workspace.projects': ['已有项目', 'Existing projects'],
   'canvas.workspace.addProject': ['新增项目空间', 'Add a project workspace'],
@@ -264,5 +264,6 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.workspace.addFailed': ['新增项目空间失败', 'Failed to add a project workspace'],
 
   'canvas.context.noLimit': ['上下文窗口暂不可用，仍可手动压缩。', 'Context window is unavailable; manual compaction is still available.'],
+  'canvas.context.unknownUsage': ['暂无有效上下文用量', 'No valid context usage reading is available'],
   'canvas.workspace.busy': ['本会话正在回复，回复结束后即可修改工作空间', 'This session is replying; the workspace can be changed once it finishes'],
 } as const

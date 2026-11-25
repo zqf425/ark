@@ -45,7 +45,7 @@ export function foldUsage(
     // The active span is server-owned (it freezes on user gates): live events
     // keep the last HTTP-seeded value and the next refresh corrects it.
     activeMs: current?.activeMs ?? null,
-    lastPromptTokens: sample.prompt_tokens,
+    lastPromptTokens: sample.prompt_tokens > 0 ? sample.prompt_tokens : current?.lastPromptTokens ?? null,
     lastRoundTokensPerSec: tokensPerSec
   }
 }
@@ -66,7 +66,11 @@ export function seedUsage(state: ItemsSnapshot, response: ThreadUsageResponse): 
   if (state.usage) {
     return {
       ...state,
-      usage: { ...state.usage, activeMs: response.active_ms ?? null }
+      usage: {
+        ...state.usage,
+        activeMs: response.active_ms ?? null,
+        lastPromptTokens: state.usage.lastPromptTokens ?? response.last_valid_prompt_tokens ?? null
+      }
     }
   }
   return {
@@ -85,9 +89,9 @@ export function seedUsage(state: ItemsSnapshot, response: ThreadUsageResponse): 
       // Same for the active span: server-folded wall clock with user-gate
       // waits already excluded, covering turns the client never rendered.
       activeMs: response.active_ms ?? null,
-      // It carries no per-round timing though: prompt fill and speed describe
-      // the newest round only, and the seed knows no "newest".
-      lastPromptTokens: null,
+      // The server replays the log to recover the newest usable prompt size;
+      // per-round streaming speed still cannot be reconstructed from the seed.
+      lastPromptTokens: response.last_valid_prompt_tokens ?? null,
       lastRoundTokensPerSec: null
     }
   }
