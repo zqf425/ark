@@ -22,9 +22,19 @@
 
 `ImStore` 是 IM 渠道文档（`im.json`）的持久化边界，与 `ScheduleStore` 同为同步端口：整个
 文档一次进程内锁临界区读写，锁内不做网络 IO。它持有渠道记录（`ImChannelRecord { channel,
-cursor }`，端口自有的落盘类型，同 `ThreadMeta` 先例，不进 ts_export）与 chat→thread 绑定；
-`delete_channel` 必须在同一临界区级联删除其绑定，孤儿绑定会把下一条入站消息路由进幽灵线程。
-凭证校验、渠道上限与合并语义在 `ark-im` 与 server 编排层，存储只做持久化。
+cursor }`）、chat→thread 绑定，以及端口自有的 `InboundMessage`、`ImInboxId`、
+`ImInboxEntry`；这些落盘类型同 `ThreadMeta` 先例，不进 ts_export。`delete_channel` 必须在
+同一临界区级联删除其绑定，孤儿绑定会把下一条入站消息路由进幽灵线程;inbox 记录则必须
+保留,以便渠道缺失时告警并在恢复后重放。
+
+durable inbox 的方法契约: `persist_inbound_batch` 对整批消息做一次原子 rewrite,失败时
+不得部分可见;`queue_inbound` 在同一次 rewrite 中标记 `queued=true`、推进 cursor 并保留
+记录;`ack_inbound` 只在处理终态删除;`discard_inbound` 只用于过滤/命令/新消息队列满等
+确定无需剩余工作的终端路径。`ImInboxEntry.cursor_version` 是存储分配的批次顺序，
+提交时只允许不旧于该渠道已应用版本的 cursor 生效，防止乱序提交回退游标；该版本是
+端口内部落盘簿记，不进 wire。`list_inbox` 按插入顺序返回 pending 与 queued 记录,
+`advance_channel_cursor` 只用于没有可归一化消息的空批次。凭证校验、渠道上限与合并语义
+在 `ark-im` 与 server 编排层,存储只做持久化与原子状态转换。
 
 ## 硬约束
 

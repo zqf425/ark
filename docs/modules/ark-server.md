@@ -239,14 +239,32 @@ continuation/recovery 使用各自的系统来源，并直接使用 `ArkError`�
 错误到状态码的映射仍集中在 `api::error`。
 
 IM 渠道编排（[IM 渠道接入需求](../requirements/im-channels.md)）居 `service/im.rs`
-（生命周期：sync 对账、渠道启停、游标节流落盘）与 `service/im_inbound.rs`（消息管线：
-过滤/去重/每会话串行队列/`start_turn_as(TurnSource::Im)`/回复等待与投影）。回合经
-`TurnSource::Im` 走与 HTTP 同一 `start_turn` 校验路径；回复文本在终态后按本回合
+（生命周期：sync 对账、渠道启停、启动前重放 durable inbox）与 `service/im_inbound.rs`
+（消息管线：过滤/去重/每会话串行队列/`start_turn_as(TurnSource::Im)`/回复等待与投影）。
+回合经 `TurnSource::Im` 走与 HTTP 同一 `start_turn` 校验路径；回复文本在终态后按本回合
 `turn_id` 从线程投影取（同 scheduler 摘要先例），不用 delta 累积。路由
 `/v1/im/channels`(CRUD)、`/v1/im/channels/{id}/verify`、`/v1/im/bindings`、
 `/v1/im/weixin/login/{start,wait}`(确认后端直接建渠道,经容量校验、默认停用)只解包
 HTTP；
 总开关 `config.im.enabled` 只门控连接不门控编辑。
+
+IM durable inbox 的提交顺序是 write-ahead：适配器的一批消息经 `ImStore` 一次原子
+rewrite 全部落盘；server 对每条消息先原子提交 `queued=true` 与最终平台 cursor 并保留
+记录，再放入内存 conversation queue，最后才向适配器发 admission ack。磁盘与内存
+之间没有跨介质原子事务，因此“先提交可重放记录、再入内存”确保任何崩溃点都不会出现
+cursor 已前进而消息无持久副本。新渠道 transport 启动前重放 pending 与 queued 记录；
+重放按 `ImInboxId` 跳过仍被 live queue/处理任务持有的同一记录，避免 reconnect 重复
+执行，同时绕过平台 `(chat_id, message_id)` 去重，避免旧 dedup 缓存误删失去内存队列的
+queued 记录。live claim 还按 `(channel_id, chat_id, message_id)` 持有平台身份：若另一
+durable id 指向同一活跃平台消息，先原子 `discard_inbound` 再 ack，原记录仍负责后续完成；
+删除失败时 withhold ack。transport 失败后 supervisor 继续 admit/ack 已落盘的缓冲 delivery，
+待 sender 关闭才发布错误运行态，不会因失败分支先结束而丢失可重放记录。
+
+只有消息处理到达回合终态才 `ack_inbound` 删除。建线、订阅或启动失败、shutdown 中断、
+1800s 等待超时都保留记录供后续重放;新消息遇到已满队列仍回复 busy 后终端丢弃,但
+durable replay 遇到满队列只保留记录,并在当前 supervisor 内等待容量后继续入队,
+不能把已入队工作降级成 busy 丢弃或停到下次重启。该协议是至少
+一次语义:回合已完成而 ack 尚未写入时崩溃,重启可能再次执行同一回合。
 
 ## 路由清单
 

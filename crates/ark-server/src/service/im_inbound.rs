@@ -17,17 +17,23 @@ use ark_contract::{
     ImChannel, ImChannelId, ImChannelKind, ImChannelRuntime, ImCredentials, ThreadRuntimeSettings,
 };
 use ark_im::{
-    channel_autonomy, parse_command, truncate_inbound, Command, ImTransport, InboundMessage,
+    channel_autonomy, parse_command, truncate_inbound, Command, ImTransport, InboundDelivery,
+    InboundMessage,
 };
-use ark_ports::binding_now;
+use ark_ports::{binding_now, ImInboxId};
 use tokio::sync::mpsc;
 
 use crate::state::{AppState, TurnSource};
 
-use super::im::{CONVERSATION_QUEUE_CAP, IM_ACK_SECS, IM_BUSY_RETRY_SECS, IM_MAX_WAIT_SECS};
+use super::im::{
+    ImService, InboxClaimResult, CONVERSATION_QUEUE_CAP, IM_ACK_SECS, IM_BUSY_RETRY_SECS,
+    IM_MAX_WAIT_SECS,
+};
 
 /// Poll cadence for the terminal-state fallback while a reply waiter listens.
 const TERMINAL_POLL: Duration = Duration::from_secs(2);
+/// Capacity wait for durable replay, whose entry must not be downgraded to a live busy drop.
+const REPLAY_QUEUE_RETRY: Duration = Duration::from_millis(100);
 /// Title budget for threads created from an IM first message.
 const THREAD_TITLE_MAX_BYTES: usize = 40;
 
@@ -61,8 +67,40 @@ impl Default for ConversationQueues {
 
 #[derive(Default)]
 struct Conversation {
-    queue: Mutex<VecDeque<InboundMessage>>,
+    queue: Mutex<VecDeque<QueuedInbound>>,
     working: AtomicBool,
+}
+
+pub(crate) struct QueuedInbound {
+    message: InboundMessage,
+    inbox_id: Option<ImInboxId>,
+}
+
+enum Admission {
+    Terminal,
+    Drain { key: (ImChannelId, String) },
+}
+
+/// Releases an inbox-id claim on every early return or cancellation. A claim
+/// is retained only after the message is actually queued or running.
+struct InboxClaim<'a> {
+    service: &'a ImService,
+    id: ImInboxId,
+    retained: bool,
+}
+
+impl Drop for InboxClaim<'_> {
+    fn drop(&mut self) {
+        if !self.retained {
+            self.service.release_inbox(&self.id);
+        }
+    }
+}
+
+impl InboxClaim<'_> {
+    fn retain(&mut self) {
+        self.retained = true;
+    }
 }
 
 pub enum Enqueue {
@@ -70,7 +108,7 @@ pub enum Enqueue {
     Started,
     /// Queued behind the running turn.
     Queued,
-    /// Queue full: the caller answers with a busy reply.
+    /// Queue full: a live delivery gets a busy reply; durable replay waits for capacity.
     Full,
 }
 
@@ -83,7 +121,12 @@ impl ConversationQueues {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    pub fn enqueue(&self, key: (ImChannelId, String), message: InboundMessage) -> Enqueue {
+    pub fn enqueue(
+        &self,
+        key: (ImChannelId, String),
+        message: InboundMessage,
+        inbox_id: Option<ImInboxId>,
+    ) -> Enqueue {
         let conversation = self.lock().entry(key).or_default().clone();
         {
             let mut queue = conversation
@@ -93,7 +136,7 @@ impl ConversationQueues {
             if queue.len() >= CONVERSATION_QUEUE_CAP {
                 return Enqueue::Full;
             }
-            queue.push_back(message);
+            queue.push_back(QueuedInbound { message, inbox_id });
         }
         if conversation.working.swap(true, Ordering::AcqRel) {
             Enqueue::Queued
@@ -106,7 +149,7 @@ impl ConversationQueues {
     /// dry. The re-check under the lock is what makes this race-free against a
     /// concurrent enqueue: a message pushed after the empty check but before
     /// the flag clears would be lost without it.
-    pub fn next(&self, key: &(ImChannelId, String)) -> Option<InboundMessage> {
+    pub(crate) fn next(&self, key: &(ImChannelId, String)) -> Option<QueuedInbound> {
         let conversation = self.lock().get(key).cloned()?;
         let mut queue = conversation
             .queue
@@ -123,46 +166,215 @@ impl ConversationQueues {
 }
 
 impl super::im::ImService {
-    /// First stage of the pipeline: filter, dedup, answer commands, then hand
-    /// the message to its conversation queue.
+    /// Direct pipeline entry used by tests and non-transport callers. Durable
+    /// transport deliveries use [`ImService::accept_delivery`] instead.
     pub async fn accept_inbound(
         self: &Arc<Self>,
         state: &AppState,
         ctx: &Arc<ChannelContext>,
         message: InboundMessage,
     ) {
+        let admission = self.prepare_inbound(state, ctx, &message, false).await;
+        self.record_dedup(ctx, &message);
+        if let Admission::Drain { key } = admission {
+            match self.conversations.enqueue(key.clone(), message, None) {
+                Enqueue::Full => {
+                    self.send_reply(
+                        &ctx.channel.id,
+                        ctx,
+                        &key.1,
+                        "上一条消息仍在处理中，队列已满，请稍后再发。",
+                    )
+                    .await;
+                }
+                Enqueue::Queued => {}
+                Enqueue::Started => self.start_drain(state, ctx, key),
+            }
+        }
+    }
+
+    /// Admit one durable delivery, commit queue/cursor atomically, and only
+    /// then acknowledge the adapter. Failed commits deliberately withhold the
+    /// ack so the platform cursor cannot pass the retained inbox entry.
+    pub async fn accept_delivery(
+        self: &Arc<Self>,
+        state: &AppState,
+        ctx: &Arc<ChannelContext>,
+        delivery: InboundDelivery,
+    ) {
+        let Some(delivery) = self.claim_delivery(delivery) else {
+            return;
+        };
+        let mut claim = InboxClaim {
+            service: self,
+            id: delivery.id.clone(),
+            retained: false,
+        };
+        let admission = self
+            .prepare_inbound(state, ctx, &delivery.message, delivery.is_replay())
+            .await;
+        let committed = match &admission {
+            Admission::Terminal => self
+                .store()
+                .discard_inbound(&delivery.id, delivery.next_cursor.clone()),
+            Admission::Drain { .. } => self
+                .store()
+                .queue_inbound(&delivery.id, delivery.next_cursor.clone()),
+        };
+        if let Err(err) = committed {
+            tracing::warn!(
+                channel = %ctx.channel.id,
+                inbox = %delivery.id,
+                error = %err.message,
+                "cannot commit durable im inbound admission; withholding adapter ack"
+            );
+            return;
+        }
+        let mut drain = None;
+        if let Admission::Drain { key } = admission {
+            match self.enqueue_delivery(ctx, &delivery, key, &mut claim).await {
+                Ok(started) => drain = started,
+                Err(err) => {
+                    tracing::warn!(
+                        channel = %ctx.channel.id,
+                        inbox = %delivery.id,
+                        error = %err.message,
+                        "cannot finish durable im queue admission; withholding adapter ack"
+                    );
+                    return;
+                }
+            }
+        }
+        self.record_dedup(ctx, &delivery.message);
+        delivery.acknowledge();
+        if let Some(key) = drain {
+            self.start_drain(state, ctx, key);
+        }
+    }
+
+    fn claim_delivery(&self, delivery: InboundDelivery) -> Option<InboundDelivery> {
+        match self.claim_inbox(&delivery.id, &delivery.message) {
+            InboxClaimResult::New => Some(delivery),
+            InboxClaimResult::Existing => {
+                delivery.acknowledge();
+                None
+            }
+            InboxClaimResult::Duplicate => {
+                let result = self
+                    .store()
+                    .discard_inbound(&delivery.id, delivery.next_cursor.clone());
+                match result {
+                    Ok(()) => delivery.acknowledge(),
+                    Err(err) => tracing::warn!(
+                        channel = %delivery.message.channel_id,
+                        inbox = %delivery.id,
+                        error = %err.message,
+                        "cannot discard duplicate durable im delivery; withholding adapter ack"
+                    ),
+                }
+                None
+            }
+        }
+    }
+
+    async fn enqueue_delivery(
+        self: &Arc<Self>,
+        ctx: &Arc<ChannelContext>,
+        delivery: &InboundDelivery,
+        key: (ImChannelId, String),
+        claim: &mut InboxClaim<'_>,
+    ) -> ark_common::Result<Option<(ImChannelId, String)>> {
+        let mut waiting = false;
+        loop {
+            match self.conversations.enqueue(
+                key.clone(),
+                delivery.message.clone(),
+                Some(delivery.id.clone()),
+            ) {
+                Enqueue::Full => {
+                    if !delivery.is_replay() {
+                        self.send_reply(
+                            &ctx.channel.id,
+                            ctx,
+                            &key.1,
+                            "上一条消息仍在处理中，队列已满，请稍后再发。",
+                        )
+                        .await;
+                        // Queue admission already committed the cursor. Discarding the
+                        // now-terminal entry keeps the same cursor and removes it.
+                        self.store()
+                            .discard_inbound(&delivery.id, delivery.next_cursor.clone())?;
+                        return Ok(None);
+                    }
+                    if !waiting {
+                        tracing::warn!(
+                            channel = %ctx.channel.id,
+                            inbox = %delivery.id,
+                            "durable im replay is waiting for conversation queue capacity"
+                        );
+                        waiting = true;
+                    }
+                    tokio::time::sleep(REPLAY_QUEUE_RETRY).await;
+                }
+                Enqueue::Queued => {
+                    claim.retain();
+                    return Ok(None);
+                }
+                Enqueue::Started => {
+                    claim.retain();
+                    return Ok(Some(key));
+                }
+            }
+        }
+    }
+
+    async fn prepare_inbound(
+        self: &Arc<Self>,
+        state: &AppState,
+        ctx: &Arc<ChannelContext>,
+        message: &InboundMessage,
+        replay: bool,
+    ) -> Admission {
         self.record_inbound(&ctx.channel.id);
-        if ctx.transport.is_self(&message.sender_id) {
-            return;
-        }
-        if message.message_id.is_empty() || self.is_duplicate(&ctx.channel.id, &message.message_id)
+        if ctx.transport.is_self(&message.sender_id)
+            || message.message_id.is_empty()
+            || (!replay && self.has_seen(&ctx.channel.id, &message.chat_id, &message.message_id))
+            || !Self::policy_allows(ctx, message)
+            || !self.whitelist_allows(ctx, message).await
         {
-            return;
+            return Admission::Terminal;
         }
+        if self.handle_command(state, ctx, message).await {
+            return Admission::Terminal;
+        }
+        Admission::Drain {
+            key: (ctx.channel.id.clone(), message.chat_id.clone()),
+        }
+    }
+
+    fn policy_allows(ctx: &ChannelContext, message: &InboundMessage) -> bool {
         if !message.is_dm {
-            // Telegram v1 is private-chat only (requirements «平台适配器要点»);
-            // the other platforms' groups answer to the mention gate.
+            // Telegram v1 is private-chat only; other platforms use mentions.
             if ctx.channel.kind == ImChannelKind::Telegram {
-                return;
+                return false;
             }
             if ctx.channel.policy.require_mention && !message.is_mention {
-                return;
+                return false;
             }
         }
-        // WeChat is 1:1 by protocol; the owner binding is the second gate.
         if let Some(ImCredentials::Weixin { owner_user_id, .. }) = &ctx.channel.credentials {
             if message.sender_id != *owner_user_id {
-                return;
+                return false;
             }
         }
-        let text = message.text.trim();
-        if text.is_empty() {
-            return;
-        }
-        // Whitelist. Empty list = default-closed: answer a *new* chat with an
-        // onboarding hint (it needs the chat id to self-serve), but never open
-        // a turn for it. A non-empty list silently drops outsiders — sending
-        // anything to an unknown third party is worse than silence.
+        !message.text.trim().is_empty()
+    }
+
+    async fn whitelist_allows(
+        self: &Arc<Self>,
+        ctx: &Arc<ChannelContext>,
+        message: &InboundMessage,
+    ) -> bool {
         let allowed = &ctx.channel.policy.allowed_chat_ids;
         if allowed.is_empty() {
             let bound = self
@@ -178,16 +390,22 @@ impl super::im::ImService {
                 );
                 self.send_reply(&ctx.channel.id, ctx, &message.chat_id, hint)
                     .await;
-                return;
             }
-        } else if !allowed.iter().any(|id| id == &message.chat_id) {
-            return;
+            return bound;
         }
+        allowed.iter().any(|id| id == &message.chat_id)
+    }
 
-        match parse_command(text) {
+    async fn handle_command(
+        self: &Arc<Self>,
+        state: &AppState,
+        ctx: &Arc<ChannelContext>,
+        message: &InboundMessage,
+    ) -> bool {
+        match parse_command(message.text.trim()) {
             Command::New => {
-                self.handle_new_command(state, ctx, &message).await;
-                return;
+                self.handle_new_command(state, ctx, message).await;
+                true
             }
             Command::Unknown(name) => {
                 self.send_reply(
@@ -197,33 +415,31 @@ impl super::im::ImService {
                     format!("{name} 不是可用命令；当前支持：/new"),
                 )
                 .await;
-                return;
+                true
             }
-            Command::None => {}
+            Command::None => false,
         }
+    }
 
-        let key = (ctx.channel.id.clone(), message.chat_id.clone());
-        match self.conversations.enqueue(key.clone(), message) {
-            Enqueue::Full => {
-                self.send_reply(
-                    &ctx.channel.id,
-                    ctx,
-                    &key.1,
-                    "上一条消息仍在处理中，队列已满，请稍后再发。",
-                )
-                .await;
-            }
-            Enqueue::Queued => {}
-            Enqueue::Started => {
-                let service = Arc::clone(self);
-                let ctx = Arc::clone(ctx);
-                let state = state.clone();
-                let chat_id = key.1;
-                tokio::spawn(async move {
-                    service.drain_conversation(&state, &ctx, chat_id).await;
-                });
-            }
+    fn record_dedup(&self, ctx: &ChannelContext, message: &InboundMessage) {
+        if !message.message_id.is_empty() {
+            self.mark_seen(&ctx.channel.id, &message.chat_id, &message.message_id);
         }
+    }
+
+    fn start_drain(
+        self: &Arc<Self>,
+        state: &AppState,
+        ctx: &Arc<ChannelContext>,
+        key: (ImChannelId, String),
+    ) {
+        let service = Arc::clone(self);
+        let ctx = Arc::clone(ctx);
+        let state = state.clone();
+        let chat_id = key.1;
+        tokio::spawn(async move {
+            service.drain_conversation(&state, &ctx, chat_id).await;
+        });
     }
 
     /// Drain one conversation's queue serially.
@@ -234,8 +450,27 @@ impl super::im::ImService {
         chat_id: String,
     ) {
         let key = (ctx.channel.id.clone(), chat_id);
-        while let Some(message) = self.conversations.next(&key) {
-            self.process_message(state, ctx, message).await;
+        while let Some(queued) = self.conversations.next(&key) {
+            let completed = self.process_message(state, ctx, &queued.message).await;
+            if let Some(id) = queued.inbox_id {
+                if completed {
+                    if let Err(err) = self.store().ack_inbound(&id) {
+                        tracing::warn!(
+                            channel = %ctx.channel.id,
+                            inbox = %id,
+                            error = %err.message,
+                            "cannot acknowledge processed im inbox entry; retaining for replay"
+                        );
+                    }
+                } else {
+                    tracing::warn!(
+                        channel = %ctx.channel.id,
+                        inbox = %id,
+                        "im processing is unfinished; retaining inbox entry for replay"
+                    );
+                }
+                self.release_inbox(&id);
+            }
         }
     }
 
@@ -262,10 +497,10 @@ impl super::im::ImService {
         self: &Arc<Self>,
         state: &AppState,
         ctx: &Arc<ChannelContext>,
-        message: InboundMessage,
-    ) {
-        let Some((thread_id, since_seq)) = self.resolve_thread(state, ctx, &message).await else {
-            return;
+        message: &InboundMessage,
+    ) -> bool {
+        let Some((thread_id, since_seq)) = self.resolve_thread(state, ctx, message).await else {
+            return false;
         };
         // Subscribe before the turn starts so the terminal event cannot slip
         // between registration and subscription (requirements «回复路径»).
@@ -281,19 +516,19 @@ impl super::im::ImService {
                     format!("无法订阅会话事件：{err}"),
                 )
                 .await;
-                return;
+                return false;
             }
         };
         let text = truncate_inbound(&message.text);
         let turn = match self
-            .start_with_retry(state, ctx, &message, thread_id, text)
+            .start_with_retry(state, ctx, message, thread_id, text)
             .await
         {
             Some(turn_id) => turn_id,
-            None => return, // retries exhausted or a start error was replied
+            None => return false, // retries exhausted or a start error was replied
         };
-        self.wait_and_reply(state, ctx, &message, thread_id, turn, ticket.live)
-            .await;
+        self.wait_and_reply(state, ctx, message, thread_id, turn, ticket.live)
+            .await
     }
 
     /// The bound thread, creating (or recreating after a 404) as needed.
@@ -434,13 +669,13 @@ impl super::im::ImService {
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
         mut live: mpsc::Receiver<ark_contract::RuntimeEvent>,
-    ) {
+    ) -> bool {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(IM_MAX_WAIT_SECS);
         let ack_at = tokio::time::Instant::now() + Duration::from_secs(IM_ACK_SECS);
         let mut acked = false;
         let outcome = loop {
             if state.is_shutting_down() {
-                return;
+                return false;
             }
             // Registry poll first: the supervisor writes terminal states on
             // every path, so this alone is a complete (if coarser) detector.
@@ -485,7 +720,7 @@ impl super::im::ImService {
                         "处理超时；回合仍在后台运行，结果保留在会话线程中。",
                     )
                     .await;
-                    return;
+                    return false;
                 }
             }
         };
@@ -516,6 +751,7 @@ impl super::im::ImService {
                     .await;
             }
         }
+        true
     }
 
     /// Deliver one reply; failures degrade to the runtime's `last_error`,
