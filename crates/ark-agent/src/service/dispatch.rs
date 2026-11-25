@@ -10,6 +10,7 @@ use std::time::Instant;
 use crate::domain::tool::{ToolCallRequest, ToolExecution};
 use crate::exec::tool_runner::ToolRunner;
 use crate::service::reactor::execution_of;
+use tokio::sync::Semaphore;
 
 /// Run every call in `calls` concurrently, preserving input order.
 pub async fn run_calls(
@@ -26,6 +27,55 @@ pub async fn run_calls(
         }
     });
     futures::future::join_all(futures).await
+}
+
+/// Run every call in `calls` concurrently with concurrency limits.
+pub async fn run_calls_with_limit(
+    tools: Arc<dyn ToolRunner>,
+    calls: Vec<ToolCallRequest>,
+    semaphore: Arc<Semaphore>,
+) -> Vec<ToolExecution> {
+    let futures = calls.into_iter().map(|call| {
+        let tools = Arc::clone(&tools);
+        let semaphore = Arc::clone(&semaphore);
+        async move {
+            let _permit = semaphore.acquire().await.unwrap();
+            let start = Instant::now();
+            let output = tools.execute(&call).await;
+            let duration_ms = start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+            execution_of(&call, output, duration_ms)
+        }
+    });
+    futures::future::join_all(futures).await
+}
+
+/// Run calls with priority-based scheduling.
+#[derive(Debug, Clone)]
+pub struct ToolCallWithPriority {
+    pub call: ToolCallRequest,
+    pub priority: u8, // 0-255, higher is more important
+}
+
+pub async fn run_calls_with_priority(
+    tools: Arc<dyn ToolRunner>,
+    calls: Vec<ToolCallWithPriority>,
+) -> Vec<ToolExecution> {
+    // Group by priority threshold
+    let mut high_priority = Vec::new();
+    let mut normal_priority = Vec::new();
+    
+    for call_with_priority in calls {
+        if call_with_priority.priority > 128 {
+            high_priority.push(call_with_priority.call);
+        } else {
+            normal_priority.push(call_with_priority.call);
+        }
+    }
+    
+    let high_results = run_calls(Arc::clone(&tools), high_priority).await;
+    let normal_results = run_calls(tools, normal_priority).await;
+    
+    [high_results, normal_results].concat()
 }
 
 #[cfg(test)]
