@@ -42,11 +42,14 @@ const RAIL_ACTIVITY_EVENT_KINDS: ReadonlySet<RuntimeEvent['kind']> = new Set([
 export function useThreadStream(threadId: ThreadId | null): void {
   const seedItems = useCodeSessionStore((s) => s.seedItems)
   const setThreadRuntime = useCodeSessionStore((s) => s.setThreadRuntime)
+  const beginThreadRuntime = useCodeSessionStore((s) => s.beginThreadRuntime)
   const resetItems = useCodeSessionStore((s) => s.resetItems)
   const ingestEvent = useCodeSessionStore((s) => s.ingestEvent)
   const setDetailStatus = useCodeSessionStore((s) => s.setDetailStatus)
   const setStreamStatus = useCodeSessionStore((s) => s.setStreamStatus)
+  const beginThreadUsage = useCodeSessionStore((s) => s.beginThreadUsage)
   const noteThreadUsage = useCodeSessionStore((s) => s.noteThreadUsage)
+  const cancelThreadUsage = useCodeSessionStore((s) => s.cancelThreadUsage)
   const noteThreadRounds = useCodeSessionStore((s) => s.noteThreadRounds)
   const noteThreadSeq = useCodeSessionStore((s) => s.noteThreadSeq)
   const noteThreadActivity = useCodeSessionStore((s) => s.noteThreadActivity)
@@ -78,14 +81,15 @@ export function useThreadStream(threadId: ThreadId | null): void {
 
     const run = async (): Promise<void> => {
       try {
+        const runtimeRequest = beginThreadRuntime(threadId)
         const detail = await getThread(threadId, controller.signal)
         if (cancelled) return
         const watermark = detail.summary.last_seq ?? 0
-        seedItems(detail.items, watermark, detail.runtime_snapshot)
+        seedItems(detail.items, watermark, detail.runtime_snapshot, Date.now())
         // The composer pills read their labels from here: this load already
         // carries the stored overrides, so they need no second detail fetch and
         // a switch back to a thread shows its own model immediately.
-        setThreadRuntime(threadId, detail.runtime)
+        setThreadRuntime(threadId, detail.runtime, runtimeRequest)
         // The detail watermark is authoritative; pull the rail row up to it in
         // case the list was loaded before the newest events landed.
         noteThreadSeq(threadId, watermark)
@@ -103,20 +107,22 @@ export function useThreadStream(threadId: ThreadId | null): void {
 
         // Usage history is event-folded server-side, not part of the item
         // stream; seed it once per load. Best effort: an unavailable counter
-        // must not block the canvas, and the reducer only fills an empty
-        // channel, so a live `usage` event can never be double counted.
+        // must not block the canvas. The store assigns one owner ticket to all
+        // callers, so an older stats/detail response cannot replace a newer
+        // snapshot or append the same live samples twice.
         //
         // The same response seeds the per-turn clocks. It must be this
         // aggregate and not `GET /v1/debug/llm-rounds`: the latter is a
         // bounded diagnostics page, so in a long session whole turns fell
         // past the page and their clocks rendered as a few seconds.
+        const usageRequest = beginThreadUsage(threadId)
         void getThreadUsage(threadId, controller.signal)
           .then((usage) => {
             if (cancelled) return
-            noteThreadUsage(usage)
-            noteThreadRounds(usage)
+            if (noteThreadUsage(usage, usageRequest)) noteThreadRounds(usage)
           })
           .catch(() => {
+            cancelThreadUsage(usageRequest)
             // Seeding is best effort, but "footer shows no usage" must stay
             // diagnosable: surface the failure in development like the
             // reducer's unhandled-event warn.
@@ -232,5 +238,5 @@ export function useThreadStream(threadId: ThreadId | null): void {
       controller.abort()
       setStreamStatus('closed')
     }
-  }, [threadId, reloadToken, ingestEvent, noteThreadActivity, noteThreadRounds, noteThreadSeq, noteThreadUsage, requestStreamReload, resetItems, seedItems, setDetailStatus, setStreamStatus, pushToast])
+  }, [threadId, reloadToken, beginThreadRuntime, beginThreadUsage, cancelThreadUsage, ingestEvent, noteThreadActivity, noteThreadRounds, noteThreadSeq, noteThreadUsage, requestStreamReload, resetItems, seedItems, setDetailStatus, setStreamStatus, setThreadRuntime, pushToast])
 }

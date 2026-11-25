@@ -54,6 +54,12 @@ describe('session stats formatting', () => {
     expect(turnActiveMs(rounds, 't3')).toBeNull()
   })
 
+  it('ticks a mid-turn view even before the server has reported active_ms', () => {
+    const rounds = [round('t1', 0, null)]
+    expect(liveActiveMs(rounds, 't1', 105_000, 100_000, null)).toBe(5_000)
+    expect(liveActiveMs(rounds, 't1', 105_000, null, null)).toBeNull()
+  })
+
   it('extends a running turn and freezes at the moment a gate was raised', () => {
     const rounds = [round('t1', 2_000, 60_000)]
     // Five seconds since the newest event: the clock runs on.

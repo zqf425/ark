@@ -171,6 +171,35 @@ describe('NewTaskPage composer delivery', () => {
     expect(updateThread).not.toHaveBeenCalled()
   })
 
+  it('coalesces duplicate submits in the same event window into one create/start', async () => {
+    let resolveCreate!: (value: unknown) => void
+    vi.mocked(createThread).mockReturnValue(new Promise((resolve) => { resolveCreate = resolve }) as never)
+    vi.mocked(startTurn).mockResolvedValue({
+      thread_id: THREAD,
+      turn_id: '00000000-0000-0000-0000-0000000000t1',
+      state: 'running',
+      started_at: new Date().toISOString()
+    })
+    harness = await mountWithProviders(<NewTaskPage meta={undefined} />)
+    const node = input(harness.host)
+    await type(node, '只能创建一次')
+    await act(async () => {
+      node.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      node.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      await Promise.resolve()
+    })
+    expect(createThread).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      resolveCreate({
+        thread_id: THREAD, title: '新会话', created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(), archived: false, running: false
+      })
+      await Promise.resolve()
+    })
+    await settle()
+    expect(startTurn).toHaveBeenCalledTimes(1)
+  })
+
   it('a failed create keeps the draft so the next attempt still has it', async () => {
     vi.mocked(createThread).mockRejectedValue(new Error('boom'))
 

@@ -24,10 +24,47 @@ impl SseEvent {
     }
 }
 
-/// Streaming SSE parser. Owns only the incomplete tail, never the full body.
+/// Maximum bytes in one SSE frame, including its blank-line terminator.
+pub const MAX_SSE_FRAME_BYTES: usize = 1024 * 1024;
+
+/// Frames completed by one feed. `made_progress` includes comments and empty
+/// frames: transport liveness is about receiving a complete SSE frame, not
+/// about whether that frame happened to contain model content.
+#[derive(Debug, Default)]
+pub struct SseBatch {
+    pub events: Vec<SseEvent>,
+    pub made_progress: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SseError {
+    FrameTooLarge { limit: usize },
+    UnterminatedFrame { pending: usize },
+}
+
+impl std::fmt::Display for SseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FrameTooLarge { limit } => {
+                write!(f, "SSE frame exceeded the {limit}-byte limit")
+            }
+            Self::UnterminatedFrame { pending } => {
+                write!(
+                    f,
+                    "SSE stream ended with an unterminated {pending}-byte frame"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for SseError {}
+
+/// Streaming SSE parser. Owns only a bounded incomplete tail, never the body.
 #[derive(Debug, Default)]
 pub struct SseParser {
     buffer: String,
+    failed: bool,
 }
 
 impl SseParser {
@@ -35,28 +72,47 @@ impl SseParser {
         Self::default()
     }
 
-    /// Feed one raw chunk and return every frame it completed.
-    pub fn push(&mut self, chunk: &str) -> Vec<SseEvent> {
-        self.buffer.push_str(chunk);
-        let mut events = Vec::new();
-        while let Some(frame) = self.take_frame() {
-            if let Some(event) = parse_frame(&frame) {
-                events.push(event);
+    /// Feed one raw chunk and return every complete frame it dispatched.
+    pub fn push(&mut self, mut chunk: &str) -> Result<SseBatch, SseError> {
+        if self.failed {
+            return Err(SseError::FrameTooLarge {
+                limit: MAX_SSE_FRAME_BYTES,
+            });
+        }
+        let mut batch = SseBatch::default();
+        while !chunk.is_empty() {
+            let room = MAX_SSE_FRAME_BYTES + 3 - self.buffer.len();
+            let mut end = chunk.len().min(room);
+            while !chunk.is_char_boundary(end) {
+                end -= 1;
+            }
+            if end == 0 {
+                return Err(self.fail());
+            }
+            self.buffer.push_str(&chunk[..end]);
+            chunk = &chunk[end..];
+            self.drain(&mut batch)?;
+            if self.buffer.len() > MAX_SSE_FRAME_BYTES {
+                return Err(self.fail());
             }
         }
-        events
+        Ok(batch)
     }
 
-    /// Flush a trailing frame that never got its blank-line terminator.
-    ///
-    /// A provider that closes the connection right after the last `data:` line
-    /// would otherwise lose that final frame, which is exactly where usage
-    /// usually lives.
-    pub fn finish(&mut self) -> Vec<SseEvent> {
-        let frame = std::mem::take(&mut self.buffer);
-        match parse_frame(&frame) {
-            Some(event) => vec![event],
-            None => Vec::new(),
+    /// Validate EOF without dispatching an unterminated frame. A missing blank
+    /// line is a protocol truncation, not permission to invent a final event.
+    pub fn finish(&self) -> Result<(), SseError> {
+        if self.failed {
+            return Err(SseError::FrameTooLarge {
+                limit: MAX_SSE_FRAME_BYTES,
+            });
+        }
+        if self.buffer.is_empty() {
+            Ok(())
+        } else {
+            Err(SseError::UnterminatedFrame {
+                pending: self.buffer.len(),
+            })
         }
     }
 
@@ -65,11 +121,27 @@ impl SseParser {
         &self.buffer
     }
 
-    fn take_frame(&mut self) -> Option<String> {
-        let separator = find_separator(&self.buffer)?;
-        let frame = self.buffer[..separator.start].to_string();
-        self.buffer.drain(..separator.end);
-        Some(frame)
+    fn drain(&mut self, batch: &mut SseBatch) -> Result<(), SseError> {
+        while let Some(separator) = find_separator(&self.buffer) {
+            if separator.end > MAX_SSE_FRAME_BYTES {
+                return Err(self.fail());
+            }
+            let frame = self.buffer[..separator.start].to_string();
+            self.buffer.drain(..separator.end);
+            batch.made_progress = true;
+            if let Some(event) = parse_frame(&frame) {
+                batch.events.push(event);
+            }
+        }
+        Ok(())
+    }
+
+    fn fail(&mut self) -> SseError {
+        self.failed = true;
+        self.buffer.clear();
+        SseError::FrameTooLarge {
+            limit: MAX_SSE_FRAME_BYTES,
+        }
     }
 }
 
@@ -150,10 +222,14 @@ fn parse_frame(frame: &str) -> Option<SseEvent> {
 mod tests {
     use super::*;
 
+    fn feed(parser: &mut SseParser, chunk: &str) -> Vec<SseEvent> {
+        parser.push(chunk).unwrap().events
+    }
+
     #[test]
     fn one_frame_in_one_chunk() {
         let mut parser = SseParser::new();
-        let events = parser.push("data: {\"a\":1}\n\n");
+        let events = feed(&mut parser, "data: {\"a\":1}\n\n");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].data, "{\"a\":1}");
         assert!(parser.pending().is_empty());
@@ -162,8 +238,8 @@ mod tests {
     #[test]
     fn a_frame_split_across_chunks_is_reassembled() {
         let mut parser = SseParser::new();
-        assert!(parser.push("data: {\"hel").is_empty());
-        let events = parser.push("lo\":1}\n\n");
+        assert!(feed(&mut parser, "data: {\"hel").is_empty());
+        let events = feed(&mut parser, "lo\":1}\n\n");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].data, "{\"hello\":1}");
     }
@@ -171,7 +247,7 @@ mod tests {
     #[test]
     fn several_frames_in_one_chunk() {
         let mut parser = SseParser::new();
-        let events = parser.push("data: a\n\ndata: b\n\n");
+        let events = feed(&mut parser, "data: a\n\ndata: b\n\n");
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].data, "a");
         assert_eq!(events[1].data, "b");
@@ -180,7 +256,7 @@ mod tests {
     #[test]
     fn crlf_terminators_are_supported() {
         let mut parser = SseParser::new();
-        let events = parser.push("event: delta\r\ndata: x\r\n\r\n");
+        let events = feed(&mut parser, "event: delta\r\ndata: x\r\n\r\n");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].name(), "delta");
         assert_eq!(events[0].data, "x");
@@ -189,14 +265,14 @@ mod tests {
     #[test]
     fn multi_line_data_is_joined_with_newlines() {
         let mut parser = SseParser::new();
-        let events = parser.push("data: line1\ndata: line2\n\n");
+        let events = feed(&mut parser, "data: line1\ndata: line2\n\n");
         assert_eq!(events[0].data, "line1\nline2");
     }
 
     #[test]
     fn comment_lines_are_ignored() {
         let mut parser = SseParser::new();
-        let events = parser.push(": keep-alive\n\ndata: real\n\n");
+        let events = feed(&mut parser, ": keep-alive\n\ndata: real\n\n");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].data, "real");
     }
@@ -204,60 +280,54 @@ mod tests {
     #[test]
     fn done_sentinel_is_recognised() {
         let mut parser = SseParser::new();
-        let events = parser.push("data: [DONE]\n\n");
+        let events = feed(&mut parser, "data: [DONE]\n\n");
         assert!(events[0].is_done());
     }
 
     #[test]
-    fn trailing_frame_is_flushed_on_finish() {
+    fn trailing_frame_is_rejected_on_finish() {
         let mut parser = SseParser::new();
-        assert!(parser.push("data: {\"usage\":1}").is_empty());
-        let events = parser.finish();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].data, "{\"usage\":1}");
+        assert!(feed(&mut parser, "data: {\"usage\":1}").is_empty());
+        assert!(matches!(
+            parser.finish(),
+            Err(SseError::UnterminatedFrame { .. })
+        ));
     }
 
     #[test]
     fn finish_without_pending_yields_nothing() {
         let mut parser = SseParser::new();
-        parser.push("data: a\n\n");
-        assert!(parser.finish().is_empty());
+        feed(&mut parser, "data: a\n\n");
+        assert!(parser.finish().is_ok());
     }
 
     #[test]
     fn empty_frames_are_skipped() {
         let mut parser = SseParser::new();
-        assert!(parser.push("\n\n").is_empty());
+        assert!(feed(&mut parser, "\n\n").is_empty());
     }
 
     #[test]
     fn buffer_starting_with_lf_crlf_crlf_does_not_underflow() {
-        // Regression: `find_separator` computed `index - 1` unconditionally, so
-        // a buffer beginning with `\n\r\n` wrapped `start` around (debug panic
-        // / out-of-bounds slice in release) instead of yielding an empty frame.
         let mut parser = SseParser::new();
-        let events = parser.push("\n\r\ndata: x\r\n\r\n");
+        let events = feed(&mut parser, "\n\r\ndata: x\r\n\r\n");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].data, "x");
     }
 
     #[test]
     fn lf_data_line_before_crlf_blank_line_keeps_its_last_byte() {
-        // Regression: mixed line endings (`data: a\n\r\n`) moved the frame
-        // start back one byte, silently dropping the last data byte.
         let mut parser = SseParser::new();
-        let events = parser.push("data: a\n\r\n");
+        let events = feed(&mut parser, "data: a\n\r\n");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].data, "a");
     }
 
     #[test]
     fn crlf_separator_split_across_chunks_is_reassembled() {
-        // The CRLF blank line may straddle two reads: the opening CR arrives
-        // with the data line, the rest with the next chunk.
         let mut parser = SseParser::new();
-        assert!(parser.push("data: x\r").is_empty());
-        let events = parser.push("\n\r\n");
+        assert!(feed(&mut parser, "data: x\r").is_empty());
+        let events = feed(&mut parser, "\n\r\n");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].data, "x");
     }
@@ -265,7 +335,36 @@ mod tests {
     #[test]
     fn field_without_value_is_tolerated() {
         let mut parser = SseParser::new();
-        let events = parser.push("data\ndata: value\n\n");
+        let events = feed(&mut parser, "data\ndata: value\n\n");
         assert_eq!(events[0].data, "\nvalue");
+    }
+
+    #[test]
+    fn incomplete_frame_buffer_is_bounded() {
+        let mut parser = SseParser::new();
+        let chunk = format!("data: {}", "x".repeat(1_048_577));
+        assert!(matches!(
+            parser.push(&chunk),
+            Err(SseError::FrameTooLarge { .. })
+        ));
+        assert!(parser.pending().is_empty());
+    }
+
+    #[test]
+    fn oversized_completed_frame_is_rejected() {
+        let mut parser = SseParser::new();
+        let chunk = format!("data: {}\n\n", "x".repeat(1_048_577));
+        assert!(matches!(
+            parser.push(&chunk),
+            Err(SseError::FrameTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn comment_only_frames_count_as_transport_progress() {
+        let mut parser = SseParser::new();
+        let batch = parser.push(": keep-alive\n\n").unwrap();
+        assert!(batch.made_progress);
+        assert!(batch.events.is_empty());
     }
 }

@@ -74,10 +74,38 @@ impl ConfigStore {
     /// Validate then swap. `Restart` fields are refused before validation so the
     /// rejection reason always names the real blocker.
     pub fn apply(&self, patch: ConfigPatch) -> ApplyResult {
-        if let Some(rejected) = self.check_restart(&patch) {
-            return rejected;
-        }
+        self.apply_with(patch, |_| Ok(()))
+    }
+
+    /// Apply and persist one candidate while holding the same mutation lock.
+    ///
+    /// The callback receives the exact accepted snapshot. Serializing it with
+    /// the swap prevents an older concurrent request from overwriting a newer
+    /// configuration on disk. Persistence failure still leaves the live patch
+    /// applied, matching the HTTP API's existing durability semantics.
+    pub fn apply_with(
+        &self,
+        patch: ConfigPatch,
+        persist: impl FnOnce(&RuntimeConfig) -> Result<(), String>,
+    ) -> ApplyResult {
         let mut guard = self.lock();
+        let result = Self::apply_locked(&mut guard, patch);
+        if matches!(&result, ApplyResult::Applied { .. }) {
+            if let Err(message) = persist(&guard.config) {
+                tracing::warn!(%message, "config applied in memory but not persisted");
+            }
+        }
+        result
+    }
+
+    fn apply_locked(guard: &mut ConfigSnapshot, patch: ConfigPatch) -> ApplyResult {
+        let restart = restart_fields(&patch);
+        if !restart.is_empty() {
+            return ApplyResult::Rejected {
+                restart_required: restart,
+                reason: "patch touches a field that requires an arkd restart".to_string(),
+            };
+        }
         let current = guard.config.clone();
         let (candidate, coarse) = match current.candidate(&patch) {
             Ok(value) => value,
@@ -172,11 +200,13 @@ mod tests {
     fn skills_patch_applies_hot() {
         // Regression: skills used to be rejected as restart-class, which made
         // the settings UI unable to save the section at all.
+        let absolute = std::env::temp_dir().join("skills");
+        let absolute = absolute.to_string_lossy().into_owned();
         let store = store();
         let result = store.apply(ConfigPatch {
             skills: Some(ark_contract::SkillsSettings {
                 enabled: false,
-                extra_dirs: vec!["/tmp/skills".into()],
+                extra_dirs: vec![absolute.clone()],
             }),
             ..ConfigPatch::default()
         });
@@ -188,7 +218,7 @@ mod tests {
         }
         let skills = &store.snapshot().skills;
         assert!(!skills.enabled);
-        assert_eq!(skills.extra_dirs, vec!["/tmp/skills".to_string()]);
+        assert_eq!(skills.extra_dirs, vec![absolute]);
     }
 
     #[test]
@@ -303,6 +333,89 @@ mod tests {
             }
             other => panic!("expected applied, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn concurrent_apply_and_save_keeps_disk_at_the_live_snapshot() {
+        let store = Arc::new(store());
+        let path = std::env::temp_dir().join(format!(
+            "ark-config-concurrent-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let threads = [
+            {
+                let store = Arc::clone(&store);
+                let path = path.clone();
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.apply_with(
+                        ConfigPatch {
+                            log_level: Some("debug".into()),
+                            ..ConfigPatch::default()
+                        },
+                        |config| crate::save(&path, config),
+                    );
+                })
+            },
+            {
+                let store = Arc::clone(&store);
+                let path = path.clone();
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.apply_with(
+                        ConfigPatch {
+                            tuning: Some(ark_contract::TuningSettings {
+                                max_rounds: 7,
+                                ..ark_contract::TuningSettings::default()
+                            }),
+                            ..ConfigPatch::default()
+                        },
+                        |config| crate::save(&path, config),
+                    );
+                })
+            },
+        ];
+        for thread in threads {
+            thread.join().expect("config thread");
+        }
+        let live = store.snapshot();
+        let persisted = crate::load_or_default(&path).expect("load concurrent config");
+        assert_eq!(persisted, *live);
+        assert_eq!(persisted.log_level, "debug");
+        assert_eq!(persisted.tuning.max_rounds, 7);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn retry_after_failed_save_persists_the_already_applied_snapshot() {
+        let store = store();
+        let root = std::env::temp_dir().join(format!("ark-config-retry-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).expect("temp dir");
+        let path = root.join("config.json");
+        // A directory at the file path makes the atomic replacement fail on
+        // every platform; removing it models the filesystem recovering.
+        std::fs::create_dir(&path).expect("blocking config path");
+        store.apply_with(
+            ConfigPatch {
+                log_level: Some("debug".into()),
+                ..ConfigPatch::default()
+            },
+            |config| crate::save(&path, config),
+        );
+        assert_eq!(store.snapshot().log_level, "debug");
+        std::fs::remove_dir(&path).expect("recover config path");
+        assert!(matches!(
+            store.apply_with(ConfigPatch::default(), |config| crate::save(&path, config)),
+            ApplyResult::Applied { changed, .. } if changed.is_empty()
+        ));
+
+        let persisted = crate::load_or_default(&path).expect("load retried config");
+        assert_eq!(persisted.log_level, "debug");
+        assert_eq!(persisted, *store.snapshot());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -26,8 +26,8 @@ vi.mock('../hooks/use-turn', async () => {
     useTurn: (threadId: string | null) => {
       const sending = useCodeSessionStore((s) => s.sending)
       return {
-        send: vi.fn(async () => true),
-        steer: vi.fn(async () => true),
+        send: vi.fn(async () => 'accepted'),
+        steer: vi.fn(async () => 'accepted'),
         interrupt: vi.fn(async () => undefined),
         canSend: Boolean(threadId) && !sending,
         canInterrupt: false

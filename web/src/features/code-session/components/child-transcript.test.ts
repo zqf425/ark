@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RuntimeEvent, ThreadItem } from '../../../shared/contracts'
 import { foldChildEvent, seedChildTranscript } from './child-transcript'
+import { applyEvent, emptyItemsState } from '../state/items-reducer'
 
 const CHILD_THREAD = '00000000-0000-0000-0000-0000000000c1'
 const TURN = '00000000-0000-0000-0000-0000000000t1'
@@ -93,6 +94,36 @@ describe('foldChildEvent', () => {
     expect(state.itemOrder).toHaveLength(1)
     expect(state.itemsById['00000000-0000-0000-0000-0000000000i1']?.status).toBe('completed')
     expect(state.itemsById['00000000-0000-0000-0000-0000000000i1']?.text).toBe('final')
+  })
+
+  it('folds live tool start/finish into the same deterministic row as the parent reducer', () => {
+    const started: RuntimeEvent = {
+      kind: 'tool_call_started', seq: 4, thread_id: CHILD_THREAD, turn_id: TURN,
+      item_id: '00000000-0000-0000-0000-0000000000c1',
+      timestamp: '2026-10-28T00:00:03Z', call_id: 'child-call', tool: 'bash',
+      arguments: { command: 'pwd' }
+    }
+    const finished: RuntimeEvent = {
+      kind: 'tool_call_finished', seq: 5, thread_id: CHILD_THREAD, turn_id: TURN,
+      item_id: '00000000-0000-0000-0000-0000000000c1',
+      timestamp: '2026-10-28T00:00:04Z', call_id: 'child-call', tool: 'bash',
+      ok: true, duration_ms: 1000, output: '/workspace'
+    }
+    let child = seedChildTranscript([], 3)
+    child = foldChildEvent(child, started)
+    expect(child.itemOrder).toHaveLength(1)
+    expect(child.itemsById[child.itemOrder[0]!]?.status).toBe('streaming')
+    child = foldChildEvent(child, finished)
+
+    let parent = emptyItemsState()
+    parent = applyEvent(parent, started)
+    parent = applyEvent(parent, finished)
+    expect(child.itemOrder).toHaveLength(1)
+    expect(child.itemOrder[0]).toBe(parent.itemOrder[0])
+    expect(child.itemsById[child.itemOrder[0]!]).toMatchObject({
+      kind: 'tool_call', status: 'completed',
+      tool: { call_id: 'child-call', tool: 'bash', ok: true, output: '/workspace' }
+    })
   })
 
   it('lifecycle events only move the watermark', () => {

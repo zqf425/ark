@@ -18,6 +18,7 @@ tauri-plugin-dialog = "2"
 # System-level session notifications (Windows toast / macOS NSUserNotification
 # style) for turn ends the user may miss while another app has focus.
 tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
 # The readiness watcher sleeps between `/health` polls on tauri's tokio runtime.
 tokio = { version = "1", default-features = false, features = ["time"] }

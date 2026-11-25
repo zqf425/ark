@@ -158,8 +158,54 @@ pub fn encode_line<T: Serialize>(value: &T) -> Result<String> {
 }
 
 /// Append a prepared line to a JSONL file, fsyncing according to `fsync`.
+///
+/// A complete final record may have lost only its newline. Insert the separator
+/// before the next record unless the caller already supplied it; torn tails are
+/// repaired by each log's owner before reaching this helper.
 pub fn append_text(path: &Path, text: &str, fsync: bool) -> Result<()> {
-    crate::store::fs_util::append_line_blocking(path, text, fsync)
+    append_text_outcome(path, text, fsync).map_err(|failure| failure.error)
+}
+
+pub(crate) fn append_text_outcome(
+    path: &Path,
+    text: &str,
+    fsync: bool,
+) -> std::result::Result<(), crate::store::fs_util::AppendFailure> {
+    let needs_separator = !text.starts_with('\n')
+        && tail_lacks_newline(path).map_err(|error| crate::store::fs_util::AppendFailure {
+            error,
+            rolled_back: true,
+        })?;
+    if needs_separator {
+        let mut separated = String::with_capacity(text.len() + 1);
+        separated.push('\n');
+        separated.push_str(text);
+        crate::store::fs_util::append_line_blocking_outcome(path, &separated, fsync)
+    } else {
+        crate::store::fs_util::append_line_blocking_outcome(path, text, fsync)
+    }
+}
+
+fn tail_lacks_newline(path: &Path) -> Result<bool> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(ArkError::store(format!(
+                "open JSONL tail failed for {}: {error}",
+                path.display()
+            )))
+        }
+    };
+    let length = file.seek(SeekFrom::End(0))?;
+    if length == 0 {
+        return Ok(false);
+    }
+    file.seek(SeekFrom::End(-1))?;
+    let mut byte = [0u8];
+    file.read_exact(&mut byte)?;
+    Ok(byte[0] != b'\n')
 }
 
 /// Read compaction markers; a damaged marker file never fails a replay.

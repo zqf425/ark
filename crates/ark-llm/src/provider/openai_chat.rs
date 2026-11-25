@@ -144,7 +144,10 @@ impl StreamParser for ChatParser {
         };
         // An error object can arrive mid-stream with HTTP 200.
         if value.get("error").is_some() {
-            return vec![StreamEvent::Ignored];
+            return vec![crate::domain::event::provider_error(
+                &value,
+                "provider stream error",
+            )];
         }
         let mut events = Vec::new();
         if let Some(usage) = value.get("usage").filter(|usage| !usage.is_null()) {

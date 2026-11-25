@@ -313,11 +313,9 @@ pub(crate) struct ReactorSpec {
     pub machine: TurnMachine,
     pub chunk_buffer: usize,
     pub steering: Arc<SteerQueue>,
-    /// Composition-root resolver for steer-referenced attachment ids. `None`
-    /// keeps steers text-only (child runs, runtimes without attachments).
-    pub steer_image_resolver: Option<ark_agent::SteerImageResolver>,
-    /// Composition-root recorder for the steered item's delivery outcomes.
-    pub steer_outcome_recorder: Option<ark_agent::SteerOutcomeRecorder>,
+    /// Composition-root resolver for one steer entry's images and outcomes.
+    /// `None` keeps steers text-only (child runs, runtimes without attachments).
+    pub steer_attachment_resolver: Option<ark_agent::SteerAttachmentResolver>,
 }
 
 pub(crate) fn build_reactor(spec: ReactorSpec) -> Reactor {
@@ -332,8 +330,7 @@ pub(crate) fn build_reactor(spec: ReactorSpec) -> Reactor {
         seed: spec.seed,
         machine: spec.machine,
         chunk_buffer: spec.chunk_buffer,
-        steer_image_resolver: spec.steer_image_resolver,
-        steer_outcome_recorder: spec.steer_outcome_recorder,
+        steer_attachment_resolver: spec.steer_attachment_resolver,
     })
     .with_steering(spec.steering)
 }
@@ -468,7 +465,7 @@ mod tests {
         let config = Arc::new(ConfigStore::new(RuntimeConfig {
             hooks: ark_contract::HookSettings {
                 pre_tool_use: vec![ark_contract::HookRule {
-                    command: format!("echo shell >> {}", log.display()),
+                    command: format!("echo shell>>{}", log.display()),
                     tools: Vec::new(),
                     timeout_ms: 0,
                 }],
@@ -504,7 +501,8 @@ mod tests {
         let _ = runner.execute(&call).await;
         let recorded = std::fs::read_to_string(&log).unwrap();
         assert_eq!(
-            recorded, "plugin\nshell\n",
+            recorded.lines().collect::<Vec<_>>(),
+            ["plugin", "shell"],
             "decide → shell hook → dispatch"
         );
         let _ = std::fs::remove_file(&log);

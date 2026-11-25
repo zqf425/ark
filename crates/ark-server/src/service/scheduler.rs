@@ -234,10 +234,21 @@ impl SchedulerService {
             if !changed {
                 continue;
             }
-            if let Err(err) = self.store.replace(task) {
-                tracing::warn!(error = %err.message, "cannot persist a reconciled scheduled task");
-                continue;
-            }
+            let id = task.id.clone();
+            self.persist(
+                &id,
+                "cannot persist a reconciled scheduled task",
+                |current| {
+                    settle_stale_run(current);
+                    if classify(current, now) == DueState::Misfire {
+                        record_skipped(
+                            current,
+                            skipped_record(SKIPPED_PREFIX, now.with_timezone(&Utc)),
+                        );
+                        apply_next_run_at(current, now);
+                    }
+                },
+            );
             repaired += 1;
         }
         if repaired != 0 {
@@ -265,16 +276,20 @@ impl SchedulerService {
         };
         let now = Local::now();
         let mut due: Vec<ScheduledTask> = Vec::new();
-        for mut task in tasks {
+        for task in tasks {
             match classify(&task, now) {
                 DueState::NotDue => {}
                 DueState::Misfire => {
-                    record_run(
-                        &mut task,
-                        skipped_record(SKIPPED_PREFIX, now.with_timezone(&Utc)),
-                    );
-                    apply_next_run_at(&mut task, now);
-                    self.persist(task, "skipped a missed scheduled run");
+                    let id = task.id.clone();
+                    self.persist(&id, "skipped a missed scheduled run", |current| {
+                        if classify(current, now) == DueState::Misfire {
+                            record_skipped(
+                                current,
+                                skipped_record(SKIPPED_PREFIX, now.with_timezone(&Utc)),
+                            );
+                            apply_next_run_at(current, now);
+                        }
+                    });
                 }
                 DueState::Due => due.push(task),
             }
@@ -290,13 +305,17 @@ impl SchedulerService {
             // skipped and advanced, never queued: two model loops over one task
             // would double the budget and interleave their history.
             let Some(guard) = self.claim(&task.id) else {
-                let mut task = task;
-                record_run(
-                    &mut task,
-                    skipped_record(SKIPPED_BUSY, now.with_timezone(&Utc)),
+                self.persist(
+                    &task.id,
+                    "skipped a scheduled run that was already in flight",
+                    |current| {
+                        record_skipped(
+                            current,
+                            skipped_record(SKIPPED_BUSY, now.with_timezone(&Utc)),
+                        );
+                        apply_next_run_at(current, now);
+                    },
                 );
-                apply_next_run_at(&mut task, now);
-                self.persist(task, "skipped a scheduled run that was already in flight");
                 continue;
             };
             match self.begin(state, task).await {
@@ -368,7 +387,7 @@ impl SchedulerService {
     async fn begin(
         &self,
         state: &AppState,
-        mut task: ScheduledTask,
+        task: ScheduledTask,
     ) -> Result<(ScheduledTask, ThreadId, DateTime<Utc>)> {
         let thread = crate::service::threads::create_thread(state, &task.title, None).await?;
         // A scheduled run is unattended by default: `unattended` is what makes
@@ -398,14 +417,18 @@ impl SchedulerService {
         // The terminal record reuses this instant, so `last_run` keeps the real
         // start of the run instead of a zero-length interval.
         let started_at = Utc::now();
-        task.last_run = Some(ScheduledRunRecord {
+        let id = task.id.clone();
+        let running = ScheduledRunRecord {
             status: RunStatus::Running,
             message: String::new(),
             thread_id: Some(thread.thread_id),
             started_at,
             finished_at: None,
-        });
-        self.persist(task.clone(), "cannot persist the running marker");
+        };
+        let task = self.store.update(&id, &mut |current| {
+            current.last_run = Some(running.clone());
+            Ok(())
+        })?;
         Ok((task, thread.thread_id, started_at))
     }
 
@@ -417,7 +440,7 @@ impl SchedulerService {
     async fn drive(
         &self,
         state: &AppState,
-        mut task: ScheduledTask,
+        task: ScheduledTask,
         thread_id: ThreadId,
         started_at: DateTime<Utc>,
     ) -> ScheduledTask {
@@ -467,18 +490,30 @@ impl SchedulerService {
             Err(message) => terminal_record(RunStatus::Failed, message, thread_id, started_at),
         };
 
-        record_run(&mut task, record);
-        // The cadence is recomputed from *now*, not from the stored time: an
-        // interval task counts from completion, so a run that
-        // took 10 minutes does not fire again 5 minutes later.
-        apply_next_run_at(&mut task, Local::now());
-        let rounded = task.clone();
-        self.persist(task, "cannot persist a finished scheduled run");
-        rounded
+        let id = task.id.clone();
+        self.persist(&id, "cannot persist a finished scheduled run", |current| {
+            // A deleted task stays deleted; a newer run owns the marker. Only
+            // the run that installed this exact running marker may settle it.
+            let owns_marker = current.last_run.as_ref().is_some_and(|latest| {
+                latest.status == RunStatus::Running
+                    && latest.thread_id == Some(thread_id)
+                    && latest.started_at == started_at
+            });
+            if owns_marker {
+                record_run(current, record.clone());
+                // Recompute from the latest edited cadence, not the snapshot
+                // captured before the long-running turn.
+                apply_next_run_at(current, Local::now());
+            }
+        });
+        task
     }
 
-    fn persist(&self, task: ScheduledTask, context: &str) {
-        if let Err(err) = self.store.replace(task) {
+    fn persist(&self, id: &str, context: &str, mut mutate: impl FnMut(&mut ScheduledTask)) {
+        if let Err(err) = self.store.update(id, &mut |task| {
+            mutate(task);
+            Ok(())
+        }) {
             tracing::warn!(error = %err.message, "{context}");
         }
     }
@@ -550,6 +585,18 @@ fn settle_stale_run(task: &mut ScheduledTask) -> bool {
     }
     task.last_run = Some(settled);
     true
+}
+
+fn record_skipped(task: &mut ScheduledTask, record: ScheduledRunRecord) {
+    if task
+        .last_run
+        .as_ref()
+        .is_some_and(|latest| latest.status == RunStatus::Running)
+    {
+        push_record(&mut task.history, record);
+    } else {
+        record_run(task, record);
+    }
 }
 
 fn skipped_record(reason: &str, at: DateTime<Utc>) -> ScheduledRunRecord {

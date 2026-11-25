@@ -164,6 +164,26 @@ impl ScheduleStore for ScheduleFileStore {
         Ok(task)
     }
 
+    fn update(
+        &self,
+        id: &str,
+        mutate: &mut dyn FnMut(&mut ScheduledTask) -> ark_common::Result<()>,
+    ) -> Result<ScheduledTask> {
+        let mut state = self.lock();
+        let index = state
+            .tasks
+            .iter()
+            .position(|task| task.id == id)
+            .ok_or_else(|| Self::missing(id))?;
+        let mut candidate = state.tasks[index].clone();
+        mutate(&mut candidate)?;
+        let mut next = Self::snapshot(&state);
+        next.tasks[index] = candidate.clone();
+        self.persist(&next)?;
+        *state = next;
+        Ok(candidate)
+    }
+
     fn delete(&self, id: &str) -> Result<()> {
         let mut state = self.lock();
         let index = state

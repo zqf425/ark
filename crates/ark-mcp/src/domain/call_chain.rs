@@ -159,14 +159,22 @@ impl Chain {
     }
 }
 
+#[derive(Debug, Clone)]
+struct WaitEdge {
+    from: String,
+    to: String,
+    callers: usize,
+}
+
 /// Wait-for graph across concurrent calls.
 ///
 /// Node = plugin id. An edge `A -> B` means "a call issued by `A` is currently
 /// blocked on an in-process call served by `B`". Registering an edge that
-/// closes a cycle is a deadlock and is refused.
+/// closes a cycle is a deadlock and is refused. Parallel calls may share the
+/// same edge, so it remains active until the last caller releases it.
 #[derive(Debug, Default, Clone)]
 pub struct DeadlockGuard {
-    edges: Vec<(String, String)>,
+    edges: Vec<WaitEdge>,
 }
 
 impl DeadlockGuard {
@@ -182,16 +190,35 @@ impl DeadlockGuard {
         if closes_cycle {
             return Err(ChainError::Deadlock { edge });
         }
-        if !self.edges.contains(&edge) {
-            self.edges.push(edge);
+        if let Some(existing) = self
+            .edges
+            .iter_mut()
+            .find(|existing| existing.from == edge.0 && existing.to == edge.1)
+        {
+            existing.callers += 1;
+            return Ok(());
         }
+        self.edges.push(WaitEdge {
+            from: edge.0,
+            to: edge.1,
+            callers: 1,
+        });
         Ok(())
     }
 
-    /// Drop the edge once the awaited call returned.
+    /// Release one caller's interest in the edge, removing it after the last.
     pub fn release(&mut self, waiter: &str, target: &str) {
-        self.edges
-            .retain(|(from, to)| !(from == waiter && to == target));
+        let Some(position) = self
+            .edges
+            .iter()
+            .position(|edge| edge.from == waiter && edge.to == target)
+        else {
+            return;
+        };
+        self.edges[position].callers -= 1;
+        if self.edges[position].callers == 0 {
+            self.edges.remove(position);
+        }
     }
 
     /// Is there a path `from -> ... -> to`?
@@ -199,16 +226,16 @@ impl DeadlockGuard {
         let mut seen: Vec<&str> = vec![from];
         let mut queue: Vec<&str> = vec![from];
         while let Some(current) = queue.pop() {
-            for (edge_from, edge_to) in &self.edges {
-                if edge_from != current {
+            for edge in &self.edges {
+                if edge.from != current {
                     continue;
                 }
-                if edge_to == to {
+                if edge.to == to {
                     return true;
                 }
-                if !seen.contains(&edge_to.as_str()) {
-                    seen.push(edge_to);
-                    queue.push(edge_to);
+                if !seen.contains(&edge.to.as_str()) {
+                    seen.push(&edge.to);
+                    queue.push(&edge.to);
                 }
             }
         }
@@ -384,6 +411,23 @@ mod tests {
         let mut guard = DeadlockGuard::new();
         guard.register_wait("ark.a", "ark.b").unwrap();
         assert!(guard.register_wait("ark.b", "ark.a").is_err());
+        guard.release("ark.a", "ark.b");
+        assert!(guard.is_empty());
+        assert!(guard.register_wait("ark.b", "ark.a").is_ok());
+    }
+
+    #[test]
+    fn concurrent_calls_share_an_edge_until_the_last_release() {
+        let mut guard = DeadlockGuard::new();
+        guard.register_wait("ark.a", "ark.b").unwrap();
+        guard.register_wait("ark.a", "ark.b").unwrap();
+        assert_eq!(guard.edge_count(), 1);
+        guard.release("ark.a", "ark.b");
+        assert_eq!(guard.edge_count(), 1, "one caller is still waiting");
+        assert_eq!(
+            guard.register_wait("ark.b", "ark.a").unwrap_err().code(),
+            "mcp_deadlock"
+        );
         guard.release("ark.a", "ark.b");
         assert!(guard.is_empty());
         assert!(guard.register_wait("ark.b", "ark.a").is_ok());

@@ -23,16 +23,12 @@ pub async fn apply(
     Json(patch): Json<ConfigPatch>,
 ) -> Result<Json<ApplyResult>, ApiError> {
     let before = state.config.snapshot().subagents;
-    let result = state.config.apply(patch);
+    let path = ark_config::config_path(&state.config_dir);
+    let result = state
+        .config
+        .apply_with(patch, |snapshot| ark_config::save(&path, snapshot));
     if let ApplyResult::Applied { .. } = result {
-        // Persist the accepted snapshot so a restart keeps it. A write failure is
-        // reported but does not roll back the live config: the running process
-        // is already on the new version and only durability is at risk.
         let snapshot = state.config.snapshot();
-        let path = ark_config::config_path(&state.config_dir);
-        if let Err(message) = ark_config::save(&path, &snapshot) {
-            tracing::warn!(%message, "config applied in memory but not persisted");
-        }
         let after = snapshot.subagents;
         if before.enabled != after.enabled || before.auto_continue != after.auto_continue {
             crate::service::continuation::sync_auto_continue_policy(state.clone()).await;

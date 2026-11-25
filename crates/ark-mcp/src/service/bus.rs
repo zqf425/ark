@@ -44,6 +44,22 @@ tokio::task_local! {
 /// call entered the bus.
 pub const HOST_CALLER: &str = "host.runtime";
 
+/// Owns one registered wait edge. Dropping the dispatch future, including on
+/// cancellation or panic, releases exactly one caller's interest in it.
+struct WaitEdgeGuard<'a> {
+    bus: &'a McpBus,
+    caller: String,
+    provider: String,
+}
+
+impl Drop for WaitEdgeGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut waits) = self.bus.waits.lock() {
+            waits.release(&self.caller, &self.provider);
+        }
+    }
+}
+
 /// Handler used for tools exposed through the port-level API, which carries
 /// specs but no implementation. Calling such a tool is an explicit error, never
 /// a silent success.
@@ -228,6 +244,24 @@ impl McpBus {
         err.into_error()
     }
 
+    fn register_wait(&self, caller: &str, provider: &str) -> Result<Option<WaitEdgeGuard<'_>>> {
+        if caller == provider {
+            return Ok(None);
+        }
+        let mut waits = self
+            .waits
+            .lock()
+            .map_err(|_| ArkError::internal("mcp wait graph poisoned"))?;
+        waits
+            .register_wait(caller, provider)
+            .map_err(|err| self.refuse(err))?;
+        Ok(Some(WaitEdgeGuard {
+            bus: self,
+            caller: caller.to_string(),
+            provider: provider.to_string(),
+        }))
+    }
+
     /// Ingress + nested routing. Public so tests can drive it directly.
     pub async fn dispatch(
         &self,
@@ -252,16 +286,10 @@ impl McpBus {
         let frames = chain.trace();
 
         // Register the wait edge before awaiting the handler so two tasks that
-        // wait on each other are refused instead of both blocking forever.
-        if caller != provider {
-            let mut waits = self
-                .waits
-                .lock()
-                .map_err(|_| ArkError::internal("mcp wait graph poisoned"))?;
-            waits
-                .register_wait(caller, provider)
-                .map_err(|err| self.refuse(err))?;
-        }
+        // wait on each other are refused instead of both blocking forever. The
+        // guard also covers cancellation and panic, which bypass a plain release
+        // after `.await`.
+        let _wait_guard = self.register_wait(caller, provider)?;
 
         let ctx = CallContext {
             caller: caller.to_string(),
@@ -277,12 +305,6 @@ impl McpBus {
                 registered.handler.call(&ctx, args).await
             })
             .await;
-
-        if caller != provider {
-            if let Ok(mut waits) = self.waits.lock() {
-                waits.release(caller, provider);
-            }
-        }
 
         result.map(|mut value| {
             value.trace_id = ctx.trace_id.clone();

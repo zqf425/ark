@@ -300,6 +300,7 @@ mod tests {
                 call_id: "one".into(),
                 tool: "write".into(),
                 arguments: serde_json::json!({ "path": "src/main.rs" }),
+                item_id: None,
             },
             RuntimeEvent::ToolCallFinished {
                 seq: 2,
@@ -312,6 +313,7 @@ mod tests {
                 duration_ms: 1,
                 output: "written".into(),
                 detail: None,
+                item_id: None,
             },
         ];
         let projected = changes(&events);

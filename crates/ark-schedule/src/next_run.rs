@@ -18,11 +18,8 @@ use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, TimeZone, Utc};
 use crate::types::parse_hhmm;
 use crate::types::{ScheduleKind, ScheduledTask};
 
-/// How far the monthly scan will look for a matching day of month.
-///
-/// 366 days is a hard stop rather than a year of attempts: February 30th never
-/// occurs, and a task configured that way must terminate the search instead of
-/// spinning. All real dates are found well inside this window.
+/// How far the monthly scan will look for a matching day of month. Impossible
+/// dates such as February 30 must still terminate.
 const MONTHLY_SCAN_LIMIT_DAYS: i64 = 366;
 
 /// How far the weekly scan will look. A valid weekday set always matches within
@@ -374,6 +371,19 @@ mod tests {
         assert_eq!(
             compute_next_run_at(&monthly, now).unwrap(),
             at_local(2026, 12, 31, 7, 15)
+        );
+    }
+
+    #[test]
+    fn monthly_day_29_uses_the_next_calendar_month() {
+        let mut monthly = task(ScheduleKind::Monthly);
+        monthly.schedule.time_of_day = "07:15".to_string();
+        monthly.schedule.day_of_month = vec![29];
+
+        let after = at_local(2024, 2, 29, 8, 0);
+        assert_eq!(
+            compute_next_run_at(&monthly, after).unwrap(),
+            at_local(2024, 3, 29, 7, 15)
         );
     }
 

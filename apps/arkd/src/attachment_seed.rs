@@ -6,7 +6,7 @@
 //! reads the filesystem — it only receives message parts (design
 //! requirements/advanced-local-capabilities.md, 附件生命周期 v2 第二期).
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use ark_common::AttachmentId;
 use ark_contract::{AttachmentEntry, TurnAttachmentDelivery, TurnAttachmentOutcome};
@@ -32,25 +32,43 @@ pub struct AttachmentSeed {
     pub outcomes: Vec<TurnAttachmentOutcome>,
 }
 
-/// Resolve authorized attachment ids into model-seed parts.
-///
-/// * images pass through only when the model explicitly declared vision
-///   support (`vision = true`); an undeclared capability degrades the image to
-///   its preview text rather than guessing from the model name;
-/// * images beyond the remaining per-turn budget are skipped in order, never
-///   silently truncated mid-image;
-/// * any failure to read metadata or bytes leaves a durable outcome record and
-///   degrades to a preview note; a broken attachment must not fail the turn.
-pub fn resolve_attachments(
+/// Mutable image budget shared by the initial seed and every steer in one turn.
+/// A fresh instance is created at turn assembly; cloning it shares the counter.
+#[derive(Debug, Clone)]
+pub struct AttachmentBudget {
+    remaining: Arc<Mutex<u64>>,
+}
+
+impl AttachmentBudget {
+    pub fn new(limit: u64) -> Self {
+        Self {
+            remaining: Arc::new(Mutex::new(limit)),
+        }
+    }
+
+    pub fn resolve(
+        &self,
+        store: &dyn AttachmentStore,
+        ids: &[AttachmentId],
+        vision: bool,
+    ) -> AttachmentSeed {
+        let mut remaining = self
+            .remaining
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        resolve_attachments_with_remaining(store, ids, vision, &mut remaining)
+    }
+}
+
+fn resolve_attachments_with_remaining(
     store: &dyn AttachmentStore,
     ids: &[AttachmentId],
     vision: bool,
-    budget_bytes: u64,
+    remaining: &mut u64,
 ) -> AttachmentSeed {
     let mut images = Vec::new();
     let mut previews: Vec<String> = Vec::new();
     let mut outcomes = Vec::new();
-    let mut remaining = budget_bytes;
     for id in ids {
         match store.get(*id) {
             Err(error) => {
@@ -84,7 +102,7 @@ pub fn resolve_attachments(
                     });
                     continue;
                 }
-                if entry.byte_size > remaining {
+                if entry.byte_size > *remaining {
                     previews.push(format!(
                         "[attachment {}: skipped, image exceeds the remaining per-turn image budget]",
                         entry.original_filename
@@ -102,7 +120,7 @@ pub fn resolve_attachments(
                 }
                 match store.read(*id) {
                     Ok(bytes) => {
-                        remaining -= bytes.len() as u64;
+                        *remaining -= bytes.len() as u64;
                         images.push(ModelImage {
                             mime_type: mime,
                             data: base64::engine::general_purpose::STANDARD.encode(bytes),
@@ -147,34 +165,20 @@ fn preview_line(entry: &AttachmentEntry) -> String {
     }
 }
 
-/// Build the reactor's steer-image resolver on top of the seed rules.
-///
-/// A steered correction can reference attachments the same way a turn start
-/// does, so it must obey the same delivery rules: only catalog-declared vision
-/// passes images, degraded/skipped/unavailable ids simply produce no image part
-/// (the steer's text still reaches the model). The resolver reads the
-/// attachment store synchronously — the same port the turn-start seed uses —
-/// which keeps the reactor free of the filesystem.
-pub fn steer_image_resolver(
+/// Build the reactor's per-entry steer resolver on the turn's shared budget.
+/// Images and outcomes come from the same resolution, so the durable item
+/// records exactly what the model request received.
+pub fn steer_attachment_resolver(
     store: Arc<dyn AttachmentStore>,
     vision: bool,
-    budget_bytes: u64,
-) -> ark_agent::SteerImageResolver {
+    budget: AttachmentBudget,
+) -> ark_agent::SteerAttachmentResolver {
     Arc::new(move |ids: &[ark_common::AttachmentId]| {
-        resolve_attachments(store.as_ref(), ids, vision, budget_bytes).images
-    })
-}
-
-/// Build the reactor's steer-outcome recorder on top of the same seed rules:
-/// the committed `UserMessage` item shows exactly the chips a turn start with
-/// the same ids would have shown.
-pub fn steer_outcome_recorder(
-    store: Arc<dyn AttachmentStore>,
-    vision: bool,
-    budget_bytes: u64,
-) -> ark_agent::SteerOutcomeRecorder {
-    Arc::new(move |ids: &[ark_common::AttachmentId]| {
-        resolve_attachments(store.as_ref(), ids, vision, budget_bytes).outcomes
+        let seed = budget.resolve(store.as_ref(), ids, vision);
+        ark_agent::SteerAttachments {
+            images: seed.images,
+            outcomes: seed.outcomes,
+        }
     })
 }
 
@@ -192,6 +196,26 @@ mod tests {
     }
 
     impl FakeStore {
+        fn with_images(images: &[(&str, usize)]) -> Self {
+            let entries = images
+                .iter()
+                .map(|(id, size)| AttachmentEntry {
+                    id: id.parse().unwrap(),
+                    original_filename: format!("{id}.png"),
+                    byte_size: *size as u64,
+                    mime_type: Some("image/png".into()),
+                    created_at: chrono::Utc::now(),
+                    preview_text: None,
+                    sha256: String::new(),
+                })
+                .collect();
+            let bytes = images
+                .iter()
+                .map(|(id, size)| ((*id).parse().unwrap(), vec![0u8; *size]))
+                .collect();
+            Self { entries, bytes }
+        }
+
         fn with_image(id: &str, mime: &str, size: usize, preview: Option<&str>) -> Self {
             let id: Id = id.parse().unwrap();
             Self {
@@ -252,7 +276,7 @@ mod tests {
     fn a_vision_capable_model_receives_the_image_within_the_budget() {
         let store =
             FakeStore::with_image("019689f4-8000-7000-8000-000000000001", "image/png", 4, None);
-        let seed = resolve_attachments(&store, &[image_id()], true, 1_000);
+        let seed = AttachmentBudget::new(1_000).resolve(&store, &[image_id()], true);
         assert_eq!(seed.images.len(), 1);
         assert_eq!(seed.images[0].mime_type, "image/png");
         assert!(seed.preview.is_empty());
@@ -267,7 +291,7 @@ mod tests {
             4,
             Some("alt text"),
         );
-        let seed = resolve_attachments(&store, &[image_id()], false, 1_000);
+        let seed = AttachmentBudget::new(1_000).resolve(&store, &[image_id()], false);
         assert!(seed.images.is_empty());
         assert!(seed.preview.contains("alt text"));
         assert_eq!(seed.outcomes[0].delivered, TurnAttachmentDelivery::Degraded);
@@ -277,7 +301,7 @@ mod tests {
     fn an_image_over_the_remaining_budget_is_skipped_in_order() {
         let store =
             FakeStore::with_image("019689f4-8000-7000-8000-000000000001", "image/png", 8, None);
-        let seed = resolve_attachments(&store, &[image_id()], true, 4);
+        let seed = AttachmentBudget::new(4).resolve(&store, &[image_id()], true);
         assert!(seed.images.is_empty());
         assert_eq!(seed.outcomes[0].delivered, TurnAttachmentDelivery::Skipped);
         assert!(seed.preview.contains("budget"));
@@ -291,7 +315,7 @@ mod tests {
             4,
             Some("file body"),
         );
-        let seed = resolve_attachments(&store, &[image_id()], true, 1_000);
+        let seed = AttachmentBudget::new(1_000).resolve(&store, &[image_id()], true);
         assert!(seed.images.is_empty());
         assert!(seed.preview.contains("file body"));
         assert_eq!(
@@ -305,12 +329,29 @@ mod tests {
         let store =
             FakeStore::with_image("019689f4-8000-7000-8000-000000000001", "image/png", 4, None);
         let ghost: Id = "019689f4-8000-7000-8000-000000000002".parse().unwrap();
-        let seed = resolve_attachments(&store, &[ghost, image_id()], true, 1_000);
+        let seed = AttachmentBudget::new(1_000).resolve(&store, &[ghost, image_id()], true);
         assert_eq!(
             seed.outcomes[0].delivered,
             TurnAttachmentDelivery::Unavailable
         );
         // The later healthy image is still delivered.
         assert_eq!(seed.images.len(), 1);
+    }
+
+    #[test]
+    fn successive_steer_resolutions_share_one_per_turn_budget() {
+        let first: Id = "019689f4-8000-7000-8000-000000000001".parse().unwrap();
+        let second: Id = "019689f4-8000-7000-8000-000000000002".parse().unwrap();
+        let store = Arc::new(FakeStore::with_images(&[
+            ("019689f4-8000-7000-8000-000000000001", 6),
+            ("019689f4-8000-7000-8000-000000000002", 6),
+        ]));
+        let resolve = steer_attachment_resolver(store, true, AttachmentBudget::new(10));
+
+        assert_eq!(resolve(&[first]).images.len(), 1);
+        assert!(
+            resolve(&[second]).images.is_empty(),
+            "the second correction must not reset the turn's image budget"
+        );
     }
 }

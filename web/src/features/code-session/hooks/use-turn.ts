@@ -7,6 +7,7 @@
  */
 import { useCallback } from 'react'
 import { describeError } from '../../../shared/api/error-describe'
+import { ApiError } from '../../../shared/api/client'
 import { translateNow } from '../../../shared/i18n/current'
 import { interruptTurn, startTurn, steerTurn } from '../api/turns-api'
 import { useCodeSessionStore } from '../state/store'
@@ -15,9 +16,30 @@ function describe(error: unknown): string {
   return describeError(error, translateNow)
 }
 
+export type TurnSendResult = 'accepted' | 'retry' | 'permanent'
+
+const PERMANENT_ERROR_CODES: ReadonlySet<string> = new Set([
+  'validation_error',
+  'not_found',
+  'unauthorized',
+  'not_implemented',
+  'mime_mismatch',
+  'attachment_in_use',
+  'attachment_not_associated'
+])
+
+function failureResult(error: unknown): TurnSendResult {
+  if (!(error instanceof ApiError)) return 'retry'
+  if (PERMANENT_ERROR_CODES.has(error.code)) return 'permanent'
+  if (error.code === 'unknown' && error.status < 500 && ![408, 425, 429].includes(error.status)) {
+    return 'permanent'
+  }
+  return 'retry'
+}
+
 export type TurnApi = {
-  send: (text: string, attachmentIds?: string[]) => Promise<boolean>
-  steer: (text: string, attachmentIds?: string[]) => Promise<boolean>
+  send: (text: string, attachmentIds?: string[]) => Promise<TurnSendResult>
+  steer: (text: string, attachmentIds?: string[]) => Promise<TurnSendResult>
   interrupt: () => Promise<void>
   canSend: boolean
   canInterrupt: boolean
@@ -33,18 +55,18 @@ export function useTurn(threadId: string | null): TurnApi {
   const activeTurnId = useCodeSessionStore((s) => s.activeTurnId)
 
   const send = useCallback(
-    async (text: string, attachmentIds: string[] = []): Promise<boolean> => {
+    async (text: string, attachmentIds: string[] = []): Promise<TurnSendResult> => {
       const trimmed = text.trim()
-      if (!threadId || !trimmed || sending) return false
+      if (!threadId || !trimmed || sending) return 'permanent'
 
       setSending(true)
       setCommandError(null)
       try {
         await startTurn(threadId, { text: trimmed, attachment_ids: attachmentIds })
-        return true
+        return 'accepted'
       } catch (error) {
         setCommandError(describe(error))
-        return false
+        return failureResult(error)
       } finally {
         setSending(false)
       }
@@ -66,17 +88,17 @@ export function useTurn(threadId: string | null): TurnApi {
   }, [activeTurnId, interrupting, setCommandError, setInterrupting, threadId])
 
   const steer = useCallback(
-    async (text: string, attachmentIds: string[] = []): Promise<boolean> => {
+    async (text: string, attachmentIds: string[] = []): Promise<TurnSendResult> => {
       const trimmed = text.trim()
-      if (!threadId || !activeTurnId || !trimmed || sending) return false
+      if (!threadId || !activeTurnId || !trimmed || sending) return 'permanent'
       setSending(true)
       setCommandError(null)
       try {
         await steerTurn(threadId, activeTurnId, { text: trimmed, attachment_ids: attachmentIds })
-        return true
+        return 'accepted'
       } catch (error) {
         setCommandError(describe(error))
-        return false
+        return failureResult(error)
       } finally {
         setSending(false)
       }

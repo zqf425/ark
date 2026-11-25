@@ -24,7 +24,8 @@ Tauri 2.12 及其 shell plugin 的最低 Rust 版本为 1.90，因此 `ark-deskt
   声明这个发布产物，开发和普通 `cargo check` 不依赖它。外壳从 sidecar 启动它。
   发布构建将 `VITE_ARK_BASE_URL` 固定为受限的 loopback 地址，不能把生产 API 请求误发给 WebView 自身。
 - 复用：如果 `127.0.0.1:18791` 已有监听，外壳只在 `/health` 响应确认它是 arkd 时复用；未知服务会显示
-  端口冲突，绝不终止或连接它。由外壳启动的 sidecar 由其显式持有，并在退出时通过进程组/Job Object 回收。
+  端口冲突，绝不终止或连接它。由外壳启动的 sidecar 由其显式持有，并在退出时先请求优雅停机、等待进程退出，
+  超时才通过进程组/Job Object 强制回收。
 
 Windows 发布构建必须使用 GUI 子系统（`main.rs` 的 `windows_subsystem = "windows"`）：控制台子系统会额外显示
 一个黑色控制台窗口，用户关闭该窗口会向挂在其上的进程发送关闭信号，导致桌面壳和 sidecar 一起退出。Debug
@@ -42,14 +43,30 @@ Windows 发布构建必须使用 GUI 子系统（`main.rs` 的 `windows_subsyste
 `CheckIfAppIsRunning` 只检查主程序，卸载脚本同样不管 sidecar，所以"先卸载再装"并不能绕过该占用。
 
 `src-tauri/nsis/installer-hooks.nsh`（由 `tauri.release.conf.json` 的 `bundle.windows.nsis.installerHooks`
-指向）在安装、卸载前用 `taskkill` 结束 `arkd`，并留出句柄释放时间；安装前把主程序、`arkd` 和
-`WebView2Loader.dll` 备份到 `$INSTDIR\.ark-upgrade-backup`，`NSIS_HOOK_POSTINSTALL` 成功后删除，
+指向）在安装、卸载前只结束可执行路径精确等于 `$INSTDIR\arkd.exe` 的进程，并留出句柄释放时间；其他目录的
+`arkd.exe` 不受影响。hook 先调用 `InitPluginsDir` 初始化并创建 `$PLUGINSDIR`，再写临时 PowerShell 脚本，以
+`-File` 加两个独立路径参数调用 Windows PowerShell：脚本按 `Process.Path` 精确筛选，未匹配时返回 0；
+脚本创建/写入失败会打印警告，PowerShell 非零退出码会打印包含该退出码的警告，安装流程不把失败伪装成
+成功。安装前把主程序、`arkd` 和 `WebView2Loader.dll` 备份到
+`$INSTDIR\.ark-upgrade-backup`，`NSIS_HOOK_POSTINSTALL` 成功后删除，
 `.onInstFailed` 在安装中止或写入失败时把备份复制回原位。用户数据在 `~/.arkd`，不属于安装目录，升级和
 卸载都不触碰。
 
 `arkd` 被强杀会中断正在进行的回合；安装器一律先关主程序再动文件，属于安装场景可接受的代价。hook 文件
-在 Tauri 模板的 `installer_hooks` 位置 include（早于产品名 define），因此只能用 `MAINBINARYNAME` 这类
-宏内展开的变量，函数体里用通配符，不得改成顶层直接引用的具体值。
+在 Tauri 模板的 `installer_hooks` 位置 include（早于产品名 define），因此只能使用 `MAINBINARYNAME` 这类
+宏内展开的变量，不得改成顶层直接引用的具体产品值。
+
+### 托管运行时停机
+
+`ManagedRuntime` 同时持有 `CommandChild` 与事件监听任务共享的 `exited` 标志。退出时若 leader 已退出，
+不发送请求、不等待；否则用标准库 `TcpStream` 向 `127.0.0.1:18791` 同步发送
+`POST /v1/shutdown`（`Content-Length: 0`），每 100 ms 检查退出标志，最多等待 12 秒，为服务端 10 秒 drain
+留出进程收尾余量。leader 已退出、等待中退出或超时后，都显式调用一次 `CommandChild::kill()` 回收该 child
+的进程组/Job Object：leader 退出不代表组已空，提前 drop 会关闭 Windows Job Object 而遗留工具后代。正常退出
+不会等满超时；只有仍存活的 leader 超时后才连同其组强杀。两种启动路径都设置 `set_process_group(true)` 与
+`kill_on_drop(false)`，把回收时机集中到显式停机路径，避免 Drop 顺序造成隐式终止。
+同步停机逻辑通过注入退出查询、请求、kill 和 sleep 测试，不依赖真实桌面进程；health probe 的响应判定与读取
+超时保持独立，不因停机请求改变。
 
 桌面仅在端口上与 CLI/纯 Web 默认值隔离：CLI 和直接运行 `web/npm run dev` 使用 18790，桌面使用 18791；
 两种构建都把 `~/.arkd/data` 和 `~/.arkd/workspace` 显式传给 arkd，不再使用 Tauri `app_data_dir`、
@@ -63,7 +80,8 @@ Documents 或仓库根。已有 18791 监听必须通过健康检查才会复用
 
 外壳不向 JavaScript 暴露 shell 命令。它只从 Rust 调用 Tauri 的 shell plugin 启动固定的 `arkd` 命令，因此
 Web UI 不能借桌面能力执行任意程序。唯一向渲染器暴露的进程能力是 `open_external`（见下）：它只接收一个
-URL，校验 scheme 后交系统默认处理器，不执行程序、不接受 shell 参数。
+URL，校验 scheme 后经 `tauri-plugin-opener` 交系统默认处理器，不执行程序、不接受 shell 参数；严格 Clippy
+门禁要求外部链接不得再使用已弃用的 `Shell::open`。
 
 ### 外部链接与导航守卫
 
@@ -114,9 +132,13 @@ target 会按 `bundle.icon` 找第一个 `.png` 条目（找不到就回退硬�
 ## 验证
 
 - `node --test apps/ark-desktop/scripts/desktop-layout.test.mjs` 验证根 `npm run dev`、Tauri 与 Vite 编排配置
-  （含系统通知命令的桥接断言）。
-- `cargo test -p ark-desktop` 覆盖健康探针、就绪等待与导航守卫的 origin 判定
-  （`navigation_guard_accepts_only_the_app_origins`、`release_window_refuses_the_dev_origin_when_no_dev_url_is_configured`）。
+  （含系统通知命令的桥接断言）、外部链接使用 opener plugin、NSIS sidecar 精确路径终止及本地/CI 门禁命令。
+- `cargo test -p ark-desktop` 覆盖 health 响应判定、就绪等待、托管运行时停机（已退出不发送/不等待、超时前不
+  终止、提前退出不等满预算、退出后清理自有进程组）与导航守卫的 origin 判定。
 - `npm --prefix apps/ark-desktop run build:web` 验证生产 Web 构建把 API origin 指向桌面专属 loopback。
-- `cargo check -p ark-desktop`、`npm run dev` 验证 Rust 宿主与真实窗口/sidecar；Windows GNU 工具链必须提供
-  `dlltool.exe`，否则这是环境失败，不得将其表述为代码通过。
+- `scripts/verify.ps1 -Scope desktop` 与 CI 独立 desktop job 依次执行 `cargo check -p ark-desktop`、Node
+  宿主测试和生产 Web 构建；`cargo check -p ark-desktop`、`npm run dev` 验证 Rust 宿主与真实窗口/sidecar；
+  Windows GNU 工具链必须提供 `dlltool.exe`，否则这是环境失败，不得将其表述为代码通过。
+- NSIS hook 用 `makensis` 编译包含 `NSIS_HOOK_PREINSTALL`/`NSIS_HOOK_PREUNINSTALL` 的最小安装脚本检查语法；
+  同一 Windows harness 还验证临时脚本实际生成、PowerShell 可解析，以及只结束目标安装路径的进程。真实升级
+  仍需在 Windows 交付环境验证文件占用与回滚。

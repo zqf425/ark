@@ -32,8 +32,8 @@ pub mod provider;
 pub mod service;
 
 pub use common::{
-    parse_tool_arguments, repair_messages, FailureKind, RetryPolicy, RetryState, SseEvent,
-    SseParser, StreamAccumulator, UsageParser,
+    parse_tool_arguments, repair_messages, FailureKind, RetryPolicy, RetryState, SseBatch,
+    SseError, SseEvent, SseParser, StreamAccumulator, UsageParser,
 };
 pub use config::{
     EndpointFormat, ProviderConfig, COMPACTION_TRIGGER_RATIO, DEFAULT_CONTEXT_WINDOW_TOKENS,

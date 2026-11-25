@@ -14,6 +14,25 @@ use std::collections::HashSet;
 
 use crate::state::AppState;
 
+fn active_workspace_root(state: &AppState) -> Option<String> {
+    state
+        .base
+        .workspace
+        .as_ref()
+        .and_then(|service| service.view().active)
+        .map(|descriptor| normalize(&descriptor.path))
+}
+
+fn effective_workspace(state: &AppState, meta: &ThreadMeta) -> Option<String> {
+    meta.runtime
+        .workspace
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(normalize)
+        .or_else(|| active_workspace_root(state))
+}
+
 /// Create a thread and publish its `thread_created` event.
 ///
 /// `workspace` is the client's per-thread workspace for the new session (the
@@ -182,12 +201,7 @@ pub async fn delete_settled_by_workspace(
     let needle = normalize(workspace);
     // Same fallback grouping key as the renderer's rail (see the `workspace`
     // field on `ThreadSummary`): no override means "the active root".
-    let active_fallback = state
-        .base
-        .workspace
-        .as_ref()
-        .and_then(|service| service.view().active)
-        .map(|descriptor| normalize(&descriptor.path));
+    let active_fallback = active_workspace_root(state);
     let metas = state.store.list_threads().await?;
     let registry_active = state.turns.active_thread_ids();
     // One durable fold for the whole sweep: a thread whose newest turn
@@ -221,7 +235,17 @@ pub async fn delete_settled_by_workspace(
             });
             continue;
         }
-        match delete_settled(state, meta.thread_id).await {
+        let expected_seq = match state.store.highest_seq(meta.thread_id).await {
+            Ok(seq) => seq,
+            Err(error) => {
+                response.skipped.push(BulkDeleteSkipped {
+                    thread_id: meta.thread_id,
+                    code: error.code,
+                });
+                continue;
+            }
+        };
+        match delete_settled(state, meta.thread_id, Some(expected_seq), Some(&needle)).await {
             Ok(()) => response.deleted.push(meta.thread_id),
             Err(error) => response.skipped.push(BulkDeleteSkipped {
                 thread_id: meta.thread_id,
@@ -238,8 +262,39 @@ pub async fn delete_settled_by_workspace(
 /// Ownership existence is re-checked here so a concurrent delete between the
 /// listing and this call reports a structured 404-shaped skip instead of
 /// inventing a second row.
-async fn delete_settled(state: &AppState, thread_id: ThreadId) -> Result<()> {
-    state.store.get_thread(thread_id).await?;
+pub(crate) async fn delete_settled(
+    state: &AppState,
+    thread_id: ThreadId,
+    expected_seq: Option<u64>,
+    expected_workspace: Option<&str>,
+) -> Result<()> {
+    let _workspace_guard = state.workspace_gate.lock().await;
+    if let Some(active) = state.turns.active_for(thread_id) {
+        return Err(ark_common::ArkError::new(
+            ArkErrorCode::Conflict,
+            format!(
+                "thread has a running turn ({}) and cannot be deleted; interrupt it first",
+                active.turn_id
+            ),
+        ));
+    }
+    if let Some(seq) = expected_seq {
+        if state.store.highest_seq(thread_id).await? != seq {
+            return Err(ark_common::ArkError::new(
+                ArkErrorCode::Conflict,
+                "thread changed while the bulk delete was scanning",
+            ));
+        }
+    }
+    let meta = state.store.get_thread(thread_id).await?;
+    if expected_workspace
+        .is_some_and(|expected| effective_workspace(state, &meta).as_deref() != Some(expected))
+    {
+        return Err(ark_common::ArkError::new(
+            ArkErrorCode::Conflict,
+            "thread workspace changed while the bulk delete was scanning",
+        ));
+    }
     let was_suppressed = state.continuations.suppress(thread_id);
     if let Err(error) = state.store.delete_thread(thread_id).await {
         if !was_suppressed {

@@ -86,7 +86,7 @@ pub fn rewrite_items_from_events_blocking(
 ) -> Result<Vec<ThreadItem>> {
     let mut projector = crate::domain::items::ItemProjector::new();
     for event in events {
-        projector.apply(event);
+        projector.apply_in_place(event);
     }
     let records = projector.snapshot_records();
     write_items_records_blocking(paths, &records)?;
@@ -446,6 +446,7 @@ mod tests {
                 seq: 3,
                 thread_id: thread,
                 turn_id: turn,
+                item_id: None,
                 timestamp: Utc::now(),
                 call_id: tool_call.into(),
                 tool: "bash".into(),
@@ -455,6 +456,7 @@ mod tests {
                 seq: 4,
                 thread_id: thread,
                 turn_id: turn,
+                item_id: None,
                 timestamp: Utc::now(),
                 call_id: tool_call.into(),
                 tool: "bash".into(),

@@ -15,7 +15,7 @@
   （`[DONE]` / `message_stop` / `response.completed`）即视为回合结束：pump 立即收尾，不再等
   EOF，否则保持连接的服务端会把已完成的流误判为超时并触发重复请求。终止帧之后到达的字节不得
   发布。收尾时 `StreamAccumulator::finish()` 补发的 tool-call chunk 必须同样转发到 sink，使
-  `ModelResponse.tool_calls` 与事件流一致；未发终止帧就 EOF 的流也走这条补发路径。
+  `ModelResponse.tool_calls` 与事件流一致；未发终止帧就 EOF 的流直接失败，不补发未完成的 tool call。
 - `cache_hit_rate` 只能读取原生 hit/miss 后计算，不能由 prompt token 猜测。OpenAI 家族在供应商
   未报原生 miss 字段时，可用 `prompt - hit` 代数补全未命中数（brgroup_bl、Nvidia、openrouter
   实测均只报 `cached_tokens`）；但同一 usage 对象把 image/audio token 从 prompt 中拆分单独上报
@@ -63,7 +63,8 @@ Messages 无 effort 旋钮，三档映射为固定 thinking 预算（2k/8k/16k�
 ## 重试策略（common/retry.rs，唯一实现）
 
 `HttpModelClient::stream` 在**任何模型输出进入 sink 之前**对瞬时失败重试；已发布过增量的失败
-不重试（重放会复制文本）。默认预算：
+不重试（重放会复制文本）。`published` 状态逐帧累积，role-only、ping 等不产生 chunk 的帧不会
+清除它，因此这些静默帧之后的流内错误或 EOF 仍保持终态。默认预算：
 
 - 失败分类：`429` 为 `RateLimited`；`408/409/425/5xx` 与传输错误（连接/超时/请求构造外错误）
   为 `Transient`；其余 4xx 为 `Permanent`，永不重试。
@@ -84,6 +85,7 @@ Messages 无 effort 旋钮，三档映射为固定 thinking 预算（2k/8k/16k�
 
 每个协议族以录制 SSE fixture 覆盖正常分块、畸形帧、断流、重试和 usage 缺失；模拟客户端用于
 agent 无网络测试。`tests/stream_finalization.rs` 以本地 TCP 服务覆盖两条传输收尾边界：发完
-终止帧但保持连接，以及无终止帧直接 EOF 时工具调用的补发。`HttpModelClient` 的单测宿主在
+终止帧但保持连接，以及无终止帧直接 EOF 时返回截断错误且不发布未完成工具调用。`HttpModelClient` 的单测宿主在
 `service/http/tests/http_tests.rs`（经 `#[path]` 挂回 `http.rs` 的 `tests` 模块），生产文件与
-测试文件分别遵守单文件行数上限。
+测试文件分别遵守单文件行数上限。另有本地 TCP 回归覆盖“delta → role-only/ping → 错误终态”，
+断言只发起一次请求且 sink 不收到重放文本。

@@ -156,12 +156,15 @@ pub async fn build(args: &ServeArgs, unattended: bool) -> Result<Wiring> {
         &hooks,
         runner,
         &mcp_adapter,
-    );
+    )
+    .with_automatic_followups(!unattended);
 
-    spawn_completion_listener(state.clone(), agent.completion_notifications);
-    // Recover unacknowledged completions that were durable before this process
-    // started (for example, a crash after `child_completed` but before debounce).
-    ark_server::sync_auto_continue_policy(state.clone()).await;
+    if !unattended {
+        spawn_completion_listener(state.clone(), agent.completion_notifications);
+        // Recover unacknowledged completions that were durable before this process
+        // started (for example, a crash after `child_completed` but before debounce).
+        ark_server::sync_auto_continue_policy(state.clone()).await;
+    }
     // The loop is NOT started here: a one-shot headless `run` reuses this
     // assembly and must not fire due schedules (or spend model budget) while
     // executing a single turn. `serve` calls `Wiring::schedules.spawn(...)`

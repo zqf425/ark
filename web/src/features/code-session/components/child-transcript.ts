@@ -12,6 +12,7 @@
  * re-render while a child transcript folds.
  */
 import type { RuntimeEvent, ThreadItem } from '../../../shared/contracts'
+import { projectToolCall } from '../state/item-projection'
 
 export type ChildTranscript = {
   /** Row ids in display order, matching the server's item projection. */
@@ -65,6 +66,12 @@ export function foldChildEvent(state: ChildTranscript, event: RuntimeEvent): Chi
           text: event.delta
         })
       }
+      break
+    }
+    case 'tool_call_started':
+    case 'tool_call_finished': {
+      const id = event.item_id!
+      upsert(projectToolCall(event, itemsById[id]))
       break
     }
     // Turn/child lifecycle events carry no row; they only move the watermark.

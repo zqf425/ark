@@ -8,6 +8,7 @@
  * clickable) during B's load, and a failed B load would leave them there for
  * good. Both branches must end with an empty projection.
  */
+import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RuntimeEvent, ThreadDetail, ThreadItem } from '../../../shared/contracts'
 import { installBrowserStubs, mountWithProviders, settle, type ReactHarness } from '../../../shared/testing/react-harness'
@@ -15,6 +16,7 @@ import { getThread, getThreadUsage } from '../api/threads-api'
 import { subscribeThreadEvents } from '../api/events-api'
 import { useCodeSessionStore } from '../state/store'
 import { useThreadStream } from './use-thread-stream'
+import { SessionStatsBar } from '../components/SessionStatsBar'
 import { resetTurnEndNotifications } from './turn-end-toast'
 
 vi.mock('../api/threads-api', () => ({ getThread: vi.fn(), getThreadUsage: vi.fn() }))
@@ -204,6 +206,52 @@ describe('useThreadStream thread ownership', () => {
     expect(useCodeSessionStore.getState().itemOrder).toHaveLength(1)
   })
 
+  it('ignores an older stats usage seed after the newer detail seed resolves first', async () => {
+    let resolveStats!: (value: unknown) => void
+    let resolveDetail!: (value: unknown) => void
+    const statsRequest = new Promise((resolve) => { resolveStats = resolve })
+    const detailRequest = new Promise((resolve) => { resolveDetail = resolve })
+    getThreadMock.mockResolvedValue(detail(THREAD_A, 41, [item({})]))
+    getThreadUsageMock.mockReturnValueOnce(statsRequest as never).mockReturnValueOnce(detailRequest as never)
+    function CombinedProbe(): JSX.Element {
+      useThreadStream(THREAD_A)
+      return <SessionStatsBar threadId={THREAD_A} />
+    }
+
+    harness = await mountWithProviders(<CombinedProbe />)
+    await settle()
+    expect(getThreadUsageMock).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      resolveDetail({
+        thread_id: THREAD_A,
+        turns: 2,
+        samples: 2,
+        turn_usage: [],
+        prompt_tokens: 150,
+        completion_tokens: 50,
+        total_tokens: 200
+      })
+      await Promise.resolve()
+    })
+    expect(useCodeSessionStore.getState().usage?.totalTokens).toBe(200)
+
+    await act(async () => {
+      resolveStats({
+        thread_id: THREAD_A,
+        turns: 1,
+        samples: 1,
+        turn_usage: [],
+        prompt_tokens: 90,
+        completion_tokens: 10,
+        total_tokens: 100
+      })
+      await Promise.resolve()
+    })
+    expect(useCodeSessionStore.getState().usage?.totalTokens).toBe(200)
+    expect(useCodeSessionStore.getState().usageTurns).toBe(2)
+  })
+
   it('re-seeds usage per thread without leaking values across switches', async () => {
     getThreadMock.mockImplementation((threadId) => Promise.resolve(
       threadId === THREAD_A
@@ -330,6 +378,7 @@ describe('useThreadStream rail activity', () => {
       seq: 9,
       thread_id: THREAD_A,
       turn_id: TURN_A,
+      item_id: '00000000-0000-0000-0000-0000000000d1',
       timestamp: '2026-11-21T00:00:00Z',
       call_id: 'call-1',
       tool: 'bash',
@@ -426,6 +475,7 @@ describe('useThreadStream turn-end notifications', () => {
       seq: 8,
       thread_id: THREAD_B,
       turn_id: TURN_A,
+      item_id: '00000000-0000-0000-0000-0000000000e1',
       timestamp: '2026-11-20T00:00:00Z',
       message: 'boom',
       model_request_failed: false
@@ -438,6 +488,7 @@ describe('useThreadStream turn-end notifications', () => {
       seq: 9,
       thread_id: THREAD_A,
       turn_id: TURN_A,
+      item_id: '00000000-0000-0000-0000-0000000000e1',
       timestamp: '2026-11-20T00:00:00Z',
       message: 'boom',
       model_request_failed: false

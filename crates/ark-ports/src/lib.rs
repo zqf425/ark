@@ -41,7 +41,7 @@ pub use hook::{
     truncate_utf8, HookBroker, HookScope, LlmCallFact, ModelRequestTuning, NoHooks,
     ToolPreCallVerdict, TurnOutcomeFact, HOOK_ABI, LLM_TAIL_BYTES, TOOL_ARGS_HEAD_BYTES,
 };
-pub use im::{binding_now, ImChannelRecord, ImStore};
+pub use im::{binding_now, ImChannelRecord, ImInboxEntry, ImInboxId, ImStore, InboundMessage};
 pub use model::{
     ModelChunk, ModelClient, ModelImage, ModelMessage, ModelRequest, ModelResponse, ModelRole,
     ToolCallRef,

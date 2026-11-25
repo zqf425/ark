@@ -147,6 +147,7 @@ fn skills_config_source_reads_the_latest_snapshot() {
     // (skills is a `Hot` reload class).
     let store = Arc::new(ConfigStore::new(RuntimeConfig::default()));
     let global_skills = std::path::PathBuf::from("/tmp/global-skills");
+    let extra_skills = std::env::temp_dir().join("ark-extra-skills");
     let source = skills_config_source(store.clone(), global_skills.clone());
     assert!(source().enabled);
     // First root is the app-owned global dir; the shared `~/.agents/skills`
@@ -158,7 +159,7 @@ fn skills_config_source_reads_the_latest_snapshot() {
     let applied = store.apply(ark_contract::ConfigPatch {
         skills: Some(ark_contract::SkillsSettings {
             enabled: false,
-            extra_dirs: vec!["/tmp/extra-skills".into()],
+            extra_dirs: vec![extra_skills.to_string_lossy().into_owned()],
         }),
         ..ark_contract::ConfigPatch::default()
     });
@@ -169,7 +170,5 @@ fn skills_config_source_reads_the_latest_snapshot() {
 
     let config = source();
     assert!(!config.enabled);
-    assert!(config
-        .roots
-        .contains(&std::path::PathBuf::from("/tmp/extra-skills")));
+    assert!(config.roots.contains(&extra_skills));
 }

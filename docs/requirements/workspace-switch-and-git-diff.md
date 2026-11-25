@@ -59,6 +59,11 @@ headless/远程构建不装配，避免在无人可见的机器上弹窗。macOS
 descriptor（active/recent）输出 normalize 形态;列表投影 `summary_of` 读出时 normalize,兜底历史数据与
 scheduler/IM 旁路写入。运行回合的 `resolve_workspace` 仍做 canonicalize（语义不受影响）。
 
+含 `runtime` 的线程 PATCH 在读取旧元数据前取得 `workspace_gate`，合并与写回也在锁内完成；bulk-delete
+在提交临界区复核有效 workspace 后直接物理删除。二者串行后，PATCH 只能观察到删除前状态或删除后的
+`NotFound`，不能把已移出项目的线程写回并误报删除成功。确定性回归在删除物理提交处设门，验证 PATCH
+确实等待且删除先提交时返回 `NotFound`。
+
 ## 当前实现（2026-11-03 更新）
 
 - `WorkspaceRoots` 持有 canonical root 与 generation；父 turn 在 runner 入口获取 lease，prompt 与每次

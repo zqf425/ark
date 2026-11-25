@@ -40,6 +40,7 @@ struct TurnRegistryState {
     /// Threads whose manual checkpoint snapshot is in progress. Turn
     /// registration checks this under the same lock as active-slot lookup.
     compactions: std::collections::HashSet<ThreadId>,
+    shutting_down: bool,
 }
 
 impl TurnRegistryState {
@@ -48,6 +49,7 @@ impl TurnRegistryState {
             slots: HashMap::new(),
             finished: VecDeque::new(),
             compactions: std::collections::HashSet::new(),
+            shutting_down: false,
         }
     }
 }
@@ -111,6 +113,9 @@ impl TurnRegistry {
         cancel: CancelToken,
     ) -> Option<TurnRegistration> {
         let mut guard = self.lock();
+        if guard.shutting_down {
+            return None;
+        }
         let busy = guard.compactions.contains(&thread_id)
             || guard
                 .slots
@@ -141,6 +146,14 @@ impl TurnRegistry {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(thread_id, turn_id);
         Some(TurnRegistration { summary, steering })
+    }
+
+    /// Close the registration gate under the same lock as slot insertion.
+    ///
+    /// A registration that wins this lock is visible to the subsequent cancel
+    /// sweep; one that loses is rejected instead of escaping the drain.
+    pub fn shutdown(&self) {
+        self.lock().shutting_down = true;
     }
 
     /// The in-flight turn of a thread, if any.

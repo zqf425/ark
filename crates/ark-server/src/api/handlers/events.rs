@@ -27,6 +27,9 @@ use crate::api::error::ApiError;
 use crate::api::handlers::threads::parse_thread;
 use crate::state::AppState;
 
+/// Maximum time a non-reading SSE client may occupy a replay pump.
+const SLOW_CLIENT_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Query parameters of the event stream.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct EventsQuery {
@@ -55,7 +58,13 @@ pub async fn stream(
 
     let (sender, receiver) = mpsc::channel::<Result<Event, Infallible>>(64);
     let thread_label = thread_id.to_string();
-    tokio::spawn(pump(ticket, sender, idle, thread_label));
+    tokio::spawn(pump(
+        ticket,
+        sender,
+        idle,
+        SLOW_CLIENT_TIMEOUT,
+        thread_label,
+    ));
 
     Ok(
         Sse::new(tokio_stream::wrappers::ReceiverStream::new(receiver))
@@ -68,6 +77,7 @@ async fn pump(
     ticket: ark_ports::SubscribeTicket,
     sender: mpsc::Sender<Result<Event, Infallible>>,
     idle: Option<Duration>,
+    send_timeout: Duration,
     thread_label: String,
 ) {
     let ark_ports::SubscribeTicket {
@@ -86,13 +96,13 @@ async fn pump(
         // replayed event already opens the stream, and repeating its `seq`
         // would hand the client a duplicate id.
         let opening = initial_frame(&thread_label, watermark);
-        if sender.send(Ok(to_sse(&opening))).await.is_err() {
+        if !send_frame(&sender, opening, send_timeout).await {
             return;
         }
     }
     for event in backlog {
         last_sent_seq = last_sent_seq.max(event.seq());
-        if sender.send(Ok(to_sse(&event))).await.is_err() {
+        if !send_frame(&sender, event, send_timeout).await {
             return;
         }
     }
@@ -117,7 +127,7 @@ async fn pump(
                             thread_id: parse_thread_lossy(&thread_label),
                             timestamp: chrono::Utc::now(),
                         };
-                        let _ = sender.send(Ok(to_sse(&event))).await;
+                        let _ = send_frame(&sender, event, send_timeout).await;
                         return;
                     }
                 },
@@ -130,13 +140,26 @@ async fn pump(
         match next {
             Some(event) => {
                 last_sent_seq = last_sent_seq.max(event.seq());
-                if sender.send(Ok(to_sse(&event))).await.is_err() {
+                if !send_frame(&sender, event, send_timeout).await {
                     // Slow client: the store already disconnected it, so drop
                     // this connection and let it resume from `since_seq`.
                     return;
                 }
             }
             None => return,
+        }
+    }
+}
+
+async fn send_frame(
+    sender: &mpsc::Sender<Result<Event, Infallible>>,
+    event: RuntimeEvent,
+    timeout: Duration,
+) -> bool {
+    tokio::select! {
+        _ = sender.closed() => false,
+        sent = tokio::time::timeout(timeout, sender.send(Ok(to_sse(&event)))) => {
+            matches!(sent, Ok(Ok(())))
         }
     }
 }
@@ -291,6 +314,7 @@ mod tests {
             },
             sender,
             Some(Duration::from_millis(10)),
+            Duration::from_millis(100),
             thread_id.to_string(),
         ));
 
@@ -424,6 +448,7 @@ mod tests {
             },
             sender,
             None,
+            Duration::from_millis(100),
             thread_id.to_string(),
         ));
 
@@ -441,5 +466,38 @@ mod tests {
         let frame = initial_frame(&ThreadId::new().to_string(), 7);
         assert_eq!(frame.seq(), 7);
         assert_eq!(frame.kind(), ark_contract::EventKind::Heartbeat);
+    }
+
+    #[tokio::test]
+    async fn a_slow_backlog_client_is_disconnected_instead_of_blocking_the_pump() {
+        let thread_id = ThreadId::new();
+        let backlog = [1u64, 2, 3]
+            .into_iter()
+            .map(|seq| RuntimeEvent::Heartbeat {
+                seq,
+                thread_id,
+                timestamp: chrono::Utc::now(),
+            })
+            .collect();
+        let (_live_sender, live) = mpsc::channel(1);
+        let (sender, _receiver) = mpsc::channel(1);
+        let mut task = tokio::spawn(pump(
+            ark_ports::SubscribeTicket {
+                backlog,
+                watermark: 3,
+                live,
+            },
+            sender,
+            None,
+            Duration::from_millis(100),
+            thread_id.to_string(),
+        ));
+
+        let settled = tokio::time::timeout(Duration::from_secs(1), &mut task).await;
+        drop(_receiver);
+        assert!(
+            settled.is_ok(),
+            "a non-reading client must not pin the pump"
+        );
     }
 }
