@@ -27,10 +27,12 @@ describe('live turn → prose chip', () => {
     state = applyEvent(state, { ...base, kind: 'turn_started', turn_id: turnId })
     state = applyEvent(state, {
       ...base, seq: 2, kind: 'tool_call_started', turn_id: turnId,
+      item_id: '00000000-0000-0000-0000-0000000000b1',
       call_id: 'c1', tool: 'write', arguments: { path: '/ws/prose-chip-verify.md', content: 'x' }
     })
     state = applyEvent(state, {
       ...base, seq: 3, kind: 'tool_call_finished', turn_id: turnId,
+      item_id: '00000000-0000-0000-0000-0000000000b1',
       call_id: 'c1', tool: 'write', ok: true, duration_ms: 4, output: 'wrote'
     })
     state = applyEvent(state, {

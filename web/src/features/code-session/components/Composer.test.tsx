@@ -127,7 +127,11 @@ describe('Composer per-thread draft persistence', () => {
 
   beforeEach(() => {
     installBrowserStubs()
-    useCodeSessionStore.setState({ drafts: {}, sending: false, streamStatus: 'open', activeTurnId: null })
+    useCodeSessionStore.setState({ drafts: {}, queuedMessages: {}, sending: false, streamStatus: 'open', activeTurnId: null })
+    turnMocks.send.mockClear()
+    turnMocks.steer.mockClear()
+    turnMocks.send.mockResolvedValue(true)
+    turnMocks.steer.mockResolvedValue(true)
   })
 
   afterEach(async () => {
@@ -199,6 +203,131 @@ describe('Composer per-thread draft persistence', () => {
     expect(node.value).toBe('')
     expect(useCodeSessionStore.getState().drafts[THREAD_A]).toBeUndefined()
     expect(harness.text()).toContain('#1 排队')
+  })
+
+  it('keeps each thread queue across keyed remounts without leaking it', async () => {
+    useCodeSessionStore.setState({ activeTurnId: '00000000-0000-0000-0000-0000000000t1' })
+    harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+    const node = input(harness.host)
+    await type(node, 'A 的排队消息')
+    const trigger = harness.host.querySelector<HTMLButtonElement>('.ark-composer__delivery-trigger')!
+    await click(trigger)
+    await settle()
+    const queueOption = [...harness.host.querySelectorAll<HTMLButtonElement>('.ark-composer__delivery-option')]
+      .find((option) => option.textContent?.includes('排队'))!
+    await click(queueOption)
+    await settle()
+    await pressEnter(node)
+    expect(harness.text()).toContain('A 的排队消息')
+
+    await harness.render(<Composer key={THREAD_B} threadId={THREAD_B} />)
+    expect(harness.text()).not.toContain('A 的排队消息')
+    await harness.render(<Composer key={THREAD_A} threadId={THREAD_A} />)
+    expect(harness.text()).toContain('A 的排队消息')
+  })
+
+  it('keeps duplicate queued texts distinct and ignores a stale head completion', () => {
+    const store = useCodeSessionStore.getState()
+    store.queueMessage(THREAD_A, 'x')
+    store.queueMessage(THREAD_A, 'x')
+    const queue = useCodeSessionStore.getState().queuedMessages[THREAD_A]!
+    const first = queue[0]!
+    const second = queue[1]!
+
+    expect(first.id).not.toBe(second.id)
+    store.removeQueuedMessage(THREAD_A, first.id)
+    store.dequeueMessage(THREAD_A, first.id)
+    expect(useCodeSessionStore.getState().queuedMessages[THREAD_A]).toEqual([second])
+
+    store.dequeueMessage(THREAD_A, second.id)
+    expect(useCodeSessionStore.getState().queuedMessages[THREAD_A]).toBeUndefined()
+  })
+
+  it('retains a queued message when its automatic drain fails', async () => {
+    useCodeSessionStore.setState({ activeTurnId: '00000000-0000-0000-0000-0000000000t1' })
+    turnMocks.send.mockResolvedValueOnce(false)
+    harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+    const node = input(harness.host)
+    await type(node, '失败也不能丢')
+    const trigger = harness.host.querySelector<HTMLButtonElement>('.ark-composer__delivery-trigger')!
+    await click(trigger)
+    await settle()
+    const queueOption = [...harness.host.querySelectorAll<HTMLButtonElement>('.ark-composer__delivery-option')]
+      .find((option) => option.textContent?.includes('排队'))!
+    await click(queueOption)
+    await settle()
+    await pressEnter(node)
+    useCodeSessionStore.setState({ activeTurnId: null })
+    await settle()
+
+    expect(turnMocks.send).toHaveBeenCalledWith('失败也不能丢', [])
+    expect(harness.text()).toContain('失败也不能丢')
+  })
+
+  it('retries a failed idle drain without requiring another live-to-idle edge', async () => {
+    vi.useFakeTimers()
+    try {
+      useCodeSessionStore.setState({ activeTurnId: '00000000-0000-0000-0000-0000000000t1' })
+      turnMocks.send.mockResolvedValueOnce(false)
+      useCodeSessionStore.getState().queueMessage(THREAD_A, '空闲时重试')
+      harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+      await settle()
+
+      await act(async () => {
+        useCodeSessionStore.setState({ activeTurnId: null })
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(turnMocks.send).toHaveBeenCalledTimes(1)
+      expect(useCodeSessionStore.getState().queuedMessages[THREAD_A]).toHaveLength(1)
+
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(turnMocks.send).toHaveBeenCalledTimes(2)
+      expect(useCodeSessionStore.getState().queuedMessages[THREAD_A]).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('pauses failed queue retries while the stream is closed and resumes after reopen', async () => {
+    vi.useFakeTimers()
+    try {
+      useCodeSessionStore.setState({ activeTurnId: '00000000-0000-0000-0000-0000000000t1' })
+      turnMocks.send.mockResolvedValueOnce(false)
+      useCodeSessionStore.getState().queueMessage(THREAD_A, '重连后重试')
+      harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+      await settle()
+
+      await act(async () => {
+        useCodeSessionStore.setState({ activeTurnId: null })
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(turnMocks.send).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        useCodeSessionStore.setState({ streamStatus: 'reconnecting' })
+        vi.advanceTimersByTime(500)
+        await Promise.resolve()
+      })
+      expect(turnMocks.send).toHaveBeenCalledTimes(1)
+      expect(useCodeSessionStore.getState().queuedMessages[THREAD_A]).toHaveLength(1)
+
+      await act(async () => {
+        useCodeSessionStore.setState({ streamStatus: 'open' })
+        vi.advanceTimersByTime(500)
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(turnMocks.send).toHaveBeenCalledTimes(2)
+      expect(useCodeSessionStore.getState().queuedMessages[THREAD_A]).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('an empty running composer shows the interrupt button instead of the chooser', async () => {
@@ -278,7 +407,11 @@ describe('Composer attachment parity (steer, paste, drop)', () => {
     turnMocks.steer.mockResolvedValue(true)
     vi.mocked(uploadAttachment).mockReset()
     vi.mocked(associateAttachment).mockReset()
-    useCodeSessionStore.setState({ drafts: {}, sending: false, streamStatus: 'open', activeTurnId: null })
+    useCodeSessionStore.setState({ drafts: {}, queuedMessages: {}, sending: false, streamStatus: 'open', activeTurnId: null })
+    turnMocks.send.mockClear()
+    turnMocks.steer.mockClear()
+    turnMocks.send.mockResolvedValue(true)
+    turnMocks.steer.mockResolvedValue(true)
   })
 
   afterEach(async () => {

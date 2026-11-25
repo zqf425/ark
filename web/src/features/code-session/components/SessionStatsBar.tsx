@@ -34,16 +34,19 @@ const EMPTY_STATS: Stats = { owner: null, turns: null, roundsCount: null }
 export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.Element | null {
   const { t, locale } = useI18n()
   // One channel per slice: a stream error or gate event no longer re-renders
-  // the whole strip, and `samples` is the refresh signal for the HTTP reads.
+  // the whole strip. Live samples update the aggregate in place; they are not
+  // a signal to replay the usage log over HTTP.
   const usage = useCodeSessionStore((s) => s.usage)
-  const samples = usage?.samples ?? 0
+  const usageTurns = useCodeSessionStore((s) => s.usageTurns)
   const streamError = useCodeSessionStore((s) => s.streamError)
   const lastCompaction = useCodeSessionStore((s) => s.lastCompaction)
   const [stats, setStats] = useState<Stats>(EMPTY_STATS)
   // The seed also back-fills the active-span channel (see `seedUsage`): a live
   // `usage` event that won the race leaves `activeMs` null, and without this
   // refresh the strip would never show a clock for the thread.
+  const beginThreadUsage = useCodeSessionStore((s) => s.beginThreadUsage)
   const noteThreadUsage = useCodeSessionStore((s) => s.noteThreadUsage)
+  const cancelThreadUsage = useCodeSessionStore((s) => s.cancelThreadUsage)
   const noteThreadRounds = useCodeSessionStore((s) => s.noteThreadRounds)
 
   useEffect(() => {
@@ -51,26 +54,36 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
       setStats(EMPTY_STATS)
       return
     }
+    const current = useCodeSessionStore.getState()
+    // A detail load may already have seeded the aggregate. Live samples extend
+    // it in the store, so mounting the strip must not replay the whole log.
+    if (current.usage !== null && current.usageTurns !== null) return
+    const request = beginThreadUsage(threadId)
     const controller = new AbortController()
     setStats((current) => (current.owner === threadId ? current : { owner: threadId, turns: null, roundsCount: null }))
     // One read, one truth: turns and model calls both come from the same
     // event-folded aggregate, so the strip can never report a call count that
     // disagrees with the turn count it is derived from.
     void getThreadUsage(threadId, controller.signal).then((usage) => {
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted || !noteThreadUsage(usage, request)) return
       setStats({ owner: threadId, turns: usage.turns, roundsCount: usage.samples })
-      noteThreadUsage(usage)
       noteThreadRounds(usage)
     }).catch(() => {
+      cancelThreadUsage(request)
       // Keep the last verified numbers: a diagnostics outage is not zero usage.
     })
-    return () => controller.abort()
-  }, [threadId, samples, noteThreadUsage, noteThreadRounds])
+    return () => {
+      controller.abort()
+      cancelThreadUsage(request)
+    }
+  }, [threadId, beginThreadUsage, cancelThreadUsage, noteThreadUsage, noteThreadRounds])
 
   if (!threadId) return null
   const visible = stats.owner === threadId ? stats : null
-  const turns = visible?.turns ?? null
-  const roundsCount = visible?.roundsCount ?? null
+  const turns = visible?.turns ?? usageTurns ?? null
+  // The store aggregate is authoritative and already includes every live sample;
+  // an older HTTP count must not pin the display after SSE usage arrives.
+  const roundsCount = usage?.samples ?? visible?.roundsCount ?? null
   // Total active span: the server-folded wall clock with user-gate waits
   // excluded, covering every turn in the log (including ones this client never
   // rendered). While the thread has a turn in flight the clock extends live

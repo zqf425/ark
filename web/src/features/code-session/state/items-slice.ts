@@ -2,9 +2,9 @@ import type { StateCreator } from 'zustand'
 import type { RuntimeEvent, ThreadItem, ThreadRuntimeSnapshot, ThreadUsageResponse } from '../../../shared/contracts'
 import type { StreamStatus } from '../api/events-api'
 import { applyEvent, emptyItemsState, markApprovalLocally, markUserInputLocally, seedFromItems } from './items-reducer'
-import { seedUsage } from './usage'
-import { roundsFromTurnUsage } from './rounds'
-import type { ItemsSnapshot, LoadStatus } from './types'
+import { cancelUsageRequest, createUsageRequest, seedUsage } from './usage'
+import { indexRounds, roundsFromTurnUsage } from './rounds'
+import type { ItemsSnapshot, LoadStatus, UsageRequest } from './types'
 
 export type ItemsSlice = ItemsSnapshot & {
   detailStatus: LoadStatus
@@ -18,7 +18,7 @@ export type ItemsSlice = ItemsSnapshot & {
   reloadToken: number
   requestStreamReload: () => void
   /** Replace the stream with the authoritative server snapshot. */
-  seedItems: (items: ThreadItem[], lastSeq: number, runtime: ThreadRuntimeSnapshot) => void
+  seedItems: (items: ThreadItem[], lastSeq: number, runtime: ThreadRuntimeSnapshot, snapshotAt?: number) => void
   /** Fold one SSE event through the pure reducer. */
   ingestEvent: (event: RuntimeEvent) => void
   resetItems: () => void
@@ -26,13 +26,13 @@ export type ItemsSlice = ItemsSnapshot & {
   setStreamStatus: (status: StreamStatus, error?: string | null) => void
   noteApprovalResolved: (approvalId: string, approved: boolean) => void
   noteUserInputAnswered: (requestId: string, answer: string) => void
-  /** Seed the usage aggregate from the thread usage endpoint (idempotent). */
-  noteThreadUsage: (usage: ThreadUsageResponse) => void
-  /**
-   * Replace the per-turn model timings from the thread usage aggregate. The
-   * aggregate is authoritative: it wins over any live-estimated rows for the
-   * same thread, and never accumulates with them.
-   */
+  /** Claim the thread's usage snapshot and return its seq/generation ticket. */
+  beginThreadUsage: (threadId: string) => UsageRequest
+  /** Apply a response only when its ticket still owns this thread projection. */
+  noteThreadUsage: (usage: ThreadUsageResponse, request: UsageRequest) => boolean
+  /** Release a failed or aborted owner without clearing a newer request. */
+  cancelThreadUsage: (request: UsageRequest) => void
+  /** Merge per-turn timings monotonically with newer reducer-banked rows. */
   noteThreadRounds: (response: ThreadUsageResponse) => void
 }
 
@@ -46,8 +46,8 @@ export const createItemsSlice: StateCreator<ItemsSlice, [], [], ItemsSlice> = (s
 
   requestStreamReload: () => set((state) => ({ reloadToken: state.reloadToken + 1 })),
 
-  seedItems: (items, lastSeq, runtime) => set((state) => ({
-    ...seedFromItems(items, lastSeq, runtime),
+  seedItems: (items, lastSeq, runtime, snapshotAt) => set((state) => ({
+    ...seedFromItems(items, lastSeq, runtime, snapshotAt, state),
     // A fresh server snapshot invalidates every workbench projection, even
     // when the thread id did not change (reload after rewind, another client).
     workbenchRevision: state.workbenchRevision + 1,
@@ -73,7 +73,26 @@ export const createItemsSlice: StateCreator<ItemsSlice, [], [], ItemsSlice> = (s
 
   noteUserInputAnswered: (requestId, answer) => set(markUserInputLocally(get(), requestId, answer)),
 
-  noteThreadUsage: (usage) => set(seedUsage(get(), usage)),
+  beginThreadUsage: (threadId) => {
+    const request = createUsageRequest(get(), threadId)
+    set({ usageRequest: request, usageTail: null })
+    return request
+  },
 
-  noteThreadRounds: (response) => set({ rounds: roundsFromTurnUsage(response, get().rounds) })
+  noteThreadUsage: (usage, request) => {
+    let accepted = false
+    set((state) => {
+      const next = seedUsage(state, usage, request)
+      accepted = next !== state
+      return next
+    })
+    return accepted
+  },
+
+  cancelThreadUsage: (request) => set((state) => cancelUsageRequest(state, request)),
+
+  noteThreadRounds: (response) => set((state) => {
+    const rounds = roundsFromTurnUsage(response, state.rounds)
+    return { rounds, roundIndex: indexRounds(rounds) }
+  })
 })

@@ -101,6 +101,7 @@ describe('groupByTurn reference reuse', () => {
         text: 'a'
       }
     }
+    state.liveItemCount = 1
     return state
   }
 
@@ -144,6 +145,47 @@ describe('groupByTurn reference reuse', () => {
     expect(after.map((group) => group.turnId)).toEqual([TURN_A, TURN_B])
   })
 
+  it('只重建发生变化的回合，不枚举未变的 itemOrder', () => {
+    const first = baseView()
+    const before = groupByTurn(first)
+    const guardedOrder = new Proxy(first.itemOrder, {
+      get(target, property, receiver) {
+        if (property === Symbol.iterator) throw new Error('full stream scan')
+        return Reflect.get(target, property, receiver)
+      }
+    })
+    const after = groupByTurn({
+      itemOrder: guardedOrder,
+      itemsById: { ...first.itemsById, [ITEM_B]: { ...first.itemsById[ITEM_B]!, text: 'ab' } },
+      turnState: first.turnState,
+      changedItemIds: [ITEM_B]
+    }, before, { ...first, itemOrder: guardedOrder })
+
+    expect(after[0]).toBe(before[0])
+    expect(after[1]).not.toBe(before[1])
+    expect(after[1]?.items[0]?.text).toBe('ab')
+  })
+
+  it('does not rescan prior groups to count rows when the ordered channel is unchanged', () => {
+    const first = baseView()
+    const before = groupByTurn(first)
+    const guardedGroups = new Proxy(before, {
+      get(target, property, receiver) {
+        if (property === 'reduce') throw new Error('prior group count scan')
+        return Reflect.get(target, property, receiver)
+      }
+    })
+    const after = groupByTurn({
+      itemOrder: first.itemOrder,
+      itemsById: { ...first.itemsById, [ITEM_B]: { ...first.itemsById[ITEM_B]!, text: 'ab' } },
+      turnState: first.turnState,
+      changedItemIds: [ITEM_B]
+    }, guardedGroups, first)
+
+    expect(after[0]).toBe(before[0])
+    expect(after[1]).not.toBe(before[1])
+  })
+
   it('没有上一个结果时按需重建', () => {
     const groups = groupByTurn(baseView())
 
@@ -170,5 +212,13 @@ describe('groupByTurn reference reuse', () => {
 
     expect(inheritedCount).toBe(2)
     expect(visible.itemOrder).toEqual([])
+  })
+
+  it('uses the reducer live count without scanning the transcript', () => {
+    const itemOrder = new Proxy([] as string[], {
+      get() { throw new Error('live selector full scan') }
+    })
+    expect(hasLiveItems({ itemOrder, itemsById: {}, liveItemCount: 1 })).toBe(true)
+    expect(hasLiveItems({ itemOrder, itemsById: {}, liveItemCount: 0 })).toBe(false)
   })
 })

@@ -157,7 +157,9 @@
   （不含工具执行），并作为轮次耗时的唯一 wire 载体。线程 usage 聚合直接对这些样本做严格折叠，不为
   旧日志缺失值补时；只有诊断用的 llm-rounds 投影会在单个旧样本缺少耗时时回退到回合边界窗口。
   同一次重放还发布 `last_valid_prompt_tokens`：只接受正 `prompt_tokens`，全零样本照常计数和累计，
-  但不覆盖最近一次有效读数；从未出现有效读数时省略该字段。
+  但不覆盖最近一次有效读数；从未出现有效读数时省略该字段。`ThreadUsageResponse.last_seq` 返回同一份
+  事件输入的最后一条持久日志序号（空日志为 `None`），让客户端能精确重放响应水位之后的 live usage 帧，
+  避免首次加载时把 lifetime 样本数误当成实时覆盖数。
 - **同一路由还投影"活跃时长"读数**（`ActiveClock`，与 usage 折叠同一次日志重放）：每个回合的
   `active_ms` 是 `turn_started` 到终态事件之间的挂钟时间，**扣除回合停在审批/用户输入门禁上的窗口**
   （`ApprovalRequested/UserInputRequested` 冻结时钟，对应 Resolve 事件恢复；gate 打开即计入

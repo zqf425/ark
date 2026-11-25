@@ -19,6 +19,29 @@ function row(overrides: Partial<ThreadSummary> = {}): ThreadSummary {
   }
 }
 
+describe('threads slice runtime request ownership', () => {
+  beforeEach(() => {
+    useCodeSessionStore.setState({ threadRuntime: {}, threadRuntimeGeneration: {} })
+  })
+
+  it('rejects an older detail response after a newer pill reload starts', () => {
+    const detail = useCodeSessionStore.getState().beginThreadRuntime(A)
+    const pill = useCodeSessionStore.getState().beginThreadRuntime(A)
+
+    expect(useCodeSessionStore.getState().setThreadRuntime(A, { model: 'old-model' }, detail)).toBe(false)
+    expect(useCodeSessionStore.getState().setThreadRuntime(A, { model: 'new-model' }, pill)).toBe(true)
+    expect(useCodeSessionStore.getState().threadRuntime[A]?.model).toBe('new-model')
+  })
+
+  it('keeps generations independent across threads', () => {
+    const detailA = useCodeSessionStore.getState().beginThreadRuntime(A)
+    const pillB = useCodeSessionStore.getState().beginThreadRuntime(B)
+
+    expect(useCodeSessionStore.getState().setThreadRuntime(A, { model: 'a' }, detailA)).toBe(true)
+    expect(useCodeSessionStore.getState().setThreadRuntime(B, { model: 'b' }, pillB)).toBe(true)
+  })
+})
+
 describe('threads slice noteThreadSeq', () => {
   beforeEach(() => {
     useCodeSessionStore.setState({ threads: [row()], activeThreadId: null })

@@ -495,6 +495,7 @@ impl Harness {
                     timestamp: Utc::now(),
                     message: "model request failed".into(),
                     model_request_failed,
+                    item_id: None,
                 },
             )
             .await

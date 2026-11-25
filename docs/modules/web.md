@@ -19,10 +19,13 @@
   `onError` 写入的传输诊断不能被随后裸 `onStatus('reconnecting')` 抹掉：仅显式传参或恢复到
   `open` 才清除 `streamError`。
 - 实时回合的工具行由前端 reducer 折叠:`tool_call_started`/`tool_call_finished` 在 wire 上是
-  裸事件(服务端只把它们折叠进**持久** items 投影,实时通道不发 item 快照),渲染器按
-  `apply_tool_started/finished` 同语义映射为 `tool_call:{call_id}` 的确定性 item
-  (FNV-1a,与 `turn_failed` 同构),否则回合进行中的画布缺所有工具行——工具卡、
-  正文路径白名单(prose-path-links)全部落空,直到整页 detail 重载才补齐。
+  裸事件(服务端只把它们折叠进**持久** items 投影,实时通道不发 item 快照),渲染器直接使用
+  Rust 事件携带的 `item_id` 映射工具行,否则回合进行中的画布缺所有工具行——工具卡、
+  正文路径白名单(prose-path-links)全部落空,直到整页 detail 重载才补齐。父画布与子代理
+  transcript 共用 `state/item-projection.ts` 的字段投影,不得在前端复制稳定 ID 算法。
+- reducer 的 token 热路径用有界原型层写时复制记录（`items-draft.ts`，64 层后物化），
+  `itemsById` 与 `turnLastEventAt` 不随每个 delta 复制全历史；`groupByTurn` 在 `itemOrder`
+  引用未变时直接复用有序通道，不为行数再次扫描旧分组。usage 在途尾部同样只在结算时物化。
 - Plan、Changes、File、Terminal 面板订阅 `workbenchRevision` 而非 `lastSeq`。`lastSeq` 每个事件
   （含每个 text delta token）都递增，作为 effect 依赖会让每个 token 触发约 6 次 HTTP 全量重取；
   只有 `goal/todos` 与 `tool_call_started/finished` 这些会改变服务端投影的事件才递增 revision，
@@ -40,8 +43,8 @@
   child-runs；排队与运行同样必须显示为用户文案。已决审批在当前页面会话中保留为历史卡片。用户输入
   gate 分两种形态：待回答的 pending 卡来自 `userInputs` 门控通道，钉在流末尾（这是活着的“请回答”入口）；
   已回答的问答是会话历史，渲染为提问回合内的一行折叠摘要（`AnsweredGateRow`，`ark-answeredgate`），
-  锚点是 store 投影里的持久 `user_input` item（`user_input_resolved` 折叠为
-  `keyed_item_id("user_input:{request_id}")`，`status: completed`，`text` 为提问、`detail` 为回答），
+  锚点是 store 投影里的持久 `user_input` item（`user_input_resolved` 使用事件携带的
+  `item_id`，`status: completed`，`text` 为提问、`detail` 为回答），
   因此回合结束后流末尾不再堆叠已回答卡，切换会话或刷新后（detail 重建投影）问答记录仍在原回合可见。
   流末尾只渲染 pending 的用户输入卡（`userInputCards` + pending 过滤）。刷新后的待处理 gate 只可来自
   服务端的 runtime 快照，web 不得从历史 item 猜测仍可提交的 gate id。
@@ -58,12 +61,19 @@
   不全量解析所有 patch）；`patch` 缺失（二进制或超出字节上限）时明确提示，浏览器不自行 diff。
 - 会话标题下方的 `SessionStatsBar` 展示线程级用量；会话流不再有统计 footer。统计条由
   `GET /v1/threads/{id}/usage` 的整线程聚合播种，并折叠后续 live `usage` 事件，展示调用数、活跃
-  总时长、tokens、缓存命中率、费用、最近速度、压缩摘要与错误。它不读取有界诊断分页
-  `GET /v1/debug/llm-rounds`，因此调用数和耗时不会因分页截断变成下限。上下文占用只在输入框工具条的
-  context ring 常驻展示：分母取所选模型真实 `context_window_tokens`（未声明时取运行时同源的 256K
-  默认窗口），`compaction_threshold_tokens` 仅画为环内压缩刻度/警示线；两者都只供展示，不参与
-  前端运行时决策。占用读数由 HTTP 快照的 `last_valid_prompt_tokens` 恢复，并由 live `usage` 事件更新；
-  全零样本不覆盖已有读数。provider 限额缓存带 TTL 并定时重取，避免设置修改后永久陈旧。
+  总时长、tokens、缓存命中率、费用、最近速度、压缩摘要与错误。播种由线程 detail 加载链发起，
+  请求开始时记录 `last_seq` 水位，响应携带本次聚合覆盖的日志 `last_seq`；重放只保留事件序号大于
+  响应水位的 live 样本，旧服务端缺少该字段时才回退到样本数覆盖前缀。仅接受仍持有所有者票、
+  线程一致、响应水位不早于请求水位或 `usageSeedSeq` 且 `samples` 不少于请求基线的响应；被拒的当前请求
+  释放所有者与在途尾部，不改写已有聚合。在途样本以
+  不可变链表 O(1) 保留，结算时才按事件 `seq` 排序；HTTP 在途期间允许补收
+  尚未见过且低于 `lastSeq` 的 usage 帧，重复 `seq` 不重复折叠。统计条仅在
+  store 尚未播种时补取，已有聚合不因 `samples` 变化重放日志，调用数直接读 live 聚合。它不读取
+  有界诊断分页 `GET /v1/debug/llm-rounds`，因此调用数和耗时不会因分页截断变成下限。上下文占用只在
+  输入框工具条的 context ring 常驻展示：分母取所选模型真实 `context_window_tokens`（未声明时取
+  运行时同源的 256K 默认窗口），`compaction_threshold_tokens` 仅画为环内压缩刻度/警示线；两者都只供
+  展示，不参与前端运行时决策。占用读数由 HTTP 快照的 `last_valid_prompt_tokens` 恢复，并由 live
+  `usage` 事件更新；全零样本不覆盖已有读数。provider 限额缓存带 TTL 并定时重取，避免设置修改后永久陈旧。
 - 模型输出的 markdown 渲染集中在 `shared/ui` 的 `Markdown`（marked + DOMPurify 消毒后注入）与
   `code-highlight`（文件预览高亮）：模型输出是不可信输入，任何进入 `dangerouslySetInnerHTML` 的
   HTML 必须先经 DOMPurify；这是展示层能力，不与 Rust 侧业务逻辑双实现。markdown 排版对齐主流
@@ -109,11 +119,14 @@
   `ActiveClock` 折叠出每个回合的挂钟时间并扣除等审批/用户输入的窗口；工具执行、HTTP 重试、
   恢复退避与子任务运行全部计入——体感时长（"跑了一两小时的会话"）应与该读数一致，旧口径
   （`duration_ms`，只含模型调用墙钟）仍保留为 `RoundTiming.durationMs` 供"模型时间"类读数使用。
-  运行中回合由 `liveActiveMs` 按秒延伸：从回合最新事件锚点（`turnLastEventAt`，reducer 维护）加
-  挂钟增量，挂起门禁出现后以最早 `requested_at` 为上限（时钟冻结在提问时刻，不倒退、不空转）；
-  下一次 HTTP 刷新以服务端 `active_ms` 为准整体替换，两边永不漂移。运行中的时钟每秒 tick 由
-  `components/use-clock-tick.ts` 独占（`LiveActivity` 的旧 `setInterval` 仍是独立实现，属另一读数）。
-  旧运行时聚合无 `active_ms` 字段时读数为 `null`：不显示，而不是伪造 `0秒`。
+  运行中回合由 `liveActiveMs` 按秒延伸：从回合最新事件锚点（`turnLastEventAt`，reducer 为每个
+  带 `turn_id` 的事件维护，即使尚无 turn 状态）加挂钟增量，挂起门禁出现后以最早 `requested_at`
+  为上限（时钟冻结在提问时刻，不倒退、不空转）；中途打开时 `active_ms` 仍未知也能从有效锚点
+  建立时钟。下一次 HTTP 刷新以服务端 `active_ms` 为准整体替换，两边永不漂移。同一 active turn
+  的中途 detail 重播种沿用已折叠轮次、`turnLastEventAt` 与 `roundWindow`，不用新的 `snapshotAt`
+  重置活跃时钟；只有首次播种重新建立锚点。运行中的时钟每秒
+  tick 由 `components/use-clock-tick.ts` 独占（`LiveActivity` 的旧 `setInterval` 仍是独立实现，属另一
+  读数）。旧运行时既无 `active_ms` 又无事件锚点时读数为 `null`：不显示，而不是伪造 `0秒`。
 - 用时文案是**本地化的单位拼接**（`formatDurationWords`，读作“耗时 1时2分3秒”），不是 `m:ss` 时钟：
   时/分/秒的单位词来自 i18n（`canvas.duration.hours|minutes|seconds`），由调用方经
   `hooks/use-duration-words.ts` 的 `useDurationFormat` 注入，因此 `session-stats.ts` 仍保持无 React、
@@ -358,8 +371,11 @@
   （协议映射见 [ark-llm](ark-llm.md)）。
   **pill 的标签一律来自"当前选中的会话"的覆盖，而不是打开菜单时才读的那份**：会话切换会重挂载输入框
   （`key={threadId}`），pill 的局部状态随之销毁，因此覆盖存在会话 store 的
-  `threadRuntime[threadId]` 上（`state/threads-slice.ts`），唯一写入方是 `useThreadStream` 的
-  detail 播种（`GET /v1/threads/{id}` 已带 `runtime`），pill 通过 `hooks/use-thread-runtime.ts` 只读它。
+  `threadRuntime[threadId]` 上（`state/threads-slice.ts`），初始写入方是 `useThreadStream` 的
+  detail 播种（`GET /v1/threads/{id}` 已带 `runtime`），pill 通过 `hooks/use-thread-runtime.ts`
+  只读缓存并在菜单打开时重载。detail 与所有 pill 共用 store 持有的
+  `threadRuntimeGeneration[threadId]` 请求票：每次重载递增，只有最新同线程票能写入，旧响应或旧错误
+  不得覆盖/提示新状态，不同线程互不影响。
   这样一次切换只产生一次详情读取，且在菜单打开前标签就显示本会话的模型/权限/推理强度；
   未写入该键（尚未读到详情）时标签回落运行时默认，绝不残留上一个会话的值。
   同一组 pill 在新任务页（无会话）读写页面的暂存覆盖而非线程记录（见上方 `new` 场景条目），
@@ -369,20 +385,20 @@
   「新增项目空间」调用 `POST /v1/workspace/pick` 与 `POST /v1/workspace/validate` 后同样只 PATCH 当前
   线程，不调用全局 `POST /v1/workspace/switch`。活跃回合时禁用选择。全局 switch 仅由设置页和 Changes
   面板承载。上下文环弹层展示工具、系统提示、技能、消息、思考、检查点、其他的**结构占比**（渲染行数
-  与字符数）；总量取最近一次有效权威 `usage` 事件的正 `prompt_tokens`，全零样本保留前值；无有效读数时
-  显示未知而不是 0。环分母取所选模型真实 context window，压缩 threshold 只作环内刻度。
-  token 估算的唯一宿主仍是 `ark-agent::TokenEstimator`，前端不重算
+  与字符数）；总量取最近一次权威 `usage` 事件的 `prompt_tokens`，环分母取所选模型真实 context window，
+  压缩 threshold 只作环内刻度。token 估算的唯一宿主仍是 `ark-agent::TokenEstimator`，前端不重算
   token。弹层内「压缩上下文」直接调用
   `POST /v1/threads/{id}/compact`。共享 `ModelProviderMenu` 提供「供应商 → 模型」二级菜单与搜索，
   会话输入框用 `variant="flyout"`：供应商列表常驻、hover/focus 浮出独立滚动的模型卡，避免长模型
-  清单挤占输入框；推理强度留在菜单 footer；所有选择打开时重读线程覆盖、写入仍走 `PATCH`。
-  设置页使用生成契约提供同一全局权限，展示“永远询问”“仅工作区修改”“完全访问”三档。
-- 会话标题下方有紧凑统计条（`SessionStatsBar`）：轮次与模型调用数来自 `GET /v1/threads/{id}/usage`，
-  耗时是 store 的每轮耗时折叠（`state/rounds.ts`：HTTP 快照播种、live `usage` 事件追加，快照权威覆盖
-  live 估计），即各次模型调用实测耗时之和，只统计模型回复时间，不含工具执行；并展示
-  prompt/completion/total tokens、真实 `cache_hit_rate` 与 `cost_usd`。它不读取诊断分页，调用数不是
-  `truncated` 下限；请求失败保留上次已验证数值而不伪造零。运行时版本、SSE 状态、数据目录等诊断信息不能占据
-  主任务层级，必须退为状态详情或提示信息。
+  清单挤占输入框；推理强度留在菜单 footer；所有选择打开时重读线程覆盖、写入仍走 `PATCH`，且只提交
+  用户本次修改的字段，省略字段由服务端合并保留。设置页使用生成契约提供同一全局权限，展示“永远询问”
+  “仅工作区修改”“完全访问”三档。
+- 会话标题下方有紧凑统计条（`SessionStatsBar`）：轮次来自整线程 usage 快照，模型调用数直接读
+  store 的 live 聚合；耗时是 store 的每回合活跃时长折叠（`state/rounds.ts`：HTTP 快照播种、live
+  事件按最新事件锚点延伸，快照权威覆盖 live 估计），不把工具执行、重试或子任务运行排除在外；
+  并展示 prompt/completion/total tokens、真实 `cache_hit_rate` 与 `cost_usd`。它不读取诊断分页，
+  调用数不是 `truncated` 下限；请求失败保留上次已验证数值而不伪造零。运行时版本、SSE 状态、数据目录
+  等诊断信息不能占据主任务层级，必须退为状态详情或提示信息。
 - 设置页的分类导航是 `web` 内本地状态，只决定既有 section 的可见性；每个 section 仍独立持有既有 hook，
   不把 provider、MCP 或 runtime 配置逻辑回流到 Code 会话状态或 `ark-agent`。
 - 运行调优参数按运行时语义分组呈现（回合与 token / 工具保护 / 上下文与压缩 / 流式传输 /
@@ -394,7 +410,7 @@
   （该路由在 Rust 侧仍是未建模 JSON，前端经 `web-only.ts` 的视图类型渲染，Rust 建模后应迁移到生成
   类型）。`/v1/runtime/tuning` 与 `/v1/runtime/model-providers` 是运行时的 501 占位路由，不是缺口。
 - 输入框在活跃回合提供两种非中断动作：「追加」（steer，立即注入下一轮）与「排队」（本地暂存为
-  chips，回合结束的 live→idle 转变触发按顺序自动发送）；排队消息可逐条移除，纯本地状态不进 wire。
+  chips，空闲且 SSE `open` 时按顺序自动发送）；排队消息可逐条移除，纯本地状态不进 wire。
   附件在活跃回合同样可添加（+ 按钮、textarea 粘贴图片、拖拽文件均可用）：steer 与发送共用同一
   「先 `POST /v1/threads/{id}/attachments` 关联、后投递」流程，steer 携带 `TurnRequest.attachment_ids`，
   服务端授权失败走命令错误提示且不清空 chips；「排队」只排文本、附件保留待下一次投递。粘贴/拖入的
@@ -409,8 +425,13 @@
 - 未发送草稿按线程保存在 store（`runtime-slice` 的 `drafts: Record<ThreadId, string>`，`setDraft`/
   `clearDraft`）：Composer 因 `key={threadId}` 在切换会话时重挂载，textarea 不持草稿，挂载时从
   store 恢复本线程草稿，输入即写回（受控 textarea）。发送成功仅清除与已发送文本一致的草稿条目，
-  发送失败或被闸门拦截（`sending`、SSE 非 `open`）时草稿原样保留；排队动作把文本移入组件本地
-  队列并清掉对应 store 草稿。新任务页的无会话 Composer 把草稿存在同一条 map 的保留键
+  发送失败或被闸门拦截（`sending`、SSE 非 `open`）时草稿原样保留；排队动作把文本移入
+  `runtime-slice` 的 `queuedMessages: Record<ThreadId, QueuedMessage[]>` 并清掉对应 store 草稿，因此
+  `key={threadId}` 重挂载后仍按线程恢复且不串会话。每条消息有独立 ID，重复文本不合并，移除与
+  迟到完成都按 ID 匹配队首。队列只存内存、不进 wire 或 localStorage；自动排空以
+  `send(text, [])` 投递，同一时刻只发送一个队首，仅在服务端接受后按 ID 移除；失败保留消息并在
+  500ms 后重试，SSE 断开时暂停、恢复 `open` 后继续，不依赖再次出现 live→idle 边沿。已选附件继续留给
+  下一次投递。新任务页的无会话 Composer 把草稿存在同一条 map 的保留键
   `NEW_TASK_DRAFT_KEY`（`'new-task'`，与线程 UUID 命名空间隔离），随同一条 localStorage 镜像
   持久化。草稿只存内存、不进 wire；`state/draft-storage.ts` 把同一映射镜像到
   localStorage（键 `ark.composer.drafts`，≤100 条、单条 ≤100k 字符，读写失败静默降级），`main.tsx`

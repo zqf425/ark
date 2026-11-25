@@ -4,7 +4,7 @@
  * layout) with the live active-span clock; a settled card keeps the
  * "执行过程 · N 步 · 耗时 …" summary line the duration contract pins.
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ThreadItem } from '../../../shared/contracts'
 import { installBrowserStubs, mountWithProviders } from '../../../shared/testing/react-harness'
 import { useCodeSessionStore } from '../state/store'
@@ -59,5 +59,21 @@ describe('TurnBlock running header', () => {
     const clock = h.host.querySelector('.ark-process__duration')
     expect(clock).not.toBeNull()
     expect(clock!.textContent).toBe('1分1秒')
+  })
+
+  it('ticks when opened mid-turn before an active span seed exists', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-20T08:00:05Z'))
+    try {
+      useCodeSessionStore.setState({
+        rounds: [{ turnId: TURN, durationMs: 0, activeMs: null }],
+        turnLastEventAt: { [TURN]: Date.parse('2026-11-20T08:00:00Z') }
+      })
+      const h = await mountWithProviders(<TurnBlock threadId="t" group={group('running')} availability="hidden" />)
+      expect(h.host.querySelector('.ark-process__duration')?.textContent).toBe('5秒')
+      await h.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -221,6 +221,7 @@ mod tests {
             timestamp: Utc::now(),
             message: "model request failed".into(),
             model_request_failed: true,
+            item_id: None,
         }
     }
 
@@ -279,6 +280,7 @@ mod tests {
                     timestamp: Utc::now(),
                     message: "tool policy refused".into(),
                     model_request_failed: false,
+                    item_id: None,
                 },
             )
             .await

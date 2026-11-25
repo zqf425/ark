@@ -175,6 +175,7 @@ fn interaction_projection_keeps_only_unresolved_live_gate_for_active_turn() {
                 timestamp: now,
                 request_id: "old".into(),
                 prompt: "old prompt".into(),
+                item_id: None,
             },
         ],
         ["live"],

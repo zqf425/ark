@@ -7,7 +7,7 @@
 
 use crate::config::StoreLimits;
 use crate::domain::diagnostics::{DiagnosticKind, DiagnosticSink, StoreDiagnostic};
-use crate::domain::items::{is_delta_event, ItemProjector};
+use crate::domain::items::{backfill_legacy_item_id, is_delta_event, ItemProjector};
 use crate::domain::layout::ThreadPaths;
 use crate::domain::session_state::SessionState;
 use crate::store::event_log::{
@@ -115,14 +115,18 @@ impl WriterState {
                 .for_thread(thread_id),
             );
         }
-        let (projector, session) = load_projections(&paths, &parsed.events)?;
+        let mut events = parsed.events;
+        for event in &mut events {
+            backfill_legacy_item_id(event);
+        }
+        let (projector, session) = load_projections(&paths, &events)?;
         let rewinds = read_json_opt(&paths.rewinds_json()).unwrap_or_default();
         Ok(Self {
             thread_id,
             paths,
             seq: parsed.max_seq,
             needs_newline: parsed.needs_newline,
-            events: parsed.events,
+            events,
             subscribers: Vec::new(),
             limits,
             projector,
@@ -159,7 +163,8 @@ impl WriterState {
     pub fn append(&mut self, event: RuntimeEvent) -> Result<RuntimeEvent> {
         self.finish_pending_transactions()?;
         let seq = self.seq + 1;
-        let stored = event.with_seq(seq);
+        let mut stored = event.with_seq(seq);
+        backfill_legacy_item_id(&mut stored);
         let owns_dirty =
             if crate::store::derived_repair::affects_derived(&stored) && !is_delta_event(&stored) {
                 crate::store::derived_dirty::mark_if_clean(

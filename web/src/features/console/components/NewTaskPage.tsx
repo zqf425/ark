@@ -13,7 +13,7 @@
  * the view switches to `code` only after the whole chain lands, so a failure
  * keeps the user on this page with draft and picks intact.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { describeError } from '../../../shared/api/error-describe'
 import { translateNow } from '../../../shared/i18n/current'
 import { useI18n } from '../../../shared/i18n'
@@ -36,6 +36,9 @@ export function NewTaskPage(_props: { meta?: ConsoleMeta }): JSX.Element {
   const upsertThread = useCodeSessionStore((s) => s.upsertThread)
 
   const [busy, setBusy] = useState(false)
+  // React state updates are batched; Enter twice before a rerender must still
+  // create only one thread.
+  const inFlightRef = useRef(false)
   // Overrides picked on the page before the thread exists. Committed at start
   // time: the workspace seeds the create call, the rest merge into the fresh
   // thread's runtime. Cleared on success so the next task starts neutral.
@@ -46,7 +49,8 @@ export function NewTaskPage(_props: { meta?: ConsoleMeta }): JSX.Element {
   }
 
   const start: ComposerSubmit = async (text, attachmentIds) => {
-    if (busy) return false
+    if (busy || inFlightRef.current) return false
+    inFlightRef.current = true
     setBusy(true)
     try {
       // A staged workspace is validated server-side (the same
@@ -83,6 +87,7 @@ export function NewTaskPage(_props: { meta?: ConsoleMeta }): JSX.Element {
       push('error', t('console.new.failed'), describeError(error, translateNow))
       return false
     } finally {
+      inFlightRef.current = false
       setBusy(false)
     }
   }
