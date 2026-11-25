@@ -11,6 +11,9 @@
   `duration_ms` 表示单次模型调用的实测墙钟耗时。聚合采用严格可选值语义：只有全部实际样本都带耗时才
   求和；任一样本缺失即永久将该聚合标为 `None`，不能把部分和伪装成完整总耗时。空的
   `Usage::default()` 仅是累加器，不算缺失样本。
+- `cache_hit_rate_approximate` 标记命中率来自推导出的 miss（`prompt - hit` 跨过含图片/音频的余数），
+  展示层必须以"≈"呈现。该标志随 `merge` 粘性传播：聚合内含任一近似样本，总率即近似；缺计数样本
+  将聚合率置 `None` 时标志保留（未知优先于近似），为真才上 wire。
 - 路径归一化的唯一实现为 `ark_common::path::normalize`；其它 crate 和前端不得复制逻辑。
 - Windows `canonicalize` 产生的 verbatim 前缀由 `ark_common::path::strip_verbatim` 在归一化入口统一移除；盘符和 UNC 路径均以非 verbatim 形式参与比较。
 - 文本写入必须 UTF-8 无 BOM，原子写入由 `write_text_atomic` 完成：临时文件使用 UUID 唯一名，

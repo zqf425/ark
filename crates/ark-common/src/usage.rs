@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use serde_json::json;
 
 /// The one and only usage shape (design §6.4).
 ///
@@ -42,6 +44,13 @@ pub struct Usage {
     /// Set once duration folding has seen both a measured and unmeasured sample.
     #[serde(skip)]
     duration_incomplete: bool,
+    /// True when the rate is derived from a miss the provider never sent
+    /// (`prompt - hit` past a split-modality remainder). Wire-visible so the
+    /// renderer can mark the rate as approximate; sticky in `merge` like the
+    /// incompleteness flags.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(as = "Option<bool>")]
+    pub cache_hit_rate_approximate: bool,
     /// Distinguishes an empty `Usage::default()` accumulator from a real sample.
     #[serde(skip)]
     samples_merged: bool,
@@ -63,6 +72,21 @@ impl Usage {
         self.cache_miss_tokens = miss;
         self.cache_counters_incomplete = hit.is_none() || miss.is_none();
         self.cache_hit_rate = Self::rate(hit, miss);
+        self
+    }
+
+    /// Same as `with_cache`, but marks the derived rate approximate: the miss
+    /// side was reconstructed from a prompt that also contained tokens the
+    /// provider bills outside the cacheable text remainder (image/audio), so
+    /// `hit / (hit + miss)` overstates the hit rate by an unknown margin.
+    pub fn with_cache_approximate(self, hit: Option<u64>, miss: Option<u64>) -> Self {
+        self.with_cache(hit, miss).mark_approximate()
+    }
+
+    /// Flags an already-built usage's derived rate as approximate without
+    /// touching its counters.
+    pub fn mark_approximate(mut self) -> Self {
+        self.cache_hit_rate_approximate = self.cache_hit_rate.is_some();
         self
     }
 
@@ -100,6 +124,11 @@ impl Usage {
         } else {
             Usage::rate(self.cache_hit_tokens, self.cache_miss_tokens)
         };
+        // Approximation is sticky for the same reason a missing counter is: a
+        // mixed aggregate has no single honest label, and "approximate" is the
+        // safe description of any fold that contains a guessed miss.
+        self.cache_hit_rate_approximate =
+            self.cache_hit_rate_approximate || other.cache_hit_rate_approximate;
         self.cost_usd = sum_opt_f(self.cost_usd, other.cost_usd);
         self.duration_incomplete = self.duration_incomplete
             || other.duration_incomplete
@@ -203,5 +232,52 @@ mod tests {
         let mut reversed = Usage::new(5, 1).with_cache(Some(10), Some(10));
         reversed.merge(&Usage::new(10, 1).with_cache(Some(90), None));
         assert_eq!(reversed.cache_hit_rate, None);
+    }
+
+    #[test]
+    fn approximate_flag_is_sticky_and_not_set_by_real_pairs() {
+        // A real pair never carries the flag.
+        let real = Usage::new(10, 1).with_cache(Some(90), Some(10));
+        assert!(!real.cache_hit_rate_approximate);
+
+        // A guessed miss does.
+        let approx = Usage::new(10, 1).with_cache_approximate(Some(90), Some(10));
+        assert!(approx.cache_hit_rate_approximate);
+        assert_eq!(approx.cache_hit_rate, Some(0.9));
+
+        // Mixing one approximate sample into an aggregate marks the whole
+        // total approximate: the label must describe the worst sample.
+        let mut total = Usage::new(10, 1).with_cache(Some(90), Some(10));
+        total.merge(&Usage::new(5, 1).with_cache_approximate(Some(30), Some(20)));
+        assert_eq!(total.cache_hit_rate, Some(120.0 / 150.0));
+        assert!(total.cache_hit_rate_approximate);
+
+        // Sticky in the other fold order too.
+        let mut reversed = Usage::new(5, 1).with_cache_approximate(Some(30), Some(20));
+        reversed.merge(&Usage::new(10, 1).with_cache(Some(90), Some(10)));
+        assert!(reversed.cache_hit_rate_approximate);
+
+        // An approximate flag cannot survive an incomplete aggregate: the
+        // rate is unknown, so "approximate" would misdescribe it.
+        let mut unknown = Usage::new(10, 1).with_cache_approximate(Some(90), Some(10));
+        unknown.merge(&Usage::new(5, 1).with_cache(Some(10), None));
+        assert_eq!(unknown.cache_hit_rate, None);
+        assert!(unknown.cache_hit_rate_approximate);
+    }
+
+    #[test]
+    fn approximate_flag_serializes_for_the_renderer() {
+        let approx = Usage::new(10, 1).with_cache_approximate(Some(90), Some(10));
+        let json = serde_json::to_value(&approx).unwrap();
+        assert_eq!(json["cache_hit_rate_approximate"], json!(true));
+
+        // Absent when false, so old consumers see an unchanged shape.
+        let real = Usage::new(10, 1).with_cache(Some(90), Some(10));
+        let json = serde_json::to_value(&real).unwrap();
+        assert!(json.get("cache_hit_rate_approximate").is_none());
+
+        // Round-trips.
+        let back: Usage = serde_json::from_value(json).unwrap();
+        assert!(!back.cache_hit_rate_approximate);
     }
 }

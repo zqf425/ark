@@ -61,7 +61,9 @@
   不全量解析所有 patch）；`patch` 缺失（二进制或超出字节上限）时明确提示，浏览器不自行 diff。
 - 会话标题下方的 `SessionStatsBar` 展示线程级用量；会话流不再有统计 footer。统计条由
   `GET /v1/threads/{id}/usage` 的整线程聚合播种，并折叠后续 live `usage` 事件，展示调用数、活跃
-  总时长、tokens、缓存命中率、费用、最近速度、压缩摘要与错误。播种由线程 detail 加载链发起，
+  总时长、tokens、缓存命中率、费用、最近速度、压缩摘要与错误。前端 fold 与 Rust `Usage::merge`
+  同构：`cache_hit_rate_approximate` 随样本粘性传播到聚合（任一近似样本即总率近似），缺失计数
+  仍使聚合率未知。播种由线程 detail 加载链发起，
   请求开始时记录 `last_seq` 水位，响应携带本次聚合覆盖的日志 `last_seq`；重放只保留事件序号大于
   响应水位的 live 样本，旧服务端缺少该字段时才回退到样本数覆盖前缀。仅接受仍持有所有者票、
   线程一致、响应水位不早于请求水位或 `usageSeedSeq` 且 `samples` 不少于请求基线的响应；被拒的当前请求
@@ -411,7 +413,9 @@
   事件按最新事件锚点延伸，快照权威覆盖 live 估计），不把工具执行、重试或子任务运行排除在外，
   但审批/用户输入门禁等待不计入；本地决议成功只更新展示状态，pending gate 计数保留到对应
   SSE 决议事件才释放，避免回写早于 SSE 时把用户等待误计为活跃时长；
-  并展示 prompt/completion/total tokens、真实 `cache_hit_rate` 与 `cost_usd`。它不读取诊断分页，
+  并展示 prompt/completion/total tokens、`cache_hit_rate` 与 `cost_usd`：命中/未命中计数齐全时展示
+  真实值；聚合含近似样本（`cache_hit_rate_approximate`，带图请求推导 miss）时以"缓存命中 ≈X%"展示
+  并在 title 说明近似来源，不再因带图输入隐藏缓存角标。它不读取诊断分页，
   调用数不是 `truncated` 下限；请求失败保留上次已验证数值而不伪造零。运行时版本、SSE 状态、数据目录
   等诊断信息不能占据主任务层级，必须退为状态详情或提示信息。
 - 设置页的分类导航是 `web` 内本地状态，只决定既有 section 的可见性；每个 section 仍独立持有既有 hook，

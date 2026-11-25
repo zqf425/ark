@@ -72,6 +72,22 @@ describe('foldUsage optional aggregates', () => {
     expect(noCache.cacheCountersIncomplete).toBe(true)
   })
 
+  it('marks the aggregate approximate once any sample derived its miss', () => {
+    const real = foldUsage(null, sample({ cache_hit_tokens: 80, cache_miss_tokens: 20 }))
+    expect(real.cacheHitRateApproximate).toBe(false)
+
+    // One approximate sample (image input, miss = prompt - hit) taints the
+    // whole thread total, mirroring Rust `Usage::merge` stickiness.
+    const mixed = foldUsage(real, sample({ cache_hit_tokens: 30, cache_miss_tokens: 10, cache_hit_rate_approximate: true }))
+    expect(mixed.cacheHitTokens).toBe(110)
+    expect(mixed.cacheMissTokens).toBe(30)
+    expect(mixed.cacheHitRateApproximate).toBe(true)
+
+    // An HTTP seed carrying the flag propagates too.
+    const seeded = foldUsage(null, sample({ cache_hit_tokens: 5, cache_miss_tokens: 5, cache_hit_rate_approximate: true }))
+    expect(seeded.cacheHitRateApproximate).toBe(true)
+  })
+
   it('keeps duration unknown once any folded sample has no measured duration', () => {
     const measured = foldUsage(null, sample({ duration_ms: 25 }))
     expect(measured.durationMs).toBe(25)

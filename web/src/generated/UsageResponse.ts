@@ -10,4 +10,11 @@ export type UsageResponse = { turns: number, prompt_tokens: number, completion_t
  * the runtime's per-round samples set it: a provider payload parsed by
  * `ark-llm` never carries one, and aggregates must not invent it.
  */
-duration_ms?: number, };
+duration_ms?: number, 
+/**
+ * True when the rate is derived from a miss the provider never sent
+ * (`prompt - hit` past a split-modality remainder). Wire-visible so the
+ * renderer can mark the rate as approximate; sticky in `merge` like the
+ * incompleteness flags.
+ */
+cache_hit_rate_approximate?: boolean, };

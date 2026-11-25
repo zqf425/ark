@@ -354,6 +354,7 @@ describe('items reducer usage and compaction', () => {
       cacheHitTokens: null,
       cacheMissTokens: null,
       cacheCountersIncomplete: true,
+      cacheHitRateApproximate: false,
       // Neither sample carried a measured duration: unknown, not `0秒`.
       durationMs: null,
       durationIncomplete: true,
@@ -420,6 +421,7 @@ describe('items reducer usage and compaction', () => {
       cacheHitTokens: null,
       cacheMissTokens: null,
       cacheCountersIncomplete: true,
+      cacheHitRateApproximate: false,
       durationMs: null,
       durationIncomplete: true,
       activeMs: 442_467,

@@ -18,10 +18,12 @@
   `ModelResponse.tool_calls` 与事件流一致；未发终止帧就 EOF 的流直接失败，不补发未完成的 tool call。
 - `cache_hit_rate` 只能读取原生 hit/miss 后计算，不能由 prompt token 猜测。OpenAI 家族在供应商
   未报原生 miss 字段时，可用 `prompt - hit` 代数补全未命中数（brgroup_bl、Nvidia、openrouter
-  实测均只报 `cached_tokens`）；但同一 usage 对象把 image/audio token 从 prompt 中拆分单独上报
+  实测均只报 `cached_tokens`）；同一 usage 对象把 image/audio token 从 prompt 中拆分单独上报
   时（`prompt_tokens_details` / `input_tokens_details` 内含 `image_tokens` / `audio_tokens`），
-  该余数含不可缓存的计费 token，命中率必须保持 unknown 而非伪造；显式为零的 image/audio
-  计数（如 brgroup_bl 的 `image_tokens: 0`）不构成拆分，推导继续生效。
+  余数可能含不可缓存的计费 token（部分网关把图片排除在 `prompt` 之外），此时仍推导该对但必须
+  经 `with_cache_approximate` / `mark_approximate` 打上近似标志，展示层以"≈"呈现——带图请求
+  的缓存可见性优先于精确性；显式为零的 image/audio
+  计数（如 brgroup_bl 的 `image_tokens: 0`）不构成拆分，推导继续生效且不带标志。
 - 传输 client 由调用方注入（`HttpModelClient::new` / `ModelCatalogClient::new`）；组合根注入经
   `ark_http::transport_client` 构建的受治理 client（同一代理/TLS 策略），本 crate 不自建传输。
 - model catalog 解析远端显式返回的 context/modalities 元数据，以及 `max_completion_tokens` /
