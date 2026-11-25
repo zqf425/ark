@@ -18,13 +18,13 @@ import { Button } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import {
   ENDPOINT_FORMATS,
-  type EndpointFormat,
   type ProviderEntry,
   type ProviderModelCatalogRequest,
   type ProviderModelCatalogResponse,
   type ProviderModelSummary
 } from '../../../shared/contracts'
-import { CheckField, Field, SelectField, TextField } from './Field'
+import { CheckField, Field, TextField } from './Field'
+import { FORMAT_NAMES, requestUrl } from './ProviderDetail'
 import {
   appendManualModel,
   buildCatalogRequest,
@@ -34,16 +34,6 @@ import {
 import { ProviderModelImportDialog } from './ProviderModelImportDialog'
 import { Notice } from './SectionShell'
 import { buildEntry, type ProviderDraft } from './ProviderDraft'
-
-/**
- * Endpoint ids are wire values, so only the parenthesised path hint is prose;
- * the path itself is the literal URL the runtime appends.
- */
-const FORMAT_LABELS: Record<EndpointFormat, string> = {
-  openai_chat: 'openai_chat (/chat/completions)',
-  openai_responses: 'openai_responses (/responses)',
-  anthropic_messages: 'anthropic_messages (/v1/messages)'
-}
 
 /** Normalize a context-window input to a positive integer or "unknown". */
 function parseContextInput(raw: string): number | undefined {
@@ -206,11 +196,13 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
   }
 
   return (
-    <div className="ark-card ark-card--editing">
-      <div className="ark-card__meta">
+    <div className="ark-card ark-provider-form">
+      <div className="ark-provider-form__crumb">
+        <Button variant="ghost" size="sm" disabled={busy} onClick={onCancel}>← {t('settings.providerForm.back')}</Button>
         <strong>{editing ? t('settings.providerForm.editTitle', { id: initial.id }) : t('settings.providerForm.createTitle')}</strong>
       </div>
 
+      <h3 className="ark-provider-form__step"><em>1</em>{t('settings.providerForm.step.basic')}</h3>
       <div className="ark-settings__grid">
         <TextField
           id="provider-id"
@@ -222,6 +214,31 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
           hint={editing ? t('settings.providerForm.idHintEditing') : t('settings.providerForm.idHintCreating')}
           onChange={(value) => patch('id', value)}
         />
+        <CheckField
+          label={t('settings.providerForm.enabledLabel')}
+          checked={draft.enabled}
+          disabled={busy}
+          onChange={(value) => patch('enabled', value)}
+        />
+      </div>
+
+      <h3 className="ark-provider-form__step"><em>2</em>{t('settings.providerForm.step.connection')}</h3>
+      <div className="ark-provider-seg" role="radiogroup" aria-label="endpoint_format">
+        {ENDPOINT_FORMATS.map((format) => (
+          <button
+            key={format}
+            type="button"
+            role="radio"
+            aria-checked={draft.endpoint_format === format}
+            className={draft.endpoint_format === format ? 'is-on' : ''}
+            disabled={busy}
+            onClick={() => patch('endpoint_format', format)}
+          >
+            {FORMAT_NAMES[format]}
+          </button>
+        ))}
+      </div>
+      <div className="ark-settings__grid">
         <TextField
           id="provider-api-key"
           label="api_key"
@@ -241,17 +258,13 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
           mono
           disabled={busy}
           placeholder="https://api.deepseek.com"
+          hint={draft.base_url.trim() ? `${t('settings.providerForm.requestPreview')}${requestUrl(draft.base_url, draft.endpoint_format)}` : undefined}
           onChange={(value) => patch('base_url', value)}
         />
-        <SelectField<EndpointFormat>
-          id="provider-format"
-          label="endpoint_format"
-          value={draft.endpoint_format}
-          options={ENDPOINT_FORMATS}
-          labels={FORMAT_LABELS}
-          disabled={busy}
-          onChange={(value) => patch('endpoint_format', value)}
-        />
+      </div>
+
+      <h3 className="ark-provider-form__step"><em>3</em>{t('settings.providerForm.step.models')}</h3>
+      <div className="ark-settings__grid">
         <Field
           label={t('settings.providerForm.modelsLabel')}
           htmlFor="provider-model"
@@ -330,12 +343,6 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
       </div>
 
       <div className="ark-card__foot">
-        <CheckField
-          label={t('settings.providerForm.enabledLabel')}
-          checked={draft.enabled}
-          disabled={busy}
-          onChange={(value) => patch('enabled', value)}
-        />
         <button type="button" className="ark-linkbtn" onClick={() => setAdvanced((value) => !value)}>
           {advanced ? t('settings.providerForm.advancedHide') : t('settings.providerForm.advancedShow')}
         </button>
@@ -399,7 +406,20 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
       {error ? <Notice tone="error" title={t('settings.providerForm.validationFailed')}>{error}</Notice> : null}
       {catalogError ? <Notice tone="error" title={t('settings.providerForm.catalogFailed')}>{catalogError}</Notice> : null}
 
-      <div className="ark-settings__actions">
+      <div className="ark-provider-form__footer">
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={() => {
+            const entry = resolve()
+            if (entry) void onTest(entry)
+          }}
+        >
+          {t('settings.providers.testConnection')}
+        </Button>
+        <Button variant="ghost" size="sm" disabled={busy} onClick={onCancel}>
+          {t('common.cancel')}
+        </Button>
         <Button
           variant="primary"
           size="sm"
@@ -410,19 +430,6 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
           }}
         >
           {busy ? t('common.saving') : t('common.save')}
-        </Button>
-        <Button
-          size="sm"
-          disabled={busy}
-          onClick={() => {
-            const entry = resolve()
-            if (entry) void onTest(entry)
-          }}
-        >
-          {t('common.test')}
-        </Button>
-        <Button variant="ghost" size="sm" disabled={busy} onClick={onCancel}>
-          {t('common.cancel')}
         </Button>
       </div>
     </div>
