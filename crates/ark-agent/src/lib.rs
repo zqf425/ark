@@ -55,6 +55,6 @@ pub use policy::{
     ToolSignature, TurnBudget,
 };
 pub use service::{
-    run_calls, step, MachineError, ModelSeed, Reactor, ReactorConfig, SteerImageResolver,
-    SteerOutcomeRecorder, TurnMachine,
+    run_calls, step, MachineError, ModelSeed, Reactor, ReactorConfig, SteerAttachmentResolver,
+    SteerAttachments, TurnMachine,
 };

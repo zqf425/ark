@@ -91,7 +91,9 @@ HTTP 侧批准一条策略表明确拒绝的调用。
   会话重放资料，也是服务端 Changes/File/Terminal 投影的唯一来源，不能由 web 解析自由文本补造。
 - 同一回合的正文 delta 与 reasoning delta 使用各自稳定的 item ID；两类内容不得合并为同一个渲染条目，
   以保证默认折叠的 reasoning 不会遮蔽用户可见正文。
-- 每个模型轮次创建的正文和 reasoning 条目在该轮结算时写入最终文本并完成；失败、取消和其它回合终态也会完成仍打开的条目，工具循环的下一轮使用新的 item ID。
+- 每个模型轮次创建的正文和 reasoning 条目在该轮结算时写入最终文本并完成；失败、取消和其它回合终态也会完成仍打开的条目，工具循环的下一轮使用新的 item ID。正文条目以 provider 最终响应文本为权威：即使已流式输出过 delta，完成条目也替换为最终文本；provider 不输出 delta 但最终文本非空时，仍创建并完成正文条目。
+- checkpoint 的用户请求、结构化事实和标识符去重使用伴随 `Vec` 的 `HashSet`，保持原有顺序与输出语义，避免长历史上反复 `Vec::contains` 的平方级扫描。
+- 工具批次在任何执行器启动前持久化全部 `ToolCallStarted`。若后续 Started/Finished 追加失败，reactor 只对已经 durable 的 Started 调用尽力补写配对 Finished，避免重放留下永久孤儿；补偿失败保留原始存储错误。
 - reactor 在回合开始时从注入的 `ModelClient` 取 `provider:model` 快照（`model_label_of`），盖在开场的
   `UserMessage` item 与 steer 补写的用户 item 上（`ThreadItem.model`）：标签是回合时快照，模型切换只影响
   下一回合，回放后 UI 才能与 live 流一致地显示"这条消息发给了哪个模型"。
@@ -106,9 +108,11 @@ HTTP 侧批准一条策略表明确拒绝的调用。
   终结回合，队列不再有 drain 机会），reactor 在 `Finish(Completed)` 前把待投递更正补 drain 并转入一个
   零批次 dispatch，驱动下一个轮次消费该文本；该补投以「未取消且预算仍 Allow」为前提，取消或预算不可
   负担时不补投、不写账，终态沿用本次 Finish（journal 不声称模型未收到的更正）。队列条目是
-  `SteerEntry { text, attachment_ids }`：steer 可引用附件（路由已按线程授权），reactor 在构建请求时经
-  组合根注入的同步 resolver 把 id 解析为图片部分、经 outcome recorder 把投递结果记在补写的
-  `UserMessage` item 上；取消一轮时整条目 restore，附件与文本不拆散。agent 自身不接触文件系统。
+  `SteerEntry { text, attachment_ids }`：steer 可引用附件（路由已按线程授权），reactor 在轮次边界把每条
+  steer 暂存为独立的文本、图片与投递结果，并在进入模型调用前重新经过上下文 gate；组合根注入的同步
+  resolver 只解析一次，同时返回 `ModelImage` 与 `TurnAttachmentOutcome`，结果随补写的 `UserMessage` item
+  持久化。同一回合的初始种子与所有 steer 共享 20 MiB 图片预算，后到的 steer 不能重置预算，也不能串用
+  前一条 steer 的图片。取消一轮时整条目 restore，附件与文本不拆散。agent 自身不接触文件系统。
 - 子代理完成 inbox 从父线程权威事件投影为带标记的 system source，而非用户消息；按稳定通知 ID 去重，
   跳过已确认项，并且每个父回合最多交付 8 条、每条最多 1,200 UTF-8 字节，避免完成风暴突破上下文
   预算。同一条通知最多自动投递 2 次（`MAX_AUTO_DELIVERY_ATTEMPTS`），超限后只在用户显式回合投递；

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use ark_ports::{ModelMessage, ModelRole};
 
 /// Prefix every generated checkpoint starts with. `ModelMessage` carries no
@@ -41,6 +43,9 @@ pub struct ContextCheckpoint {
     identifiers: Vec<String>,
     /// Failure evidence: errors, rejected attempts, stack-trace lines.
     failures: Vec<String>,
+    seen_user_lines: HashSet<String>,
+    seen_entries: HashSet<String>,
+    seen_identifiers: HashSet<String>,
 }
 
 impl ContextCheckpoint {
@@ -67,7 +72,12 @@ impl ContextCheckpoint {
             out.merge(Self::from_texts([text]));
             if let ModelRole::User = message.role {
                 for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
-                    push_bounded(&mut out.user_lines, line.to_owned(), MAX_USER_LINE_CHARS);
+                    push_bounded(
+                        &mut out.user_lines,
+                        &mut out.seen_user_lines,
+                        line.to_owned(),
+                        MAX_USER_LINE_CHARS,
+                    );
                 }
             }
             // Tool failure rows need no separate branch: `from_texts` already
@@ -76,7 +86,7 @@ impl ContextCheckpoint {
             // second time and double-counted every tool error (rendered
             // `(repeated x4)` for two occurrences, review S2's root cause).
             for identifier in identifiers_in(text) {
-                push_unique(&mut out.identifiers, identifier);
+                push_unique(&mut out.identifiers, &mut out.seen_identifiers, identifier);
             }
         }
         out
@@ -97,7 +107,7 @@ impl ContextCheckpoint {
             let mut failure_armed = false;
             for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
                 if is_structured_line(line) {
-                    push_unique(&mut out.entries, line.to_owned());
+                    push_unique(&mut out.entries, &mut out.seen_entries, line.to_owned());
                 }
                 if is_failure_line(line) {
                     push_failure(&mut out.failures, line, MAX_FAILURE_LINE_CHARS);
@@ -108,7 +118,7 @@ impl ContextCheckpoint {
                     failure_armed = false;
                 }
                 for identifier in identifiers_in(line) {
-                    push_unique(&mut out.identifiers, identifier);
+                    push_unique(&mut out.identifiers, &mut out.seen_identifiers, identifier);
                 }
             }
         }
@@ -142,7 +152,7 @@ impl ContextCheckpoint {
                     // under any section of an older render; they always belong
                     // to entries regardless of where they were displayed.
                     if is_structured_line(line) {
-                        push_unique(&mut self.entries, line.to_owned());
+                        push_unique(&mut self.entries, &mut self.seen_entries, line.to_owned());
                         continue;
                     }
                     let content = line.strip_prefix("- ");
@@ -156,12 +166,17 @@ impl ContextCheckpoint {
                             }
                             push_bounded(
                                 &mut self.user_lines,
+                                &mut self.seen_user_lines,
                                 content.to_owned(),
                                 MAX_USER_LINE_CHARS,
                             );
                         }
                         (CheckpointSection::Entries, Some(content)) => {
-                            push_unique(&mut self.entries, content.to_owned());
+                            push_unique(
+                                &mut self.entries,
+                                &mut self.seen_entries,
+                                content.to_owned(),
+                            );
                         }
                         (CheckpointSection::Failures, Some(content)) => {
                             // Absorption must never bump a count: an older
@@ -180,7 +195,11 @@ impl ContextCheckpoint {
                             }
                         }
                         (CheckpointSection::Identifiers, Some(content)) => {
-                            push_unique(&mut self.identifiers, content.to_owned());
+                            push_unique(
+                                &mut self.identifiers,
+                                &mut self.seen_identifiers,
+                                content.to_owned(),
+                            );
                         }
                         _ => {}
                     }
@@ -191,13 +210,22 @@ impl ContextCheckpoint {
 
     fn merge(&mut self, other: Self) {
         for entry in other.entries {
-            push_unique(&mut self.entries, entry);
+            push_unique(&mut self.entries, &mut self.seen_entries, entry);
         }
         for identifier in other.identifiers {
-            push_unique(&mut self.identifiers, identifier);
+            push_unique(
+                &mut self.identifiers,
+                &mut self.seen_identifiers,
+                identifier,
+            );
         }
         for line in other.user_lines {
-            push_bounded(&mut self.user_lines, line, MAX_USER_LINE_CHARS);
+            push_bounded(
+                &mut self.user_lines,
+                &mut self.seen_user_lines,
+                line,
+                MAX_USER_LINE_CHARS,
+            );
         }
         for line in other.failures {
             push_failure(&mut self.failures, &line, MAX_FAILURE_LINE_CHARS);
@@ -427,8 +455,8 @@ enum CheckpointSection {
     Identifiers,
 }
 
-fn push_unique(vec: &mut Vec<String>, value: String) {
-    if !vec.contains(&value) {
+fn push_unique(vec: &mut Vec<String>, seen: &mut HashSet<String>, value: String) {
+    if seen.insert(value.clone()) {
         vec.push(value);
     }
 }
@@ -565,11 +593,16 @@ fn bump_failure_count(entry: &mut String) {
     *entry = format!("{text} (repeated x{})", count.max(1) + 1);
 }
 
-fn push_bounded(vec: &mut Vec<String>, value: String, max_chars: usize) {
-    if value.chars().count() > max_chars || vec.contains(&value) {
+fn push_bounded(
+    vec: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+    value: String,
+    max_chars: usize,
+) {
+    if value.chars().count() > max_chars {
         return;
     }
-    vec.push(value);
+    push_unique(vec, seen, value);
 }
 
 /// The todo title behind one plan line, for last-wins folding: a `Goal:` line
@@ -716,14 +749,12 @@ fn identifiers_in(text: &str) -> Vec<String> {
             .filter(|word| is_short_identifier(word))
             .map(ToOwned::to_owned),
     );
-    identifiers
-        .into_iter()
-        .fold(Vec::new(), |mut unique, value| {
-            if !unique.contains(&value) {
-                unique.push(value);
-            }
-            unique
-        })
+    let mut unique = Vec::new();
+    let mut seen = HashSet::new();
+    for value in identifiers {
+        push_unique(&mut unique, &mut seen, value);
+    }
+    unique
 }
 
 pub(crate) fn is_generated_checkpoint(message: &ModelMessage) -> bool {

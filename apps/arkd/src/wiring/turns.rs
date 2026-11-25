@@ -282,7 +282,7 @@ impl AgentTurnRunner {
             Arc::clone(&self.gates),
             &snapshot.approvals,
         );
-        let (attachments, events, writer, image_resolver, outcome_recorder) = self
+        let (attachments, events, writer, attachment_resolver) = self
             .parent_delivery(
                 job,
                 thread.runtime.provider_id.as_deref(),
@@ -328,8 +328,7 @@ impl AgentTurnRunner {
             )),
             chunk_buffer: super::turn_common::chunk_buffer_for_turn(&snapshot),
             steering: Arc::clone(&job.steering),
-            steer_image_resolver: Some(image_resolver),
-            steer_outcome_recorder: Some(outcome_recorder),
+            steer_attachment_resolver: Some(attachment_resolver),
         });
         Ok(PreparedParentTurn {
             reactor,
@@ -424,30 +423,26 @@ impl AgentTurnRunner {
         crate::attachment_seed::AttachmentSeed,
         TurnEvents,
         Arc<EventSinkWriter>,
-        ark_agent::SteerImageResolver,
-        ark_agent::SteerOutcomeRecorder,
+        ark_agent::SteerAttachmentResolver,
     )> {
         let is_auto = matches!(&job.source, TurnSource::AutoContinuation);
         // Vision follows the effective model: a thread override reads the
         // inventory entry recorded for that model when there is one.
         let vision = self.providers.resolve_vision(provider_id, model);
-        let attachments = crate::attachment_seed::resolve_attachments(
+        let budget = crate::attachment_seed::AttachmentBudget::new(
+            crate::attachment_seed::IMAGE_BUDGET_BYTES,
+        );
+        let attachments = budget.resolve(
             self.attachments.as_ref(),
             &job.attachment_ids,
             vision == Some(true),
-            crate::attachment_seed::IMAGE_BUDGET_BYTES,
         );
-        // Steers can reference attachments too: same vision gate and per-turn
-        // image budget as a turn start, resolved from the same store.
-        let steer_image_resolver = crate::attachment_seed::steer_image_resolver(
+        // Steers share the seed's remaining per-turn image budget and resolve
+        // each entry's images and outcomes together, exactly once.
+        let attachment_resolver = crate::attachment_seed::steer_attachment_resolver(
             Arc::clone(&self.attachments),
             vision == Some(true),
-            crate::attachment_seed::IMAGE_BUDGET_BYTES,
-        );
-        let steer_outcome_recorder = crate::attachment_seed::steer_outcome_recorder(
-            Arc::clone(&self.attachments),
-            vision == Some(true),
-            crate::attachment_seed::IMAGE_BUDGET_BYTES,
+            budget,
         );
         let events = if is_auto {
             TurnEvents::auto_continuation(job.thread_id, job.turn_id)
@@ -459,13 +454,7 @@ impl AgentTurnRunner {
         .with_attachments(job.attachment_ids.clone())
         .with_attachment_outcomes(attachments.outcomes.clone());
         let writer = Arc::new(EventSinkWriter::new(Arc::clone(&self.sink), events.clone()));
-        Ok((
-            attachments,
-            events,
-            writer,
-            steer_image_resolver,
-            steer_outcome_recorder,
-        ))
+        Ok((attachments, events, writer, attachment_resolver))
     }
 
     /// Assemble the parent turn's seed: static prefix, replayed history, then

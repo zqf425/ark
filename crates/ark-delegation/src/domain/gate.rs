@@ -35,7 +35,7 @@ pub fn acquire_error(limit: usize, max_queued: usize) -> ArkError {
 #[derive(Default)]
 struct Inner {
     active: usize,
-    waiters: VecDeque<oneshot::Sender<()>>,
+    waiters: VecDeque<oneshot::Sender<SlotGuard>>,
 }
 
 /// Slot gate shared by every child spawn in the process.
@@ -92,30 +92,31 @@ impl SlotGate {
         };
 
         if let Some(rx) = waiter {
-            // The releaser transfers its slot to us, so `active` is unchanged.
-            if rx.await.is_err() {
-                // The gate was dropped mid-wait; nothing to release.
-                return Err(ArkError::new(
+            // Ownership moves with the message. If this task is cancelled after
+            // send but before polling rx again, dropping the receiver drops the
+            // transferred guard and returns the slot.
+            Ok(rx.await.map_err(|_| {
+                ArkError::new(
                     ArkErrorCode::RuntimeUnavailable,
                     "delegation slot gate closed while waiting",
-                ));
-            }
+                )
+            })?)
+        } else {
+            Ok(SlotGuard::new(Arc::clone(self)))
         }
-
-        Ok(SlotGuard {
-            gate: Arc::clone(self),
-        })
     }
 
     /// Hand the slot to the next waiter, or free it.
-    fn release(&self) {
+    fn release(self: &Arc<Self>) {
         let mut inner = self.lock();
         while let Some(waiter) = inner.waiters.pop_front() {
-            // A waiter whose future was dropped (cancelled parent) no longer
-            // receives; the slot must not be lost to a dead entry.
-            if waiter.send(()).is_ok() {
-                return;
+            // A failed send returns the guard. Disarm it while keeping `active`
+            // unchanged: this release call still owns the original slot.
+            if let Err(returned) = waiter.send(SlotGuard::new(Arc::clone(self))) {
+                returned.abandon();
+                continue;
             }
+            return;
         }
         inner.active = inner.active.saturating_sub(1);
     }
@@ -123,12 +124,24 @@ impl SlotGate {
 
 /// Holds one slot; releases on drop, including on cancel and panic.
 pub struct SlotGuard {
-    gate: Arc<SlotGate>,
+    gate: Option<Arc<SlotGate>>,
+}
+
+impl SlotGuard {
+    fn new(gate: Arc<SlotGate>) -> Self {
+        Self { gate: Some(gate) }
+    }
+
+    fn abandon(mut self) {
+        self.gate = None;
+    }
 }
 
 impl Drop for SlotGuard {
     fn drop(&mut self) {
-        self.gate.release();
+        if let Some(gate) = self.gate.take() {
+            gate.release();
+        }
     }
 }
 
@@ -209,6 +222,33 @@ mod tests {
         assert_eq!(gate.active(), 0);
         let again = gate.acquire(1, 4).await.unwrap();
         assert_eq!(gate.active(), 1);
+        drop(again);
+    }
+
+    #[tokio::test]
+    async fn a_waiter_cancelled_after_slot_transfer_still_releases_it() {
+        let gate = Arc::new(SlotGate::new());
+        let held = gate.acquire(1, 4).await.unwrap();
+        let waiting = {
+            let gate = Arc::clone(&gate);
+            tokio::spawn(async move { gate.acquire(1, 4).await })
+        };
+        while gate.queued() == 0 {
+            tokio::task::yield_now().await;
+        }
+
+        // Transfer the slot, then cancel before the waiter is polled again. The
+        // receiver owns the slot as soon as send succeeds, even if it never runs.
+        drop(held);
+        waiting.abort();
+        assert!(waiting.await.unwrap_err().is_cancelled());
+
+        assert_eq!(
+            gate.active(),
+            0,
+            "an abandoned transfer must not leak a slot"
+        );
+        let again = gate.acquire(1, 4).await.unwrap();
         drop(again);
     }
 
