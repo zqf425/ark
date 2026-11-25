@@ -68,7 +68,10 @@ child，发现父线程缺少相同 `notificationId` 的完成事件时补发。
 `autoContinue` 仅在 `subagents.enabled=true` 且 `subagents.auto_continue=true`、父线程无活动 turn、
 未删除/归档且没有已调度 continuation 时触发。关闭 subagents 或 auto-continue 会立即取消进程内待调度
 continuation，不影响已开始回合。`auto_continue` 的默认值及旧配置缺失值均为 `true`：默认配置在后台 child
-完成后会产生额外的父模型调用，用于自动汇总；显式 `false` 才恢复仅通知、不自动调用模型的模式。同一父线程
+完成后会产生额外的父模型调用，用于自动汇总；显式 `false` 才恢复仅通知、不自动调用模型的模式。
+关闭期间到达的通知不被丢弃，也不静默：server 在该线程确有未确认通知时记一条带原因的 `INFO`
+（`auto_continue_disabled` / `subagents_disabled` / `automatic_followups_disabled`），重新打开后由
+策略扫描补投。同一父线程
 250 ms 内的多个完成通知合并为一个 continuation；活动父回合期间到达的通知保留一个待调度槽，等回合
 结束后再复核持久 inbox。用户中断、删除或归档父线程时取消待执行 continuation，并抑制迟到 child
 completion，直到下一次显式用户回合（或取消归档）开启新的生命周期。该抑制从父线程持久终态恢复，

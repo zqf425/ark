@@ -60,6 +60,12 @@
   跨重启恢复（启动修复合成的 abort 除外）。每批最多消费 8 条；仅当前批全部确认成功且仍有待消费项时
   调度下一批，确认失败不会自行循环。自动作业仍调用注入的普通 `TurnRunner`，不会绕过 reactor、gate
   或 sandbox，也不会写入伪用户消息。
+- 策略关闭时的唤醒是**可观测**的：`auto_continue_block` 区分 `automatic_followups_disabled`
+  （一次性 `arkd run`）、`subagents_disabled` 与 `auto_continue_disabled` 三种原因。命中任一原因时，
+  `schedule_with_delay` 与策略扫描都不再静默返回，而是只在该线程确有未确认通知时打一条 `INFO`
+  （唤醒路径按线程一行，启动/配置应用的全量扫描只汇总一行 `threads`/`notifications`）；已归档线程不计入。
+  上报只读取不消费，通知仍在持久 inbox 里等下一次显式用户回合，因此"关闭开关"与"supervisor 丢事件"
+  在日志上可区分。inbox 为空时不打日志，避免每个普通回合结束都留下噪声。
 - 回合因模型请求失败（`model_request_failed`，网关抖动/断流/流超时）终结时，`service::recovery`
   调度自动恢复：以同一请求文本（`TurnSource::AutoRecovery`）重开回合，退避 5s/10s/20s，最多 3 次；
   失败回合的 lifecycle epoch 由 supervisor 在释放槽位前持有并传入恢复任务，退避后及 `workspace_gate`
