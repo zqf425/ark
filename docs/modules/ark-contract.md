@@ -41,6 +41,11 @@ gated 在 `Notice` kind 上）。取消原因词表与自治权词表不在本 c
 该 id 已关联到**本线程**，本阶段只记录本回合引用了哪些附件，不向模型传字节。`TurnStarted` 的
 `attachment_ids` 同样带 serde default，使旧日志可读。
 
+`ToolCallStarted/Finished`、`UserInputRequested/Resolved` 与 `TurnFailed` 携带可选
+`item_id`，由 Rust 生产者通过 `ark_common::keyed_item_id` 生成；live 渲染层直接消费该 ID，
+不再实现或镜像哈希算法。字段带 serde default 且空值省略，旧日志缺少时由存储投影按原 namespace
+回退生成，保持历史回放兼容。
+
 `ToolStormSuppressed` 除 `tool`/`count` 外还携带 `arguments`（serde default，旧行省略时读为 null）：
 被熔断抑制的调用必须留下"重复的是什么"的原始参数记录，且不要求审计方把抑制事件与配对的
 `ToolCallStarted` 做跨事件 join。`with_seq` 的逐变体重写集中在 `event/with_seq.rs`；每行拼写一个

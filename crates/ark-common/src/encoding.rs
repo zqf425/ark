@@ -312,7 +312,40 @@ pub fn write_text_atomic(path: &Path, text: &str) -> Result<()> {
         file.sync_all()
             .map_err(|err| io_error("sync", &temp, err))?;
     }
-    std::fs::rename(&temp, path).map_err(|err| io_error("rename", path, err))
+    std::fs::rename(&temp, path).map_err(|err| io_error("rename", path, err))?;
+    sync_parent_dir(path)
+}
+
+/// Persist the directory entry changed by an atomic rename.
+fn sync_parent_dir(path: &Path) -> Result<()> {
+    let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return Ok(());
+    };
+    #[cfg(test)]
+    if let Some(error) = injected_parent_sync_failure(path) {
+        return Err(error);
+    }
+    sync_dir(parent).map_err(|err| io_error("sync parent directory", parent, err))
+}
+
+#[cfg(unix)]
+fn sync_dir(path: &Path) -> std::io::Result<()> {
+    std::fs::File::open(path)?.sync_all()
+}
+
+#[cfg(windows)]
+fn sync_dir(path: &Path) -> std::io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)?
+        .sync_all()
 }
 
 /// Write text as UTF-8 without a BOM (no atomicity, for append-style surfaces).
@@ -329,8 +362,41 @@ pub fn write_json_file<T: serde::Serialize>(path: &Path, value: &T) -> Result<()
 
 fn temp_sibling(path: &Path) -> std::path::PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".tmp-{}", std::process::id()));
+    name.push(format!(".{}.tmp", uuid::Uuid::new_v4()));
     path.with_file_name(name)
+}
+
+#[cfg(test)]
+static PARENT_SYNC_FAILURES: std::sync::OnceLock<std::sync::Mutex<Option<std::path::PathBuf>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(test)]
+fn fail_next_parent_sync(path: &Path) {
+    *PARENT_SYNC_FAILURES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap() = Some(path.to_path_buf());
+}
+
+#[cfg(test)]
+fn injected_parent_sync_failure(path: &Path) -> Option<ArkError> {
+    let mut failures = PARENT_SYNC_FAILURES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap();
+    if failures.as_deref() == Some(path) {
+        failures.take();
+        Some(io_error(
+            "sync parent directory",
+            path,
+            std::io::Error::new(
+                std::io::ErrorKind::StorageFull,
+                "injected parent directory fsync failure",
+            ),
+        ))
+    } else {
+        None
+    }
 }
 
 fn io_error(action: &str, path: &Path, err: std::io::Error) -> ArkError {
@@ -482,6 +548,24 @@ mod tests {
         assert_eq!(written.last(), Some(&b'\n'));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn atomic_write_propagates_parent_directory_sync_failure() {
+        let dir = std::env::temp_dir().join(format!("ark-enc-sync-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        fail_next_parent_sync(&path);
+        let result = write_text_atomic(&path, "content");
+        assert!(result.is_err(), "rename must be followed by parent fsync");
+        assert_eq!(std::fs::read(&path).unwrap(), b"content");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn atomic_temp_siblings_are_unique_within_one_process() {
+        let path = std::path::Path::new("nested/config.json");
+        assert_ne!(temp_sibling(path), temp_sibling(path));
     }
 
     #[test]

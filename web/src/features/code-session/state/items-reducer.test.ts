@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { RuntimeEvent } from '../../../shared/contracts'
 import { childCompletionStatusKey } from '../child-completion-status'
 import { applyEvent, emptyItemsState, seedFromItems } from './items-reducer'
@@ -437,6 +437,19 @@ describe('items reducer workbench revision', () => {
     expect(state.workbenchRevision).toBe(4)
   })
 
+  it('handles goal and todo changes explicitly without duplicating panel state', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      let state = applyEvent(emptyItemsState(), { kind: 'goal_cleared', ...base })
+      state = applyEvent(state, { kind: 'todos_updated', ...base, seq: 2, todos: [] })
+      state = applyEvent(state, { kind: 'todos_cleared', ...base, seq: 3 })
+      expect(state.workbenchRevision).toBe(3)
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('bumps monotonically on rewind so a rebuilt snapshot is never stale', () => {
     let state = emptyItemsState()
     state = applyEvent(state, { kind: 'goal_updated', ...base, goal: 'ship' })
@@ -627,6 +640,22 @@ describe('live tool_call fold (实时回合工具行投影)', () => {
     expect(write!.status).toBe('completed')
     expect(write!.tool!.ok).toBe(true)
     expect((write!.tool!.arguments as { path: string }).path).toBe('a.md')
+  })
+
+  it('uses the item_id supplied by Rust instead of recomputing it', () => {
+    const itemId = '00000000-0000-0000-0000-0000000000aa' as const
+    const state = applyEvent(emptyItemsState(), {
+      ...base,
+      kind: 'tool_call_started',
+      turn_id: turnId,
+      item_id: itemId,
+      call_id: 'server-keyed',
+      tool: 'read',
+      arguments: {}
+    } as RuntimeEvent)
+
+    expect(state.itemOrder).toEqual([itemId])
+    expect(state.itemsById[itemId]?.tool?.call_id).toBe('server-keyed')
   })
 
   it('finished 先于 started 到达(重连窗口)也能建行', () => {

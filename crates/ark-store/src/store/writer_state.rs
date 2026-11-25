@@ -11,10 +11,10 @@ use crate::domain::items::{is_delta_event, ItemProjector};
 use crate::domain::layout::ThreadPaths;
 use crate::domain::session_state::SessionState;
 use crate::store::event_log::{
-    append_text, encode_event, plan_compaction, read_markers_blocking, repair_log_blocking,
+    append_text_outcome, encode_event, plan_compaction, read_markers_blocking, repair_log_blocking,
 };
 use crate::store::fs_util::{
-    read_json_opt, remove_dir_all, sync_parent_dir, write_atomic, write_json_atomic,
+    read_json_opt, remove_dir_all, sync_parent_dir, write_atomic, write_json_atomic, AppendFailure,
 };
 use crate::store::items_log::{
     append_item_record_blocking, append_usage_blocking, write_items_records_blocking, UsageRecord,
@@ -87,6 +87,7 @@ pub struct WriterState {
     rewinds: Vec<RewindRecord>,
     compaction_pending: bool,
     rewind_pending: bool,
+    append_uncertain: bool,
     diagnostics: Arc<dyn DiagnosticSink>,
 }
 
@@ -129,6 +130,7 @@ impl WriterState {
             rewinds,
             compaction_pending: false,
             rewind_pending: false,
+            append_uncertain: false,
             diagnostics,
         })
     }
@@ -174,11 +176,12 @@ impl WriterState {
             // The previous tail was a complete line without a trailing newline.
             text.insert(0, '\n');
         }
-        append_text(
+        append_text_outcome(
             &self.paths.events_jsonl(),
             &text,
             append_fsync(&self.limits, &stored),
-        )?;
+        )
+        .map_err(|failure| self.handle_append_failure(owns_dirty, failure))?;
         self.needs_newline = false;
         self.seq = seq;
         self.events.push(stored.clone());
@@ -188,6 +191,23 @@ impl WriterState {
         }
         self.fanout(&stored);
         Ok(stored)
+    }
+
+    fn handle_append_failure(&mut self, owns_dirty: bool, failure: AppendFailure) -> ArkError {
+        if failure.rolled_back {
+            if owns_dirty {
+                self.clear_dirty_after_append();
+            }
+            return failure.error;
+        }
+        self.append_uncertain = true;
+        let _ = crate::store::derived_dirty::mark_if_clean(
+            &self.paths,
+            self.seq + 1,
+            self.projector.current_turn(),
+            &self.session,
+        );
+        failure.error
     }
 
     /// Watermark, backlog and live channel in one indivisible step.
@@ -502,17 +522,22 @@ impl WriterState {
     }
 
     fn project_item(&mut self, stored: &RuntimeEvent) -> bool {
-        let Some(item) = self.projector.apply(stored) else {
+        let Some(item_id) = self.projector.apply_in_place(stored) else {
             return true;
         };
         if is_delta_event(stored) {
             return true;
         }
-        let record = crate::domain::items::ItemSnapshotRecord::from_projection(
-            self.projector.first_seq_of(&item.item_id),
-            self.projector.watermark_of(&item.item_id),
-            &item,
-        );
+        let item = self
+            .projector
+            .item(&item_id)
+            .expect("projected item remains in the projector")
+            .clone();
+        let record = crate::domain::items::ItemSnapshotRecord {
+            first_seq: self.projector.first_seq_of(&item_id),
+            watermark_seq: self.projector.watermark_of(&item_id),
+            item,
+        };
         self.record_derived_result(
             "items.jsonl",
             append_item_record_blocking(
@@ -576,6 +601,12 @@ impl WriterState {
     }
 
     pub(crate) fn finish_pending_transactions(&mut self) -> Result<()> {
+        if self.append_uncertain {
+            return Err(ArkError::store(format!(
+                "thread {} has an uncertain event append; restart the store to recover",
+                self.thread_id
+            )));
+        }
         if self.compaction_pending {
             sync_parent_dir(&self.paths.events_jsonl())?;
             crate::store::compaction_tx::recover(&self.paths)?;
@@ -703,7 +734,7 @@ fn load_projections(
 fn project_items_in_memory(events: &[RuntimeEvent]) -> ItemProjector {
     let mut projector = ItemProjector::new();
     for event in events {
-        projector.apply(event);
+        projector.apply_in_place(event);
     }
     projector
 }

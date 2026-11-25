@@ -13,7 +13,23 @@
 use crate::store::writer_state::{Snapshot, WriterState};
 use ark_common::{ArkError, Result, ThreadId};
 use ark_contract::{RewindResponse, RuntimeEvent, ThreadItem};
+use chrono::{DateTime, Utc};
+use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
+
+/// Side effects that must observe the same order as durable writer commands.
+///
+/// The store's index observer runs before the command acknowledgement and before
+/// the actor receives its next command, so a delayed caller cannot publish an
+/// older watermark over a newer append or rewind.
+pub trait WriterObserver: Send + Sync {
+    fn appended(&self, _event: &RuntimeEvent) {}
+    fn rewound(&self, _thread: ThreadId, _last_seq: u64, _last_event_at: Option<DateTime<Utc>>) {}
+}
+
+pub(crate) struct NoopWriterObserver;
+
+impl WriterObserver for NoopWriterObserver {}
 
 /// Commands accepted by a writer actor (design 7.4.3, extended with the reads
 /// the store facade needs so they also use the serialization point).
@@ -80,9 +96,17 @@ pub struct WriterHandle {
 impl WriterHandle {
     /// Spawn the actor task that owns `state`.
     pub fn spawn(state: WriterState, queue_capacity: usize) -> Self {
+        Self::spawn_observed(state, queue_capacity, Arc::new(NoopWriterObserver))
+    }
+
+    pub(crate) fn spawn_observed(
+        state: WriterState,
+        queue_capacity: usize,
+        observer: Arc<dyn WriterObserver>,
+    ) -> Self {
         let thread_id = state.thread_id();
         let (tx, rx) = mpsc::channel(queue_capacity.max(1));
-        tokio::spawn(run(state, rx));
+        tokio::spawn(run(state, rx, observer));
         Self { thread_id, tx }
     }
 
@@ -220,11 +244,18 @@ impl WriterHandle {
     }
 }
 
-async fn run(mut state: WriterState, mut rx: mpsc::Receiver<WriterCmd>) {
+async fn run(
+    mut state: WriterState,
+    mut rx: mpsc::Receiver<WriterCmd>,
+    observer: Arc<dyn WriterObserver>,
+) {
     while let Some(cmd) = rx.recv().await {
         match cmd {
             WriterCmd::Append { event, ack } => {
                 let result = state.append(*event);
+                if let Ok(event) = &result {
+                    observer.appended(event);
+                }
                 let _ = ack.send(result);
             }
             WriterCmd::SnapshotAndSubscribe { since_seq, reply } => {
@@ -269,6 +300,10 @@ async fn run(mut state: WriterState, mut rx: mpsc::Receiver<WriterCmd>) {
                 reply,
             } => {
                 let result = state.rewind(rewind_from_seq, target_turn_id);
+                if let Ok(response) = &result {
+                    let last_event_at = state.events().last().map(RuntimeEvent::timestamp);
+                    observer.rewound(state.thread_id(), response.last_seq, last_event_at);
+                }
                 let _ = reply.send(result);
             }
             WriterCmd::RewindRecord {
