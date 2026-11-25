@@ -13,7 +13,7 @@ CLI 当前目录产生多套互不相见的数据。启动只创建目录，不�
 ~/.arkd/
 ├── data/       # 会话、附件、memory、plugins 等运行数据
 ├── config/     # config.json、providers.json
-├── log/        # arkd.log
+├── log/        # arkd.log 与历史轮转日志
 ├── skills/     # 全局 skills
 ├── mcp/        # mcp-servers.json
 ├── tasks/      # schedules.json
@@ -46,9 +46,14 @@ arkd tracing 保留既有控制台行为，并同步以 append 模式写入 `<ro
 tracing 控制台流保持 stdout；`run` 使用 stderr，保证 stdout 只承载模型输出。日志目录在 subscriber
 初始化前创建，文件打开失败会使启动明确失败。
 
+当前日志写入后达到 10 MiB（10,485,760 字节）时自动轮转：重命名为同目录的
+`arkd-<本地轮转时间 YYYYMMDD-HHMMSS-mmm>[-序号].log`，然后创建新的空日志继续写入。
+历史轮转日志不自动删除；重命名失败时保留当前日志，不静默丢弃日志内容。
+
 ## 验收
 
 - CLI 与 desktop 测试固定默认参数。
 - 路径测试覆盖常规 `<root>/data`、非 `data` 自定义目录、相对 `data` 与大小写严格的 `IM`。
+- 日志测试覆盖阈值边界、轮转时间命名、重命名内容完整、轮转后继续写入与多次轮转文件名不冲突。
 - wiring 测试和编译确认 config/provider、MCP、schedule、IM、workspace recent、skills 分别使用上述目录。
 - ark-server 保持 `AppState::new` 兼容默认值，并允许组合根通过 builder 指定 `config_dir`，使加载与保存一致。
