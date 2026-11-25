@@ -35,8 +35,7 @@
   min-width: 0;
 }
 
-.ark-threadlist__iconbtn,
-.ark-threadlist__refresh {
+.ark-threadlist__iconbtn {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -50,17 +49,10 @@
   cursor: pointer;
 }
 
-.ark-threadlist__iconbtn:hover,
-.ark-threadlist__refresh:hover {
+.ark-threadlist__iconbtn:hover {
   background: var(--ark-sidebar-row-hover);
   border-color: var(--ark-sidebar-row-ring);
   color: var(--ark-text);
-}
-
-.ark-threadlist__refresh {
-  width: 26px;
-  height: 22px;
-  margin-left: auto;
 }
 
 .ark-threadlist__title {
@@ -651,6 +643,42 @@
   font-family: var(--ark-mono);
   font-size: 10px;
   font-weight: 400;
+}
+.ark-threadlist__scope .ark-threadlist__refresh {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  gap: 4px;
+  min-height: 24px;
+  margin: 0 0 5px 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius-sm);
+  background: var(--ark-bg-raised);
+  color: var(--ark-text-dim);
+  font-size: 10.5px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.ark-threadlist__scope .ark-threadlist__refresh:hover {
+  border-color: var(--ark-sidebar-row-ring);
+  background: var(--ark-sidebar-row-hover);
+  color: var(--ark-text);
+}
+
+.ark-threadlist__scope .ark-threadlist__refresh:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ark-threadlist__scope .ark-threadlist__refresh {
+    transition: none;
+  }
 }
 
 .ark-threadlist__count {

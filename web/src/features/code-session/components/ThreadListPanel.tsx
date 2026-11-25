@@ -207,15 +207,6 @@ export function ThreadListPanel(): JSX.Element {
           >
             <Icon name="clock" size={14} />
           </button>
-          <button
-            type="button"
-            className="ark-threadlist__iconbtn"
-            title={t('thread.list.refresh')}
-            aria-label={t('thread.list.refresh')}
-            onClick={() => void refresh()}
-          >
-            <Icon name="refresh" size={14} />
-          </button>
           <Button variant="primary" size="sm" disabled={busy} onClick={() => void create()}>
             {busy ? t('thread.list.creating') : t('thread.list.create')}
           </Button>
@@ -243,7 +234,8 @@ export function ThreadListPanel(): JSX.Element {
             {t('thread.list.scopeArchived')} <span>{archivedCount}</span>
           </button>
           <button type="button" className="ark-threadlist__refresh" title={t('thread.list.refresh')} aria-label={t('thread.list.refresh')} onClick={() => void refresh()}>
-            <Icon name="refresh" size={13} />
+            <Icon name="refresh" size={12} />
+            <span className="ark-threadlist__refresh-label">{t('thread.list.refresh')}</span>
           </button>
         </div>
       </div>
