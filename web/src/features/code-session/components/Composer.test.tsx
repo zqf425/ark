@@ -401,12 +401,30 @@ describe('Composer per-thread draft persistence', () => {
     expect(harness.host.querySelector('.ark-skill-palette__search')).toBeNull()
     expect(harness.text()).toContain('/kun-new-session')
 
-    // Enter replaces the bare slash with the highlighted skill's full mention.
+    // Enter turns the pick into a chip and cuts the typed `/query` out of the draft.
     await pressEnter(node)
     await settle()
-    expect(useCodeSessionStore.getState().drafts[THREAD_A]).toBe('/kun-new-session ')
+    expect(useCodeSessionStore.getState().drafts[THREAD_A] ?? '').toBe('')
+    const chip = harness.host.querySelector('.ark-composer__skills .ark-skillchip')
+    expect(chip?.getAttribute('title')).toBe('/kun-new-session')
     // The palette closes once the token is gone.
     expect(harness.host.querySelector('.ark-skill-palette')).toBeNull()
+  })
+
+  it('sending folds the skill chip back into the body as a leading /id mention', async () => {
+    harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+    const node = input(harness.host)
+    await type(node, '/')
+    await settle()
+    await pressEnter(node)
+    await settle()
+    await type(node, '帮我新开会话')
+    await settle()
+    await pressEnter(node)
+    await settle()
+    expect(turnMocks.send).toHaveBeenCalledWith('/kun-new-session 帮我新开会话', [])
+    // The chip is consumed by the delivery.
+    expect(harness.host.querySelector('.ark-composer__skills')).toBeNull()
   })
 
   it('the slash palette filters as the query grows and paths never summon it', async () => {

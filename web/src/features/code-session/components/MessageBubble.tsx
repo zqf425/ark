@@ -12,6 +12,7 @@ import { Markdown } from '../../../shared/ui/Markdown'
 import { CopyButton } from '../../../shared/ui/copy'
 import { useThreadSkills } from '../hooks/use-thread-skills'
 import { splitSkillMentions } from './skill-mention'
+import { SkillChip } from './SkillChip'
 import { AttachmentThumb } from './AttachmentThumb'
 
 /*
@@ -98,20 +99,13 @@ export function AttachmentChips({ outcomes }: { outcomes: TurnAttachmentOutcome[
  * text, so a detached row never becomes an API caller.
  */
 function MentionBody({ text, threadId }: { text: string; threadId: string | null }): JSX.Element {
-  const { t } = useI18n()
   const { skills } = useThreadSkills(threadId)
   if (!skills || skills.length === 0) return <>{text}</>
   return (
     <>
       {splitSkillMentions(text, skills).map((segment, index) =>
         segment.kind === 'mention' ? (
-          <span
-            key={`${index}-${segment.value}`}
-            className="ark-mention"
-            title={segment.skill.description ?? t('canvas.composer.skillsAria')}
-          >
-            {segment.value}
-          </span>
+          <SkillChip key={`${index}-${segment.value}`} id={segment.skill.id} name={segment.skill.name} />
         ) : (
           <span key={`text-${index}`}>{segment.value}</span>
         )

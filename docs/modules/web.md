@@ -249,8 +249,15 @@
   仍是唯一激活方式，不新增技能运行时字段。面板本体是浮动 palette（`SkillPalette`），有两种模式：
   - **menu 模式**：`+` 菜单打开，自带搜索框、来源/legacy 标签与重扫入口；
   - **token 模式**：在草稿中键入 `/` 唤起（`mentionTokenAt` 识别光标下的 token，词边界开闭，
-    路径/URL 不触发），草稿即过滤词、无搜索框；↑/↓ 换行、Enter 整词替换（`applySkill` 光标处
-    替换 token 并清 token）、Esc 关闭，空匹配显示"没有匹配的技能"。两种模式互斥。
+    路径/URL 不触发），草稿即过滤词、无搜索框；↑/↓ 换行、Enter 选中、Esc 关闭，空匹配显示
+    "没有匹配的技能"。两种模式互斥。
+  - **当前实现（已选技能 chip）**：两种模式选中后 `applySkill` 都不再向草稿插入 `/id`，而是把
+    id 加入 Composer 本地 `selectedSkills`（去重）并在 textarea 正上方单独一行显示 `SkillChip`
+    （flex wrap；可编辑时带删除按钮）；token 模式同时从草稿删去光标下的 `/query` 片段。
+    发送/steer/排队/新任务创建时由 `skill-mention.ts` 的 `composeWithSkills` 把 chip 按既有
+    提及格式拼回正文前缀（`/id1 /id2 正文`），与 `splitSkillMentions` 渲染识别及
+    `ark-skills::activation` 的 id 词边界匹配同形，不新增解析逻辑；投递成功后清空 chip，切换线程
+    时也清空（chip 不持久化到草稿存储）。
   线程技能集缓存在 `use-thread-skills.ts`（30s TTL，模块级共享），Composer palette 与消息画布的
   提及芯片共用同一份缓存。
 - 已知未接入的路由：`attachments/diagnostics`（诊断）、
@@ -464,7 +471,9 @@
   渲染一致；运行时未发附件字段的旧 item 保持原样。
 - 「技能」面板的消费面见上方"输入框「技能」面板"条目：线程级视图 + 全局回落，显式 `/id` 提及即激活
   是 arkd 的技能指定方式；不新增技能运行时字段。用户消息正文里的 `/id` 提及在渲染层识别
-  （`skill-mention.ts`，仅当 token 与已加载技能 id 精确匹配时）并渲染成 `.ark-mention` 芯片，
+  （`skill-mention.ts`，仅当 token 与已加载技能 id 精确匹配时）并渲染成 `SkillChip`（当前实现：
+  sparkles 图标 + 技能 name，无底色无边框，`--ark-skill` 色 600 字重，title 为 `/<id>`，name 缺失时
+  回落 id；与输入框已选 chip 共用组件与 `.ark-skillchip` 样式），
   未知斜杠词（路径、URL）保持纯文本；识别只影响展示，复制按钮仍复制逐字原文。**UserBubble 必须从
   `StreamRow`/`TurnBlock` 拿到所属 threadId**（芯片依赖该线程的技能缓存），脱离流的独立渲染
   传 `null` 回落纯文本。输入框草稿侧，`DraftHighlight` 镜像层在 textarea 之下按同字体度量
@@ -474,8 +483,9 @@
   1px 清晰细边、淡紫底），文字与正文同字号同字重。额外宽度来自 `padding`，由等量负 `margin`
   抵消，使 token 的 advance 严格等于逐字文本——后续字形不漂移（实测 0.03px），行首 chip
   左边界正好落在内容起点（0px，不裁切）；进行中 token 只保留细边、无底色，表达"未解析"。
-  `box-decoration-break: clone` 让跨行 chip 每段都有完整边框。消息气泡与输入框共用同一 chip，
-  深浅主题由 `--ark-skill` / `--ark-skill-soft` 切换。
+  `box-decoration-break: clone` 让跨行 chip 每段都有完整边框。上述 `.ark-mention` 样式现仅用于
+  输入框镜像层（用户手打的 `/id` 与进行中 token）；消息气泡改用 `SkillChip`。深浅主题由
+  `--ark-skill` / `--ark-skill-soft` 切换。
 - 用户可见文本通过 `web/src/shared/i18n/` 的消息键与中英文资源提供；新增 UI 不得硬编码文案。
   该目录已按域拆分为 `catalogs/*`（`common`、`errors`、`session`、`thread-list`、`workbench`、
   `session-canvas`、`settings-*`）：每个 catalog 输出一张

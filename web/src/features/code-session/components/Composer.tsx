@@ -30,10 +30,11 @@ import { useRuntimeSkills, useThreadSkills } from '../hooks/use-thread-skills'
 import { associateAttachment, uploadAttachment } from '../api/attachments-api'
 import { canEditComposer, canSendToThread } from './composer-availability'
 import type { ThreadRuntimeSettings } from '../../../shared/contracts'
-import { filterSkills, mentionTokenAt, type MentionToken } from './skill-mention'
+import { composeWithSkills, filterSkills, mentionTokenAt, type MentionToken } from './skill-mention'
 import { AutonomyPicker, WorkspacePicker, ContextRing, ModelPicker } from './ComposerRuntimeControls'
 import { SkillPalette } from './SkillPalette'
 import { DraftHighlight } from './DraftHighlight'
+import { SkillChip } from './SkillChip'
 import { AttachmentThumb } from './AttachmentThumb'
 import { CopyButton } from '../../../shared/ui/copy'
 const MAX_ROWS = 8
@@ -284,6 +285,9 @@ export function Composer({
    */
   const [token, setToken] = useState<MentionToken | null>(null)
   const [tokenActive, setTokenActive] = useState(0)
+  /** Skill ids picked from the palette, shown as chips; folded into the body on send. */
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([])
+  const skillName = (id: string): string | undefined => skills?.find((skill) => skill.id === id)?.name
   /** The round + button opens a small insert menu (attachment / skills). */
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -402,6 +406,7 @@ export function Composer({
   useEffect(() => {
     setToken(null)
     setTokenActive(0)
+    setSelectedSkills([])
   }, [threadId])
 
   const resetInput = (): void => {
@@ -418,12 +423,13 @@ export function Composer({
    */
   const submit = async (): Promise<void> => {
     if (!canSendToThread(threadId, draft, streamStatus, pendingStart)) return
-    const text = draftText
-    if (!text.trim()) return
+    const raw = draftText
+    if (!raw.trim()) return
     if (live && deliveryMode === 'queue') {
       queueDraft()
       return
     }
+    const text = composeWithSkills(selectedSkills, raw)
     // The new-task page has no thread yet: the picked attachments ride the
     // create+start delivery below (associated after the thread exists).
     if (!pendingStart) {
@@ -443,8 +449,9 @@ export function Composer({
       if (result === 'accepted') {
         // Clear only the text that was actually sent; anything typed during the
         // request stays in the draft and a failure keeps everything.
-        if (threadId && useCodeSessionStore.getState().drafts[threadId] === text) clearDraft(threadId)
+        if (threadId && useCodeSessionStore.getState().drafts[threadId] === raw) clearDraft(threadId)
         setAttachments([])
+        setSelectedSkills([])
         setCommandError(null)
         set(false)
       }
@@ -455,17 +462,19 @@ export function Composer({
     if (ok) {
       // Same failure rule as the thread path: only a delivered draft is
       // dropped, so a failed create keeps the text for the next attempt.
-      if (useCodeSessionStore.getState().drafts[NEW_TASK_DRAFT_KEY] === text) clearDraft(NEW_TASK_DRAFT_KEY)
+      if (useCodeSessionStore.getState().drafts[NEW_TASK_DRAFT_KEY] === raw) clearDraft(NEW_TASK_DRAFT_KEY)
       setAttachments([])
+      setSelectedSkills([])
       setCommandError(null)
       set(false)
     }
   }
 
   const queueDraft = (): void => {
-    const text = draftText.trim()
-    if (!text || !threadId) return
-    queueMessage(threadId, text)
+    const raw = draftText.trim()
+    if (!raw || !threadId) return
+    queueMessage(threadId, composeWithSkills(selectedSkills, raw))
+    setSelectedSkills([])
     resetInput()
   }
 
@@ -557,40 +566,29 @@ export function Composer({
     threadSkillView.reload()
   }
 
-  const mentionSkill = (id: string): void => {
-    const next = draftText ? `${draftText.trimEnd()} /${id} ` : `/${id} `
-    if (threadId) setDraft(threadId, next)
-    else setDraft(NEW_TASK_DRAFT_KEY, next)
-    inputRef.current?.focus()
-    setSkillsOpen(false)
-  }
-
   /**
-   * Replace the in-progress token under the caret with the full mention, or
-   * insert at the caret when there is no token (menu mode). One landing spot
-   * for both palette modes, so the caret/lead-space rules stay in one place.
+   * A palette pick (menu or token mode) becomes a chip above the textarea
+   * instead of `/id` text. Token mode also cuts the typed `/query` out of the
+   * draft; the chip is folded back into the body on send (composeWithSkills).
    */
   const applySkill = (id: string): void => {
     const node = inputRef.current
-    // Closing the palette is part of the pick: the token below is about to be
-    // replaced, and a stale one would keep the palette open after re-render.
+    // Closing the palette is part of the pick: a stale token would keep the
+    // palette open after re-render.
     setToken(null)
     setSkillsOpen(false)
-    if (!node) {
-      mentionSkill(id)
+    setSelectedSkills((current) => (current.includes(id) ? current : [...current, id]))
+    if (!token) {
+      node?.focus()
       return
     }
-    const mention = `/${id} `
-    const start = token ? token.start : (node.selectionStart ?? draftText.length)
-    const end = token ? token.end : (node.selectionEnd ?? draftText.length)
-    const before = draftText.slice(0, start)
-    const after = draftText.slice(end)
-    // A mention is a word: keep one space before it when gluing onto text.
-    const lead = before && !/\s$/.test(before) ? ' ' : ''
-    const next = `${before}${lead}${mention}${after}`
+    const before = draftText.slice(0, token.start)
+    const after = draftText.slice(token.end)
+    const next = `${before}${after}`
     if (threadId) setDraft(threadId, next)
     else setDraft(NEW_TASK_DRAFT_KEY, next)
-    const caret = before.length + lead.length + mention.length
+    if (!node) return
+    const caret = before.length
     // The value lands through the store → prop cycle, so the caret restore
     // waits one frame; without it the cursor jumps to the end of the draft.
     requestAnimationFrame(() => {
@@ -680,6 +678,20 @@ export function Composer({
             {attachments.some((picked) => /\.(png|jpe?g|gif|webp|bmp)$/i.test(picked.name)) ? (
               <span className="ark-composer__status">{t('canvas.composer.imageVisionHint')}</span>
             ) : null}
+          </div>
+        ) : null}
+
+        {selectedSkills.length > 0 ? (
+          <div className="ark-composer__skills" role="list" aria-label={t('canvas.composer.skillsAria')}>
+            {selectedSkills.map((id) => (
+              <span key={id} role="listitem">
+                <SkillChip
+                  id={id}
+                  name={skillName(id)}
+                  onRemove={inputDisabled ? undefined : () => setSelectedSkills((current) => current.filter((item) => item !== id))}
+                />
+              </span>
+            ))}
           </div>
         ) : null}
 

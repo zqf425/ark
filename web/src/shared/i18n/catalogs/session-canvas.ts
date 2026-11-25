@@ -205,6 +205,7 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.composer.queuedAria': ['排队中的消息，回合结束后按顺序发送', 'Queued messages; sent in order when the turn ends'],
   'canvas.composer.skills': ['技能', 'Skills'],
   'canvas.composer.skillsAria': ['可指定的技能', 'Skills to mention'],
+  'canvas.composer.skillChipRemove': ['移除技能 {name}', 'Remove skill {name}'],
   'canvas.composer.skillsLoading': ['技能加载中…', 'Loading skills…'],
   'canvas.composer.skillsEmpty': ['没有可用技能。', 'No skills available.'],
   'canvas.composer.skillsHint': ['点击插入 /id，消息中提及即激活该技能。', 'Click to insert /id; mentioning it in the message activates the skill.'],

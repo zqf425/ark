@@ -77,6 +77,17 @@ export function splitSkillMentions(text: string, skills: readonly SkillSummary[]
   }
 }
 
+/**
+ * Fold selected skill chips back into the message body as leading `/id `
+ * mentions: the exact token the palette used to insert, which both
+ * `splitSkillMentions` (rendering) and the runtime's activation
+ * (`ark-skills::activation`, id word match) already recognize.
+ */
+export function composeWithSkills(ids: readonly string[], text: string): string {
+  if (ids.length === 0) return text
+  return `${ids.map((id) => `/${id}`).join(' ')} ${text}`
+}
+
 /** The in-progress mention under the caret, or `null` when none is open. */
 export type MentionToken = {
   /** Where the `/` sits in the draft. */
