@@ -32,6 +32,8 @@ export function foldUsage(
     cacheHitTokens: sumOptional(current?.cacheHitTokens ?? null, sample.cache_hit_tokens ?? null),
     cacheMissTokens: sumOptional(current?.cacheMissTokens ?? null, sample.cache_miss_tokens ?? null),
     cacheCountersIncomplete,
+    cacheHitRateApproximate:
+      (current?.cacheHitRateApproximate ?? false) || sample.cache_hit_rate_approximate === true,
     durationIncomplete,
     durationMs: durationIncomplete
       ? null
@@ -56,6 +58,7 @@ function usageFromResponse(response: ThreadUsageResponse): UsageAggregate {
     cacheHitTokens: response.cache_hit_tokens ?? null,
     cacheMissTokens: response.cache_miss_tokens ?? null,
     cacheCountersIncomplete,
+    cacheHitRateApproximate: response.cache_hit_rate_approximate === true,
     durationIncomplete,
     durationMs: durationIncomplete ? null : response.duration_ms ?? null,
     activeMs: response.active_ms ?? null,

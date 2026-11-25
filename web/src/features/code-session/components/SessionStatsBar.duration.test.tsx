@@ -67,6 +67,7 @@ describe('SessionStatsBar total duration format', () => {
         cacheHitTokens: null,
         cacheMissTokens: null,
         cacheCountersIncomplete: true,
+        cacheHitRateApproximate: false,
         durationIncomplete: true,
         lastPromptTokens: null,
         lastRoundTokensPerSec: null
@@ -110,6 +111,7 @@ describe('SessionStatsBar total duration format', () => {
         cacheHitTokens: null,
         cacheMissTokens: null,
         cacheCountersIncomplete: true,
+        cacheHitRateApproximate: false,
         durationIncomplete: true,
         lastPromptTokens: null,
         lastRoundTokensPerSec: null
@@ -176,6 +178,7 @@ describe('SessionStatsBar total duration format', () => {
         cacheHitTokens: null,
         cacheMissTokens: null,
         cacheCountersIncomplete: true,
+        cacheHitRateApproximate: false,
         durationIncomplete: true,
         lastPromptTokens: null,
         lastRoundTokensPerSec: null
@@ -203,6 +206,7 @@ describe('SessionStatsBar total duration format', () => {
         cacheHitTokens: 80,
         cacheMissTokens: 20,
         cacheCountersIncomplete: false,
+        cacheHitRateApproximate: false,
         lastPromptTokens: 100,
         lastRoundTokensPerSec: null
       }

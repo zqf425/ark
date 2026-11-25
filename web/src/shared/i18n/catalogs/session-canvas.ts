@@ -129,6 +129,8 @@ export const SESSION_CANVAS_MESSAGES = {
   'canvas.usage.speedTitle': ['最近一个模型轮的流式输出速度（按本轮 delta 实测窗口折算）', 'Streaming output speed of the latest model round (measured over its delta window)'],
   'canvas.usage.cache': ['缓存命中 {percent}%', 'cache hit {percent}%'],
   'canvas.usage.cacheTitle': ['会话累计提示缓存命中率（仅来自权威命中/未命中计数）', 'Cumulative prompt-cache hit rate (authoritative hit/miss counters only)'],
+  'canvas.usage.cacheApprox': ['缓存命中 ≈{percent}%', 'cache hit ≈{percent}%'],
+  'canvas.usage.cacheApproxTitle': ['会话累计提示缓存命中率（近似值：部分请求带图片输入，未命中数由 prompt - hit 推导，可能略高）', "Cumulative prompt-cache hit rate (approximate: some requests carried image inputs, the miss side is derived from prompt - hit and may run high)"],
   'canvas.compaction.title': ['最近一次上下文压缩', 'Most recent context compaction'],
   'canvas.compaction.notice': ['已压缩：折叠 {removed} 条消息，检查点 {chars} 字符', 'Compacted: folded {removed} messages, checkpoint {chars} chars'],
   'canvas.checkpoint.title': ['上下文已压缩', 'Context compacted'],

@@ -34,20 +34,29 @@ impl UsageParser {
         // still be completed algebraically — but only when the uncached
         // remainder is exactly `prompt - hit`. If the same usage object splits
         // image/audio tokens out of the prompt, that remainder also contains
-        // billable non-cacheable modalities, so the rate stays unknown instead
-        // of being fabricated (measured 2026-11-18: brgroup_bl, Nvidia and
-        // openrouter all report `cached_tokens` with no miss field and no
-        // split modalities; this is what turns their cache chips visible).
+        // billable non-cacheable modalities: the pair is still completed (an
+        // approximate rate beats no rate), but it is flagged approximate
+        // because gateways may exclude images from `prompt`, which would make
+        // `prompt - hit` overstate the miss (measured 2026-11-18: brgroup_bl,
+        // Nvidia and openrouter all report `cached_tokens` with no miss field
+        // and no split modalities; this is what turns their cache chips
+        // visible).
+        let mut approx = false;
         let miss = uint(usage, "prompt_cache_miss_tokens").or_else(|| {
             if splits_modalities(usage) {
-                return None;
+                approx = true;
             }
             match (prompt, hit) {
                 (Some(prompt), Some(hit)) => Some(prompt.saturating_sub(hit)),
                 _ => None,
             }
         });
-        self.build(prompt, completion, hit, miss)
+        let built = self.build(prompt, completion, hit, miss);
+        if approx {
+            built.mark_approximate()
+        } else {
+            built
+        }
     }
 
     /// Anthropic messages shape.
@@ -109,11 +118,14 @@ fn nested_uint(value: &Value, outer: &str, inner: &str) -> Option<u64> {
 
 /// True when the provider reports a NONZERO image/audio token count inside
 /// the prompt details. In the OpenAI family `prompt_tokens` includes the
-/// cached portion, so `prompt - cached` is the complete uncached remainder;
-/// an explicitly zero modality (brgroup_bl ships `image_tokens: 0`) adds no
-/// unaccounted tokens either. Only a nonzero split makes the remainder's
-/// composition unverifiable for gateways that exclude images from `prompt`:
-/// then the rate stays unknown instead of being fabricated.
+/// cached portion, so `prompt - cached` is the uncached remainder; but
+/// gateways that exclude images from `prompt_tokens` make that remainder's
+/// composition unverifiable — the derived miss may absorb billable,
+/// non-cacheable image tokens. The rate is still derived (an approximate
+/// rate beats hiding cache entirely) and flagged via
+/// `with_cache_approximate` so the renderer can mark it "≈". An explicitly
+/// zero modality (brgroup_bl ships `image_tokens: 0`) adds no unaccounted
+/// tokens and is not a split.
 fn splits_modalities(usage: &Value) -> bool {
     const DETAIL_KEYS: [&str; 2] = ["prompt_tokens_details", "input_tokens_details"];
     const MODALITY_KEYS: [&str; 2] = ["image_tokens", "audio_tokens"];
@@ -167,6 +179,9 @@ mod tests {
         assert_eq!(usage.cache_hit_tokens, Some(90));
         assert_eq!(usage.cache_miss_tokens, Some(10));
         assert_eq!(usage.cache_hit_rate, Some(0.9));
+        // No split modalities in the payload, so the remainder is fully
+        // accounted and the rate is real, not approximate.
+        assert!(!usage.cache_hit_rate_approximate);
     }
 
     #[test]
@@ -253,22 +268,25 @@ mod tests {
         assert_eq!(usage.cache_hit_tokens, Some(90));
         assert_eq!(usage.cache_miss_tokens, Some(10));
         assert_eq!(usage.cache_hit_rate, Some(0.9));
+        assert!(!usage.cache_hit_rate_approximate);
     }
 
     #[test]
     fn openai_cached_tokens_does_not_guess_with_nonzero_split_modalities() {
         // A nonzero image/audio count inside the prompt details makes the
         // remainder's composition unverifiable (gateways may exclude images
-        // from `prompt_tokens`). Without a native miss field the rate stays
-        // unknown instead of being fabricated.
+        // from `prompt_tokens`). The pair is still completed so cache stays
+        // visible, but the rate is flagged approximate instead of claiming a
+        // measured value.
         let usage = UsageParser::new().parse_openai(&json!({
             "prompt_tokens": 100,
             "completion_tokens": 5,
             "prompt_tokens_details": { "cached_tokens": 90, "image_tokens": 7 }
         }));
         assert_eq!(usage.cache_hit_tokens, Some(90));
-        assert_eq!(usage.cache_miss_tokens, None);
-        assert_eq!(usage.cache_hit_rate, None);
+        assert_eq!(usage.cache_miss_tokens, Some(10));
+        assert_eq!(usage.cache_hit_rate, Some(0.9));
+        assert!(usage.cache_hit_rate_approximate);
     }
 
     #[test]
@@ -304,6 +322,8 @@ mod tests {
         assert_eq!(usage.cache_hit_tokens, Some(90));
         assert_eq!(usage.cache_miss_tokens, Some(10));
         assert_eq!(usage.cache_hit_rate, Some(0.9));
+        // Native counters win: no approximation flag on a real pair.
+        assert!(!usage.cache_hit_rate_approximate);
     }
 
     #[test]

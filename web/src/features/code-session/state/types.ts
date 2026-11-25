@@ -37,6 +37,8 @@ export type UsageAggregate = {
   cacheHitTokens: number | null
   cacheMissTokens: number | null
   cacheCountersIncomplete: boolean
+  /** Any folded sample derived its miss from a split-modality remainder. */
+  cacheHitRateApproximate: boolean
   /**
    * Thread's active span from the server fold: every turn's wall clock minus
    * user-gate waits, plus harness recovery/continuation gaps, milliseconds.

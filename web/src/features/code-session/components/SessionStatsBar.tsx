@@ -136,8 +136,12 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
 
   const number = (value: number): string => new Intl.NumberFormat(locale).format(value)
 
-  // Cache hit rate only from the hit/miss pair, mirroring the Rust aggregate:
-  // never faked from `hit / prompt_tokens`, which would overstate efficiency.
+  // Cache hit rate mirrors the Rust aggregate: `hit / (hit + miss)` from the
+  // pair, never faked from `hit / prompt_tokens`. An aggregate whose misses
+  // were derived past a split-modality remainder (image/audio inputs) still
+  // renders — marked approximate with "≈" — because a labeled estimate beats
+  // hiding the fact that prompt cache is working.
+  const cacheRateApproximate = usage?.cacheHitRateApproximate ?? false
   const cacheRate =
     usage?.cacheHitTokens != null && usage.cacheMissTokens != null && usage.cacheHitTokens + usage.cacheMissTokens > 0
       ? usage.cacheHitTokens / (usage.cacheHitTokens + usage.cacheMissTokens)
@@ -173,8 +177,10 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
             })}
           </span>
           {cacheRate != null ? (
-            <span className="ark-stats-bar__item" title={t('canvas.usage.cacheTitle')}>
-              {t('canvas.usage.cache', { percent: number(Math.round(cacheRate * 100)) })}
+            <span className="ark-stats-bar__item" title={cacheRateApproximate ? t('canvas.usage.cacheApproxTitle') : t('canvas.usage.cacheTitle')}>
+              {cacheRateApproximate
+                ? t('canvas.usage.cacheApprox', { percent: number(Math.round(cacheRate * 100)) })
+                : t('canvas.usage.cache', { percent: number(Math.round(cacheRate * 100)) })}
             </span>
           ) : null}
           {usage.costUsd != null ? (
