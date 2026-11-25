@@ -62,8 +62,8 @@
   或 sandbox，也不会写入伪用户消息。
 - 回合因模型请求失败（`model_request_failed`，网关抖动/断流/流超时）终结时，`service::recovery`
   调度自动恢复：以同一请求文本（`TurnSource::AutoRecovery`）重开回合，退避 5s/10s/20s，最多 3 次；
-  调度时（读取失败历史之前）捕获失败回合的 lifecycle epoch，退避后及 `workspace_gate` 注册临界区内再次核对；期间任何
-  新回合都会使旧恢复以 `conflict` 失效，不能越过用户的新输入继续执行。失败回合已授权的附件 id
+  失败回合的 lifecycle epoch 由 supervisor 在释放槽位前持有并传入恢复任务，退避后及 `workspace_gate`
+  注册临界区内再次核对；期间任何新回合都会使旧恢复以 `conflict` 失效，不能越过用户的新输入继续执行。失败回合已授权的附件 id
   随恢复作业保留，并在注册前重新经过 `authorize_turn_attachments`，不能凭旧授权直接复用。
   尝试号写入 `turn_started.auto_recovery`，恢复回合先写一条 Notice 说明自动重试原因。恢复是**续跑**
   而非新请求：失败回合已把用户消息落盘并在重放历史末尾出现，`arkd` 组合根据此不再重复 `push_user_message`

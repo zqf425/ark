@@ -14,6 +14,7 @@ import { installBrowserStubs, mountWithProviders, settle, type ReactHarness } fr
 import { useCodeSessionStore } from '../state/store'
 import { Composer } from './Composer'
 import { associateAttachment, uploadAttachment } from '../api/attachments-api'
+import type { TurnSendResult } from '../hooks/use-turn'
 
 vi.mock('./ComposerRuntimeControls', () => ({
   AutonomyPicker: () => null,
@@ -86,8 +87,8 @@ const THREAD_B = '00000000-0000-0000-0000-00000000000b'
 
 /** Module-level stand-ins the use-turn mock hands to every consumer. */
 const turnMocks = vi.hoisted(() => ({
-  send: vi.fn(async () => true),
-  steer: vi.fn(async () => true)
+  send: vi.fn<(text: string, attachmentIds: string[]) => Promise<TurnSendResult>>(async () => 'accepted'),
+  steer: vi.fn<(text: string, attachmentIds: string[]) => Promise<TurnSendResult>>(async () => 'accepted')
 }))
 
 function input(host: HTMLElement): HTMLTextAreaElement {
@@ -130,8 +131,8 @@ describe('Composer per-thread draft persistence', () => {
     useCodeSessionStore.setState({ drafts: {}, queuedMessages: {}, sending: false, streamStatus: 'open', activeTurnId: null })
     turnMocks.send.mockClear()
     turnMocks.steer.mockClear()
-    turnMocks.send.mockResolvedValue(true)
-    turnMocks.steer.mockResolvedValue(true)
+    turnMocks.send.mockResolvedValue('accepted')
+    turnMocks.steer.mockResolvedValue('accepted')
   })
 
   afterEach(async () => {
@@ -245,7 +246,7 @@ describe('Composer per-thread draft persistence', () => {
 
   it('retains a queued message when its automatic drain fails', async () => {
     useCodeSessionStore.setState({ activeTurnId: '00000000-0000-0000-0000-0000000000t1' })
-    turnMocks.send.mockResolvedValueOnce(false)
+    turnMocks.send.mockResolvedValueOnce('retry')
     harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
     const node = input(harness.host)
     await type(node, '失败也不能丢')
@@ -268,7 +269,7 @@ describe('Composer per-thread draft persistence', () => {
     vi.useFakeTimers()
     try {
       useCodeSessionStore.setState({ activeTurnId: '00000000-0000-0000-0000-0000000000t1' })
-      turnMocks.send.mockResolvedValueOnce(false)
+      turnMocks.send.mockResolvedValueOnce('retry')
       useCodeSessionStore.getState().queueMessage(THREAD_A, '空闲时重试')
       harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
       await settle()
@@ -293,11 +294,40 @@ describe('Composer per-thread draft persistence', () => {
     }
   })
 
+  it('does not reschedule a permanently rejected queue head', async () => {
+    vi.useFakeTimers()
+    try {
+      useCodeSessionStore.setState({ activeTurnId: '00000000-0000-0000-0000-0000000000t1' })
+      turnMocks.send.mockResolvedValue('permanent')
+      useCodeSessionStore.getState().queueMessage(THREAD_A, '超过服务端上限的消息')
+      harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+      await settle()
+
+      await act(async () => {
+        useCodeSessionStore.setState({ activeTurnId: null })
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(turnMocks.send).toHaveBeenCalledTimes(1)
+      expect(useCodeSessionStore.getState().queuedMessages[THREAD_A]).toHaveLength(1)
+
+      await act(async () => {
+        vi.advanceTimersByTime(5_000)
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(turnMocks.send).toHaveBeenCalledTimes(1)
+      expect(useCodeSessionStore.getState().queuedMessages[THREAD_A]).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('pauses failed queue retries while the stream is closed and resumes after reopen', async () => {
     vi.useFakeTimers()
     try {
       useCodeSessionStore.setState({ activeTurnId: '00000000-0000-0000-0000-0000000000t1' })
-      turnMocks.send.mockResolvedValueOnce(false)
+      turnMocks.send.mockResolvedValueOnce('retry')
       useCodeSessionStore.getState().queueMessage(THREAD_A, '重连后重试')
       harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
       await settle()
@@ -403,15 +433,15 @@ describe('Composer attachment parity (steer, paste, drop)', () => {
     installBrowserStubs()
     turnMocks.send.mockClear()
     turnMocks.steer.mockClear()
-    turnMocks.send.mockResolvedValue(true)
-    turnMocks.steer.mockResolvedValue(true)
+    turnMocks.send.mockResolvedValue('accepted')
+    turnMocks.steer.mockResolvedValue('accepted')
     vi.mocked(uploadAttachment).mockReset()
     vi.mocked(associateAttachment).mockReset()
     useCodeSessionStore.setState({ drafts: {}, queuedMessages: {}, sending: false, streamStatus: 'open', activeTurnId: null })
     turnMocks.send.mockClear()
     turnMocks.steer.mockClear()
-    turnMocks.send.mockResolvedValue(true)
-    turnMocks.steer.mockResolvedValue(true)
+    turnMocks.send.mockResolvedValue('accepted')
+    turnMocks.steer.mockResolvedValue('accepted')
   })
 
   afterEach(async () => {

@@ -519,6 +519,7 @@ async fn unattended_build_does_not_recover_a_failed_turn() {
     ark_server::service::schedule_recovery(
         wiring.state.clone(),
         thread,
+        ark_common::TurnId::new(),
         Some("run exactly once".into()),
         1,
         "model stream broke".into(),

@@ -25,7 +25,7 @@
 
 use std::time::Duration;
 
-use ark_common::ThreadId;
+use ark_common::{ThreadId, TurnId};
 use ark_contract::RuntimeEvent;
 
 use crate::service::turns::start_turn_as_at_epoch;
@@ -49,6 +49,9 @@ pub const MAX_CONSECUTIVE_MODEL_FAILURES: usize = ark_agent::RECOVERY_MODEL_FAIL
 
 /// Schedule one recovery attempt after the attempt-specific backoff.
 ///
+/// * `failed_turn_id`: lifecycle epoch of the failed turn. It is captured before
+///   the registry releases that turn, so newer input cannot be adopted by an old
+///   recovery in the gap before scheduling.
 /// * `text`: the failed request's user text (`None` only for an
 ///   auto-continuation parent — there is no user message to resume, and a
 ///   continuation reruns through its own supervisor instead).
@@ -58,6 +61,7 @@ pub const MAX_CONSECUTIVE_MODEL_FAILURES: usize = ark_agent::RECOVERY_MODEL_FAIL
 pub async fn schedule_recovery(
     state: AppState,
     thread_id: ThreadId,
+    failed_turn_id: TurnId,
     text: Option<String>,
     attempt: u32,
     failure: String,
@@ -84,7 +88,7 @@ pub async fn schedule_recovery(
         );
         return;
     }
-    let expected_epoch = state.turns.latest_for(thread_id);
+    let expected_epoch = Some(failed_turn_id);
     if recovery_paused_by_model_failures(&state, thread_id).await {
         return;
     }
@@ -261,6 +265,7 @@ mod tests {
         schedule_recovery(
             state.clone(),
             thread,
+            TurnId::new(),
             Some("do the thing".into()),
             1,
             "boom".into(),
@@ -309,6 +314,7 @@ mod tests {
         schedule_recovery(
             state.clone(),
             thread,
+            TurnId::new(),
             Some("do the thing".into()),
             (RECOVERY_DELAYS.len() + 1) as u32,
             "boom".into(),
@@ -334,6 +340,7 @@ mod tests {
         schedule_recovery(
             state.clone(),
             thread,
+            TurnId::new(),
             Some("do the thing".into()),
             1,
             "boom".into(),
@@ -376,6 +383,7 @@ mod tests {
         schedule_recovery(
             state.clone(),
             thread,
+            failed,
             Some("old request".into()),
             1,
             "boom".into(),
@@ -397,6 +405,61 @@ mod tests {
             runner.runs.load(Ordering::SeqCst),
             1,
             "the stale recovery must not start after a newer user turn"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_user_turn_finished_before_scheduling_invalidates_the_old_recovery() {
+        let runner = Arc::new(ScriptedRunner {
+            runs: std::sync::atomic::AtomicUsize::new(0),
+            succeed_after: 1,
+            jobs: Mutex::new(Vec::new()),
+        });
+        let (state, thread, _dir) = state_with(runner.clone()).await;
+        let failed = TurnId::new();
+        state
+            .turns
+            .try_register(thread, failed, ark_agent::CancelToken::new())
+            .expect("failed turn registers");
+        state.turns.finish(
+            failed,
+            &crate::TurnEnd::Failed {
+                message: "model stream broke".into(),
+                model_request_failed: true,
+            },
+        );
+        start_turn_as(
+            &state,
+            thread,
+            TurnSource::User("new request".into()),
+            "new request".into(),
+            Vec::new(),
+        )
+        .await
+        .expect("the user turn starts");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while state.turns.active_for(thread).is_some() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the user turn finishes before recovery is scheduled");
+
+        schedule_recovery(
+            state.clone(),
+            thread,
+            failed,
+            Some("old request".into()),
+            1,
+            "boom".into(),
+            Vec::new(),
+        )
+        .await;
+        tokio::time::sleep(RECOVERY_DELAYS[0] + Duration::from_millis(200)).await;
+        assert_eq!(
+            runner.runs.load(Ordering::SeqCst),
+            1,
+            "a recovery scheduled after newer input must retain the failed turn's epoch"
         );
     }
 
@@ -439,6 +502,7 @@ mod tests {
             schedule_recovery(
                 recovery_state,
                 thread,
+                failed,
                 Some("old request".into()),
                 1,
                 "boom".into(),

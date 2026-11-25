@@ -263,8 +263,8 @@ export function Composer({
   const fileRef = useRef<HTMLInputElement | null>(null)
 
   // Per-thread queued drafts: filled by 「排队」 during a live turn, flushed in
-  // order while idle. A failed head remains queued and retries after a short
-  // delay once the stream is open again.
+  // order while idle. Transient failures retry after a short delay; permanent
+  // rejections stay queued until the user edits or removes them.
   const [deliveryMode, setDeliveryMode] = useState<RunningDeliveryMode>('steer')
   const [attachments, setAttachments] = useState<PickedAttachment[]>([])
   const [uploading, setUploading] = useState(false)
@@ -344,16 +344,19 @@ export function Composer({
   // harmless if the user removed that head or appended an identical message.
   const draining = useRef<{ threadId: string; id: QueuedMessage['id'] } | null>(null)
   const retryAt = useRef<{ threadId: string; id: QueuedMessage['id']; at: number } | null>(null)
+  const pausedHead = useRef<{ threadId: string; id: QueuedMessage['id'] } | null>(null)
   const [queueRetryVersion, setQueueRetryVersion] = useState(0)
   const queuedHead = queued[0]
   useEffect(() => () => {
     draining.current = null
     retryAt.current = null
+    pausedHead.current = null
   }, [threadId])
 
   useEffect(() => {
     if (!threadId || live || draft || streamStatus !== 'open' || !queuedHead) return
     if (draining.current) return
+    if (pausedHead.current?.threadId === threadId && pausedHead.current.id === queuedHead.id) return
     const retry = retryAt.current
     if (retry?.threadId === threadId && retry.id === queuedHead.id && retry.at > Date.now()) {
       const timer = window.setTimeout(
@@ -365,15 +368,17 @@ export function Composer({
 
     const request = { threadId, id: queuedHead.id }
     draining.current = request
-    void send(queuedHead.text, []).then((ok) => {
+    void send(queuedHead.text, []).then((result) => {
       if (draining.current === request) {
         draining.current = null
-        if (!ok) retryAt.current = { ...request, at: Date.now() + QUEUE_RETRY_MS }
+        if (result === 'retry') retryAt.current = { ...request, at: Date.now() + QUEUE_RETRY_MS }
+        else retryAt.current = null
+        if (result === 'permanent') pausedHead.current = request
         setQueueRetryVersion((version) => version + 1)
       }
       // An accepted delivery is removed by identity even after a thread switch;
       // a replacement head (including duplicate text) cannot be consumed by it.
-      if (ok) dequeueMessage(threadId, queuedHead.id)
+      if (result === 'accepted') dequeueMessage(threadId, queuedHead.id)
     })
   }, [draft, dequeueMessage, live, queueRetryVersion, queuedHead, send, streamStatus, threadId])
 
@@ -434,8 +439,8 @@ export function Composer({
           return
         }
       }
-      const ok = live ? await steer(text, ids) : await send(text, ids)
-      if (ok) {
+      const result = live ? await steer(text, ids) : await send(text, ids)
+      if (result === 'accepted') {
         // Clear only the text that was actually sent; anything typed during the
         // request stays in the draft and a failure keeps everything.
         if (threadId && useCodeSessionStore.getState().drafts[threadId] === text) clearDraft(threadId)

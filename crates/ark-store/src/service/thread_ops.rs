@@ -8,7 +8,7 @@ use crate::domain::thread_file::ThreadFile;
 use crate::service::store::FileSessionStore;
 use crate::store::child_store::rebuild_child_index_blocking;
 use crate::store::index::IndexEntry;
-use ark_common::{ArkError, Result, ThreadId};
+use ark_common::{ArkError, ArkErrorCode, Result, ThreadId};
 use ark_contract::{RuntimeEvent, ThreadItem};
 use ark_ports::{ChildRunRecord, SessionStore, SubscribeTicket, ThreadMeta};
 
@@ -405,7 +405,11 @@ impl SessionStore for FileSessionStore {
         // Block new event writers first, then drain without holding the parent
         // log lock. The authoritative record is removed only inside the final
         // synchronous critical section, so cancellation leaves it replayable.
-        let deletion = self.registry.begin_delete(&child_paths)?;
+        let deletion = match self.registry.begin_delete(&child_paths) {
+            Ok(deletion) => deletion,
+            Err(error) if error.code == ArkErrorCode::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
         deletion.drain().await;
         #[cfg(test)]
         self.wait_for_child_delete_test_gate().await;
@@ -638,6 +642,25 @@ mod tests {
             3,
             "queued plus two concurrent status appends must all survive the rewrite"
         );
+    }
+
+    #[tokio::test]
+    async fn deleting_an_already_deleted_child_returns_false() {
+        let dir = TempDir::new("thread-ops-child-delete-repeat");
+        let store = test_store(&dir);
+        let parent = store.create_thread("parent").await.unwrap().thread_id;
+        let child = ChildId::new();
+        store
+            .append_child_run(child_record(
+                parent,
+                child,
+                ark_common::ChildRunStatus::Completed,
+            ))
+            .await
+            .unwrap();
+
+        assert!(store.delete_child_run(parent, child).await.unwrap());
+        assert!(!store.delete_child_run(parent, child).await.unwrap());
     }
 
     #[tokio::test]

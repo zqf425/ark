@@ -385,7 +385,8 @@
   「新增项目空间」调用 `POST /v1/workspace/pick` 与 `POST /v1/workspace/validate` 后同样只 PATCH 当前
   线程，不调用全局 `POST /v1/workspace/switch`。活跃回合时禁用选择。全局 switch 仅由设置页和 Changes
   面板承载。上下文环弹层展示工具、系统提示、技能、消息、思考、检查点、其他的**结构占比**（渲染行数
-  与字符数）；总量取最近一次权威 `usage` 事件的 `prompt_tokens`，环分母取所选模型真实 context window，
+  与字符数）；总量取最近一次权威 `usage` 事件中 `prompt_tokens > 0` 的读数，全零样本照常
+  计入调用数与累计 token，但不覆盖最近一次有效上下文占用；环分母取所选模型真实 context window，
   压缩 threshold 只作环内刻度。token 估算的唯一宿主仍是 `ark-agent::TokenEstimator`，前端不重算
   token。弹层内「压缩上下文」直接调用
   `POST /v1/threads/{id}/compact`。共享 `ModelProviderMenu` 提供「供应商 → 模型」二级菜单与搜索，
@@ -395,7 +396,9 @@
   “仅工作区修改”“完全访问”三档。
 - 会话标题下方有紧凑统计条（`SessionStatsBar`）：轮次来自整线程 usage 快照，模型调用数直接读
   store 的 live 聚合；耗时是 store 的每回合活跃时长折叠（`state/rounds.ts`：HTTP 快照播种、live
-  事件按最新事件锚点延伸，快照权威覆盖 live 估计），不把工具执行、重试或子任务运行排除在外；
+  事件按最新事件锚点延伸，快照权威覆盖 live 估计），不把工具执行、重试或子任务运行排除在外，
+  但审批/用户输入门禁等待不计入；本地决议成功只更新展示状态，pending gate 计数保留到对应
+  SSE 决议事件才释放，避免回写早于 SSE 时把用户等待误计为活跃时长；
   并展示 prompt/completion/total tokens、真实 `cache_hit_rate` 与 `cost_usd`。它不读取诊断分页，
   调用数不是 `truncated` 下限；请求失败保留上次已验证数值而不伪造零。运行时版本、SSE 状态、数据目录
   等诊断信息不能占据主任务层级，必须退为状态详情或提示信息。
@@ -410,7 +413,8 @@
   （该路由在 Rust 侧仍是未建模 JSON，前端经 `web-only.ts` 的视图类型渲染，Rust 建模后应迁移到生成
   类型）。`/v1/runtime/tuning` 与 `/v1/runtime/model-providers` 是运行时的 501 占位路由，不是缺口。
 - 输入框在活跃回合提供两种非中断动作：「追加」（steer，立即注入下一轮）与「排队」（本地暂存为
-  chips，空闲且 SSE `open` 时按顺序自动发送）；排队消息可逐条移除，纯本地状态不进 wire。
+  chips，空闲且 SSE `open` 时按顺序自动发送）；传输失败、冲突与运行时暂不可用每 500ms 重试，
+  校验/不存在/未授权等永久拒绝保留在队列但不自动重试，直至用户编辑或逐条移除；纯本地状态不进 wire。
   附件在活跃回合同样可添加（+ 按钮、textarea 粘贴图片、拖拽文件均可用）：steer 与发送共用同一
   「先 `POST /v1/threads/{id}/attachments` 关联、后投递」流程，steer 携带 `TurnRequest.attachment_ids`，
   服务端授权失败走命令错误提示且不清空 chips；「排队」只排文本、附件保留待下一次投递。粘贴/拖入的

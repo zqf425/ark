@@ -599,6 +599,7 @@ describe('items reducer active clock', () => {
     })
     expect(state.pendingGateCounts[TURN_ID]).toBe(1)
     state = markApprovalLocally(state, 'approval-1', true)
+    expect(state.pendingGateCounts[TURN_ID]).toBe(1)
     state = applyEvent(state, {
       kind: 'approval_resolved', seq: 3, thread_id: THREAD_ID, turn_id: TURN_ID,
       approval_id: 'approval-1', approved: true, timestamp: '2026-10-28T00:00:02Z'

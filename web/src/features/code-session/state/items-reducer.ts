@@ -465,7 +465,7 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
         ? draft.approvals[event.approval_id]
         : draft.base.approvals[event.approval_id]
       if (existing) {
-        if (existing.status === 'pending') changePendingGateCount(draft, existing.turn_id, -1)
+        if (turnHasPendingGate(draft, event.turn_id)) changePendingGateCount(draft, event.turn_id, -1)
         draftApprovals(draft)[event.approval_id] = {
           ...existing,
           status: event.approved ? 'approved' : 'rejected'
@@ -496,7 +496,7 @@ export function applyEvent(state: ItemsSnapshot, event: RuntimeEvent): ItemsSnap
         ? draft.userInputs[event.request_id]
         : draft.base.userInputs[event.request_id]
       if (existing) {
-        if (existing.status === 'pending') changePendingGateCount(draft, existing.turn_id, -1)
+        if (turnHasPendingGate(draft, event.turn_id)) changePendingGateCount(draft, event.turn_id, -1)
         draftUserInputs(draft)[event.request_id] = { ...existing, status: 'answered', answer: event.answer }
       }
       const id = event.item_id!
@@ -605,7 +605,7 @@ export function markApprovalLocally(
   const existing = state.approvals[approvalId]
   if (!existing || existing.status !== 'pending') return state
   const draft = draftOf(state)
-  changePendingGateCount(draft, existing.turn_id, -1)
+  // The durable resolution resumes the clock; clearing it here banks user wait.
   draftApprovals(draft)[approvalId] = { ...existing, status: approved ? 'approved' : 'rejected' }
   return commitDraft(draft)
 }
@@ -614,7 +614,6 @@ export function markUserInputLocally(state: ItemsSnapshot, requestId: string, an
   const existing = state.userInputs[requestId]
   if (!existing || existing.status !== 'pending') return state
   const draft = draftOf(state)
-  changePendingGateCount(draft, existing.turn_id, -1)
   draftUserInputs(draft)[requestId] = { ...existing, status: 'answered', answer }
   return commitDraft(draft)
 }

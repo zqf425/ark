@@ -374,6 +374,7 @@ async fn schedule_model_recovery(state: AppState, supervisor: TurnSupervisor, me
         crate::service::schedule_recovery(
             state,
             supervisor.thread_id,
+            supervisor.turn_id,
             Some(text),
             attempt,
             message,
