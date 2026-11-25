@@ -40,6 +40,14 @@ export const WORKBENCH_MESSAGES = {
   'workbench.fileBinaryTitle': ['二进制文件不预览', 'Binary file not previewed'],
   'workbench.fileBinaryHint': ['该文件含非文本字节（{size} 字节），已跳过渲染。', 'This file contains non-text bytes ({size} bytes); rendering was skipped.'],
   'workbench.fileTruncated': ['内容超过预览上限，仅显示前 256 KiB。', 'The file exceeds the preview budget; only the first 256 KiB is shown.'],
+  'workbench.fileLocate': ['在变更中查看', 'View in changes'],
+
+  'workbench.changes.writesTitle': ['会话写入', 'Session writes'],
+  'workbench.changes.gitTitle': ['Git 差异', 'Git diff'],
+  'workbench.changes.workspaceToggle': ['切换工作区', 'Change workspace'],
+  'workbench.changes.addedLines': ['+{added}', '+{added}'],
+  'workbench.changes.removedLines': ['-{removed}', '-{removed}'],
+  'workbench.noSummaryTitle': ['—', '—'],
 
   'workbench.changes.title': ['改动', 'Changes'],
   'workbench.changes.loading': ['正在加载改动…', 'Loading changes…'],
@@ -72,6 +80,9 @@ export const WORKBENCH_MESSAGES = {
   'workbench.diffSummary.untracked': ['未跟踪 {count}', 'Untracked {count}'],
 
   'workbench.plan.title': ['计划', 'Plan'],
+  'workbench.plan.status.pending': ['待办：点击切换为进行中', 'Todo: click to mark in progress'],
+  'workbench.plan.status.in_progress': ['进行中：点击切换为已完成', 'In progress: click to mark completed'],
+  'workbench.plan.status.completed': ['已完成：点击切换为待办', 'Completed: click to mark todo'],
   'workbench.plan.todoCount': ['{count} 项待办', '{count} todos'],
   'workbench.plan.loading': ['正在加载计划…', 'Loading the plan…'],
   'workbench.plan.goalLabel': ['当前目标', 'Current goal'],
