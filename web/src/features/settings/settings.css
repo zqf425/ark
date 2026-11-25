@@ -35,7 +35,7 @@
 
 .ark-settings__title {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--ark-scale));
   font-weight: 620;
   color: var(--ark-text);
 }
@@ -43,7 +43,7 @@
 .ark-settings__desc {
   grid-column: 1 / -1;
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
   line-height: 1.55;
   color: var(--ark-text-faint);
 }
@@ -91,7 +91,7 @@
 
 .ark-settings__hint {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
   color: var(--ark-text-faint);
 }
 
@@ -109,7 +109,7 @@
 
 .ark-settings__code {
   font-family: var(--ark-mono);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ark-scale));
   color: var(--ark-text-dim);
   overflow-wrap: anywhere;
 }
@@ -134,7 +134,7 @@
 }
 
 .ark-field__label {
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
   font-weight: 550;
   color: var(--ark-text-dim);
 }
@@ -149,7 +149,7 @@
   border-radius: var(--ark-radius);
   padding: 7px 10px;
   color: var(--ark-text);
-  font-size: 13px;
+  font-size: calc(13px * var(--ark-scale));
   line-height: 1.4;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
@@ -193,7 +193,7 @@
 .ark-field__secret-toggle {
   flex: none;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
 }
 
 .ark-field__secret-toggle:disabled {
@@ -211,7 +211,7 @@
   padding: 8px 10px;
   color: var(--ark-text);
   font-family: var(--ark-mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
   line-height: 1.55;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
@@ -236,7 +236,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ark-scale));
   color: var(--ark-text-dim);
   cursor: pointer;
 }
@@ -303,7 +303,7 @@
 
 .ark-card__name {
   font-family: var(--ark-mono);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ark-scale));
   font-weight: 600;
   overflow-wrap: anywhere;
   color: var(--ark-text);
@@ -314,7 +314,7 @@
   gap: 6px 14px;
   flex-wrap: wrap;
   font-family: var(--ark-mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
   line-height: 1.55;
   color: var(--ark-text-dim);
 }
@@ -370,7 +370,7 @@
 
 .ark-settings__subhead {
   margin: 0;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ark-scale));
   font-weight: 620;
   color: var(--ark-text);
 }
@@ -386,7 +386,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
   line-height: 1.55;
   color: var(--ark-warn);
 }
@@ -416,7 +416,7 @@
   gap: 0 16px;
   margin: 0;
   border-top: 1px solid var(--ark-border-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
 }
 
 .ark-kv__k,
@@ -428,7 +428,7 @@
 
 .ark-kv__k {
   color: var(--ark-text-faint);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ark-scale));
 }
 
 .ark-kv__v {
@@ -496,4 +496,24 @@
 .ark-im-qr img,
 .ark-im-qr svg {
   display: block;
+}
+
+/* Font-size preview: inherits the scaled body size so the sample tracks --ark-scale. */
+.ark-settings__font-preview {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--console-line);
+  border-radius: var(--ark-radius);
+  background: var(--console-code);
+}
+
+.ark-settings__font-preview p {
+  margin: 0 0 8px;
+  font-size: var(--ark-size);
+}
+
+.ark-settings__font-preview pre {
+  margin: 0;
+  font-family: var(--ark-mono);
+  font-size: calc(12px * var(--ark-scale));
 }

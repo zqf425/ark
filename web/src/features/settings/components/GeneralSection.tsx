@@ -64,6 +64,11 @@ function AppearancePreferences(): JSX.Element {
           onChange={setTheme}
         />
       </div>
+      {/* Live sample so a font-size switch is visible without leaving settings. */}
+      <div className="ark-settings__font-preview" aria-label={t('settings.fontSize.previewAria')}>
+        <p>{t('settings.fontSize.previewMessage')}</p>
+        <pre><code>{'fn main() {\n    println!("ark");\n}'}</code></pre>
+      </div>
     </SettingsSection>
   )
 }

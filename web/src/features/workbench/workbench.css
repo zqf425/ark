@@ -49,7 +49,7 @@
   background: var(--ark-bg-canvas);
   color: var(--ark-text-faint);
   cursor: pointer;
-  font-size: 14px;
+  font-size: calc(14px * var(--ark-scale));
 }
 
 .console-sidebar-tab:hover {

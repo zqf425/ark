@@ -39,13 +39,13 @@
   justify-content: space-between;
   gap: 8px;
   color: var(--ark-text-faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
 }
 
 .ark-panel__head h2 {
   margin: 0;
   color: var(--ark-text);
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
   font-weight: 600;
 }
 
@@ -53,7 +53,7 @@
 .ark-panel__error {
   margin: 12px;
   color: var(--ark-text-faint);
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
 }
 
 .ark-panel__hint--flush {
@@ -66,7 +66,7 @@
 
 .ark-panel__label {
   color: var(--ark-text-dim);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
 }
 
 .ark-panel__actions,
@@ -112,14 +112,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--ark-mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
 }
 
 .ark-panel__row span,
 .ark-terminal summary > span:last-child {
   flex: none;
   color: var(--ark-text-faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
 }
 
 .ark-panel__code {
@@ -142,7 +142,7 @@
   min-width: 0;
   padding: 5px 0;
   border-bottom: 1px solid var(--ark-border);
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
 }
 
 .ark-plan__todo > span {
@@ -201,7 +201,7 @@
 .ark-panel__section {
   margin: 2px 0 6px;
   color: var(--ark-text-dim);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -211,7 +211,7 @@
 }
 
 .ark-panel__head--file h2 {
-  font-size: 13px;
+  font-size: calc(13px * var(--ark-scale));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -223,7 +223,7 @@
   overflow: hidden;
   color: var(--ark-text-faint);
   font-family: var(--ark-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--ark-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -236,7 +236,7 @@
   background: none;
   color: var(--ark-text-dim);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
   padding: 0;
 }
 

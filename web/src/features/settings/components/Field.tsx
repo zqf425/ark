@@ -67,7 +67,7 @@ export function TextField({
       disabled={disabled}
       spellCheck={false}
       autoComplete="off"
-      style={mono ? { fontFamily: 'var(--ark-mono)', fontSize: 11.5 } : undefined}
+      style={mono ? { fontFamily: 'var(--ark-mono)', fontSize: 'calc(11.5px * var(--ark-scale))' } : undefined}
       onChange={handle}
     />
   )

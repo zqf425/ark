@@ -48,7 +48,7 @@
 
 .ark-toast__detail {
   color: var(--ark-text-dim);
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
   word-break: break-word;
 }
 

@@ -491,7 +491,9 @@
   中文的逐字复制、同键占位符集合一致、`translate` 对每个键都非空，并校验主要前缀与每个错误 code 都有
   本地化提示。
 - 语言、字号和主题是 renderer-only 偏好，默认 `zh-CN`/中号/跟随系统，保存于当前浏览器的 localStorage
-  并即时更新根 `lang` 属性及字号、主题 token；选择“跟随系统”时监听 `prefers-color-scheme` 的变化并即时
+  并即时更新根 `lang` 属性及字号、主题 token。字号档位通过根 `data-ark-font-size` 切换 `--ark-scale`
+  （小/中/大 = 12/14/16px 正文），组件 CSS 的字号一律写成 `calc(<设计px> * var(--ark-scale))`，不得新增
+  未乘系数的字面 px 字号；「外观与语言」卡片内含示例消息与代码块的即时预览；选择“跟随系统”时监听 `prefers-color-scheme` 的变化并即时
   重新解析浅/深色主题。它们不属于 Rust wire 契约或运行时配置，不能通过设置 API 写入。
 
 ## 桌面宿主边界

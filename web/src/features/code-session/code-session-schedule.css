@@ -55,7 +55,7 @@
 }
 
 .ark-scheduledialog__head strong {
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--ark-scale));
   color: var(--ark-text);
 }
 
@@ -67,7 +67,7 @@
   background: transparent;
   color: var(--ark-text-faint);
   cursor: pointer;
-  font-size: 17px;
+  font-size: calc(17px * var(--ark-scale));
   line-height: 1;
 }
 

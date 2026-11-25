@@ -8,7 +8,7 @@
   border: 1px solid var(--ark-border);
   border-radius: var(--ark-radius);
   background: var(--ark-bg-inset);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
 }
 
 .ark-workspace-status__summary {
@@ -46,7 +46,7 @@
 .ark-workspace-diff__group h3 {
   margin: 0 0 6px;
   color: var(--ark-text-dim);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
   font-weight: 600;
 }
 
@@ -75,7 +75,7 @@
 .ark-workspace-diff__group code {
   overflow: hidden;
   color: var(--ark-text-faint);
-  font-size: 10px;
+  font-size: calc(10px * var(--ark-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
