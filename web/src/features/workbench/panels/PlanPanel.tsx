@@ -208,7 +208,14 @@ export function PlanPanel(): JSX.Element {
       <div className="ark-plan__list">
         {todos.map((todo) => (
           <div className="ark-plan__todo" key={todo.id}>
-            <button type="button" className={`ark-plan__status is-${todo.status}`} disabled={busy} onClick={() => void persistTodos(todos.map((row) => row.id === todo.id ? { ...row, status: nextStatus(row.status) } : row))}>
+            <button
+              type="button"
+              className={`ark-plan__status is-${todo.status}`}
+              disabled={busy}
+              title={t(`workbench.plan.status.${todo.status}` as const)}
+              aria-label={t(`workbench.plan.status.${todo.status}` as const)}
+              onClick={() => void persistTodos(todos.map((row) => row.id === todo.id ? { ...row, status: nextStatus(row.status) } : row))}
+            >
               {todo.status === 'completed' ? '✓' : todo.status === 'in_progress' ? '•' : '○'}
             </button>
             <span className={todo.status === 'completed' ? 'is-done' : ''}>{todo.title}</span>

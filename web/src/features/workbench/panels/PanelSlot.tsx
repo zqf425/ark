@@ -64,9 +64,9 @@ export function PanelSlot(): JSX.Element {
         </button>
       </header>
       <Tabs
-        items={PANEL_TABS.map((tab) => ({
+        items={PANEL_TABS.map((tab, index) => ({
           id: tab.id,
-          label: t(tab.labelKey),
+          label: index === 3 ? `│ ${t(tab.labelKey)}` : t(tab.labelKey),
           badge:
             tab.id === 'subagents' && activeChildRuns > 0 ? (
               <span className="ark-tabs__badge is-live">{activeChildRuns}</span>

@@ -143,6 +143,7 @@ export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): 
       >
         <div className="console-inspector__head">
           <span className="console-inspector__title">{t('console.inspector.title')}</span>
+          <InspectorSessionSummary />
           <span className="console-inspector__grow" />
           <button
             type="button"
@@ -158,5 +159,21 @@ export function WorkbenchLayout({ left, center, right }: WorkbenchLayoutProps): 
         <div className="console-inspector__body">{right}</div>
       </aside>
     </div>
+  )
+}
+
+
+/** Current-session context in the inspector header; reads store only. */
+function InspectorSessionSummary(): JSX.Element | null {
+  const { t } = useI18n()
+  const threadId = useCodeSessionStore((s) => s.activeThreadId)
+  const threads = useCodeSessionStore((s) => s.threads)
+  if (!threadId) return null
+  const thread = threads.find((row) => row.thread_id === threadId)
+  if (!thread) return <span className="console-inspector__summary">{t('workbench.noThreadTitle')}</span>
+  return (
+    <span className="console-inspector__summary" title={thread.title}>
+      {thread.title || t('thread.row.untitled')}
+    </span>
   )
 }

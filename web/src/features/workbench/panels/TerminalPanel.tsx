@@ -82,7 +82,7 @@ export function TerminalPanel(): JSX.Element {
       </header>
       <div className="ark-terminal__list">
         {data.entries.map((entry) => (
-          <details className="ark-terminal" key={`${entry.call_id}:${entry.seq}`}>
+          <details className={`ark-terminal${entry.ok ? '' : ' is-failed'}`} key={`${entry.call_id}:${entry.seq}`}>
             <summary>
               <span className={entry.ok ? 'ark-chip ark-chip--ok' : 'ark-chip ark-chip--error'}>
                 {entry.ok ? t('workbench.terminal.ok') : t('workbench.terminal.failed')}

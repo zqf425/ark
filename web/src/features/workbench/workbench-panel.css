@@ -195,3 +195,74 @@
   flex: 1;
   min-width: 0;
 }
+
+/* ---------- redesigned inspector primitives ---------- */
+
+.ark-panel__section {
+  margin: 2px 0 6px;
+  color: var(--ark-text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.ark-panel__head--file {
+  align-items: flex-start;
+}
+
+.ark-panel__head--file h2 {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-panel__path {
+  display: block;
+  max-width: 36ch;
+  overflow: hidden;
+  color: var(--ark-text-faint);
+  font-family: var(--ark-mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ark-workspace-switch__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: none;
+  color: var(--ark-text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+}
+
+.ark-workspace-switch__toggle svg {
+  transition: transform 120ms ease;
+}
+
+.ark-workspace-switch__toggle svg.is-open {
+  transform: rotate(180deg);
+}
+
+.ark-workspace-diff__file summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ark-workspace-diff__file summary::before {
+  content: '';
+}
+
+.ark-terminal.is-failed {
+  border-left: 3px solid var(--ark-error);
+}
+
+.ark-terminal .ark-panel__code {
+  max-height: 320px;
+  overflow: auto;
+}

@@ -364,6 +364,16 @@ button.console-chip:hover {
   font-weight: 650;
 }
 
+.console-inspector__summary {
+  min-width: 0;
+  max-width: 52%;
+  overflow: hidden;
+  color: var(--ark-text-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .console-inspector__grow {
   flex: 1;
 }
@@ -387,6 +397,13 @@ button.console-chip:hover {
   padding: 6px 8px;
   border-bottom: 1px solid var(--console-line);
   background: var(--ark-bg-canvas);
+  flex-wrap: wrap;
+}
+
+.console-inspector .ark-panelslot .ark-tabs__tab:nth-child(4) {
+  margin-left: 10px;
+  padding-left: 12px;
+  border-left: 1px solid var(--console-line);
 }
 
 .console-inspector .ark-panelslot .ark-tabs__tab {

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { describeError } from '../../../shared/api/error-describe'
 import { translateNow } from '../../../shared/i18n/current'
 import type { ThreadId, WorkspaceChangesResponse, WorkspaceDiff, WorkspaceDiffFile, WorkspaceView } from '../../../shared/contracts'
-import { EmptyState } from '../../../shared/ui'
+import { EmptyState, Icon } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../../code-session/state/store'
 import { getChanges } from '../api/workbench-api'
@@ -30,6 +30,7 @@ export function ChangesPanel(): JSX.Element {
   const [workspaceDiff, setWorkspaceDiff] = useState<WorkspaceDiff | null>(null)
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
   const [workspaceDraft, setWorkspaceDraft] = useState('')
+  const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const [switching, setSwitching] = useState(false)
   /**
    * Which thread the rows and the newest changes request belong to.
@@ -130,11 +131,18 @@ export function ChangesPanel(): JSX.Element {
         <h2>{t('workbench.changes.title')}</h2>
         <span>{changesSummary(data.changes).map((part) => t(part.key, part.params)).join(' · ')}</span>
       </header>
+      <p className="ark-panel__section">{t('workbench.changes.writesTitle')}</p>
       {data.changes.length === 0 ? (
         <EmptyState title={t('workbench.changes.emptyTitle')} hint={t('workbench.changes.emptyHint')} />
       ) : null}
       <p className="ark-panel__hint ark-panel__hint--flush">{t('workbench.changes.scopeHint')}</p>
       <div className="ark-workspace-switch">
+        <button type="button" className="ark-workspace-switch__toggle" aria-expanded={workspaceOpen} onClick={() => setWorkspaceOpen(!workspaceOpen)}>
+          <Icon name="chevron" size={12} className={workspaceOpen ? 'is-open' : ''} />
+          {t('workbench.changes.workspaceToggle')}
+        </button>
+        {workspaceOpen ? (
+        <>
         <label htmlFor="changes-workspace">{t('workbench.changes.workspaceLabel')}</label>
         <div className="ark-workspace-switch__controls">
           <input
@@ -159,9 +167,12 @@ export function ChangesPanel(): JSX.Element {
         ) : null}
         <p className="ark-panel__hint ark-panel__hint--flush">{t('workbench.changes.switchBlocked')}</p>
         {workspaceError ? <p className="ark-panel__error">{workspaceError}</p> : null}
+        </>
+        ) : null}
       </div>
       {gitSummary ? (
         <div className="ark-workspace-diff">
+          <p className="ark-panel__section">{t('workbench.changes.gitTitle')}</p>
           <p className="ark-workspace-diff__summary">
             {t(gitSummary.staged.key, gitSummary.staged.params)} · {t(gitSummary.unstaged.key, gitSummary.unstaged.params)} ·{' '}
             {t(gitSummary.untracked.key, gitSummary.untracked.params)}
@@ -197,6 +208,7 @@ export function ChangesPanel(): JSX.Element {
             <button className="ark-panel__row" type="button" key={change.path} onClick={() => selectFile(change.path)}>
               <code>{change.path}</code>
               <span>{change.operation} · seq {change.seq}</span>
+              <Icon name="file" size={12} />
             </button>
           ))}
         </div>

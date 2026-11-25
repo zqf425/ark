@@ -5,6 +5,7 @@ import type { WorkspaceFilePreview } from '../../../shared/contracts'
 import { EmptyState, highlightSource, Markdown } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../../code-session/state/store'
+import { workspaceBasename } from '../../code-session/components/thread-projects'
 import { getWorkspaceFilePreview } from '../api/workbench-api'
 import { previewModeOf } from '../api/file-dispatch'
 
@@ -17,6 +18,7 @@ export function FilePanel(): JSX.Element {
   const threadId = useCodeSessionStore((state) => state.activeThreadId)
   const path = useCodeSessionStore((state) => state.selectedFilePath)
   const workbenchRevision = useCodeSessionStore((state) => state.workbenchRevision)
+  const setActivePanel = useCodeSessionStore((state) => state.setActivePanel)
   const [file, setFile] = useState<WorkspaceFilePreview | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -54,10 +56,14 @@ export function FilePanel(): JSX.Element {
   const mode = previewModeOf(file.path, file.binary)
   return (
     <section className="ark-panel">
-      <header className="ark-panel__head">
-        <h2>{file.path}</h2>
-        {mode === 'markdown' ? <span>md</span> : null}
+      <header className="ark-panel__head ark-panel__head--file">
+        <div>
+          <h2>{workspaceBasename(file.path)}</h2>
+          <span className="ark-panel__path" title={file.path}>{file.path}</span>
+        </div>
+        <span className="ark-chip">{mode}</span>
       </header>
+      <button type="button" className="ark-linkbtn" onClick={() => setActivePanel('changes')}>{t('workbench.fileLocate')}</button>
       {mode === 'binary' ? (
         <EmptyState title={t('workbench.fileBinaryTitle')} hint={t('workbench.fileBinaryHint', { size: file.size_bytes })} />
       ) : mode === 'markdown' ? (
