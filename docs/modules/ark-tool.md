@@ -61,7 +61,8 @@
   活动 ANSI 代码页（GBK/CP936）写字节，`from_utf8_lossy` 会把每行变成 U+FFFD，报错原文
   不可恢复——实测一天内 111 次失败 `bash` 中 19 次带替换字符，另有 99 次「成功」输出被静默
   弄乱。解码统一走 `ark_common::decode`（严格 UTF-8 → GB18030/Big5/Shift-JIS/EUC-KR →
-  Latin-1），与文件读取共用一条编码策略。
+  Latin-1），与文件读取共用一条编码策略。有界输出捕获额外保留 4 字节 lookahead，并从保留前缀
+  初始化编码 rank，避免四字节 UTF-8/GB18030 字符跨截断边界时被误判为 Latin-1。
 - `bash` 在 spawn 之前校验工作目录（`ensure_cwd`）：`current_dir` 指向不存在的路径时 `spawn`
   只返回裸 OS 错误（Windows 为 267「目录名称无效」），既不含路径也不含原因，实测三次调用仅
   得到该消息。校验只把「目录已消失」这一常见情形换成带路径的结构化错误，不替代 spawn 本身
@@ -82,7 +83,8 @@
   会话状态，不让整个调用在 spawn 前硬失败。`run_in_background` 以 std Command 派生独立
   进程组并立即返回 task_id）、
   `bash_output`（按绝对逻辑字节 offset 增量返回输出与 running/finished 状态；环形缓冲丢弃前缀后仍以
-  `base_offset + retained_len` 推进，不能把 offset 当当前 `VecDeque` 下标）、`bash_kill`
+  `base_offset + retained_len` 推进，不能把 offset 当当前 `VecDeque` 下标；跨读取的 UTF-8/GB18030
+  尾字节由共享编码边界助手保留，完整后再解码）、`bash_kill`
   （组信号 + direct kill 兜底，幂等）。`ShellSessionManager` 是进程内运行态（不入盘、不进
   契约）：环境变量**不**跨调用保持（Windows 无可移植 shell 协议，需求 §2 显式记录）；
   输出环形缓冲 64 KiB 超限丢最旧并打标记；任务数是 16 的硬上限，满额时先淘汰最旧已完成任务，
@@ -95,13 +97,17 @@
 - `find`/`grep` 的同步目录扫描经 `tokio::task::spawn_blocking` 执行并受共享扫描预算约束
   （`exec::common::BlockingScan`，复用 bash 的 clamp 超时）。直接在 async 执行器里扫描曾把 tokio
   worker 阻塞十余分钟，回合取消信号无法被 poll，"停止"按钮杀不掉 grep；扫描函数在目录与文件粒度
-  检查 `ScanDeadline::is_expired`，超时返回带预算毫秒数的结构化错误。
+  检查 `ScanDeadline::is_expired`，超时返回带预算毫秒数的结构化错误。外层 timeout 只停止等待，
+  不能取消阻塞闭包；`grep` 因此只读取大小受限的普通文件，并在 Windows 于任何元数据查询前拒绝
+  命名管道保留路径（包括显式搜索根），避免阻塞线程泄漏。
 - `grep` 是无正则引擎的纯子串扫描。pattern 含正则元字符（`. * + ? ( ) [ ] { } | ^ $ \`）且
   未显式 `literal: true` 时返回结构化错误，错误里同时点明该显式开关与 `bash` 的 `grep -E`，
   不再静默按字面量匹配——那会产出"no matches"假阴性（实测一次 686 秒扫描换来错误结论）。
   显式 `literal: true` 的调用一律按字面量执行：忽略该标志曾让一天内 76 次 `grep` 被拒，
   其中 22 次调用方已经明确要求精确匹配。命中的单行按匹配位置截断到 400 字符（固定前缀会把
   匹配本身截掉），防止单行 minified 文件绕过行数上限灌爆模型上下文（实测一次拉入 254k 字符）。
+  全局匹配预算在遍历与文件入口同时检查；达到预算后仍补齐当前文件的上下文，但不再打开后续文件，
+  已有结果可在扫描超时前正常返回。
 
 ## 验证
 
@@ -113,12 +119,15 @@
 
 `find`/`grep` 另有：忽略名单回归（六个目录不进、显式 `path` 指进被忽略目录仍可搜）、正则元字符
 pattern 拒绝（含交替 `|` 场景）、`literal: true` 时含元字符的 pattern 按字面量搜出结果、拒绝消息点明
-该开关、单行 bundle 命中按匹配位置截断（输出长度有界且仍含 needle）。`grep` 的 blocking 执行正确性
-由并发测试与 `bash` 树回归共同覆盖；扫描超时路径依赖 `BlockingScan` 的共享预算，与 bash 超时同一
-`clamp_timeout` 常量，不单测墙钟。
+该开关、单行 bundle 命中按匹配位置截断（输出长度有界且仍含 needle）。Windows 命名管道回归同时
+证明预算耗尽后不连接后续文件且保留当前文件上下文、非普通文件在元数据查询前被跳过，以及显式
+管道搜索根不会触发顶层元数据查询。
+`grep` 的 blocking 执行正确性由并发测试与 `bash` 树回归共同覆盖；扫描超时路径依赖
+`BlockingScan` 的共享预算，与 bash 超时同一 `clamp_timeout` 常量，不单测墙钟。
 
 `bash` 另有：工作目录不存在时错误必须含该路径（不再只是裸 OS 267）、CP936 字节经
-`decode_shell_output` 解码为原文且不含替换字符。
+`decode_shell_output` 解码为原文且不含替换字符；输出截断另有四字节 UTF-8/GB18030 边界与
+保留前缀编码 rank 回归。
 
 `web_fetch` 另有跳转回归（假出口，无网络）：301 后跟随并再次请求新 URL、302 指向私有地址时第二跳
 被拒且从未发起请求、超过 5 跳预算返回结构化错误、3xx 缺 `Location` 时渲染该状态码。

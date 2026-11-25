@@ -13,6 +13,6 @@ pub mod usage;
 pub use image::data_url;
 pub use repair::{parse_tool_arguments, repair_messages};
 pub use retry::{FailureKind, RetryPolicy, RetryState};
-pub use sse::{SseEvent, SseParser};
+pub use sse::{SseBatch, SseError, SseEvent, SseParser};
 pub use stream::StreamAccumulator;
 pub use usage::UsageParser;

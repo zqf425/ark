@@ -5,7 +5,8 @@
 //! provider layer therefore emits [`StreamEvent`] and the accumulator decides
 //! when a value is publishable.
 
-use ark_common::Usage;
+use ark_common::{text, Usage};
+use serde_json::Value;
 
 /// One parsed fragment of a provider stream.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,8 +18,30 @@ pub enum StreamEvent {
     Usage(Usage),
     /// The provider said the stream is over (`[DONE]`, `message_stop`, …).
     Terminal,
+    /// A provider error delivered inside an otherwise successful HTTP stream.
+    Error(String),
     /// A frame that carries no content we care about (role markers, pings).
     Ignored,
+}
+
+/// Normalize the different provider error envelopes without dropping the
+/// provider's explanation. The transport, not the accumulator, turns this into
+/// a failed attempt so content published before the error cannot be retried.
+pub fn provider_error(value: &Value, fallback: &str) -> StreamEvent {
+    let payload = value
+        .get("error")
+        .or_else(|| {
+            value
+                .get("response")
+                .and_then(|response| response.get("error"))
+        })
+        .unwrap_or(value);
+    let message = ["message", "code", "type"]
+        .iter()
+        .find_map(|field| payload.get(*field).and_then(Value::as_str))
+        .or_else(|| payload.as_str())
+        .unwrap_or(fallback);
+    StreamEvent::Error(text::truncate_utf8(message, 512).to_string())
 }
 
 /// Partial tool call as it streams in.

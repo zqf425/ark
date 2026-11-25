@@ -56,14 +56,23 @@ impl UsageParser {
     /// `cache_read_input_tokens` (hit) and `cache_creation_input_tokens` (written
     /// to cache, i.e. a miss). Both sides are native, so the rate is real.
     pub fn parse_anthropic(&self, usage: &Value) -> Usage {
-        let prompt = uint(usage, "input_tokens");
+        let input = uint(usage, "input_tokens");
         let completion = uint(usage, "output_tokens");
         let hit = uint(usage, "cache_read_input_tokens");
-        let miss = match (
-            uint(usage, "cache_creation_input_tokens"),
-            uint(usage, "input_tokens"),
-        ) {
-            (cache_write, Some(input)) => Some(cache_write.unwrap_or(0) + input),
+        let cache_write = uint(usage, "cache_creation_input_tokens");
+        // Anthropic excludes both cache counters from `input_tokens`; all three
+        // are billable prompt tokens and must be present in the aggregate total.
+        let prompt = match (input, hit, cache_write) {
+            (None, None, None) => None,
+            _ => Some(
+                input
+                    .unwrap_or(0)
+                    .saturating_add(hit.unwrap_or(0))
+                    .saturating_add(cache_write.unwrap_or(0)),
+            ),
+        };
+        let miss = match (cache_write, input) {
+            (cache_write, Some(input)) => Some(cache_write.unwrap_or(0).saturating_add(input)),
             (Some(cache_write), None) => Some(cache_write),
             (None, None) => None,
         };
@@ -192,8 +201,9 @@ mod tests {
             "cache_read_input_tokens": 90,
             "cache_creation_input_tokens": 0
         }));
-        assert_eq!(usage.prompt_tokens, 10);
+        assert_eq!(usage.prompt_tokens, 100);
         assert_eq!(usage.completion_tokens, 4);
+        assert_eq!(usage.total_tokens, 104);
         assert_eq!(usage.cache_hit_tokens, Some(90));
         assert_eq!(usage.cache_miss_tokens, Some(10));
         assert_eq!(usage.cache_hit_rate, Some(0.9));
@@ -209,6 +219,8 @@ mod tests {
         }));
         // Anthropic's `input_tokens` excludes cached input, so the true prompt is
         // read (5) + write (5) + uncached (5) = 15 and the rate is 5/15.
+        assert_eq!(usage.prompt_tokens, 15);
+        assert_eq!(usage.total_tokens, 16);
         assert_eq!(usage.cache_miss_tokens, Some(10));
         assert_eq!(usage.cache_hit_rate, Some(5.0 / 15.0));
     }

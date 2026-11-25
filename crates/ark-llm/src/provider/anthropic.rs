@@ -174,7 +174,11 @@ impl StreamParser for AnthropicParser {
             "content_block_delta" => self.content_block_delta(&value),
             "message_delta" => self.message_delta(&value),
             "message_stop" => vec![StreamEvent::Terminal],
-            "ping" | "error" => vec![StreamEvent::Ignored],
+            "ping" => vec![StreamEvent::Ignored],
+            "error" => vec![crate::domain::event::provider_error(
+                &value,
+                "anthropic stream error",
+            )],
             _ => vec![StreamEvent::Ignored],
         }
     }
@@ -545,8 +549,9 @@ mod tests {
         })));
         match &events[0] {
             StreamEvent::Usage(usage) => {
-                assert_eq!(usage.prompt_tokens, 40);
+                assert_eq!(usage.prompt_tokens, 100);
                 assert_eq!(usage.completion_tokens, 7);
+                assert_eq!(usage.total_tokens, 107);
                 assert_eq!(usage.cache_hit_tokens, Some(60));
             }
             other => panic!("expected usage, got {other:?}"),

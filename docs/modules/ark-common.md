@@ -13,7 +13,8 @@
   `Usage::default()` 仅是累加器，不算缺失样本。
 - 路径归一化的唯一实现为 `ark_common::path::normalize`；其它 crate 和前端不得复制逻辑。
 - Windows `canonicalize` 产生的 verbatim 前缀由 `ark_common::path::strip_verbatim` 在归一化入口统一移除；盘符和 UNC 路径均以非 verbatim 形式参与比较。
-- 文本写入必须 UTF-8 无 BOM，原子写入由 `write_text_atomic` 完成。
+- 文本写入必须 UTF-8 无 BOM，原子写入由 `write_text_atomic` 完成。`encoding::incomplete_encoded_suffix`
+  是流式分块解码的边界判定宿主：只保留可能尚未完整的 UTF-8/GB18030 尾字节，实际解码仍统一走 `decode`。
 - `ArkErrorCode` 是错误码的唯一枚举，`http_status` 紧跟枚举定义，使得新增一个 code 时必须同时决定
   它的传输状态码，不可能只加变体不加状态：`ValidationError` 400、`Unauthorized` 401、`NotFound` 404、
   `Conflict` 409、`ModelRequestFailed` 502、`ToolExecutionFailed` 500、`RuntimeUnavailable` 503、

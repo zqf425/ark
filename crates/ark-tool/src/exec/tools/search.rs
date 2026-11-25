@@ -8,6 +8,7 @@
 //! 686 s to `0\.8|80%|…` returning a false "no matches".
 
 use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput};
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -50,6 +51,8 @@ struct Query {
     file_glob: Option<String>,
     limit: usize,
     context: usize,
+    /// Matching rows consumed across every file in this one scan.
+    matched: Cell<usize>,
 }
 
 impl Query {
@@ -59,6 +62,10 @@ impl Query {
     fn line_cap(&self) -> usize {
         self.limit
             .saturating_mul(self.context.saturating_mul(2).saturating_add(1))
+    }
+
+    fn budget_reached(&self) -> bool {
+        self.matched.get() >= self.limit
     }
 }
 
@@ -105,14 +112,27 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
         file_glob: parsed.glob.clone(),
         limit: parsed.limit.unwrap_or(DEFAULT_GREP_LIMIT).max(1),
         context: parsed.context.unwrap_or(0),
+        matched: Cell::new(0),
     };
+    let empty_notice = query.needle.clone();
+    #[cfg(windows)]
+    if parsed
+        .path
+        .as_deref()
+        .is_some_and(|path| is_windows_named_pipe_path(Path::new(path)))
+    {
+        return Ok(ToolOutput::ok(format!("no matches for `{empty_notice}`")));
+    }
     let target = workspace_path(ctx, parsed.path.as_deref())?;
     let scan = BlockingScan::start();
     let line_cap = query.line_cap();
-    let empty_notice = query.needle.clone();
     let hits = scan
         .run(move |deadline| {
             let mut hits: Vec<String> = Vec::new();
+            #[cfg(windows)]
+            if is_windows_named_pipe_path(&target) {
+                return Ok(Vec::new());
+            }
             if target.is_file() {
                 scan_file(&target, &target, &query, deadline, &mut hits);
             } else {
@@ -127,6 +147,7 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
                     &mut visited,
                 );
             }
+            deadline.check()?;
             Ok(hits)
         })
         .await?;
@@ -146,7 +167,11 @@ fn walk(
     out: &mut Vec<String>,
     visited: &mut HashSet<PathBuf>,
 ) {
-    if depth > 32 || out.len() >= query.line_cap() || deadline.is_expired() {
+    if depth > 32
+        || out.len() >= query.line_cap()
+        || query.budget_reached()
+        || deadline.is_expired()
+    {
         return;
     }
     // Canonicalize once per directory and never revisit it: a symlink cycle
@@ -164,7 +189,7 @@ fn walk(
         return;
     };
     for entry in entries.flatten() {
-        if out.len() >= query.line_cap() || deadline.is_expired() {
+        if out.len() >= query.line_cap() || query.budget_reached() || deadline.is_expired() {
             return;
         }
         let Ok(kind) = entry.file_type() else {
@@ -197,6 +222,56 @@ fn walk(
     }
 }
 
+#[cfg(windows)]
+fn is_windows_named_pipe_path(file: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+
+    fn ascii_lower(value: u16) -> u16 {
+        if (b'A' as u16..=b'Z' as u16).contains(&value) {
+            value + 32
+        } else {
+            value
+        }
+    }
+
+    fn has_prefix(file: &Path, device: u16) -> bool {
+        let expected = [
+            b'\\' as u16,
+            b'\\' as u16,
+            device,
+            b'\\' as u16,
+            b'p' as u16,
+            b'i' as u16,
+            b'p' as u16,
+            b'e' as u16,
+            b'\\' as u16,
+        ];
+        let mut actual = file.as_os_str().encode_wide();
+        expected.into_iter().all(|want| {
+            actual
+                .next()
+                .is_some_and(|got| ascii_lower(got) == ascii_lower(want))
+        })
+    }
+
+    has_prefix(file, b'.' as u16) || has_prefix(file, b'?' as u16)
+}
+
+fn is_scannable_regular_file(file: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        // Even a metadata lookup can connect to a Windows named pipe. Reject
+        // its reserved path before touching the filesystem.
+        if is_windows_named_pipe_path(file) {
+            return false;
+        }
+    }
+    let Ok(meta) = std::fs::metadata(file) else {
+        return false;
+    };
+    meta.is_file() && meta.len() <= MAX_FILE_BYTES
+}
+
 fn scan_file(
     root: &Path,
     file: &Path,
@@ -204,7 +279,10 @@ fn scan_file(
     deadline: &ScanDeadline,
     out: &mut Vec<String>,
 ) {
-    if out.len() >= query.line_cap() || deadline.is_expired() {
+    if out.len() >= query.line_cap() || query.budget_reached() || deadline.is_expired() {
+        return;
+    }
+    if !is_scannable_regular_file(file) {
         return;
     }
     let relative = file
@@ -219,12 +297,6 @@ fn scan_file(
         if !glob::matches(pattern, &relative) && !glob::matches(pattern, &name) {
             return;
         }
-    }
-    let Ok(meta) = std::fs::metadata(file) else {
-        return;
-    };
-    if meta.len() > MAX_FILE_BYTES {
-        return;
     }
     // Same encoding policy as `read`/`edit`: strict UTF-8 first, then the
     // documented Windows fallbacks. A GBK-encoded file would otherwise look
@@ -255,15 +327,14 @@ fn scan_file(
     let mut emit: Vec<Option<char>> = vec![None; lines.len()];
     let mut hit_at: Vec<usize> = vec![0; lines.len()];
     let needle_chars = query.needle.chars().count();
-    let mut matched = 0usize;
     for (index, line) in haystack_lines.iter().enumerate() {
-        if matched >= query.limit {
+        if query.matched.get() >= query.limit {
             break;
         }
         let Some(byte_at) = line.find(&haystack_needle) else {
             continue;
         };
-        matched += 1;
+        query.matched.set(query.matched.get() + 1);
         hit_at[index] = line[..byte_at].chars().count();
         let start = index.saturating_sub(query.context);
         let end = index
@@ -348,6 +419,204 @@ mod tests {
             .unwrap();
         assert!(out.ok);
         assert!(out.content.contains("a.txt:2:beta"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn match_limit_is_shared_across_files() {
+        let dir = temp_workspace("grep-global-limit");
+        std::fs::write(dir.join("a.txt"), "needle\nneedle\nneedle\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "needle\nneedle\n").unwrap();
+        let out = GrepTool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({ "pattern": "needle", "limit": 2, "context": 1 })),
+            )
+            .await
+            .unwrap();
+        assert!(out.ok, "{}", out.content);
+        assert_eq!(
+            out.content
+                .lines()
+                .filter(|line| line.contains(":needle"))
+                .count(),
+            2,
+            "limit must bound matches across the whole walk: {}",
+            out.content
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn reached_match_budget_skips_later_named_pipe_and_keeps_context() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::windows::named_pipe::ServerOptions;
+
+        let dir = temp_workspace("grep-budget-pipe");
+        let first = dir.join("a.txt");
+        std::fs::write(&first, "before\nneedle\nneedle\nafter\n").unwrap();
+        let query = Query {
+            needle: "needle".into(),
+            ignore_case: false,
+            file_glob: None,
+            limit: 2,
+            context: 10,
+            matched: Cell::new(0),
+        };
+        let expected = vec![
+            "a.txt-1-before".to_string(),
+            "a.txt:2:needle".to_string(),
+            "a.txt:3:needle".to_string(),
+            "a.txt-4-after".to_string(),
+        ];
+
+        let pipe_name = format!(r"\\.\pipe\ark-grep-budget-{}", std::process::id());
+        let mut pipe = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&pipe_name)
+            .unwrap();
+        let connected = Arc::new(AtomicBool::new(false));
+        let server_connected = Arc::clone(&connected);
+        let server = tokio::spawn(async move {
+            if tokio::time::timeout(Duration::from_millis(200), pipe.connect())
+                .await
+                .is_ok_and(|result| result.is_ok())
+            {
+                server_connected.store(true, Ordering::SeqCst);
+                let _ = pipe.write_all(b"needle\n").await;
+            }
+        });
+        let scan = BlockingScan::start();
+        let hits = tokio::time::timeout(
+            Duration::from_secs(2),
+            scan.run(move |deadline| {
+                let mut hits = Vec::new();
+                scan_file(&dir, &first, &query, deadline, &mut hits);
+                assert_eq!(query.matched.get(), 2);
+                assert_eq!(hits, expected, "current-file context must be complete");
+
+                scan_file(&dir, Path::new(&pipe_name), &query, deadline, &mut hits);
+                assert_eq!(hits, expected, "existing results must be returned intact");
+                Ok(hits)
+            }),
+        )
+        .await
+        .expect("a satisfied match budget must not block on a later file")
+        .unwrap();
+        server.await.unwrap();
+
+        assert!(
+            !connected.load(Ordering::SeqCst),
+            "a later file must not be opened after the global match budget is reached"
+        );
+        assert_eq!(hits.len(), 4);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn skips_non_regular_named_pipe_before_open() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::windows::named_pipe::ServerOptions;
+
+        let dir = temp_workspace("grep-non-regular-pipe");
+        let query = Query {
+            needle: "needle".into(),
+            ignore_case: false,
+            file_glob: None,
+            limit: 2,
+            context: 0,
+            matched: Cell::new(0),
+        };
+        let pipe_name = format!(r"\\.\pipe\ark-grep-skip-{}", std::process::id());
+        let mut pipe = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&pipe_name)
+            .unwrap();
+        let connected = Arc::new(AtomicBool::new(false));
+        let server_connected = Arc::clone(&connected);
+        let server = tokio::spawn(async move {
+            if tokio::time::timeout(Duration::from_millis(200), pipe.connect())
+                .await
+                .is_ok_and(|result| result.is_ok())
+            {
+                server_connected.store(true, Ordering::SeqCst);
+                let _ = pipe.write_all(b"needle\n").await;
+            }
+        });
+
+        let scan = BlockingScan::start();
+        let hits = tokio::time::timeout(
+            Duration::from_secs(2),
+            scan.run(move |deadline| {
+                let mut hits = Vec::new();
+                scan_file(&dir, Path::new(&pipe_name), &query, deadline, &mut hits);
+                Ok(hits)
+            }),
+        )
+        .await
+        .expect("a non-regular file must not block the scan")
+        .unwrap();
+        server.await.unwrap();
+
+        assert!(
+            !connected.load(Ordering::SeqCst),
+            "grep must skip a non-regular file before opening it"
+        );
+        assert!(hits.is_empty());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn explicit_named_pipe_path_is_skipped_before_top_level_metadata() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::windows::named_pipe::ServerOptions;
+
+        let dir = temp_workspace("grep-explicit-pipe");
+        let mut context = ctx(&dir);
+        context.sandbox = ark_ports::SandboxDecision::Unrestricted;
+        let pipe_name = format!(r"\\.\pipe\ark-grep-explicit-{}", std::process::id());
+        let mut pipe = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&pipe_name)
+            .unwrap();
+        let connected = Arc::new(AtomicBool::new(false));
+        let server_connected = Arc::clone(&connected);
+        let server = tokio::spawn(async move {
+            if tokio::time::timeout(Duration::from_millis(200), pipe.connect())
+                .await
+                .is_ok_and(|result| result.is_ok())
+            {
+                server_connected.store(true, Ordering::SeqCst);
+                let _ = pipe.write_all(b"needle\n").await;
+            }
+        });
+
+        let output = tokio::time::timeout(
+            Duration::from_secs(2),
+            run(
+                &context,
+                ToolArgs(serde_json::json!({ "pattern": "needle", "path": pipe_name })),
+            ),
+        )
+        .await
+        .expect("an explicit named pipe must not block the scan")
+        .unwrap();
+        server.await.unwrap();
+
+        assert!(
+            !connected.load(Ordering::SeqCst),
+            "grep must reject an explicit named pipe before its top-level metadata lookup"
+        );
+        assert!(output.ok);
+        assert!(output.content.contains("no matches"), "{}", output.content);
     }
 
     #[tokio::test]

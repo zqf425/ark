@@ -6,11 +6,15 @@
 //! model context.
 
 use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput};
+use std::io;
 use std::process::Stdio;
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::domain::{args, schema};
-use crate::exec::common::{as_output, decode_shell_output, with_detail, workspace_path};
+use crate::exec::common::{
+    as_output, decode_shell_output, decode_shell_output_status, with_detail, workspace_path,
+};
 use crate::policy::truncate::{cap_bytes, clamp_timeout};
 use crate::policy::DEFAULT_LIMITS;
 
@@ -20,6 +24,126 @@ const SECRET_MARKERS: [&str; 4] = ["KEY", "TOKEN", "SECRET", "PASSWORD"];
 /// `bash`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BashTool;
+
+/// Enough lookahead to finish any UTF-8 or supported legacy-codepage character
+/// that straddles the retained-prefix boundary.
+const CAPTURE_LOOKAHEAD: usize = 4;
+
+struct BoundedCapture {
+    bytes: Vec<u8>,
+    limit: usize,
+    capacity: usize,
+}
+
+impl BoundedCapture {
+    fn new(limit: usize) -> Self {
+        let capacity = limit.saturating_add(CAPTURE_LOOKAHEAD);
+        Self {
+            bytes: Vec::with_capacity(capacity),
+            limit,
+            capacity,
+        }
+    }
+
+    fn push(&mut self, bytes: &[u8]) {
+        let retained = self
+            .capacity
+            .saturating_sub(self.bytes.len())
+            .min(bytes.len());
+        self.bytes.extend_from_slice(&bytes[..retained]);
+    }
+
+    fn exceeded(&self) -> bool {
+        self.bytes.len() > self.limit
+    }
+
+    fn text(&self) -> String {
+        if self.bytes.len() <= self.limit {
+            return decode_shell_output(&self.bytes);
+        }
+        let sample = decode_sample(&self.bytes, self.limit);
+        let earliest = self.limit.saturating_sub(CAPTURE_LOOKAHEAD - 1);
+        for end in (earliest..=self.limit).rev() {
+            let candidate = decode_shell_output_status(&self.bytes[..end]);
+            if sample.text.starts_with(&candidate.text)
+                && (candidate.encoding == sample.encoding
+                    || candidate.encoding == ark_common::TextEncoding::Utf8)
+            {
+                return candidate.text;
+            }
+        }
+        String::new()
+    }
+}
+
+fn encoding_rank(encoding: ark_common::TextEncoding) -> u8 {
+    match encoding {
+        ark_common::TextEncoding::Utf8 => 0,
+        ark_common::TextEncoding::Gb18030 => 1,
+        ark_common::TextEncoding::Big5 => 2,
+        ark_common::TextEncoding::ShiftJis => 3,
+        ark_common::TextEncoding::EucKr => 4,
+        ark_common::TextEncoding::Latin1 => 5,
+    }
+}
+
+fn decode_sample(bytes: &[u8], limit: usize) -> ark_common::DecodedText {
+    let mut best = decode_shell_output_status(&bytes[..limit]);
+    let mut best_rank = encoding_rank(best.encoding);
+    for end in (limit + 1..=bytes.len()).rev() {
+        let candidate = decode_shell_output_status(&bytes[..end]);
+        let rank = encoding_rank(candidate.encoding);
+        if rank < best_rank {
+            best_rank = rank;
+            best = candidate;
+        }
+    }
+    best
+}
+
+struct CapturedOutput {
+    stdout: BoundedCapture,
+    stderr: BoundedCapture,
+    status: std::process::ExitStatus,
+}
+
+async fn capture_pipe<R>(pipe: Option<R>, limit: usize) -> io::Result<BoundedCapture>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut capture = BoundedCapture::new(limit);
+    let Some(mut pipe) = pipe else {
+        return Ok(capture);
+    };
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = pipe.read(&mut buffer).await?;
+        if read == 0 {
+            return Ok(capture);
+        }
+        // Keep draining after the prefix is full so a chatty child never blocks
+        // on a full stdout/stderr pipe while we are waiting for it to exit.
+        capture.push(&buffer[..read]);
+    }
+}
+
+async fn collect_output(
+    child: &mut tokio::process::Child,
+    limit: usize,
+) -> io::Result<CapturedOutput> {
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let (status, stdout, stderr) = tokio::try_join!(
+        child.wait(),
+        capture_pipe(stdout, limit),
+        capture_pipe(stderr, limit)
+    )?;
+    Ok(CapturedOutput {
+        stdout,
+        stderr,
+        status,
+    })
+}
 
 #[async_trait::async_trait]
 impl Tool for BashTool {
@@ -66,7 +190,7 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
     // the shell as a group leader is what makes a later teardown reach the rest.
     ark_common::process::isolate(command.as_std_mut());
 
-    let child = command.spawn().map_err(|err| {
+    let mut child = command.spawn().map_err(|err| {
         ark_common::ArkError::new(
             ark_common::ArkErrorCode::ToolExecutionFailed,
             format!("cannot start shell: {err}"),
@@ -78,7 +202,7 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
     let mut tree = ark_common::process::ProcessTree::adopt(child.id());
     let output = match tokio::time::timeout(
         Duration::from_millis(timeout),
-        child.wait_with_output(),
+        collect_output(&mut child, DEFAULT_LIMITS.max_bash_bytes),
     )
     .await
     {
@@ -204,9 +328,9 @@ fn sanitize_env(command: &mut tokio::process::Command, ctx: &ToolContext) {
 }
 
 /// Build the model-visible output and the on-the-side detail.
-fn render(output: &std::process::Output, timeout_ms: u64) -> ToolOutput {
-    let stdout = decode_shell_output(&output.stdout);
-    let stderr = decode_shell_output(&output.stderr);
+fn render(output: &CapturedOutput, timeout_ms: u64) -> ToolOutput {
+    let stdout = output.stdout.text();
+    let stderr = output.stderr.text();
     let mut body = String::new();
     if !stdout.is_empty() {
         body.push_str(&stdout);
@@ -221,7 +345,15 @@ fn render(output: &std::process::Output, timeout_ms: u64) -> ToolOutput {
     if body.is_empty() {
         body.push_str("(no output)");
     }
-    let capped = cap_bytes(&body, DEFAULT_LIMITS.max_bash_bytes);
+    let source_truncated = output.stdout.exceeded() || output.stderr.exceeded();
+    let capped = if source_truncated && body.len() <= DEFAULT_LIMITS.max_bash_bytes {
+        format!(
+            "{body}\n[truncated: output exceeded {} bytes]",
+            DEFAULT_LIMITS.max_bash_bytes
+        )
+    } else {
+        cap_bytes(&body, DEFAULT_LIMITS.max_bash_bytes)
+    };
     let code = output.status.code().unwrap_or(-1);
     let detail = format!("exit={code} timeout_ms={timeout_ms}");
     if output.status.success() {
@@ -254,6 +386,68 @@ mod tests {
         assert!(out.ok, "{}", out.content);
         assert!(out.content.contains("hello"));
         assert!(out.detail.unwrap().contains("exit=0"));
+    }
+
+    #[test]
+    fn output_capture_is_bounded_while_excess_bytes_are_discarded() {
+        let limit = 64;
+        let mut capture = BoundedCapture::new(limit);
+        capture.push(&vec![b'x'; limit * 16]);
+        assert!(capture.bytes.len() <= limit + CAPTURE_LOOKAHEAD);
+        assert_eq!(capture.text(), "x".repeat(limit));
+    }
+
+    #[test]
+    fn bounded_output_does_not_split_utf8_or_legacy_codepage_characters() {
+        let mut utf8 = BoundedCapture::new(8);
+        utf8.push("1234567中中文中文".as_bytes());
+        assert_eq!(utf8.text(), "1234567");
+
+        let mut gbk = BoundedCapture::new(3);
+        gbk.push(b"abc\xc4\xe3\xba\xc3\xc4\xe3");
+        assert_eq!(gbk.text(), "abc");
+    }
+
+    #[test]
+    fn four_byte_utf8_character_at_capture_limit_is_not_mojibake() {
+        let mut capture = BoundedCapture::new(3);
+        // The prefix ends exactly before a four-byte character. Sampling all
+        // four following bytes is required to recognize the stream as UTF-8.
+        capture.push("中\u{1f600}tail".as_bytes());
+        assert_eq!(capture.text(), "中");
+    }
+
+    #[test]
+    fn four_byte_gb18030_character_at_capture_limit_is_not_mojibake() {
+        let mut capture = BoundedCapture::new(4);
+        // The prefix ends exactly before a four-byte GB18030 character.
+        capture.push(b"\xd6\xd0\xce\xc4\x94\x39\xfc\x36tail");
+        assert_eq!(capture.text(), "中文");
+    }
+
+    #[test]
+    fn sample_keeps_a_better_prefix_encoding() {
+        let mut bytes = "中".as_bytes().to_vec();
+        bytes.extend_from_slice(&[0xff; 4]);
+        let mut capture = BoundedCapture::new(bytes.len() - 4);
+        capture.push(&bytes);
+        assert_eq!(capture.text(), "中");
+    }
+
+    #[tokio::test]
+    async fn large_output_is_capped_after_bounded_capture() {
+        let dir = temp_workspace("bash-large-output");
+        let out = BashTool
+            .execute(&ctx(&dir), echo("head -c 200000 /dev/zero | tr '\\0' x"))
+            .await
+            .unwrap();
+        assert!(out.ok, "{}", out.content);
+        assert!(
+            out.content.contains("[truncated:"),
+            "got {} bytes",
+            out.content.len()
+        );
+        assert!(out.content.len() < DEFAULT_LIMITS.max_bash_bytes + 128);
     }
 
     #[tokio::test]
