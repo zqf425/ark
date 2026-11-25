@@ -112,6 +112,19 @@ test('the shell exposes system notifications for turn ends', () => {
   assert.match(desktopBridge, /notify_session_event/, 'the web bridge must call the shell command')
 })
 
+test('external links use the opener plugin instead of the deprecated shell API', () => {
+  const manifest = readFileSync(resolve(desktopRoot, 'src-tauri', 'Cargo.toml'), 'utf8')
+  const mainRs = readFileSync(resolve(desktopRoot, 'src-tauri', 'src', 'main.rs'), 'utf8')
+  const runtimeRs = readFileSync(resolve(desktopRoot, 'src-tauri', 'src', 'runtime.rs'), 'utf8')
+
+  assert.match(manifest, /^tauri-plugin-opener = "2"$/m)
+  assert.match(mainRs, /\.plugin\(tauri_plugin_opener::init\(\)\)/)
+  assert.match(mainRs, /app\.opener\(\)\s*\.open_url\(parsed\.as_str\(\), None::<&str>\)/)
+  assert.match(runtimeRs, /app\.opener\(\)\s*\.open_url\(url\.as_str\(\), None::<&str>\)/)
+  assert.doesNotMatch(mainRs, /\.shell\(\)\s*\.open\(/)
+  assert.doesNotMatch(runtimeRs, /\.shell\(\)\s*\.open\(/)
+})
+
 test('the folder picker is owned by the main window', () => {
   const mainRs = readFileSync(resolve(desktopRoot, 'src-tauri', 'src', 'main.rs'), 'utf8')
 
@@ -136,6 +149,55 @@ test('release configuration is the only place that embeds the arkd sidecar', () 
 
   const desktopPackage = readJson(resolve(desktopRoot, 'package.json'))
   assert.equal(desktopPackage.scripts.build, 'tauri build --config src-tauri/tauri.release.conf.json')
+})
+
+test('managed runtime keeps process-group teardown explicit', () => {
+  const runtimeRs = readFileSync(resolve(desktopRoot, 'src-tauri', 'src', 'runtime.rs'), 'utf8')
+  assert.equal(runtimeRs.match(/\.set_process_group\(true\)/g)?.length, 2)
+  assert.equal(runtimeRs.match(/\.kill_on_drop\(false\)/g)?.length, 2)
+})
+
+test('NSIS stops only the sidecar from the current installation', () => {
+  const hooks = readFileSync(
+    resolve(desktopRoot, 'src-tauri', 'nsis', 'installer-hooks.nsh'),
+    'utf8'
+  )
+
+  assert.doesNotMatch(hooks, /taskkill(?:\.exe)?["'][^\r\n]*\/IM\s+arkd\.exe/i)
+  assert.match(hooks, /InitPluginsDir/, 'the installer must initialize the temporary script directory')
+  assert.match(hooks, /CreateDirectory "\$PLUGINSDIR"/, 'the temporary script directory must exist')
+  assert.match(hooks, /Where-Object\s+\{\s*\$\$?_\.Path\s+-eq\s+\$\$?ExecutablePath\s+\}/)
+  assert.match(hooks, /-File\s+"\$PLUGINSDIR\\ark-stop-sidecar\.ps1"\s+"\$INSTDIR\\arkd\.exe"/)
+  assert.match(hooks, /\$\{If\}\s+\$0\s+!=\s+0/, 'nonzero exit codes must be handled')
+})
+
+test('core verification runs strict Clippy after the workspace check', () => {
+  const verify = readFileSync(resolve(repositoryRoot, 'scripts', 'verify.ps1'), 'utf8')
+  const core = verify.match(/function Invoke-CoreChecks \{([\s\S]*?)\n\}/)?.[1]
+
+  assert.ok(core, 'core scope must exist')
+  assert.match(core, /Invoke-CheckedNative cargo @\('check', '--workspace'\)/)
+  assert.match(core, /Invoke-CheckedNative cargo @\('clippy', '--workspace', '--all-targets', '--', '-D', 'warnings'\)/)
+})
+
+test('web verification includes an explicit typecheck', () => {
+  const verify = readFileSync(resolve(repositoryRoot, 'scripts', 'verify.ps1'), 'utf8')
+  const web = verify.match(/function Invoke-WebChecks \{([\s\S]*?)\n\}/)?.[1]
+
+  assert.ok(web, 'web scope must exist')
+  assert.match(web, /Invoke-CheckedNative npm @\('--prefix', 'web', 'run', 'typecheck'\)/)
+})
+
+test('desktop verification checks the Rust host in the existing CI job', () => {
+  const verify = readFileSync(resolve(repositoryRoot, 'scripts', 'verify.ps1'), 'utf8')
+  const desktop = verify.match(/function Invoke-DesktopChecks \{([\s\S]*?)\n\}/)?.[1]
+  const workflow = readFileSync(resolve(repositoryRoot, '.github', 'workflows', 'verify.yml'), 'utf8')
+
+  assert.ok(desktop, 'desktop scope must exist')
+  assert.match(desktop, /Enable-GnuToolchain/)
+  assert.match(desktop, /Invoke-CheckedNative cargo @\('check', '-p', 'ark-desktop'\)/)
+  assert.match(workflow, /desktop:[\s\S]*?dtolnay\/rust-toolchain@stable/)
+  assert.match(workflow, /run: \.\/scripts\/verify\.ps1 -Scope desktop/)
 })
 
 test('sidecar preparation resolves default and isolated Cargo target directories', () => {
