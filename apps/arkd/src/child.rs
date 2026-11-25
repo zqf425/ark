@@ -352,8 +352,7 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             steering: steer,
             // Child runs keep text-only steers: children have no attachment
             // association surface and their seed carries no image resolver.
-            steer_image_resolver: None,
-            steer_outcome_recorder: None,
+            steer_attachment_resolver: None,
         });
         reactor.push_user(ctx.prompt.clone());
         let outcome = reactor.run().await;
@@ -365,11 +364,11 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             .observed_counts(thread_id, progress.tokens_used, progress.tool_calls)
             .await;
 
-        // The parent reads the child's last assistant message; a run that never
-        // produced one reports no summary instead of an invented placeholder.
+        // The parent reads this run's last assistant message; a run that never
+        // produced one reports no summary instead of reusing an earlier turn.
         let summary = match &outcome {
             Ok(TurnOutcome::Completed) | Ok(TurnOutcome::Aborted { .. }) => {
-                self.final_answer(thread_id).await
+                self.final_answer(thread_id, turn_id).await
             }
             _ => String::new(),
         };
@@ -421,8 +420,9 @@ impl ChildTurnExecutorImpl {
         (usage, tool_invocations)
     }
 
-    /// The child's last assistant message, which is what the parent reads.
-    async fn final_answer(&self, thread_id: ThreadId) -> String {
+    /// The child's last assistant message from this run, which is what the
+    /// parent reads.
+    async fn final_answer(&self, thread_id: ThreadId, turn_id: TurnId) -> String {
         let items = match self.store.read_items(thread_id).await {
             Ok(items) => items,
             Err(_) => return String::new(),
@@ -430,7 +430,7 @@ impl ChildTurnExecutorImpl {
         items
             .iter()
             .rev()
-            .find(|item| item.kind == ItemKind::AssistantMessage)
+            .find(|item| item.kind == ItemKind::AssistantMessage && item.turn_id == turn_id)
             .and_then(|item| item.text.clone())
             .unwrap_or_default()
     }
@@ -472,7 +472,120 @@ pub const DEFAULT_MAX_QUEUED: u32 = 20;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark_common::ChildId;
     use ark_ports::SubagentPolicySource;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FirstAnswerThenPendingModel(AtomicUsize);
+
+    #[async_trait::async_trait]
+    impl ModelClient for FirstAnswerThenPendingModel {
+        fn provider_id(&self) -> &str {
+            "test"
+        }
+
+        fn model(&self) -> &str {
+            "test"
+        }
+
+        async fn stream(
+            &self,
+            _request: ark_ports::ModelRequest,
+            _sink: tokio::sync::mpsc::Sender<ark_ports::ModelChunk>,
+        ) -> Result<ark_ports::ModelResponse> {
+            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(ark_ports::ModelResponse {
+                    text: "previous answer".to_string(),
+                    ..ark_ports::ModelResponse::default()
+                })
+            } else {
+                std::future::pending().await
+            }
+        }
+    }
+
+    fn executor_with_model(
+        store: Arc<ark_store::FileSessionStore>,
+        dir: &std::path::Path,
+        model: Arc<dyn ModelClient>,
+    ) -> ChildTurnExecutorImpl {
+        let usage = Arc::new(UsageRecorder::new());
+        let providers = ark_provider::ProviderStore::new(dir.to_path_buf());
+        let skills = Arc::new(ark_skills::SkillRuntime::new(
+            Arc::new(ark_skills::SkillsConfig::default),
+            dir.to_path_buf(),
+        ));
+        let roots = Arc::new(WorkspaceRoots::new(dir.to_path_buf(), dir).unwrap());
+        ChildTurnExecutorImpl::new(
+            Arc::new(ark_config::ConfigStore::new(RuntimeConfig::default())),
+            Arc::new(providers),
+            usage,
+            model,
+            Arc::new(ToolRegistry::new()),
+            Arc::clone(&store) as Arc<dyn EventSink>,
+            store,
+            Arc::new(ark_tool::BuiltinSandboxPolicy::new(
+                ark_tool::Autonomy::WorkspaceWrite,
+            )),
+            roots,
+            skills,
+            Arc::new(ark_ports::NoHooks),
+        )
+    }
+
+    #[tokio::test]
+    async fn resumed_child_abort_does_not_reuse_the_previous_turn_summary() {
+        use ark_ports::SessionStore;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            ark_store::FileSessionStore::open(ark_store::StoreConfig::new(dir.path())).unwrap(),
+        );
+        let parent = store.create_thread("parent").await.unwrap().thread_id;
+        let child = ChildId::new();
+        store
+            .create_child_run(parent, child, "child")
+            .await
+            .unwrap();
+        let executor = executor_with_model(
+            Arc::clone(&store),
+            dir.path(),
+            Arc::new(FirstAnswerThenPendingModel(AtomicUsize::new(0))),
+        );
+        let ctx = ChildTurnContext {
+            child_id: child,
+            parent_thread_id: parent,
+            parent_turn_id: TurnId::new(),
+            prompt: "initial task".to_string(),
+            workspace: None,
+            model: None,
+            provider_id: None,
+            autonomy: None,
+            cancel: Arc::new(ark_ports::CancelToken::new()),
+            steer: Arc::new(ark_ports::SteerQueue::new()),
+        };
+
+        let first = executor.run_child_turn(ctx.clone()).await.unwrap();
+        assert_eq!(first.status, ChildTurnStatus::Completed);
+        assert_eq!(first.summary, "previous answer");
+
+        let cancel = Arc::new(ark_ports::CancelToken::new());
+        cancel.cancel();
+        let resumed = ChildTurnContext {
+            parent_turn_id: TurnId::new(),
+            prompt: "resume after abort".to_string(),
+            cancel,
+            ..ctx
+        };
+        let report = executor.run_child_turn(resumed).await.unwrap();
+
+        assert!(matches!(report.status, ChildTurnStatus::Aborted { .. }));
+        assert!(
+            report.summary.is_empty(),
+            "an aborted resume must not report the previous turn's answer: {}",
+            report.summary
+        );
+    }
 
     #[test]
     fn child_runtime_override_wins_and_absence_inherits_parent() {

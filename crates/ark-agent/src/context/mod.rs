@@ -25,6 +25,7 @@ mod checkpoint_tests {
     use super::checkpoint::MAX_PLAN_LINES;
     use super::ContextCheckpoint;
     use ark_ports::ModelMessage;
+    use std::time::{Duration, Instant};
 
     /// Tool 角色测试桩：与 reactor 回放 `ToolCall` 结果时的消息形态一致。
     fn tool_result(output: &str) -> ModelMessage {
@@ -36,6 +37,23 @@ mod checkpoint_tests {
             name: Some("bash".to_string()),
             tool_calls: Vec::new(),
         }
+    }
+
+    #[test]
+    fn checkpoint_deduplication_handles_large_histories_without_quadratic_scans() {
+        let text = (0..30_000)
+            .map(|index| format!("key={index:05}\n"))
+            .collect::<String>();
+        let started = Instant::now();
+
+        let checkpoint = ContextCheckpoint::from_texts([text.as_str()]);
+
+        assert!(!checkpoint.is_empty());
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "checkpoint extraction took {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]

@@ -996,3 +996,5 @@ async fn the_executor_receives_the_prompt_and_parent_identity() {
     assert_eq!(seen[0].parent_thread_id, harness.parent);
     assert_eq!(seen[0].parent_turn_id, harness.parent_turn);
 }
+
+mod regressions;

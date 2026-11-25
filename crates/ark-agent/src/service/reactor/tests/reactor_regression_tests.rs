@@ -115,8 +115,7 @@ fn regression_reactor(
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
-        steer_image_resolver: None,
-        steer_outcome_recorder: None,
+        steer_attachment_resolver: None,
     });
     (reactor, writer)
 }
@@ -282,8 +281,7 @@ async fn a_cancelled_batch_finishes_every_started_call() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
-        steer_image_resolver: None,
-        steer_outcome_recorder: None,
+        steer_attachment_resolver: None,
     });
     let batch = vec![
         ToolCallRequest::new("c1", "read", serde_json::json!({ "path": "a" })),
@@ -386,8 +384,7 @@ async fn an_append_failure_still_writes_one_terminal_and_run_is_idempotent() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
-        steer_image_resolver: None,
-        steer_outcome_recorder: None,
+        steer_attachment_resolver: None,
     });
     reactor.push_user("hi");
 
@@ -464,8 +461,7 @@ async fn a_cancelled_round_keeps_its_steering_instead_of_false_journaling() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
-        steer_image_resolver: None,
-        steer_outcome_recorder: None,
+        steer_attachment_resolver: None,
     })
     .with_steering(Arc::clone(&queue));
 
@@ -536,8 +532,7 @@ async fn a_cancel_during_a_gate_pairs_every_declared_call() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
-        steer_image_resolver: None,
-        steer_outcome_recorder: None,
+        steer_attachment_resolver: None,
     });
     let calls = vec![
         ToolCallRequest::new("plain", "read", serde_json::json!({ "path": "a" })),
@@ -615,6 +610,208 @@ async fn duplicate_call_ids_each_get_their_own_gate_and_result() {
     assert!(HistoryHygiene::new().is_legal(reactor.history()));
 }
 
+/// A later `ToolCallStarted` append failure must close every start that already
+/// reached the journal, and must not execute any tool from the batch.
+#[tokio::test]
+async fn an_append_failure_closes_already_started_calls_without_executing() {
+    struct CountingRunner(Arc<AtomicUsize>);
+
+    #[async_trait::async_trait]
+    impl ToolRunner for CountingRunner {
+        async fn execute(&self, _call: &ToolCallRequest) -> Result<ToolOutput> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(ToolOutput::ok("executed"))
+        }
+    }
+
+    let events = crate::exec::TurnEvents::new(ThreadId::new(), TurnId::new());
+    let failing = Arc::new(FailAfterWriter {
+        inner: MemoryWriter::for_turn(events.clone()),
+        fail_at: 2,
+        count: AtomicUsize::new(0),
+    });
+    let executions = Arc::new(AtomicUsize::new(0));
+    let mut reactor = Reactor::new(ReactorConfig {
+        model: Arc::new(NoopModel),
+        tools: Arc::new(CountingRunner(Arc::clone(&executions))),
+        writer: Arc::clone(&failing) as Arc<dyn SessionWriter>,
+        gates: Arc::new(AllowAllGates),
+        sandbox: Arc::new(ReadOnlySandbox),
+        events,
+        cancel: CancelToken::new(),
+        seed: ModelSeed::default(),
+        machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+        chunk_buffer: 1,
+        steer_attachment_resolver: None,
+    });
+    let batch = vec![
+        ToolCallRequest::new("c1", "read", serde_json::json!({ "path": "a" })),
+        ToolCallRequest::new("c2", "read", serde_json::json!({ "path": "b" })),
+    ];
+
+    let result = reactor.run_batch(&batch).await;
+
+    assert!(result.is_err(), "the original append error must propagate");
+    assert_eq!(executions.load(Ordering::SeqCst), 0);
+    let recorded = failing.inner.recorded();
+    let started: Vec<_> = recorded
+        .iter()
+        .filter_map(|event| match event {
+            RuntimeEvent::ToolCallStarted { call_id, .. } => Some(call_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(started, ["c1"], "only the successful start is durable");
+    let finished: Vec<_> = recorded
+        .iter()
+        .filter_map(|event| match event {
+            RuntimeEvent::ToolCallFinished {
+                call_id, detail, ..
+            } => Some((call_id.as_str(), detail.as_deref())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        finished,
+        [(
+            "c1",
+            Some("tool event persistence failed before completion")
+        )],
+        "the durable start must not remain orphaned: {recorded:?}"
+    );
+}
+
+/// A failure while recording a synthetic refusal's optional storm event must
+/// not leave its already-durable start open.
+#[tokio::test]
+async fn a_synthetic_result_append_failure_closes_its_started_call() {
+    let events = crate::exec::TurnEvents::new(ThreadId::new(), TurnId::new());
+    let failing = Arc::new(FailAfterWriter {
+        inner: MemoryWriter::for_turn(events.clone()),
+        fail_at: 2,
+        count: AtomicUsize::new(0),
+    });
+    let mut reactor = Reactor::new(ReactorConfig {
+        model: Arc::new(NoopModel),
+        tools: Arc::new(MapToolRunner::new()),
+        writer: Arc::clone(&failing) as Arc<dyn SessionWriter>,
+        gates: Arc::new(AllowAllGates),
+        sandbox: Arc::new(ReadOnlySandbox),
+        events,
+        cancel: CancelToken::new(),
+        seed: ModelSeed::default(),
+        machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+        chunk_buffer: 1,
+        steer_attachment_resolver: None,
+    });
+    let call = ToolCallRequest::new("storm", "bash", serde_json::json!({ "cmd": "x" }));
+    let synthetic = SyntheticResult::new(&call, false, "suppressed").with_storm_count(3);
+    let mut executions = Vec::new();
+
+    let result = reactor.record_synthetic(&synthetic, &mut executions).await;
+
+    assert!(result.is_err(), "the original append error must propagate");
+    assert!(executions.is_empty(), "a failed record is not an execution");
+    let recorded = failing.inner.recorded();
+    assert_eq!(finished_call_ids(&recorded), ["storm"], "{recorded:?}");
+    let detail = recorded.iter().find_map(|event| match event {
+        RuntimeEvent::ToolCallFinished { detail, .. } => detail.as_deref(),
+        _ => None,
+    });
+    assert_eq!(
+        detail,
+        Some("tool event persistence failed before completion")
+    );
+}
+
+/// Cancellation convergence also persists a start before its finish; if that
+/// finish append fails, the durable start must still be compensated.
+#[tokio::test]
+async fn a_cancelled_call_append_failure_closes_its_started_event() {
+    let events = crate::exec::TurnEvents::new(ThreadId::new(), TurnId::new());
+    let failing = Arc::new(FailAfterWriter {
+        inner: MemoryWriter::for_turn(events.clone()),
+        fail_at: 2,
+        count: AtomicUsize::new(0),
+    });
+    let mut reactor = Reactor::new(ReactorConfig {
+        model: Arc::new(NoopModel),
+        tools: Arc::new(MapToolRunner::new()),
+        writer: Arc::clone(&failing) as Arc<dyn SessionWriter>,
+        gates: Arc::new(AllowAllGates),
+        sandbox: Arc::new(ReadOnlySandbox),
+        events,
+        cancel: CancelToken::new(),
+        seed: ModelSeed::default(),
+        machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+        chunk_buffer: 1,
+        steer_attachment_resolver: None,
+    });
+    let call = ToolCallRequest::new("pending", "read", serde_json::json!({ "path": "a" }));
+    reactor.record_assistant_turn("", std::slice::from_ref(&call));
+    reactor.pending_calls = vec![call];
+
+    let result = reactor.converge_pending_calls_on_cancel().await;
+
+    assert!(result.is_err(), "the original append error must propagate");
+    let recorded = failing.inner.recorded();
+    assert_eq!(finished_call_ids(&recorded), ["pending"], "{recorded:?}");
+    let detail = recorded.iter().find_map(|event| match event {
+        RuntimeEvent::ToolCallFinished { detail, .. } => detail.as_deref(),
+        _ => None,
+    });
+    assert_eq!(
+        detail,
+        Some("tool event persistence failed before completion")
+    );
+}
+
+/// A failure while appending one result must close that call and every other
+/// call whose start is already durable.
+#[tokio::test]
+async fn a_batch_result_append_failure_closes_all_durable_starts() {
+    let events = crate::exec::TurnEvents::new(ThreadId::new(), TurnId::new());
+    let failing = Arc::new(FailAfterWriter {
+        inner: MemoryWriter::for_turn(events.clone()),
+        fail_at: 3,
+        count: AtomicUsize::new(0),
+    });
+    let tools = Arc::new(MapToolRunner::new().with("read", ToolOutput::ok("body")));
+    let mut reactor = Reactor::new(ReactorConfig {
+        model: Arc::new(NoopModel),
+        tools,
+        writer: Arc::clone(&failing) as Arc<dyn SessionWriter>,
+        gates: Arc::new(AllowAllGates),
+        sandbox: Arc::new(ReadOnlySandbox),
+        events,
+        cancel: CancelToken::new(),
+        seed: ModelSeed::default(),
+        machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+        chunk_buffer: 1,
+        steer_attachment_resolver: None,
+    });
+    let batch = vec![
+        ToolCallRequest::new("c1", "read", serde_json::json!({ "path": "a" })),
+        ToolCallRequest::new("c2", "read", serde_json::json!({ "path": "b" })),
+    ];
+
+    let result = reactor.run_batch(&batch).await;
+
+    assert!(result.is_err(), "the original append error must propagate");
+    let recorded = failing.inner.recorded();
+    assert_eq!(finished_call_ids(&recorded), ["c1", "c2"], "{recorded:?}");
+    for event in recorded
+        .iter()
+        .filter(|event| matches!(event, RuntimeEvent::ToolCallFinished { .. }))
+    {
+        assert!(matches!(
+            event,
+            RuntimeEvent::ToolCallFinished { detail, .. }
+                if detail.as_deref() == Some("tool event persistence failed before completion")
+        ));
+    }
+}
+
 /// A turn seeded with attachments must land the delivery record on the opening
 /// `UserMessage` item, so history replay renders the same attachment chips the
 /// live stream did (the `turn_started` audit record alone is not observable
@@ -646,8 +843,7 @@ async fn the_opening_user_item_carries_the_attachment_outcomes() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
-        steer_image_resolver: None,
-        steer_outcome_recorder: None,
+        steer_attachment_resolver: None,
     });
     reactor.push_user_message(ark_ports::ModelMessage::user("look at this"));
 
@@ -718,8 +914,7 @@ async fn a_steering_item_does_not_inherit_attachment_outcomes() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
-        steer_image_resolver: None,
-        steer_outcome_recorder: None,
+        steer_attachment_resolver: None,
     })
     .with_steering(Arc::new({
         let queue = SteerQueue::new();

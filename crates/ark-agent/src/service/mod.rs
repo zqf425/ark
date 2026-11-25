@@ -8,5 +8,5 @@ pub mod step;
 
 pub use dispatch::run_calls;
 pub use machine::{MachineError, TurnMachine};
-pub use reactor::{ModelSeed, Reactor, ReactorConfig, SteerImageResolver, SteerOutcomeRecorder};
+pub use reactor::{ModelSeed, Reactor, ReactorConfig, SteerAttachmentResolver, SteerAttachments};
 pub use step::step;
