@@ -139,7 +139,7 @@
 
 .ark-md-code__lang {
   font-family: var(--ark-mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
   font-weight: 550;
   letter-spacing: 0.04em;
   text-transform: lowercase;
@@ -162,7 +162,7 @@
   background: none;
   border: none;
   padding: 0;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ark-scale));
   line-height: 1.65;
 }
 

@@ -24,7 +24,7 @@
 }
 
 .ark-msg--user .ark-msg__body {
-  font-size: 14px;
+  font-size: calc(14px * var(--ark-scale));
   font-weight: 500;
   line-height: 1.65;
 }

@@ -25,7 +25,7 @@
 
 .ark-statusbar__logo {
   color: var(--ark-text);
-  font-size: 16px;
+  font-size: calc(16px * var(--ark-scale));
   font-weight: 650;
   letter-spacing: -0.04em;
 }
@@ -47,7 +47,7 @@
 
 .ark-statusbar__label {
   color: var(--ark-text-faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
 }
 
 .ark-statusbar__label.is-warning {
@@ -59,7 +59,7 @@
   max-width: 26ch;
   overflow: hidden;
   color: var(--ark-error);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -76,7 +76,7 @@
   background: transparent;
   color: var(--ark-text-faint);
   cursor: pointer;
-  font-size: 16px;
+  font-size: calc(16px * var(--ark-scale));
   line-height: 1;
 }
 
@@ -110,7 +110,7 @@
   max-width: min(62vw, 720px);
   margin: 0;
   color: var(--ark-text);
-  font-size: 15px;
+  font-size: calc(15px * var(--ark-scale));
   font-weight: 620;
   letter-spacing: -0.015em;
   overflow: hidden;
@@ -121,7 +121,7 @@
 .ark-threadfocus p {
   margin: 1px 0 0;
   color: var(--ark-text-faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
 }
 
 /* Live state: the accent pill treatment from the titlebar. */

@@ -46,7 +46,7 @@ code,
 pre,
 kbd {
   font-family: var(--ark-mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
 }
 
 ::selection {

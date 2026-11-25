@@ -38,7 +38,7 @@
 }
 
 .ark-importdialog__head strong {
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--ark-scale));
 }
 
 .ark-importdialog__filters {
@@ -90,7 +90,7 @@
 
 .ark-importdialog__row-id {
   font-family: var(--ark-mono);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ark-scale));
   overflow-wrap: anywhere;
 }
 
@@ -131,7 +131,7 @@
   min-width: 140px;
   max-width: 320px;
   font-family: var(--ark-mono);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ark-scale));
 }
 
 .ark-importdialog__row .ark-provider-model__context {

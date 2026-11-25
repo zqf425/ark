@@ -26,7 +26,7 @@
   align-items: center;
   gap: 7px;
   min-height: 22px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
   color: var(--ark-text-faint);
 }
 
@@ -41,7 +41,7 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  font-size: 9px;
+  font-size: calc(9px * var(--ark-scale));
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.02em;
@@ -51,7 +51,7 @@
   background: var(--ark-bg-inset);
   border: 1px solid var(--ark-border-muted);
   color: var(--ark-text-dim);
-  font-size: 7.5px;
+  font-size: calc(7.5px * var(--ark-scale));
 }
 
 /* User bubble: right-aligned, asymmetric radius with the "direction" corner,
@@ -68,7 +68,7 @@
 }
 
 .ark-msg--user .ark-msg__body {
-  font-size: 15px;
+  font-size: calc(15px * var(--ark-scale));
   font-weight: 500;
   line-height: 1.65;
   color: var(--ark-text);
@@ -98,7 +98,7 @@
 }
 
 .ark-msg__attachments .ark-thumb--file {
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -162,14 +162,14 @@
 
 .ark-msg__time {
   font-family: var(--ark-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ark-scale));
 }
 
 /* Which model this message was sent with: a quiet mono chip beside the
    clock, exactly as loud as the timestamp it accompanies. */
 .ark-msg__model {
   font-family: var(--ark-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ark-scale));
   color: var(--ark-text-faint);
   border: 1px solid var(--ark-border-muted);
   border-radius: var(--ark-radius);
@@ -196,13 +196,13 @@
 .ark-msg__body--prose {
   white-space: normal;
   line-height: 1.66;
-  font-size: 15px;
+  font-size: calc(15px * var(--ark-scale));
 }
 
 .ark-msg__detail {
   margin: 0;
   color: var(--ark-text-faint);
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
 }
 
 /* Failed/aborted states: the identity glyph and status chip carry the signal,
@@ -246,7 +246,7 @@
   gap: 8px;
   min-height: 30px;
   border-bottom: 1px solid var(--ark-border-muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--ark-scale));
   font-weight: 600;
   color: var(--ark-text);
 }
@@ -284,7 +284,7 @@
 
 .ark-reply__time {
   font-family: var(--ark-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ark-scale));
   color: var(--ark-text-faint);
 }
 
@@ -293,7 +293,7 @@
    process-card header); quiet mono keeps it subordinate to the title. */
 .ark-reply__duration {
   font-family: var(--ark-mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
   font-weight: 400;
   color: var(--ark-text-dim);
 }
@@ -325,7 +325,7 @@
   white-space: normal;
   padding-top: 6px;
   line-height: 1.66;
-  font-size: 15px;
+  font-size: calc(15px * var(--ark-scale));
   word-break: break-word;
 }
 
@@ -342,7 +342,7 @@
 
 .ark-checkpoint__summary {
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ark-scale));
   display: flex;
   gap: 8px;
   align-items: center;
@@ -356,7 +356,7 @@
 .ark-checkpoint__summary::before {
   content: '▸';
   color: var(--ark-text-faint);
-  font-size: 10px;
+  font-size: calc(10px * var(--ark-scale));
   transition: transform 120ms ease;
 }
 
@@ -367,7 +367,7 @@
 .ark-checkpoint__meta {
   color: var(--ark-text-faint);
   font-family: var(--ark-mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
 }
 
 .ark-checkpoint__body {
@@ -375,7 +375,7 @@
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--ark-text-faint);
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
   line-height: 1.6;
   max-height: 320px;
   overflow: auto;
@@ -393,7 +393,7 @@
 
 .ark-reasoning__summary {
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ark-scale));
   display: flex;
   gap: 8px;
   align-items: center;
@@ -407,7 +407,7 @@
 .ark-reasoning__summary::before {
   content: '▸';
   color: var(--ark-text-faint);
-  font-size: 10px;
+  font-size: calc(10px * var(--ark-scale));
   transition: transform 120ms ease;
 }
 
@@ -418,7 +418,7 @@
 .ark-reasoning__meta {
   color: var(--ark-text-faint);
   font-family: var(--ark-mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--ark-scale));
   margin-left: auto;
   flex: none;
   white-space: nowrap;
@@ -429,7 +429,7 @@
 .ark-reasoning__label {
   flex: none;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
   font-weight: 600;
 }
 
@@ -442,7 +442,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--ark-text-faint);
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
 }
 
 /* Spark node on the timeline rail, same slot as a tool row's status node. */
@@ -498,7 +498,7 @@
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--ark-text-faint);
-  font-size: 13px;
+  font-size: calc(13px * var(--ark-scale));
   line-height: 1.6;
   max-height: 320px;
   overflow: auto;
@@ -585,7 +585,7 @@
   border: 1px dashed var(--ark-border-muted);
   border-radius: var(--ark-radius);
   background: var(--ark-card-soft);
-  font-size: 12px;
+  font-size: calc(12px * var(--ark-scale));
   transition: border-color 120ms ease;
 }
 
@@ -613,7 +613,7 @@
 
 .ark-answeredgate__chevron {
   flex: none;
-  font-size: 10px;
+  font-size: calc(10px * var(--ark-scale));
   color: var(--ark-text-faint);
   transition: transform 120ms ease;
 }
@@ -646,7 +646,7 @@
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ark-scale));
 }
 
 .ark-answeredgate__question {
