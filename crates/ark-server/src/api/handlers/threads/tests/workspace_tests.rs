@@ -281,10 +281,15 @@ impl ark_ports::WorkspaceService for FixedWorkspace {
 
     fn switch(
         &self,
-        _path: &str,
+        path: &str,
         _active_runs: usize,
     ) -> ark_common::Result<ark_contract::WorkspaceView> {
-        unreachable!("not used by this test")
+        self.validate(path)?;
+        *self
+            .active_root
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(path.to_string());
+        Ok(self.view())
     }
 
     fn diff(&self) -> ark_common::Result<ark_contract::WorkspaceDiff> {
@@ -383,6 +388,73 @@ async fn bulk_delete_removes_settled_threads_and_skips_running_ones() {
     assert_eq!(state.turns.latest_for(settled), None);
 }
 
+#[tokio::test]
+async fn bulk_delete_scan_does_not_block_unrelated_turn_registration() {
+    let dir = test_dir("bulk-delete-scan-gate");
+    let sessions =
+        Arc::new(FileSessionStore::open(StoreConfig::new(dir.path())).expect("session store"));
+    let settled = sessions.create_thread("settled").await.expect("thread");
+    sessions
+        .set_thread_runtime(
+            settled.thread_id,
+            ark_contract::ThreadRuntimeSettings {
+                workspace: Some("/w/alpha".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("workspace");
+    let unrelated = sessions.create_thread("unrelated").await.expect("thread");
+    let gated = crate::api::handlers::test_support::GatedStore::new(
+        sessions.clone() as Arc<dyn SessionStore>
+    );
+    gated.list.enable();
+    let state = AppState::new(
+        gated.clone(),
+        Arc::new(EmptyTools),
+        Arc::new(ConfigStore::new(RuntimeConfig::default())),
+        Arc::new(UsageRecorder::new()),
+        Arc::new(NoopRunner),
+        dir.path().to_path_buf(),
+        "test",
+    )
+    .with_base_services(BaseServices::new().with_workspace(Arc::new(FixedWorkspace::new(None))));
+    let entered = gated.list.entered.notified();
+    let delete_task = tokio::spawn(remove_by_workspace(
+        State(state.clone()),
+        Query(ThreadWorkspaceQuery {
+            workspace: Some("/w/alpha".into()),
+        }),
+    ));
+    tokio::time::timeout(std::time::Duration::from_secs(1), entered)
+        .await
+        .expect("bulk delete starts its scan");
+
+    let registration = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        crate::service::start_turn(
+            &state,
+            unrelated.thread_id,
+            "unrelated work".into(),
+            Vec::new(),
+        ),
+    )
+    .await;
+    gated.list.resume();
+    assert!(
+        registration.is_ok(),
+        "a bulk-delete scan must not hold the global turn-registration gate"
+    );
+    let response = tokio::time::timeout(std::time::Duration::from_secs(1), delete_task)
+        .await
+        .expect("bulk delete settles")
+        .expect("delete task")
+        .expect("bulk delete response")
+        .0;
+    assert_eq!(response.deleted, vec![settled.thread_id]);
+    state.begin_shutdown();
+}
+
 /// A thread whose newest durable turn-lifecycle event is still `turn_started`
 /// counts as running even after a restart dropped the registry — the same
 /// durable verdict the list's busy marker uses.
@@ -436,6 +508,135 @@ async fn bulk_delete_without_workspace_is_a_validation_error() {
     .await
     .expect_err("empty workspace is refused");
     assert_eq!(error.0.code, ark_common::ArkErrorCode::ValidationError);
+}
+
+#[tokio::test]
+async fn bulk_delete_rechecks_the_active_workspace_before_deleting_fallback_rows() {
+    let dir = test_dir("bulk-delete-fallback-race");
+    let sessions =
+        Arc::new(FileSessionStore::open(StoreConfig::new(dir.path())).expect("session store"));
+    let fallback = sessions.create_thread("fallback").await.expect("thread");
+    let gated = crate::api::handlers::test_support::GatedStore::new(
+        sessions.clone() as Arc<dyn SessionStore>
+    );
+    gated.list.enable();
+    let state = AppState::new(
+        gated.clone(),
+        Arc::new(EmptyTools),
+        Arc::new(ConfigStore::new(RuntimeConfig::default())),
+        Arc::new(UsageRecorder::new()),
+        Arc::new(NoopRunner),
+        dir.path().to_path_buf(),
+        "test",
+    )
+    .with_base_services(
+        BaseServices::new().with_workspace(Arc::new(FixedWorkspace::new(Some("/w/alpha")))),
+    );
+    let entered = gated.list.entered.notified();
+    let delete_state = state.clone();
+    let delete_task = tokio::spawn(async move {
+        crate::service::delete_settled_by_workspace(&delete_state, "/w/alpha").await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(1), entered)
+        .await
+        .expect("bulk delete pauses after capturing the active root");
+
+    state
+        .base
+        .workspace
+        .as_ref()
+        .expect("workspace service")
+        .switch("/w/beta", 0)
+        .expect("switch workspace");
+    gated.list.resume();
+    gated.list.disable();
+    let response = tokio::time::timeout(std::time::Duration::from_secs(1), delete_task)
+        .await
+        .expect("bulk delete settles")
+        .expect("delete task")
+        .expect("bulk delete response");
+
+    assert!(response.deleted.is_empty());
+    assert_eq!(response.skipped.len(), 1);
+    assert_eq!(response.skipped[0].code, ark_common::ArkErrorCode::Conflict);
+    assert!(
+        state.store.get_thread(fallback.thread_id).await.is_ok(),
+        "a row that moved to another active workspace must survive the stale sweep"
+    );
+}
+
+/// PATCH must join delete's workspace gate between effective-metadata
+/// revalidation and the physical delete; otherwise a moved row is still swept.
+#[tokio::test]
+async fn bulk_delete_serializes_runtime_patch_with_its_delete_commit() {
+    let dir = test_dir("bulk-delete-patch-race");
+    let sessions =
+        Arc::new(FileSessionStore::open(StoreConfig::new(dir.path())).expect("session store"));
+    let thread = sessions.create_thread("settled").await.expect("thread");
+    let gated = crate::api::handlers::test_support::GatedStore::new(
+        sessions.clone() as Arc<dyn SessionStore>
+    );
+    let state = AppState::new(
+        gated.clone(),
+        Arc::new(EmptyTools),
+        Arc::new(ConfigStore::new(RuntimeConfig::default())),
+        Arc::new(UsageRecorder::new()),
+        Arc::new(NoopRunner),
+        dir.path().to_path_buf(),
+        "test",
+    )
+    .with_base_services(
+        BaseServices::new()
+            .with_workspace(Arc::new(FixedWorkspace::new(Some("/w/alpha"))))
+            .with_providers(Arc::new(Providers)),
+    );
+    gated.delete.enable();
+    let entered = gated.delete.entered.notified();
+    let delete_state = state.clone();
+    let delete_task = tokio::spawn(async move {
+        crate::service::delete_settled_by_workspace(&delete_state, "/w/alpha").await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(1), entered)
+        .await
+        .expect("delete reaches its gated commit");
+
+    let patch_state = state.clone();
+    let mut patch_task = tokio::spawn(async move {
+        update(
+            State(patch_state),
+            Path(thread.thread_id.to_string()),
+            Json(UpdateThreadRequest {
+                runtime: Some(ark_contract::ThreadRuntimeSettings {
+                    workspace: Some("/w/beta".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        )
+        .await
+    });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(100), &mut patch_task)
+            .await
+            .is_err(),
+        "PATCH must wait for the delete commit gate"
+    );
+    gated.delete.resume();
+    let response = delete_task
+        .await
+        .expect("delete task")
+        .expect("bulk delete response");
+    let _ = patch_task
+        .await
+        .expect("patch task")
+        .expect_err("PATCH observes the committed deletion");
+
+    assert_eq!(response.deleted, vec![thread.thread_id]);
+    assert!(response.skipped.is_empty());
+    assert!(matches!(
+        state.store.get_thread(thread.thread_id).await,
+        Err(error) if error.code == ark_common::ArkErrorCode::NotFound
+    ));
 }
 
 /// The rail groups a thread without an override under the runtime's active

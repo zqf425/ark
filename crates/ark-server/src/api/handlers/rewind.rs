@@ -17,22 +17,37 @@ pub async fn rewind(
     Json(request): Json<RewindRequest>,
 ) -> Result<Json<RewindResponse>, ApiError> {
     let thread_id = parse_thread(&id)?;
-    let _lifecycle_guard = state.workspace_gate.lock().await;
-    if state.turns.active_for(thread_id).is_some() {
-        return Err(ApiError::new(
-            ArkErrorCode::Conflict,
-            "cannot rewind a thread with a running turn",
-        ));
-    }
-    match target(&state, thread_id, request).await? {
-        Target::New { seq, turn_id } => Ok(Json(
-            state.store.rewind_thread(thread_id, seq, turn_id).await?,
-        )),
-        Target::Existing { seq, last_seq } => Ok(Json(RewindResponse {
-            last_seq,
-            rewind_from_seq: seq,
-            already_rewound: true,
-        })),
+    let mut observed_epoch = state.turns.latest_for(thread_id);
+    let mut selected_target = target(&state, thread_id, &request).await?;
+    loop {
+        let _lifecycle_guard = state.workspace_gate.lock().await;
+        if state.turns.active_for(thread_id).is_some() {
+            return Err(ApiError::new(
+                ArkErrorCode::Conflict,
+                "cannot rewind a thread with a running turn",
+            ));
+        }
+        if state.turns.latest_for(thread_id) != observed_epoch {
+            drop(_lifecycle_guard);
+            observed_epoch = state.turns.latest_for(thread_id);
+            selected_target = target(&state, thread_id, &request).await?;
+            continue;
+        }
+        if state.store.highest_seq(thread_id).await? != selected_target.expected_seq() {
+            drop(_lifecycle_guard);
+            selected_target = target(&state, thread_id, &request).await?;
+            continue;
+        }
+        return match selected_target {
+            Target::New { seq, turn_id, .. } => Ok(Json(
+                state.store.rewind_thread(thread_id, seq, turn_id).await?,
+            )),
+            Target::Existing { seq, last_seq, .. } => Ok(Json(RewindResponse {
+                last_seq,
+                rewind_from_seq: seq,
+                already_rewound: true,
+            })),
+        };
     }
 }
 
@@ -40,6 +55,7 @@ enum Target {
     New {
         seq: u64,
         turn_id: Option<ark_common::TurnId>,
+        expected_seq: u64,
     },
     Existing {
         seq: u64,
@@ -47,10 +63,19 @@ enum Target {
     },
 }
 
+impl Target {
+    fn expected_seq(&self) -> u64 {
+        match self {
+            Self::New { expected_seq, .. } => *expected_seq,
+            Self::Existing { last_seq, .. } => *last_seq,
+        }
+    }
+}
+
 async fn target(
     state: &AppState,
     thread_id: ark_common::ThreadId,
-    request: RewindRequest,
+    request: &RewindRequest,
 ) -> Result<Target, ApiError> {
     if request.turn_id.is_some() == request.seq.is_some() {
         return Err(ApiError::new(
@@ -60,58 +85,85 @@ async fn target(
     }
     let events = state.store.replay_events(thread_id, 0).await?;
     if let Some(turn_id) = request.turn_id {
-        if let Some(seq) = events.iter().find_map(|event| match event {
-            RuntimeEvent::TurnStarted {
-                seq,
-                turn_id: found,
-                ..
-            } if *found == turn_id => Some(*seq),
-            _ => None,
-        }) {
-            return Ok(Target::New {
-                seq,
-                turn_id: Some(turn_id),
-            });
-        }
-        if let Some(seq) = events.iter().find_map(|event| match event {
-            RuntimeEvent::ThreadRewound {
-                rewind_from_seq,
-                target_turn_id: Some(found),
-                ..
-            } if *found == turn_id => Some(*rewind_from_seq),
-            _ => None,
-        }) {
-            return Ok(Target::Existing {
-                seq,
-                last_seq: state.store.highest_seq(thread_id).await?,
-            });
-        }
-        if let Some(response) = state
-            .store
-            .rewind_record(thread_id, None, Some(turn_id))
-            .await?
-        {
-            return Ok(Target::Existing {
-                seq: response.rewind_from_seq,
-                last_seq: response.last_seq,
-            });
-        }
-        return Err(ApiError::new(
-            ArkErrorCode::NotFound,
-            "rewind target turn does not exist",
-        ));
+        return target_for_turn(state, thread_id, &events, turn_id).await;
     }
-    let Some(seq) = request.seq else {
-        return Err(ApiError::new(
-            ArkErrorCode::ValidationError,
-            "missing rewind target",
-        ));
-    };
+    let seq = request
+        .seq
+        .ok_or_else(|| ApiError::new(ArkErrorCode::ValidationError, "missing rewind target"))?;
+    target_for_seq(state, thread_id, &events, seq).await
+}
+
+async fn target_for_turn(
+    state: &AppState,
+    thread_id: ark_common::ThreadId,
+    events: &[RuntimeEvent],
+    turn_id: ark_common::TurnId,
+) -> Result<Target, ApiError> {
+    let expected_seq = events.last().map_or(0, |event| event.seq());
+    if let Some(seq) = events.iter().find_map(|event| match event {
+        RuntimeEvent::TurnStarted {
+            seq,
+            turn_id: found,
+            ..
+        } if *found == turn_id => Some(*seq),
+        _ => None,
+    }) {
+        return Ok(Target::New {
+            seq,
+            turn_id: Some(turn_id),
+            expected_seq,
+        });
+    }
+    if let Some(seq) = events.iter().find_map(|event| match event {
+        RuntimeEvent::ThreadRewound {
+            rewind_from_seq,
+            target_turn_id: Some(found),
+            ..
+        } if *found == turn_id => Some(*rewind_from_seq),
+        _ => None,
+    }) {
+        return Ok(Target::Existing {
+            seq,
+            last_seq: state.store.highest_seq(thread_id).await?,
+        });
+    }
+    if let Some(response) = state
+        .store
+        .rewind_record(thread_id, None, Some(turn_id))
+        .await?
+    {
+        return Ok(Target::Existing {
+            seq: response.rewind_from_seq,
+            last_seq: response.last_seq,
+        });
+    }
+    Err(ApiError::new(
+        ArkErrorCode::NotFound,
+        "rewind target turn does not exist",
+    ))
+}
+
+async fn target_for_seq(
+    state: &AppState,
+    thread_id: ark_common::ThreadId,
+    events: &[RuntimeEvent],
+    seq: u64,
+) -> Result<Target, ApiError> {
+    let expected_seq = events.last().map_or(0, |event| event.seq());
     if events.iter().any(|event| event.seq() == seq) {
-        return Ok(Target::New { seq, turn_id: None });
+        return Ok(Target::New {
+            seq,
+            turn_id: None,
+            expected_seq,
+        });
     }
-    if events.iter().any(|event| matches!(event, RuntimeEvent::ThreadRewound { rewind_from_seq, .. } if *rewind_from_seq == seq)) {
-        return Ok(Target::Existing { seq, last_seq: state.store.highest_seq(thread_id).await? });
+    if events.iter().any(|event| {
+        matches!(event, RuntimeEvent::ThreadRewound { rewind_from_seq, .. } if *rewind_from_seq == seq)
+    }) {
+        return Ok(Target::Existing {
+            seq,
+            last_seq: state.store.highest_seq(thread_id).await?,
+        });
     }
     if let Some(response) = state
         .store
@@ -356,6 +408,62 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&body).unwrap()["result"],
             "rejected"
         );
+    }
+
+    #[tokio::test]
+    async fn rewind_history_scan_does_not_block_turn_registration() {
+        let dir = TempDir::new();
+        let sessions = Arc::new(
+            FileSessionStore::open(
+                StoreConfig::new(dir.path()).with_limits(StoreLimits::for_tests()),
+            )
+            .expect("open test store"),
+        );
+        let (thread, discarded_turn, _) = thread_with_two_turns(&sessions).await;
+        let gated = crate::api::handlers::test_support::GatedStore::new(
+            sessions.clone() as Arc<dyn SessionStore>
+        );
+        gated.replay.enable();
+        let state = AppState::new(
+            gated.clone(),
+            Arc::new(EmptyTools),
+            Arc::new(ConfigStore::new(RuntimeConfig::default())),
+            Arc::new(UsageRecorder::new()),
+            Arc::new(PendingRunner),
+            dir.path().to_path_buf(),
+            "test",
+        );
+        let entered = gated.replay.entered.notified();
+        let rewind_task = tokio::spawn(rewind(
+            State(state.clone()),
+            Path(thread.to_string()),
+            Json(ark_contract::RewindRequest {
+                turn_id: Some(discarded_turn),
+                seq: None,
+            }),
+        ));
+        tokio::time::timeout(std::time::Duration::from_secs(1), entered)
+            .await
+            .expect("rewind starts its history scan");
+
+        let registration = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            crate::service::start_turn(&state, thread, "new work".into(), Vec::new()),
+        )
+        .await;
+        gated.replay.resume();
+        assert!(
+            registration.is_ok(),
+            "a history scan must not hold the global turn-registration gate"
+        );
+
+        let response = tokio::time::timeout(std::time::Duration::from_secs(1), rewind_task)
+            .await
+            .expect("rewind settles")
+            .expect("rewind task")
+            .expect_err("the newer turn must invalidate the scanned rewind");
+        assert_eq!(response.0.code, ArkErrorCode::Conflict);
+        state.begin_shutdown();
     }
 
     #[tokio::test]

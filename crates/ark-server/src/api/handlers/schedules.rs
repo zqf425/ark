@@ -64,9 +64,10 @@ pub async fn update(
     Json(request): Json<UpdateScheduleRequest>,
 ) -> Result<Json<ScheduledTask>, ApiError> {
     let service = state.schedule_service()?;
-    let current = service.store().get(&id)?;
-    let next = apply_update(&current, request, Local::now())?;
-    let stored = service.store().replace(next)?;
+    let stored = service.store().update(&id, &mut |current| {
+        *current = apply_update(current, request.clone(), Local::now())?;
+        Ok(())
+    })?;
     Ok(Json(stored))
 }
 

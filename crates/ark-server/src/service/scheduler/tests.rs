@@ -286,6 +286,59 @@ async fn a_tick_runs_the_task_and_writes_the_terminal_record_back() {
 }
 
 #[tokio::test]
+async fn a_due_tick_during_a_run_does_not_replace_its_running_marker() {
+    let gate = Arc::new(Notify::new());
+    let harness = Harness::new(true, false, Some(Arc::clone(&gate)));
+    let seeded = harness.seed(due_task(60));
+    harness
+        .service
+        .run_now(&harness.state, &seeded.id)
+        .await
+        .expect("start run");
+    harness
+        .service
+        .store()
+        .update(&seeded.id, &mut |current| {
+            current.next_run_at = (Local::now() - chrono::Duration::seconds(1)).to_rfc3339();
+            Ok(())
+        })
+        .expect("make the running task due again");
+
+    assert_eq!(harness.service.tick(&harness.state).await, 0);
+    let during = harness.stored(&seeded.id);
+    gate.notify_one();
+    for _ in 0..200 {
+        if harness
+            .stored(&seeded.id)
+            .last_run
+            .as_ref()
+            .map(|run| run.status)
+            == Some(RunStatus::Completed)
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    assert_eq!(
+        during.last_run.as_ref().map(|run| run.status),
+        Some(RunStatus::Running),
+        "a skipped trigger cannot steal the active run's ownership marker"
+    );
+    let stored = harness.stored(&seeded.id);
+    assert_eq!(
+        stored.last_run.as_ref().map(|run| run.status),
+        Some(RunStatus::Completed),
+        "the active run must still be able to publish its terminal state"
+    );
+    assert_eq!(
+        stored.history.len(),
+        2,
+        "the skip and completion are both outcomes"
+    );
+}
+
+#[tokio::test]
 async fn a_failed_run_is_recorded_as_failed_not_completed() {
     let harness = Harness::new(true, true, None);
     let seeded = harness.seed(due_task(0));
@@ -384,6 +437,48 @@ async fn run_now_rejects_a_task_whose_run_is_still_in_flight() {
         !harness.service.is_running(&seeded.id),
         "the slot is released"
     );
+}
+
+#[tokio::test]
+async fn a_finishing_run_preserves_edits_made_while_it_was_running() {
+    let gate = Arc::new(Notify::new());
+    let harness = Harness::new(true, false, Some(Arc::clone(&gate)));
+    let seeded = harness.seed(due_task(60));
+    harness
+        .service
+        .run_now(&harness.state, &seeded.id)
+        .await
+        .expect("start run");
+
+    let updated = crate::api::handlers::schedules::update(
+        axum::extract::State(harness.state.clone()),
+        axum::extract::Path(seeded.id.clone()),
+        axum::Json(ark_contract::UpdateScheduleRequest {
+            title: Some("edited during run".to_string()),
+            ..ark_contract::UpdateScheduleRequest::default()
+        }),
+    )
+    .await
+    .expect("edit running task")
+    .0;
+    assert_eq!(updated.title, "edited during run");
+
+    gate.notify_one();
+    for _ in 0..200 {
+        if harness
+            .stored(&seeded.id)
+            .last_run
+            .as_ref()
+            .map(|run| run.status)
+            == Some(RunStatus::Completed)
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let stored = harness.stored(&seeded.id);
+    assert_eq!(stored.title, "edited during run");
+    assert_eq!(stored.history.len(), 1);
 }
 
 #[tokio::test]

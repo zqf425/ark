@@ -86,6 +86,8 @@ dependencies = [
  "serde_json",
  "tracing",
  "tracing-subscriber",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -417,6 +419,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

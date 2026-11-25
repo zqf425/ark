@@ -29,8 +29,10 @@ ark 当前没有任何在 agent 动作前后挂接用户命令的机制。本需
    经同一组合器 `run_around` 调用,禁止第二条实现。
 3. **执行方式**:每条规则经平台 shell(`cmd /C` / `/bin/sh -c`)在**工作区根**执行,
    stdin 注入 JSON payload `{phase, tool, arguments, thread_id, turn_id}`;环境继承 arkd
-   进程(hook 是可信配置,不套用工具的脱敏 env);timeout 默认 10s、上限 60s,超时杀进程。
-   顺序执行,一条失败不中断其余规则。
+   进程(hook 是可信配置,不套用工具的脱敏 env);timeout 默认 10s、上限 60s,超时终止进程树。
+   Unix 使用独立 process group;Windows 使用私有 Job Object,直接进程暂停启动、归属 job 后才恢复,
+   因而直接父进程先退出、后代仍持有 stdout/stderr 管道时也不会泄漏。正常输出完成后只 disarm,
+   不终止既有后台后代。顺序执行,一条失败不中断其余规则。
 4. **语义**:
    - `pre_tool_use`:exit 0 = 放行;exit 2 = **拦截**,stderr(≤4 KiB)作为工具结果回给
      模型(detail 标注 `blocked_by_hook`);其他退出码、崩溃、超时 = **放行**并记 warn
@@ -45,7 +47,8 @@ ark 当前没有任何在 agent 动作前后挂接用户命令的机制。本需
 ## 验收
 
 - 纯函数与执行器单测(真实 shell):放行、exit 2 拦截含 stderr、其他退出码放行、超时放行、
-  post 输出回注、`tools` 过滤、payload 形状、多条规则顺序执行。
+  post 输出回注、`tools` 过滤、payload 形状、多条规则顺序执行;Windows 回归强制直接父进程先退出,
+  验证 timeout 后持有继承输出管道的后代不会继续运行。
 - 配置:PATCH `hooks` 热生效(下一工具调用可见);`hooks` 分类为 Hot,不触发 restart 拒绝;
   TS 生成检查通过。
 - 装配:父与子两条工具执行路径都过 hook 组合器(单测覆盖)。
@@ -62,4 +65,5 @@ ark 当前没有任何在 agent 动作前后挂接用户命令的机制。本需
 - 诊断键:`hooks` 进 `CONFIG_KEYS`,缺席**有意不告警**(纯新增可选段,存量配置静默);
   段内未知键照常告警。
 - 单测:`apps/arkd/src/hooks.rs`(真实 shell:放行/拦截/其他退出码/超时/post 回注/过滤/
-  截断)、`ark-config` PATCH 语义、适配器装配。真实回合端到端由发布验收承接。
+  截断;Windows Job Object 覆盖父进程先退出且后代持有输出管道的超时清理)、`ark-config` PATCH 语义、
+  适配器装配。真实回合端到端由发布验收承接。

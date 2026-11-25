@@ -28,3 +28,6 @@ pub mod subagents;
 pub mod threads;
 pub mod turns;
 pub mod workbench;
+
+#[cfg(test)]
+pub(crate) mod test_support;

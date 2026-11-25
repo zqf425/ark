@@ -465,7 +465,7 @@ mod tests {
         let config = Arc::new(ConfigStore::new(RuntimeConfig {
             hooks: ark_contract::HookSettings {
                 pre_tool_use: vec![ark_contract::HookRule {
-                    command: format!("echo shell >> {}", log.display()),
+                    command: format!("echo shell>>{}", log.display()),
                     tools: Vec::new(),
                     timeout_ms: 0,
                 }],
@@ -501,7 +501,8 @@ mod tests {
         let _ = runner.execute(&call).await;
         let recorded = std::fs::read_to_string(&log).unwrap();
         assert_eq!(
-            recorded, "plugin\nshell\n",
+            recorded.lines().collect::<Vec<_>>(),
+            ["plugin", "shell"],
             "decide → shell hook → dispatch"
         );
         let _ = std::fs::remove_file(&log);
