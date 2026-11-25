@@ -15,3 +15,11 @@
 
 # web 子目录的临时构建产物（历史上被 5b17fdf 误入库）
 web/.tmp/
+
+# 本机运行/工具产物，不属于任何 workspace 的源码
+node_modules/
+package-lock.json
+.playwright-mcp/
+.workbuddy/
+.workbuddy-ai/
+nul
