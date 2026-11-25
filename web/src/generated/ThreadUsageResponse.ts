@@ -32,6 +32,11 @@ samples: number,
  */
 turn_usage: Array<TurnUsage>, 
 /**
+ * Newest positive `prompt_tokens` reading. A completed call whose provider
+ * omitted usage still counts as a sample but cannot replace this reading.
+ */
+last_valid_prompt_tokens?: number, 
+/**
  * See the struct doc: wall-clock turn activity minus user-gate waits,
  * plus harness recovery/continuation gaps.
  */

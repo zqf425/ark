@@ -51,8 +51,27 @@ describe('foldUsage cache counters', () => {
   })
 })
 
+describe('foldUsage context reading', () => {
+  it('keeps the last valid prompt reading across empty provider samples', () => {
+    const empty = sample({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
+    const first = foldUsage(null, empty)
+    expect(first.lastPromptTokens).toBeNull()
+
+    const valid = foldUsage(first, sample({ prompt_tokens: 139_259, completion_tokens: 44, total_tokens: 139_303 }))
+    expect(valid.lastPromptTokens).toBe(139_259)
+
+    const afterEmpty = foldUsage(valid, empty)
+    expect(afterEmpty.samples).toBe(3)
+    expect(afterEmpty.promptTokens).toBe(139_259)
+    expect(afterEmpty.lastPromptTokens).toBe(139_259)
+
+    const next = foldUsage(afterEmpty, sample({ prompt_tokens: 139_333, completion_tokens: 13_583, total_tokens: 152_916 }))
+    expect(next.lastPromptTokens).toBe(139_333)
+  })
+})
+
 describe('seedUsage cache counters', () => {
-  it('seeds sums from the lifetime response and leaves the speed unset', () => {
+  it('seeds sums and the latest valid context reading from the lifetime response', () => {
     const response: ThreadUsageResponse = {
       thread_id: THREAD_ID,
       turns: 1,
@@ -62,12 +81,42 @@ describe('seedUsage cache counters', () => {
       completion_tokens: 4,
       total_tokens: 14,
       cache_hit_tokens: 6,
-      cache_miss_tokens: 4
+      cache_miss_tokens: 4,
+      last_valid_prompt_tokens: 10
     }
     const seeded = seedUsage(emptyItemsState(), response)
     expect(seeded.usage?.cacheHitTokens).toBe(6)
     expect(seeded.usage?.cacheMissTokens).toBe(4)
+    expect(seeded.usage?.lastPromptTokens).toBe(10)
     expect(seeded.usage?.lastRoundTokensPerSec).toBeNull()
+  })
+
+  it('backfills a missing context reading without overwriting live counters', () => {
+    const live = foldUsage(null, sample({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }))
+    const seeded = seedUsage({ ...emptyItemsState(), usage: live }, {
+      thread_id: THREAD_ID,
+      turns: 1,
+      samples: 2,
+      turn_usage: [],
+      prompt_tokens: 139_259,
+      completion_tokens: 44,
+      total_tokens: 139_303,
+      last_valid_prompt_tokens: 139_259
+    })
+    expect(seeded.usage?.samples).toBe(1)
+    expect(seeded.usage?.promptTokens).toBe(0)
+    expect(seeded.usage?.lastPromptTokens).toBe(139_259)
+
+    const legacy = seedUsage(emptyItemsState(), {
+      thread_id: THREAD_ID,
+      turns: 1,
+      samples: 1,
+      turn_usage: [],
+      prompt_tokens: 139_259,
+      completion_tokens: 44,
+      total_tokens: 139_303
+    })
+    expect(legacy.usage?.lastPromptTokens).toBeNull()
   })
 })
 

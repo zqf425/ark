@@ -56,6 +56,10 @@ runtime 每轮结算的 usage 事件写入（`ark-llm` 解析的 provider payloa
 `merge` 对该字段使用严格聚合：仅当全部实际样本都有值时求和，任一样本未计时则聚合保持 None
 （"未知"与 "0" 不混淆）；空的默认累加器不算一个未计时样本。
 
+`ThreadUsageResponse.last_valid_prompt_tokens`（serde default，省略空值）是日志中最新的正
+`prompt_tokens` 读数，用于恢复刷新后的上下文占用。provider 未返回用量时产生的全零样本仍计入
+`samples` 和累计 token，但不能覆盖这个读数；从未出现有效读数时字段缺省，前端保持未知而不是显示 0。
+
 `TurnUsage.active_ms` / `ThreadUsageResponse.active_ms`（serde default，省略空值）是**活跃时长**
 读数：回合（或整线程）从 `turn_started` 到终态的挂钟时间，扣除停在审批/用户输入门禁上的窗口，
 加计 harness 重试/续跑的回合间退避；由 `ark-server` 的 `ActiveClock` 投影从回合生命周期与门禁

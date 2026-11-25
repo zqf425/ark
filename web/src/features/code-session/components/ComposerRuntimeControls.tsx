@@ -503,11 +503,13 @@ export function ContextRing({ threadId }: { threadId: string | null }): JSX.Elem
     }
   }
 
-  const statusKey = ratio != null && thresholdRatio != null && ratio >= 1
-    ? 'canvas.context.overLimit'
-    : ratio != null && thresholdRatio != null && ratio >= thresholdRatio
-      ? 'canvas.context.nearLimit'
-      : 'canvas.context.hasRoom'
+  const statusKey = ratio == null
+    ? 'canvas.context.unknownUsage'
+    : ratio >= 1 && thresholdRatio != null
+      ? 'canvas.context.overLimit'
+      : thresholdRatio != null && ratio >= thresholdRatio
+        ? 'canvas.context.nearLimit'
+        : 'canvas.context.hasRoom'
 
   return (
     <div className="ark-composer__pick ark-composer__pick--end" ref={rootRef}>
@@ -541,9 +543,11 @@ export function ContextRing({ threadId }: { threadId: string | null }): JSX.Elem
           <div className="ark-context-popover__head">
             <strong>{t('canvas.context.title')}</strong>
             <span>
-              {limit && used != null
-                ? t('canvas.usage.context', { used: formatTokens(used), limit: formatTokens(limit), percent: percent ?? 0 })
-                : t('canvas.context.noLimit')}
+              {limit == null
+                ? t('canvas.context.noLimit')
+                : used == null
+                  ? t('canvas.context.unknownUsage')
+                  : t('canvas.usage.context', { used: formatTokens(used), limit: formatTokens(limit), percent: percent ?? 0 })}
             </span>
           </div>
           <div className="ark-context-popover__bar" role="img" aria-label={t('canvas.context.title')}>

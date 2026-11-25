@@ -597,6 +597,11 @@ pub struct ThreadUsageResponse {
     pub turn_usage: Vec<TurnUsage>,
     #[serde(flatten)]
     pub usage: Usage,
+    /// Newest positive `prompt_tokens` reading. A completed call whose provider
+    /// omitted usage still counts as a sample but cannot replace this reading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub last_valid_prompt_tokens: Option<u64>,
     /// See the struct doc: wall-clock turn activity minus user-gate waits,
     /// plus harness recovery/continuation gaps.
     #[serde(default, skip_serializing_if = "Option::is_none")]

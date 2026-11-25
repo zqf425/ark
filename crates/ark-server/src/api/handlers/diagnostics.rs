@@ -129,9 +129,9 @@ fn parse_turn(raw: &str) -> Result<TurnId, ApiError> {
 fn aggregate_thread_usage(thread: ThreadId, events: &[RuntimeEvent]) -> ThreadUsageResponse {
     let mut samples = 0u64;
     let mut usage = ark_common::Usage::default();
-    // First-seen order over *all* turns the log shows, not only usage-producing
-    // ones: a turn that failed before its first model round has no usage event
-    // but real active time, and its row must exist for the clock to cover it.
+    let mut last_valid_prompt_tokens = None;
+    // First-seen order over all turns, including those that failed before their
+    // first model round but still have active time for the clock to cover.
     let mut order: Vec<TurnId> = Vec::new();
     let mut seen: std::collections::HashSet<TurnId> = std::collections::HashSet::new();
     let mut per_turn: HashMap<TurnId, TurnUsage> = HashMap::new();
@@ -150,6 +150,9 @@ fn aggregate_thread_usage(thread: ThreadId, events: &[RuntimeEvent]) -> ThreadUs
         } = event
         {
             samples += 1;
+            if sample.prompt_tokens > 0 {
+                last_valid_prompt_tokens = Some(sample.prompt_tokens);
+            }
             usage.merge(sample);
             match per_turn.get_mut(turn_id) {
                 Some(row) => {
@@ -192,19 +195,20 @@ fn aggregate_thread_usage(thread: ThreadId, events: &[RuntimeEvent]) -> ThreadUs
             row
         })
         .collect();
-    let gate_suspensions: u64 = turn_usage
-        .iter()
-        .filter_map(|turn| turn.gate_suspensions)
-        .sum();
     ThreadUsageResponse {
         thread_id: thread,
         turns: span.turns.len() as u64,
         samples,
-        turn_usage,
         usage,
+        last_valid_prompt_tokens,
         active_ms: Some(span.total_ms),
-        gate_suspensions: Some(gate_suspensions),
+        gate_suspensions: Some(total_gate_suspensions(&turn_usage)),
+        turn_usage,
     }
+}
+
+fn total_gate_suspensions(turns: &[TurnUsage]) -> u64 {
+    turns.iter().filter_map(|turn| turn.gate_suspensions).sum()
 }
 
 /// Per-turn active-time span derived from the lifecycle and gate events.
@@ -306,15 +310,9 @@ impl ActiveClock {
                 self.cursor = Some(self.cursor.map_or(*timestamp, |held| held.max(*timestamp)));
                 self.open_gate = false;
             }
-            RuntimeEvent::TurnCompleted {
-                turn_id, timestamp, ..
-            }
-            | RuntimeEvent::TurnFailed {
-                turn_id, timestamp, ..
-            }
-            | RuntimeEvent::TurnAborted {
-                turn_id, timestamp, ..
-            } => {
+            RuntimeEvent::TurnCompleted { timestamp, .. }
+            | RuntimeEvent::TurnFailed { timestamp, .. }
+            | RuntimeEvent::TurnAborted { timestamp, .. } => {
                 if !self.open_gate {
                     self.bank(*timestamp);
                 }
@@ -996,6 +994,41 @@ mod tests {
     }
 
     #[test]
+    fn thread_usage_keeps_the_latest_valid_prompt_reading() {
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let usage_event = |seq, usage| RuntimeEvent::Usage {
+            seq,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: at(seq as i64),
+            usage,
+        };
+        let mut events = vec![
+            started(1, thread, turn, 0, 0),
+            usage_event(2, Usage::default()),
+        ];
+        assert_eq!(
+            aggregate_thread_usage(thread, &events).last_valid_prompt_tokens,
+            None
+        );
+
+        events.push(usage_event(3, Usage::new(120, 30)));
+        assert_eq!(
+            aggregate_thread_usage(thread, &events).last_valid_prompt_tokens,
+            Some(120)
+        );
+
+        events.push(usage_event(4, Usage::default()));
+        events.push(usage_event(5, Usage::new(150, 40)));
+        events.push(usage_event(6, Usage::default()));
+        let response = aggregate_thread_usage(thread, &events);
+        assert_eq!(response.samples, 5);
+        assert_eq!(response.usage.prompt_tokens, 270);
+        assert_eq!(response.last_valid_prompt_tokens, Some(150));
+    }
+
+    #[test]
     fn per_turn_usage_keeps_every_turn_regardless_of_page_bounds() {
         // The regression behind the "122 steps in 11 seconds" report: the
         // per-turn clock used to be re-derived from the *paginated*
@@ -1243,6 +1276,19 @@ mod tests {
             )
             .await
             .unwrap();
+        store
+            .append_event(
+                thread_id,
+                RuntimeEvent::Usage {
+                    seq: 0,
+                    thread_id,
+                    turn_id: turn,
+                    timestamp: Utc::now(),
+                    usage: Usage::default(),
+                },
+            )
+            .await
+            .unwrap();
 
         let response = app
             .oneshot(
@@ -1261,9 +1307,10 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["thread_id"], thread_id.to_string());
         assert_eq!(json["turns"], 1);
-        assert_eq!(json["samples"], 1);
+        assert_eq!(json["samples"], 2);
         assert_eq!(json["prompt_tokens"], 120);
         assert_eq!(json["cache_hit_tokens"], 90);
+        assert_eq!(json["last_valid_prompt_tokens"], 120);
     }
 
     #[tokio::test]
