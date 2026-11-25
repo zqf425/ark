@@ -441,7 +441,8 @@
 .ark-projectgroup__actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 8px;
+  margin-left: 6px;
   flex: none;
   opacity: 0;
   transition: opacity 120ms ease;
@@ -462,18 +463,20 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 30px;
+  height: 30px;
   padding: 0;
-  border: 0;
+  border: 1px solid var(--ark-border);
   border-radius: var(--ark-radius-sm);
-  background: none;
-  color: var(--ark-text-faint);
+  background: var(--ark-bg-canvas);
+  color: var(--ark-text-dim);
   cursor: pointer;
+  box-shadow: var(--ark-shadow-ctl);
 }
 
-.ark-projectgroup__action:hover {
+.ark-projectgroup__action:hover:not(:disabled) {
   background: var(--ark-sidebar-row-hover);
+  border-color: var(--ark-sidebar-row-ring);
   color: var(--ark-text);
 }
 
@@ -482,7 +485,13 @@
   outline-offset: 1px;
 }
 
-.ark-projectgroup__action.is-danger:hover {
+.ark-projectgroup__action.is-danger {
+  color: var(--ark-error);
+}
+
+.ark-projectgroup__action.is-danger:hover:not(:disabled) {
+  border-color: var(--ark-error);
+  background: var(--ark-error-wash);
   color: var(--ark-error);
 }
 

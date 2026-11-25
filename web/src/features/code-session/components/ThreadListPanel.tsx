@@ -275,9 +275,9 @@ export function ThreadListPanel(): JSX.Element {
                           title={t('thread.list.groupCreate', { title: group.label })}
                           aria-label={t('thread.list.groupCreate', { title: group.label })}
                           disabled={busy}
-                          onClick={() => void handleProjectCreate(group.path)}
+                          onClick={(event) => { event.stopPropagation(); void handleProjectCreate(group.path) }}
                         >
-                          <Icon name="plus" size={13} />
+                          <Icon name="plus" size={15} />
                         </button>
                         <button
                           type="button"
@@ -285,9 +285,9 @@ export function ThreadListPanel(): JSX.Element {
                           title={t('thread.list.groupDelete', { title: group.label })}
                           aria-label={t('thread.list.groupDelete', { title: group.label })}
                           disabled={busy || group.threads.length === 0}
-                          onClick={() => void handleProjectDelete(group)}
+                          onClick={(event) => { event.stopPropagation(); void handleProjectDelete(group) }}
                         >
-                          <Icon name="archive" size={13} />
+                          <Icon name="trash" size={15} />
                         </button>
                       </span>
                     ) : null}
