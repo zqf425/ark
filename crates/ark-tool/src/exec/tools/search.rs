@@ -7,7 +7,7 @@
 //! error instead of being silently matched literally — session 936001de lost
 //! 686 s to `0\.8|80%|…` returning a false "no matches".
 
-use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput};
+use ark_ports::{Tool, ToolArgs, ToolConcurrency, ToolContext, ToolOutput};
 use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -38,6 +38,9 @@ impl Tool for GrepTool {
 
     fn schema(&self) -> &'static serde_json::Value {
         schema::grep()
+    }
+    fn concurrency(&self) -> ToolConcurrency {
+        ToolConcurrency::ReadOnly
     }
 
     async fn execute(&self, ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {

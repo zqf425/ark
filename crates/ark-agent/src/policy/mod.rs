@@ -9,5 +9,7 @@ pub mod parallel;
 pub mod storm;
 
 pub use budget::{BudgetVerdict, TurnBudget};
-pub use parallel::{AccessKind, ParallelPolicy, ToolSignature};
+pub use parallel::{
+    concurrency_table, AccessKind, ConcurrencyTable, ParallelPolicy, ToolSignature,
+};
 pub use storm::{suppression_message, StormBreaker, StormReport, SuppressedCall};

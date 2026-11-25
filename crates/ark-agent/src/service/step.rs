@@ -156,7 +156,11 @@ fn dispatch(
         );
     }
     let runnable = storm.allowed;
-    let batches = ParallelPolicy::default()
+    let policy = match &input.concurrency {
+        Some(table) => ParallelPolicy::with_table(table.clone()),
+        None => ParallelPolicy::default(),
+    };
+    let batches = policy
         .with_parallel_cap(input.limits.max_parallel_tool_calls)
         .plan(&runnable);
     Action::Dispatch(DispatchPlan {

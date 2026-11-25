@@ -52,8 +52,8 @@ pub use exec::{
     GateBroker, GateFuture, MemoryWriter, SessionWriter, ToolRunner, TurnEvents, UserInputRequest,
 };
 pub use policy::{
-    AccessKind, BudgetVerdict, ParallelPolicy, StormBreaker, StormReport, SuppressedCall,
-    ToolSignature, TurnBudget,
+    concurrency_table, AccessKind, BudgetVerdict, ConcurrencyTable, ParallelPolicy, StormBreaker,
+    StormReport, SuppressedCall, ToolSignature, TurnBudget,
 };
 pub use service::{
     run_calls, step, MachineError, ModelSeed, Reactor, ReactorConfig, SteerAttachmentResolver,

@@ -12,7 +12,9 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use ark_common::Result;
-use ark_ports::{HttpCapability, OutboundRequest, Tool, ToolArgs, ToolContext, ToolOutput};
+use ark_ports::{
+    HttpCapability, OutboundRequest, Tool, ToolArgs, ToolConcurrency, ToolContext, ToolOutput,
+};
 use url::Url;
 
 use crate::domain::{args, schema};
@@ -45,6 +47,11 @@ impl Tool for WebFetchTool {
 
     fn schema(&self) -> &'static serde_json::Value {
         schema::web_fetch()
+    }
+    /// A fetch mutates nothing in the workspace; the egress bus rate-limits
+    /// and traces each request independently.
+    fn concurrency(&self) -> ToolConcurrency {
+        ToolConcurrency::ReadOnly
     }
 
     async fn execute(&self, _ctx: &ToolContext, raw: ToolArgs) -> Result<ToolOutput> {

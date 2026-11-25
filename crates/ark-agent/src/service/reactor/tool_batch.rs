@@ -128,8 +128,6 @@ impl Reactor {
         }
         let calls = batch.to_vec();
         let tools = Arc::clone(&self.tools);
-        // Use concurrency-limited execution with default limit of 8
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
         let results = tokio::select! {
             _ = self.cancel.cancelled() => {
                 // Every started call must get its paired `finished` row before
@@ -162,7 +160,7 @@ impl Reactor {
                 }
                 return Ok((Vec::new(), true));
             }
-            results = crate::service::dispatch::run_calls_with_limit(tools, calls, semaphore) => results,
+            results = crate::service::dispatch::run_calls(tools, calls) => results,
         };
         let mut executions = Vec::new();
         for execution in results {

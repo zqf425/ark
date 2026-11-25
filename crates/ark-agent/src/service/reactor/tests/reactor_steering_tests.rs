@@ -186,6 +186,7 @@ async fn a_steer_is_restored_when_its_commit_fails() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        concurrency: None,
         steer_attachment_resolver: Some(attachment_resolver()),
     })
     .with_steering(Arc::clone(&queue));

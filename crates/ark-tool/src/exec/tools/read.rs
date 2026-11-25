@@ -5,7 +5,7 @@
 //! still capped by the shared truncation limits, and the cap is announced in
 //! the content instead of silently shortening the result.
 
-use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput};
+use ark_ports::{Tool, ToolArgs, ToolConcurrency, ToolContext, ToolOutput};
 
 use crate::domain::{args, schema};
 use crate::exec::common::{as_output, read_text, with_detail, workspace_path};
@@ -96,6 +96,9 @@ impl Tool for ReadTool {
 
     fn schema(&self) -> &'static serde_json::Value {
         schema::read()
+    }
+    fn concurrency(&self) -> ToolConcurrency {
+        ToolConcurrency::ReadOnly
     }
 
     async fn execute(&self, ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {

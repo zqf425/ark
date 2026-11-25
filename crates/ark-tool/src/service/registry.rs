@@ -5,7 +5,7 @@
 //! stale, so the cache layer never has to guess whether the catalogue changed.
 
 use ark_common::{ArkError, Result};
-use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput, ToolRegistryPort};
+use ark_ports::{Tool, ToolArgs, ToolConcurrency, ToolContext, ToolOutput, ToolRegistryPort};
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
@@ -17,6 +17,9 @@ struct Entry {
     schema: serde_json::Value,
     fingerprint: u64,
     group: Option<String>,
+    /// How this tool may share a round, copied once at registration so the
+    /// agent can snapshot the whole catalogue without touching the lock again.
+    concurrency: ToolConcurrency,
 }
 
 #[derive(Default)]
@@ -182,6 +185,23 @@ impl ToolRegistry {
         crate::domain::schema::fingerprint_text(&joined.join("\u{1f}"))
     }
 
+    /// Concurrency class of every registered tool.
+    ///
+    /// One lock acquisition per turn: the agent snapshots this into its batch
+    /// policy so a registration that lands mid-turn cannot change how an
+    /// already-planned round is batched.
+    pub fn concurrency_table(&self) -> std::collections::BTreeMap<String, ToolConcurrency> {
+        self.read()
+            .map(|state| {
+                state
+                    .entries
+                    .iter()
+                    .map(|(name, entry)| (name.clone(), entry.concurrency))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Read-only snapshot for the agent, which only needs names and schemas.
     pub fn port(self: &Arc<Self>) -> Arc<dyn ToolRegistryPort> {
         Arc::clone(self) as Arc<dyn ToolRegistryPort>
@@ -238,17 +258,26 @@ impl ToolRegistryPort for ToolRegistry {
     fn version(&self) -> u64 {
         self.read().map(|state| state.version).unwrap_or_default()
     }
+
+    fn concurrency(&self, name: &str) -> ToolConcurrency {
+        self.read()
+            .ok()
+            .and_then(|state| state.entries.get(name).map(|entry| entry.concurrency))
+            .unwrap_or(ToolConcurrency::Exclusive)
+    }
 }
 
 impl Entry {
     fn new(tool: Arc<dyn Tool>, group: Option<String>) -> Self {
         let schema = tool.schema().clone();
         let fingerprint = fingerprint(&schema);
+        let concurrency = tool.concurrency();
         Self {
             tool,
             schema,
             fingerprint,
             group,
+            concurrency,
         }
     }
 }

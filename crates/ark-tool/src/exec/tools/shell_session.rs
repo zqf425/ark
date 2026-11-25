@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use ark_ports::{SandboxDecision, Tool, ToolArgs, ToolContext, ToolOutput};
+use ark_ports::{SandboxDecision, Tool, ToolArgs, ToolConcurrency, ToolContext, ToolOutput};
 
 use super::bash::{default_shell_env, BashTool};
 use crate::domain::args::{self, ShellTaskId};
@@ -467,6 +467,11 @@ impl Tool for BashSessionTool {
     fn schema(&self) -> &'static serde_json::Value {
         crate::domain::schema::bash_session()
     }
+    /// A session command owns a process; the shared manager keeps each task's
+    /// buffer separate, so two commands do not corrupt each other's output.
+    fn concurrency(&self) -> ToolConcurrency {
+        ToolConcurrency::Isolated
+    }
 
     async fn execute(&self, ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
         Ok(as_output(self.run(ctx, raw).await))
@@ -571,6 +576,10 @@ impl Tool for BashOutputTool {
     fn schema(&self) -> &'static serde_json::Value {
         crate::domain::schema::bash_output()
     }
+    /// Drains a ring buffer behind the manager's own lock.
+    fn concurrency(&self) -> ToolConcurrency {
+        ToolConcurrency::ReadOnly
+    }
 
     async fn execute(&self, _ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
         let parsed: crate::domain::args::BashOutputArgs = args::parse("bash_output", &raw)?;
@@ -629,6 +638,10 @@ impl Tool for BashKillTool {
 
     fn schema(&self) -> &'static serde_json::Value {
         crate::domain::schema::bash_kill()
+    }
+    /// Signalling one task is idempotent and does not touch other tasks.
+    fn concurrency(&self) -> ToolConcurrency {
+        ToolConcurrency::Isolated
     }
 
     async fn execute(&self, _ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {

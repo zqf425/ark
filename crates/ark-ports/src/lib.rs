@@ -57,5 +57,6 @@ pub use subagent::{
     SubagentRequest, SubagentRunner,
 };
 pub use tool::{
-    SandboxDecision, SandboxPolicy, Tool, ToolArgs, ToolContext, ToolOutput, ToolRegistryPort,
+    SandboxDecision, SandboxPolicy, Tool, ToolArgs, ToolConcurrency, ToolContext, ToolOutput,
+    ToolRegistryPort,
 };

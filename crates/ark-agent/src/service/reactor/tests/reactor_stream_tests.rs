@@ -94,6 +94,7 @@ fn reactor(writer: Arc<MemoryWriter>) -> Reactor {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        concurrency: None,
         steer_attachment_resolver: None,
     })
 }
@@ -264,6 +265,7 @@ async fn a_steer_landing_in_the_final_round_is_not_dropped() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        concurrency: None,
         steer_attachment_resolver: None,
     })
     .with_steering(queue);
@@ -346,6 +348,7 @@ async fn an_exhausted_budget_does_not_rescue_the_steering() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(limits),
         chunk_buffer: 1,
+        concurrency: None,
         steer_attachment_resolver: None,
     })
     .with_steering(queue);
@@ -384,6 +387,7 @@ async fn persists_tool_start_before_executing_a_batch() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        concurrency: None,
         steer_attachment_resolver: None,
     });
 

@@ -30,9 +30,9 @@ use ark_tool::{RegistryToolRunner, ToolRegistry};
 
 use crate::model;
 use crate::wiring::turn_common::{
-    build_reactor, chunk_buffer_for_turn, limits_for_turn, push_project_instructions,
-    resolve_workspace, seed_prefix, skill_tail, HookToolRunner, HookedToolRunner, ReactorSpec,
-    CHILD_ROLE_LINE,
+    build_reactor, chunk_buffer_for_turn, concurrency_table, limits_for_turn,
+    push_project_instructions, resolve_workspace, seed_prefix, skill_tail, HookToolRunner,
+    HookedToolRunner, ReactorSpec, CHILD_ROLE_LINE,
 };
 use crate::workspace::WorkspaceRoots;
 
@@ -349,6 +349,7 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             },
             machine: TurnMachine::new(limits_for_turn(&snapshot, provider.as_ref())),
             chunk_buffer: chunk_buffer_for_turn(&snapshot),
+            concurrency: concurrency_table(&self.child_tools),
             steering: steer,
             // Child runs keep text-only steers: children have no attachment
             // association surface and their seed carries no image resolver.
