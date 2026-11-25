@@ -31,7 +31,7 @@ export const SETTINGS_GENERAL_MESSAGES = {
     'Default model switched to {providerId} / {model}'
   ],
   'settings.general.defaultModel.switchFailed': ['设置默认模型失败', 'Failed to set the default model'],
-  'settings.general.workspace.label': ['默认工作空间', 'Default workspace'],
+  'settings.general.workspace.label': ['工作区', 'Workspace'],
   'settings.general.workspace.hint': [
     '新会话默认从这里开始；未设置时使用 ~/.arkd/workspace。点击「更改…」选择新目录后立即生效。',
     'New threads start here; when unset, ~/.arkd/workspace is used. Click "Change…" to pick a new folder; the change applies immediately.'

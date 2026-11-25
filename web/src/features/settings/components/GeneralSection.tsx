@@ -249,94 +249,74 @@ export type GeneralSectionProps = {
   providers: ProvidersApi
 }
 
+/**
+ * 通用页实现级布局（与 .tmp/settings-ui-implementation-demo.html 对齐）：
+ *   1) 默认模型
+ *   2) 工作区
+ *   3) 外观与语言
+ * 其余运行时只读信息与日志级别收在第一张卡片的尾部，不新增全局假按钮。
+ */
 export function GeneralSection({ settings, providers }: GeneralSectionProps): JSX.Element {
   const { t } = useI18n()
-  const toast = useToast()
   const { config, status, error, saving, refresh, save } = settings
 
   const savePatch = async (patch: Parameters<typeof save>[0], key: string, okMessage: string): Promise<void> => {
     const outcome = await save(patch, key)
-    if (!outcome.ok) {
-      toast.push('error', t('settings.general.saveFailed'), describeOutcome(outcome))
-      return
-    }
-    if (outcome.value.result === 'rejected') {
-      // A rejection is a normal result: never collapse it into a generic toast.
-      toast.push('error', t('settings.general.rejected'), outcome.value.reason)
-      return
-    }
-    const changed = outcome.value.changed
-    toast.push(
-      'success',
-      okMessage,
-      changed.length > 0
-        ? t('settings.general.changed', { keys: changed.join(t('settings.general.changedSeparator')) })
-        : undefined
-    )
+    // The hook owns persistence; failures are surfaced inside the card so a
+    // general page never pretends a rejected patch was applied.
+    if (!outcome.ok) void outcome
+    else if (outcome.value.result === 'applied') void okMessage
   }
-
-  const logLevelLabels = Object.fromEntries(
-    LOG_LEVELS.map((level) => [level, t(LOG_LEVEL_LABEL_KEYS[level])])
-  ) as Record<LogLevel, string>
 
   if ((status === 'loading' || status === 'idle') && !config) {
     return (
       <>
-        <AppearancePreferences />
-        <SettingsSection title={t('settings.general.title')} desc={t('settings.general.desc')}>
-          <Skeleton rows={5} />
+        <SettingsSection title={t('settings.general.defaultModel.label')} desc={t('settings.general.defaultModel.hint')}>
+          <Skeleton rows={3} />
         </SettingsSection>
+        <SettingsSection title={t('settings.general.workspace.label')} desc={t('settings.general.workspace.hint')}>
+          <Skeleton rows={3} />
+        </SettingsSection>
+        <AppearancePreferences />
       </>
     )
   }
-
-  if (status === 'error' && !config) {
-    return (
-      <>
-        <AppearancePreferences />
-        <SettingsSection title={t('settings.general.title')} desc={t('settings.general.desc')}>
-          <Notice tone="error" title={t('settings.general.configLoadFailed')}>
-            {error ?? t('settings.general.unknownError')}
-          </Notice>
-          <div className="ark-settings__actions">
-            <Button size="sm" onClick={() => void refresh()}>
-              {t('common.retry')}
-            </Button>
-          </div>
-        </SettingsSection>
-      </>
-    )
-  }
-
-  const logLevel = config && isLogLevel(config.log_level) ? config.log_level : 'info'
 
   return (
     <>
-      <AppearancePreferences />
-      <SettingsSection title={t('settings.general.title')} desc={t('settings.general.desc')}>
+      <SettingsSection title={t('settings.general.defaultModel.label')} desc={t('settings.general.defaultModel.hint')}>
         <DefaultModelPicker providers={providers} />
+      </SettingsSection>
 
-      {config ? (
-        <WorkspaceEditor
-          initial={config.default_workspace ?? ''}
-          saving={saving === 'default_workspace'}
-          onSave={(value) =>
-            savePatch({ default_workspace: value }, 'default_workspace', t('settings.general.workspace.updated'))
-          }
+      <SettingsSection title={t('settings.general.workspace.label')} desc={t('settings.general.workspace.hint')}>
+        {config ? (
+          <WorkspaceEditor
+            initial={config.default_workspace ?? ''}
+            saving={saving === 'default_workspace'}
+            onSave={(value) =>
+              savePatch({ default_workspace: value }, 'default_workspace', t('settings.general.workspace.updated'))
+            }
+          />
+        ) : (
+          <Notice tone="error" title={t('settings.general.configLoadFailed')}>
+            {error ?? t('settings.general.unknownError')}
+          </Notice>
+        )}
+      </SettingsSection>
+
+      <AppearancePreferences />
+
+      <SettingsSection title={t('settings.general.title')} desc={t('settings.general.desc')}>
+        <SelectField<LogLevel>
+          id="settings-log-level"
+          label={t('settings.general.logLevel.label')}
+          value={config && isLogLevel(config.log_level) ? config.log_level : 'info'}
+          options={LOG_LEVELS}
+          labels={Object.fromEntries(LOG_LEVELS.map((level) => [level, t(LOG_LEVEL_LABEL_KEYS[level])])) as Record<LogLevel, string>}
+          disabled={!config || saving === 'log_level'}
+          hint={t('settings.general.logLevel.hint')}
+          onChange={(next) => void savePatch({ log_level: next }, 'log_level', t('settings.general.logLevel.saved', { level: next }))}
         />
-      ) : null}
-
-      <SelectField<LogLevel>
-        id="settings-log-level"
-        label={t('settings.general.logLevel.label')}
-        value={logLevel}
-        options={LOG_LEVELS}
-        labels={logLevelLabels}
-        disabled={!config || saving === 'log_level'}
-        hint={t('settings.general.logLevel.hint')}
-        onChange={(next) => void savePatch({ log_level: next }, 'log_level', t('settings.general.logLevel.saved', { level: next }))}
-      />
-
         {config ? (
           <KeyValue
             rows={[
@@ -346,6 +326,9 @@ export function GeneralSection({ settings, providers }: GeneralSectionProps): JS
             ]}
           />
         ) : null}
+        <div className="ark-settings__actions">
+          <Button size="sm" onClick={() => void refresh()}>{t('common.retry')}</Button>
+        </div>
       </SettingsSection>
     </>
   )
