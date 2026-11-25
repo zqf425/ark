@@ -157,8 +157,13 @@ describe('ProvidersSection default-provider semantics', () => {
       />
     )
 
-    const row = harness.host.querySelectorAll('.ark-card')[0]!
-    const makeDefault = [...row.querySelectorAll('button')].find((b) => b.textContent === '设为默认')
+    // Set-as-default lives behind the detail header's "more actions" menu.
+    const more = harness.host.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')
+    expect(more).toBeTruthy()
+    await act(async () => {
+      more!.click()
+    })
+    const makeDefault = [...harness.host.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent === '设为默认') as HTMLButtonElement | undefined
     expect(makeDefault).toBeTruthy()
     await act(async () => {
       makeDefault!.click()
@@ -166,5 +171,26 @@ describe('ProvidersSection default-provider semantics', () => {
     await settle()
 
     expect(setDefaultMock).toHaveBeenCalledWith('alpha', undefined)
+  })
+
+  it('deleting goes through a confirmation dialog before calling the api', async () => {
+    deleteMock.mockResolvedValue(listResponse([]))
+    harness = await mountWithProviders(<ProvidersSection providers={providersApi()} />)
+    await act(async () => {
+      harness!.host.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click()
+    })
+    const del = [...harness.host.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent?.startsWith('删除')) as HTMLButtonElement
+    await act(async () => {
+      del.click()
+    })
+    expect(deleteMock).not.toHaveBeenCalled()
+    const dialog = harness.host.querySelector('[role="dialog"]')
+    expect(dialog?.textContent).toContain('默认供应商')
+    const confirm = [...dialog!.querySelectorAll('button')].find((b) => b.textContent === '删除')!
+    await act(async () => {
+      confirm.click()
+    })
+    await settle()
+    expect(deleteMock).toHaveBeenCalledWith('alpha')
   })
 })
