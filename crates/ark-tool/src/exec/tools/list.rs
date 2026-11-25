@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 
 use crate::domain::{args, glob, schema};
 use crate::exec::common::{
-    as_output, is_ignored_dir_name, with_detail, workspace_path, BlockingScan, ScanDeadline,
+    as_output, entry_inside_root, is_ignored_dir_name, with_detail, workspace_path, BlockingScan,
+    ScanDeadline,
 };
 use crate::policy::{cap_all, DEFAULT_LIMITS};
 
@@ -107,12 +108,20 @@ async fn run_find(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOu
     let root = workspace_path(ctx, parsed.path.as_deref())?;
     let limit = parsed.limit.unwrap_or(DEFAULT_FIND_LIMIT).max(1);
     let name_only = glob::is_name_pattern(&pattern);
+    // The containment anchor is resolved once per scan; re-canonicalizing the
+    // root at every recursion level was one redundant syscall chain per
+    // directory.
+    let real_root = match std::fs::canonicalize(&root) {
+        Ok(real_root) => real_root,
+        Err(_) => root.clone(),
+    };
     let scan = BlockingScan::start();
     let mut found = scan
         .run(move |deadline| {
             let mut found = Vec::new();
             let mut visited = HashSet::new();
             walk(
+                &real_root,
                 &root,
                 &root,
                 &pattern,
@@ -132,13 +141,14 @@ async fn run_find(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOu
     Ok(ToolOutput::ok(body))
 }
 
-/// Pre-existing lint gate blocker on master: the recursive walker legitimately
-/// carries nine parameters; regrouping them would touch every recursive call
-/// site for zero behavior change, so the established `state.rs` precedent
-/// (`#[allow(clippy::too_many_arguments)]`) applies.
+/// Pre-existing lint gate precedent (`state.rs`): the recursive walker
+/// carries ten parameters (containment anchor + display root joined the
+/// signature); regrouping would touch every recursive call site for zero
+/// behavior change, so `#[allow(clippy::too_many_arguments)]` applies.
 #[allow(clippy::too_many_arguments)]
 fn walk(
-    root: &Path,
+    real_root: &Path,
+    display_root: &Path,
     dir: &Path,
     pattern: &str,
     name_only: bool,
@@ -153,15 +163,13 @@ fn walk(
     }
     // Canonicalize once per directory and never revisit it: a symlink cycle
     // (or a bind mount) otherwise re-expands the same tree at every level.
+    // The root's canonical image was resolved once by the caller.
     let Ok(real_dir) = std::fs::canonicalize(dir) else {
         return;
     };
     if !visited.insert(real_dir) {
         return;
     }
-    let Ok(real_root) = std::fs::canonicalize(root) else {
-        return;
-    };
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -184,16 +192,13 @@ fn walk(
             continue;
         }
         let path = entry.path();
-        // Every traversed entry must still resolve inside the workspace root,
-        // not just the initial argument (design ark-tool.md:15).
-        let Ok(real_path) = std::fs::canonicalize(&path) else {
-            continue;
-        };
-        if !real_path.starts_with(&real_root) {
+        // Containment re-check — see `entry_inside_root` (design ark-tool.md:15).
+        if !entry_inside_root(kind.is_dir(), &path, real_root) {
             continue;
         }
         let relative = path
-            .strip_prefix(root)
+            .strip_prefix(display_root)
+            .or_else(|_| path.strip_prefix(real_root))
             .map(|rest| rest.to_string_lossy().replace('\\', "/"))
             .unwrap_or_default();
         let candidate = if name_only {
@@ -206,7 +211,8 @@ fn walk(
         }
         if kind.is_dir() {
             walk(
-                root,
+                real_root,
+                display_root,
                 &path,
                 pattern,
                 name_only,
@@ -223,6 +229,7 @@ fn walk(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exec::common::IGNORED_DIR_NAMES;
     use crate::exec::testsupport::{ctx, temp_workspace};
 
     #[tokio::test]
@@ -276,7 +283,9 @@ mod tests {
     #[tokio::test]
     async fn find_skips_build_and_cache_directories() {
         let dir = temp_workspace("find-ignore-dirs");
-        for name in ["target", "node_modules", ".tmp", ".worktrees"] {
+        // Iterate the real constant: a name added later lands here or the
+        // list change ships without coverage.
+        for name in IGNORED_DIR_NAMES {
             let sub = dir.join(name);
             std::fs::create_dir_all(&sub).unwrap();
             std::fs::write(sub.join("generated.rs"), "x").unwrap();
