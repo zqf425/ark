@@ -138,12 +138,96 @@ impl Drop for Harness {
 }
 
 #[tokio::test]
+async fn blocked_policy_reports_the_held_back_completion() {
+    // A disabled switch must still leave the notification durable AND leave a
+    // trace: the earlier silent return made a switched-off deployment look
+    // exactly like a supervisor that never received the wakeup.
+    let harness = Harness::new(false);
+    let thread = harness.thread_with_completion().await;
+    let block = auto_continue_block(&harness.state).expect("policy is off");
+    assert_eq!(block, AutoContinueBlock::SwitchOff);
+    assert_eq!(block.as_str(), "auto_continue_disabled");
+
+    let held = report_blocked_completions(&harness.state, block, Some(thread)).await;
+    assert_eq!(
+        held,
+        BlockedCompletions {
+            threads: 1,
+            notifications: 1
+        }
+    );
+    // Reporting reads, it does not consume: an explicit user turn still gets it.
+    assert_eq!(
+        harness
+            .store
+            .replay_child_completion_events(thread)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn blocked_policy_reports_nothing_when_the_inbox_is_empty() {
+    let harness = Harness::new(false);
+    let thread = harness.store.create_thread("idle").await.unwrap().thread_id;
+    let block = auto_continue_block(&harness.state).expect("policy is off");
+    let held = report_blocked_completions(&harness.state, block, Some(thread)).await;
+    assert_eq!(held, BlockedCompletions::default());
+}
+
+#[tokio::test]
+async fn blocked_scan_skips_archived_threads() {
+    // An archived parent cannot be continued by design, so counting it as
+    // "waiting" would send the operator looking for a bug that is not there.
+    let harness = Harness::new(false);
+    let thread = harness.thread_with_completion().await;
+    harness.store.set_archived(thread, true).await.unwrap();
+    let block = auto_continue_block(&harness.state).expect("policy is off");
+    assert_eq!(
+        report_blocked_completions(&harness.state, block, Some(thread)).await,
+        BlockedCompletions::default()
+    );
+}
+
+#[tokio::test]
+async fn block_reasons_follow_switch_precedence() {
+    let harness = Harness::new(true);
+    assert_eq!(auto_continue_block(&harness.state), None);
+    assert!(policy_allows_auto_continue(&harness.state));
+
+    let mut settings = harness.state.config.snapshot().subagents;
+    settings.enabled = false;
+    harness.state.config.apply(ark_contract::ConfigPatch {
+        subagents: Some(settings),
+        ..Default::default()
+    });
+    assert_eq!(
+        auto_continue_block(&harness.state),
+        Some(AutoContinueBlock::SubagentsOff)
+    );
+}
+
+#[tokio::test]
 async fn default_policy_never_starts_a_model_turn() {
     let harness = Harness::new(false);
     let thread = harness.thread_with_completion().await;
     schedule_with_delay(harness.state.clone(), thread, Duration::from_millis(5)).await;
     harness.settle().await;
     assert_eq!(harness.runner.0.load(Ordering::SeqCst), 0);
+    // The wakeup is refused *and* leaves the one durable notification alone, so
+    // a later explicit user turn still consumes it.
+    assert!(!harness.state.continuations.contains(thread));
+    assert_eq!(
+        harness
+            .store
+            .replay_child_completion_events(thread)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[tokio::test]

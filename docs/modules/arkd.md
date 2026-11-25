@@ -77,7 +77,9 @@ source 注入 reactor。父回合成功后再追加 completion acknowledgement�
 
 组合根在 delegation hydrate 前订阅 completion wakeup，随后把父 thread id 转发给 `ark-server` 的
 per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启动和 `subagents.auto_continue` 热开启
-同样扫描未确认 inbox。自动 continuation 复用 `AgentTurnRunner`，以独立 system-source 作业类型启动，
+同样扫描未确认 inbox。启动扫描在策略关闭时本次不投递，但若确有未确认通知，会以
+`auto_continue_disabled`（或 `subagents_disabled` / `automatic_followups_disabled`）为原因记一条汇总
+`INFO`，避免"开关关着"和"唤醒丢失"在日志上无法区分（见 [ark-server](ark-server.md)）。自动 continuation 复用 `AgentTurnRunner`，以独立 system-source 作业类型启动，
 不调用 `push_user`，因此不会伪造用户消息；其 provider、workspace、预算、sandbox 和 gates 与普通父回合
 走同一路径。
 

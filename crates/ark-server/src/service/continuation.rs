@@ -160,8 +160,9 @@ pub async fn sync_auto_continue_policy(state: AppState) {
 }
 
 async fn sync_auto_continue_policy_inner(state: AppState, before_suppress: impl Fn(ThreadId)) {
-    if !policy_allows_auto_continue(&state) {
+    if let Some(block) = auto_continue_block(&state) {
         state.continuations.cancel_all();
+        report_blocked_completions(&state, block, None).await;
         return;
     }
     let threads = match state.store.list_threads().await {
@@ -187,7 +188,7 @@ async fn sync_auto_continue_policy_inner(state: AppState, before_suppress: impl 
                 // the startup/lag-recovery wakeup.
                 schedule_auto_continuation(state.clone(), thread_id).await;
             }
-            PendingCompletionState::Pending => {
+            PendingCompletionState::Pending(_) => {
                 if interrupted_user_lifecycle(&state, thread_id).await
                     || auto_continue_paused_by_model_failures(&state, thread_id).await
                 {
@@ -247,9 +248,159 @@ async fn interrupted_user_lifecycle(state: &AppState, thread_id: ThreadId) -> bo
     }) == Some(true)
 }
 
-fn policy_allows_auto_continue(state: &AppState) -> bool {
+/// Why the live policy refuses automatic continuations.
+///
+/// Kept as a value instead of a bare `bool` so a blocked wakeup can say *which*
+/// switch did it. A completion that stays in the inbox because of configuration
+/// is the documented behaviour, but silence made it indistinguishable from a
+/// supervisor bug: the durable event just sat unacknowledged with no trace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AutoContinueBlock {
+    /// A one-shot host (`arkd run`) refuses system-origin follow-up turns.
+    NoFollowUpTurns,
+    /// Sub-agents are switched off entirely.
+    SubagentsOff,
+    /// The user switched automatic continuation off.
+    SwitchOff,
+}
+
+impl AutoContinueBlock {
+    fn as_str(self) -> &'static str {
+        match self {
+            AutoContinueBlock::NoFollowUpTurns => "automatic_followups_disabled",
+            AutoContinueBlock::SubagentsOff => "subagents_disabled",
+            AutoContinueBlock::SwitchOff => "auto_continue_disabled",
+        }
+    }
+}
+
+/// The first switch that blocks automatic continuation, or `None` when allowed.
+fn auto_continue_block(state: &AppState) -> Option<AutoContinueBlock> {
     let settings = state.config.snapshot().subagents;
-    state.automatic_followups_enabled() && settings.enabled && settings.auto_continue
+    if !state.automatic_followups_enabled() {
+        return Some(AutoContinueBlock::NoFollowUpTurns);
+    }
+    if !settings.enabled {
+        return Some(AutoContinueBlock::SubagentsOff);
+    }
+    if !settings.auto_continue {
+        return Some(AutoContinueBlock::SwitchOff);
+    }
+    None
+}
+
+fn policy_allows_auto_continue(state: &AppState) -> bool {
+    auto_continue_block(state).is_none()
+}
+
+/// Make a policy-blocked wakeup observable.
+///
+/// Informational, not an error: holding completions until explicit input is
+/// exactly what a disabled switch promises. The line names the blocking switch
+/// and how many notifications are waiting, so "the user turned this off" and
+/// "the supervisor lost the event" stop looking identical in the log.
+///
+/// It is emitted only when a `child_completed` record actually exists on the
+/// thread: the wakeup path also fires on every explicit turn end while the
+/// switch is off, and one line per turn would be noise.
+///
+/// * `thread`: the triggering thread, or `None` to scan every thread (startup
+///   and config-apply policy syncs).
+async fn report_blocked_completions(
+    state: &AppState,
+    block: AutoContinueBlock,
+    thread: Option<ThreadId>,
+) -> BlockedCompletions {
+    let scoped = thread.is_some();
+    let threads = match thread {
+        Some(thread_id) => vec![thread_id],
+        None => match state.store.list_threads().await {
+            Ok(threads) => threads.into_iter().map(|meta| meta.thread_id).collect(),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    reason = block.as_str(),
+                    "could not scan threads holding blocked child completions"
+                );
+                return BlockedCompletions::default();
+            }
+        },
+    };
+    let mut threads_waiting = 0usize;
+    let mut notifications_waiting = 0usize;
+    for thread_id in threads {
+        // Cheapest sufficient filter first: a thread whose completion log holds
+        // no `child_completed` record can have nothing held back. Without it the
+        // turn-end wakeup (which fires on every explicit turn while the switch
+        // is off) would add a thread read plus an interaction read to threads
+        // that never delegated.
+        if !has_completion_record(state, thread_id).await {
+            continue;
+        }
+        let Ok(meta) = state.store.get_thread(thread_id).await else {
+            continue;
+        };
+        if meta.archived {
+            continue;
+        }
+        let PendingCompletionState::Pending(pending) =
+            pending_completion_state(state, thread_id).await
+        else {
+            continue;
+        };
+        threads_waiting += 1;
+        notifications_waiting += pending;
+        if scoped {
+            tracing::info!(
+                thread = %thread_id,
+                reason = block.as_str(),
+                pending,
+                "child completion stays unacknowledged: automatic continuation is off"
+            );
+        }
+    }
+    if !scoped && threads_waiting > 0 {
+        tracing::info!(
+            reason = block.as_str(),
+            threads = threads_waiting,
+            notifications = notifications_waiting,
+            "child completions stay unacknowledged: automatic continuation is off"
+        );
+    }
+    BlockedCompletions {
+        threads: threads_waiting,
+        notifications: notifications_waiting,
+    }
+}
+
+/// Whether the thread's completion log carries any `child_completed` record.
+///
+/// A narrow read on purpose: this guards an informational log line, so it must
+/// not cost a full inbox projection.
+///
+/// Deliberately does not consume the test's one-shot read-failure marker: that
+/// hook models a failing *inbox* read, and a failing probe here simply reports
+/// nothing to hold back.
+async fn has_completion_record(state: &AppState, thread_id: ThreadId) -> bool {
+    state
+        .store
+        .replay_child_completion_events(thread_id)
+        .await
+        .is_ok_and(|events| {
+            events
+                .iter()
+                .any(|event| matches!(event, RuntimeEvent::ChildCompleted { .. }))
+        })
+}
+
+/// How many durable completions one blocked wakeup is holding back.
+///
+/// Returned so the reporting path is testable without installing a global
+/// subscriber: the numbers are the facts, the log line is their rendering.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct BlockedCompletions {
+    threads: usize,
+    notifications: usize,
 }
 
 /// Circuit breaker: consecutive automatic continuations that failed on the
@@ -285,7 +436,16 @@ async fn auto_continue_paused_by_model_failures(state: &AppState, thread_id: Thr
 }
 
 async fn schedule_with_delay(state: AppState, thread_id: ThreadId, delay: Duration) {
-    if state.is_shutting_down() || !policy_allows_auto_continue(&state) {
+    // A shutdown is process-owned and already final for this wakeup: there is no
+    // later lifecycle to report on.
+    if state.is_shutting_down() {
+        return;
+    }
+    if let Some(block) = auto_continue_block(&state) {
+        // The notification stays in the inbox by design. Report it here, at the
+        // only point that knows both the thread and the blocking switch, so a
+        // switched-off deployment cannot be mistaken for a broken supervisor.
+        report_blocked_completions(&state, block, Some(thread_id)).await;
         return;
     }
     let Ok(thread) = state.store.get_thread(thread_id).await else {
@@ -361,7 +521,7 @@ async fn start_if_eligible(
         return false;
     }
     match pending_completion_state(state, thread_id).await {
-        PendingCompletionState::Pending => {}
+        PendingCompletionState::Pending(_) => {}
         PendingCompletionState::Empty => return false,
         PendingCompletionState::Retry => return true,
     }
@@ -428,7 +588,8 @@ async fn start_if_eligible(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PendingCompletionState {
-    Pending,
+    /// At least one notification survives the automatic delivery bound.
+    Pending(usize),
     Empty,
     Retry,
 }
@@ -449,13 +610,13 @@ async fn pending_completion_state(state: &AppState, thread_id: ThreadId) -> Pend
         (Ok(mut events), Ok(lifecycle)) => {
             events.extend(lifecycle);
             events.sort_by_key(|event| event.seq());
-            if CompletionInbox::from_events_for_auto_continuation(&events)
+            let pending = CompletionInbox::from_events_for_auto_continuation(&events)
                 .notification_ids()
-                .is_empty()
-            {
+                .len();
+            if pending == 0 {
                 PendingCompletionState::Empty
             } else {
-                PendingCompletionState::Pending
+                PendingCompletionState::Pending(pending)
             }
         }
         (Err(error), _) | (_, Err(error)) => {

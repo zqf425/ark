@@ -30,6 +30,11 @@ HTTP 配置与子代理配置保存都回写该路径。`AppState::new` 默认�
 并调度符合条件的父线程；关闭任一开关会立即取消进程内待调度 continuation，不影响已开始回合。默认开启意味着
 后台 child 完成后会产生额外的父模型调用用于汇总，用户可在设置页显式关闭。
 
+该开关是显式值优先的：文件里写成 `false` 时，即使默认值后来改成 `true` 也不会被覆盖，也不会触发
+配置诊断告警（诊断只报告缺失或未知键）。关闭期间到达的完成通知保持在持久 inbox 中，server 以
+`auto_continue_disabled` 为原因记录一条 `INFO`（详见 [ark-server](ark-server.md)）；恢复开关后同一通知
+由策略扫描补投，不需要重新触发 child。
+
 `approvals` 配置节整体为 `Hot`：规则表和 `on_unattended` 都在每个父回合入口从同一当前快照读取，
 只影响后续回合。`serve` 的显式 User 回合使用交互 gate；headless、Scheduled、IM、自动 continuation 与
 自动 recovery 按 `on_unattended` 处置，child 不经过审批 gate。校验边界为规则数 ≤128、pattern ≤4 KiB、tool 名非空且
