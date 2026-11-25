@@ -25,7 +25,9 @@
 `workspace/workspace-recent.json`。
 `run` 复用同一 `wiring::build` 装配，但**必须经真实 HTTP/SSE 边界驱动自身**（进程内 reqwest 客户端），
 不得为 headless 另开一条绕过授权与事件语义的内部路径；其日志经 `TracingConfig::to_stderr`
-走 stderr，stdout 只承载模型输出。
+走 stderr，stdout 只承载模型输出。`run` 在 `AppState` 上关闭 automatic followups：显式回合仍走完整
+授权与执行路径，但 pending completion、模型失败恢复和回合后的自动续跑均不得开启后续模型调用；
+显式回合完成后只累计完成计数并停机，保证“一次性回合”不会被后台工作延长。
 
 长期 memory 由组合根以同一 `data_dir` 创建 `ark_store::MemoryFileStore`，再用 `MemoryAdapter` 注入
 `BaseServices`。业务校验、JSON 恢复及并发控制不位于组合根。
@@ -87,7 +89,8 @@ per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启
 重复的用户气泡（实测一个线程里同一问题出现 4 次，即 1 次原始 + 3 次恢复），模型种子也会多出一条
 重复 `User` 消息。抑制条件刻意收窄：只作用于恢复；末尾行必须是该用户消息（已被回答则说明这是一次新的
 重复发言，仍要落盘）；历史里没有该文本（rewind/fork 截断）时仍落盘，保证恢复是真续跑。用户、IM、
-Scheduled 回合永不去重。
+Scheduled 回合永不去重。恢复作业同时保留失败回合已授权的附件 id，并在回合注册前重新授权；退避期间
+出现的新回合会改变 lifecycle epoch，使旧恢复在注册门内失效。
 
 父回合使用 `InteractiveGates`，该实例同时注入 `AppState` 的 HTTP handler 与 `AgentTurnRunner` 的
 `ReactorConfig`。仅 `serve` 的显式 `TurnSource::User` 直接使用它；headless `run` 的所有回合，以及
@@ -182,7 +185,11 @@ Unicode 字符）与 checkbox 渲染（`[ ]`/`[~]`/`[x]`）以 `ark_server` 根�
 生命周期 hooks（[需求设计](../requirements/hooks.md)）的唯一执行宿主是 `apps/arkd/src/hooks.rs`：
 父回合 `ToolRunnerAdapter` 与子回合 `ChildToolRunner` 都经 `run_around` 组合器包住工具派发，
 每次调用从 config 快照现读 `hooks`（`Hot`）。exit 2 拦截、其他失败放行、post stdout 回注的
-语义只在这一处实现。
+语义只在这一处实现。Unix 沿用独立 process group；Windows 为每次 hook 创建私有 Job Object，直接
+进程以 `CREATE_SUSPENDED` 启动，分配 job 后才恢复主线程，因此后代进程不可能在归属确定前逃逸。
+超时、执行器错误或 future 丢弃时由 job owner 终止整棵树，即使直接父进程已先退出且后代仍持有输出
+管道；正常输出完成后 disarm，只关闭 job 句柄，不改变既有后台进程存活语义。该生命周期只在 hook
+宿主内实现，不复用或修改 shell session 的 kill/PID 安全边界。
 
 回合种子中的 `conversation_history` 把工具行投影回模型上下文。store 投影把 `ToolCallStarted` +
 `ToolCallFinished` 折叠为单个内嵌 output 的 `ToolCall` 条目（见 ark-store 设计），因此这里直接消费该条目：

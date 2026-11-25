@@ -525,6 +525,118 @@ impl TestDataDir {
 }
 
 #[tokio::test]
+async fn unattended_build_does_not_schedule_pending_auto_continuations() {
+    let data_dir = TestDataDir::new();
+    let store = FileSessionStore::open(StoreConfig::new(data_dir.path())).unwrap();
+    let thread = store.create_thread("parent").await.unwrap().thread_id;
+    store
+        .append_event(
+            thread,
+            RuntimeEvent::ChildCompleted {
+                seq: 0,
+                thread_id: thread,
+                timestamp: Utc::now(),
+                notification_id: "child:pending".to_string(),
+                child_id: ChildId::new(),
+                label: "inspect runtime".to_string(),
+                status: ark_common::ChildRunStatus::Completed,
+                summary: Some("done".to_string()),
+                error: None,
+                usage: None,
+                tool_invocations: None,
+            },
+        )
+        .await
+        .unwrap();
+    let pending_seq = store.highest_seq(thread).await.unwrap();
+    drop(store);
+
+    let args = ServeArgs {
+        port: 0,
+        data_dir: data_dir.path().to_path_buf(),
+        auth_token: None,
+        workspace: data_dir.path().to_path_buf(),
+    };
+
+    let wiring = build(&args, true).await.expect("unattended runtime builds");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    assert!(wiring.state.turns.active_for(thread).is_none());
+    assert_eq!(
+        wiring
+            .store
+            .replay_interaction_events(thread)
+            .await
+            .unwrap()
+            .len(),
+        0,
+        "headless startup must not create a background continuation turn"
+    );
+    assert_eq!(pending_seq, 1);
+    ark_server::schedule_auto_continuation(wiring.state.clone(), thread).await;
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(
+        wiring.state.turns.active_for(thread).is_none(),
+        "headless runtime must ignore later continuation wakeups"
+    );
+    assert_eq!(
+        wiring
+            .store
+            .replay_interaction_events(thread)
+            .await
+            .unwrap()
+            .len(),
+        0,
+        "headless runtime must not turn a completion into another model turn"
+    );
+    wiring.state.begin_shutdown();
+}
+
+#[tokio::test]
+async fn unattended_build_does_not_recover_a_failed_turn() {
+    let data_dir = TestDataDir::new();
+    let args = ServeArgs {
+        port: 0,
+        data_dir: data_dir.path().to_path_buf(),
+        auth_token: None,
+        workspace: data_dir.path().to_path_buf(),
+    };
+    let wiring = build(&args, true).await.expect("unattended runtime builds");
+    let thread = wiring
+        .store
+        .create_thread("one shot")
+        .await
+        .unwrap()
+        .thread_id;
+
+    ark_server::service::schedule_recovery(
+        wiring.state.clone(),
+        thread,
+        Some("run exactly once".into()),
+        1,
+        "model stream broke".into(),
+        Vec::new(),
+    )
+    .await;
+    tokio::time::sleep(
+        ark_server::service::recovery::RECOVERY_DELAYS[0] + std::time::Duration::from_millis(200),
+    )
+    .await;
+
+    assert!(wiring.state.turns.active_for(thread).is_none());
+    assert!(
+        wiring
+            .store
+            .replay_interaction_events(thread)
+            .await
+            .unwrap()
+            .is_empty(),
+        "headless runtime must not retry its explicit turn automatically"
+    );
+    wiring.state.begin_shutdown();
+}
+
+#[tokio::test]
 async fn child_completion_events_are_loaded_as_the_next_turn_system_source() {
     let data_dir = TestDataDir::new();
     let store = FileSessionStore::open(StoreConfig::new(data_dir.path())).unwrap();

@@ -17,8 +17,8 @@
 临界区里读取或重写，没有可 await 的对象。它只做持久化——id 补全（`sch_<uuid>`）、重复 id 的
 `conflict`、缺失 id 的 `not_found`；节奏修复、`next_run_at` 重算和 100 条任务上限都在
 `ark-schedule`，由组合根在调用存储之前完成。存储若擅自改写任务，返回给客户端的文档就会与刚写入的
-不一致。`replace` 是运行记账的唯一写路径：历史追加与 `last_run` 镜像必须是一次任务变更，拆成两次
-调用就会与 UI 更新交错。
+不一致。`update` 是运行记账与编辑的唯一读改写路径：历史追加、`last_run` 镜像及 cadence 重算必须在同一
+任务变更内完成，拆成 `get`/`replace` 两次调用就会与 UI 更新交错。
 
 `ImStore` 是 IM 渠道文档（`im.json`）的持久化边界，与 `ScheduleStore` 同为同步端口：整个
 文档一次进程内锁临界区读写，锁内不做网络 IO。它持有渠道记录（`ImChannelRecord { channel,

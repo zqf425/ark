@@ -33,11 +33,16 @@
 - steer 与回合起点共用同一 `TurnRequest` 信封与同一附件授权裁决：`enqueue_steering` 前先
   `authorize_turn_attachments`（按本线程关联事件，未关联统一 404），id 随文本进入同一条
   `SteerEntry`，不存在第二条附件通道。
-- `workspace_gate` 是全进程串行启动门，锁内只做注册表变更与必要的轻量存在性检查，不得 await
-  磁盘 I/O 或全量事件回放。附件授权（`authorize_turn_attachments`，回放整段事件日志）在取锁前
-  完成；`get_thread` 单文件存在性检查与删除路由共用同一 gate，保留在锁内以避免删除竞态。
+- `workspace_gate` 是全进程串行启动与线程删除提交门，锁内只做注册表变更、必要的轻量存在性检查、
+  单线程元数据读写与删除提交，不得 await 模型/工具等长耗时动作或全量事件回放。附件授权
+  （`authorize_turn_attachments`，回放整段事件日志）在取锁前完成；`get_thread` 单文件存在性检查与
+  删除路由共用同一 gate，避免删除竞态。含 `runtime` 的 `PATCH /v1/threads/{id}` 在读取旧元数据前
+  取同一 gate，并把合并、写回保留到 guard 释放；归档写入也复用该 guard，不递归重取。
 - `/v1/shutdown`、Ctrl-C 和任务 panic 走同一收敛流程：先阻止新的 completion wakeup，再取消待调度
-  continuation 与活动回合，等待有限时间、落终态并清理 registry。
+  continuation 与活动回合，等待有限时间、落终态并清理 registry。终态补偿的日志回放、缺失
+  `turn_started` 的补写和终态追加都必须成功；任一写入失败时不得释放 `TurnRegistry` entry、不得
+  计数完成或调度后续动作。drain 超时后仍有活动 turn/child 时返回 `runtime_unavailable`，由
+  `AppHandle::serve` 向上传播，不能把未持久化终态报告为已收敛。
 - 后台 child 的持久 `child_completed` 成功写入后会唤醒 per-thread continuation supervisor。
   `subagents.auto_continue` 默认开启；仅当它与 `subagents.enabled` 同时开启时，同一父线程 250 ms 内的
   通知共享一个可取消 debounce，关闭任一开关会立即取消待调度 continuation。默认开启会使后台完成产生
@@ -50,6 +55,9 @@
   或 sandbox，也不会写入伪用户消息。
 - 回合因模型请求失败（`model_request_failed`，网关抖动/断流/流超时）终结时，`service::recovery`
   调度自动恢复：以同一请求文本（`TurnSource::AutoRecovery`）重开回合，退避 5s/10s/20s，最多 3 次；
+  调度时（读取失败历史之前）捕获失败回合的 lifecycle epoch，退避后及 `workspace_gate` 注册临界区内再次核对；期间任何
+  新回合都会使旧恢复以 `conflict` 失效，不能越过用户的新输入继续执行。失败回合已授权的附件 id
+  随恢复作业保留，并在注册前重新经过 `authorize_turn_attachments`，不能凭旧授权直接复用。
   尝试号写入 `turn_started.auto_recovery`，恢复回合先写一条 Notice 说明自动重试原因。恢复是**续跑**
   而非新请求：失败回合已把用户消息落盘并在重放历史末尾出现，`arkd` 组合根据此不再重复 `push_user_message`
   （见 [arkd](arkd.md)），因此一个用户请求在会话流里只有一条用户气泡，恢复只追加 Notice 与 Error 行。
@@ -78,9 +86,14 @@
 - `DELETE /v1/threads?workspace=…`（`service::threads::delete_settled_by_workspace`）按项目批量删除
   **已结束**的线程：匹配遵循渲染层项目分组规则（显式 override 与路径规范化后比对，无 override 回退
   运行时 active root；默认组不被此动词服务），"已结束"复用列表 busy 标记的同一持久折叠
-  （`durable_running_ids`，注册表与日志同源，两种判定永不漂移）。整段 sweep 持 `workspace_gate`，
-  与回合注册、单线程删除互斥；运行中/删除失败的线程逐行进入响应 `skipped`（结构化 `ArkErrorCode`，
-  运行中为 `conflict`），不令整个请求失败。响应 `BulkDeleteThreadsResponse`（`deleted`/`skipped`）。
+  （`durable_running_ids`，注册表与日志同源，两种判定永不漂移）。全量 list、durable running 判定与
+  候选线程水位读取均在锁外完成；每个候选删除只在其提交临界区持有 `workspace_gate`，并复核 active
+  turn、扫描时的水位与当前有效 workspace，扫描期间启动的新回合、新增事件或 active root
+  切换会使该候选重新求值而非按旧快照删除。runtime PATCH 与删除提交共用 `workspace_gate`，因此
+  有效 workspace 的复核与物理删除之间不能插入元数据变更；确定性回归覆盖“删除已持 gate、PATCH
+  等待、删除提交后 PATCH 观察到 NotFound”的合法串行顺序。
+  运行中/删除失败的线程逐行进入响应 `skipped`（结构化 `ArkErrorCode`，运行中为 `conflict`），
+  不令整个请求失败。响应 `BulkDeleteThreadsResponse`（`deleted`/`skipped`）。
 - `GET /v1/threads/{id}` 的 `child_completions` 是最新 50 个不同通知 ID 的有界视图；它从 store 的窄
   completion 查询投影，不能全量回放普通会话事件。
 - `InteractiveGates` 只做 HTTP 决议与 reactor gate future 的一次性 rendezvous；`prepare_*` 同步插入
@@ -121,8 +134,10 @@
   `http://tauri.localhost` 与 macOS/Linux 的 `tauri://localhost` origin，且只允许 GET/POST/PATCH/DELETE
   和 `accept`、`authorization`、`content-type` headers；禁止将其放宽为 `*`。
 - `POST /v1/threads/{id}/rewind` 仅在没有活动回合时接受 `turn_id` 或 `seq` 之一；目标 turn 从其
-  `turn_started` 处开始物理删除。成功响应含新的 `last_seq`，重复请求同一已记录目标幂等返回；SSE 的
-  `thread_rewound` 事件要求客户端重新读取线程详情。
+  `turn_started` 处开始物理删除。目标扫描与历史回放在 `workspace_gate` 外完成；提交前在锁内复核
+  active turn、lifecycle epoch 与扫描时的日志水位，过期即释放锁并重新求值，不能依据旧快照截断新回合。
+  成功响应含新的 `last_seq`，重复请求同一已记录目标幂等返回；SSE 的 `thread_rewound` 事件要求客户端
+  重新读取线程详情。
 - `POST /v1/subagents/config` 是子代理开关和并发上限的专用热更新入口，内部复用
   `ConfigPatch.subagents` 的校验、替换和持久化语义，并与 `/v1/runtime/config` 一样返回
   `ApplyResult`；不得路由到其他 split-config 占位 handler。
@@ -130,7 +145,8 @@
   provider，且非空 model 必须有可解析 provider；校验失败不得写入 store。覆盖字段按
   `merge_runtime` 的 `patch.or(current)` 逐项合并（本端点不支持经 PATCH 单项清空覆盖）；`autonomy`
   经 `Autonomy::parse` 校验，`reasoning_effort` 仅接受 `REASONING_EFFORTS`（`off|low|medium|high`），
-  空串视为未设置。覆盖语义在回合侧的解析见 [arkd](arkd.md)。
+  空串视为未设置。覆盖语义在回合侧的解析见 [arkd](arkd.md)。请求含 `runtime` 时，读取、合并与写回
+  都在 `workspace_gate` 内完成，与 bulk-delete 的有效 workspace 复核/物理删除串行。
   `POST /v1/threads/{id}/turns` 在注册回合前拒绝超过 `ark_contract::MAX_TURN_TEXT_BYTES` 的 UTF-8 文本。
 - `POST /v1/workspace/validate` 只转发 `WorkspaceService::validate` 的目录存在性校验，并使用
   `ark_common::path::normalize` 返回规范化路径；handler 不得复制工作区解析规则。

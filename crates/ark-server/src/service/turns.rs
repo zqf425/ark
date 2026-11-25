@@ -53,6 +53,61 @@ pub async fn start_turn_as(
     raw_text: String,
     requested_attachments: Vec<ark_common::AttachmentId>,
 ) -> ark_common::Result<TurnSummary> {
+    start_turn_as_inner(
+        state,
+        thread_id,
+        source,
+        raw_text,
+        requested_attachments,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn start_turn_as_at_epoch(
+    state: &AppState,
+    thread_id: ThreadId,
+    source: TurnSource,
+    raw_text: String,
+    requested_attachments: Vec<ark_common::AttachmentId>,
+    expected_epoch: Option<TurnId>,
+) -> ark_common::Result<TurnSummary> {
+    start_turn_as_inner(
+        state,
+        thread_id,
+        source,
+        raw_text,
+        requested_attachments,
+        expected_epoch,
+    )
+    .await
+}
+
+async fn start_turn_as_inner(
+    state: &AppState,
+    thread_id: ThreadId,
+    source: TurnSource,
+    raw_text: String,
+    requested_attachments: Vec<ark_common::AttachmentId>,
+    expected_epoch: Option<TurnId>,
+) -> ark_common::Result<TurnSummary> {
+    if !state.automatic_followups_enabled()
+        && matches!(
+            source,
+            TurnSource::AutoContinuation | TurnSource::AutoRecovery { .. }
+        )
+    {
+        return Err(ark_common::ArkError::new(
+            ark_common::ArkErrorCode::RuntimeUnavailable,
+            "automatic follow-up turns are disabled for this runtime",
+        ));
+    }
+    if expected_epoch.is_some_and(|epoch| state.turns.latest_for(thread_id) != Some(epoch)) {
+        return Err(ark_common::ArkError::new(
+            ark_common::ArkErrorCode::Conflict,
+            "turn lifecycle changed while the automatic follow-up was waiting",
+        ));
+    }
     let raw_text = source_text(&source, raw_text);
     validate_turn_text(&raw_text)?;
     let turn_id = TurnId::new();
@@ -60,7 +115,7 @@ pub async fn start_turn_as(
     run_pre_start_hook(state, thread_id, turn_id, &source).await?;
     let attachment_ids =
         crate::service::authorize_turn_attachments(state, thread_id, requested_attachments).await?;
-    let registration = register_turn(state, thread_id, turn_id, &cancel).await?;
+    let registration = register_turn(state, thread_id, turn_id, &cancel, expected_epoch).await?;
     name_user_thread(state, thread_id, &source, &raw_text).await;
     let job = TurnJob {
         thread_id,
@@ -81,7 +136,7 @@ fn source_text(source: &TurnSource, raw_text: String) -> String {
     }
 }
 
-fn validate_turn_text(raw_text: &str) -> ark_common::Result<()> {
+pub(crate) fn validate_turn_text(raw_text: &str) -> ark_common::Result<()> {
     if raw_text.len() > MAX_TURN_TEXT_BYTES {
         return Err(ark_common::ArkError::validation(format!(
             "turn text exceeds the {MAX_TURN_TEXT_BYTES}-byte UTF-8 limit"
@@ -120,10 +175,29 @@ async fn register_turn(
     thread_id: ThreadId,
     turn_id: TurnId,
     cancel: &CancelToken,
+    expected_epoch: Option<TurnId>,
 ) -> ark_common::Result<crate::state::TurnRegistration> {
     let _workspace_guard = state.workspace_gate.lock().await;
+    if expected_epoch.is_some_and(|epoch| state.turns.latest_for(thread_id) != Some(epoch)) {
+        return Err(ark_common::ArkError::new(
+            ark_common::ArkErrorCode::Conflict,
+            "turn lifecycle changed while the automatic follow-up was waiting",
+        ));
+    }
+    if state.is_shutting_down() {
+        return Err(ark_common::ArkError::new(
+            ark_common::ArkErrorCode::RuntimeUnavailable,
+            "runtime is shutting down",
+        ));
+    }
     state.store.get_thread(thread_id).await?;
     let Some(registration) = state.turns.try_register(thread_id, turn_id, cancel.clone()) else {
+        if state.is_shutting_down() {
+            return Err(ark_common::ArkError::new(
+                ark_common::ArkErrorCode::RuntimeUnavailable,
+                "runtime is shutting down",
+            ));
+        }
         let running = state
             .turns
             .active_for(thread_id)
@@ -159,15 +233,17 @@ struct TurnSupervisor {
     turn_id: TurnId,
     thread_id: ThreadId,
     is_auto_continuation: bool,
-    recovery: Option<(String, u32)>,
+    recovery: Option<(String, u32, Vec<ark_common::AttachmentId>)>,
 }
 
 impl TurnSupervisor {
     fn from_job(job: &TurnJob) -> Self {
         let recovery = match &job.source {
-            TurnSource::AutoRecovery { text, attempt } => Some((text.clone(), *attempt)),
+            TurnSource::AutoRecovery { text, attempt } => {
+                Some((text.clone(), *attempt, job.attachment_ids.clone()))
+            }
             TurnSource::User(text) | TurnSource::Scheduled(text) | TurnSource::Im { text, .. } => {
-                Some((text.clone(), 0))
+                Some((text.clone(), 0, job.attachment_ids.clone()))
             }
             TurnSource::AutoContinuation => None,
         };
@@ -186,8 +262,16 @@ pub fn spawn_turn(state: AppState, job: TurnJob) {
     let runner = Arc::clone(&state.runner);
     tokio::spawn(async move {
         let end = run_worker(runner, job).await;
+        if let Err(error) = observe_turn_end(&state, &supervisor, &end).await {
+            tracing::warn!(
+                turn = %supervisor.turn_id,
+                code = ?error.code,
+                %error,
+                "turn terminal persistence failed; leaving the turn unsettled"
+            );
+            return;
+        }
         state.turns.finish(supervisor.turn_id, &end);
-        observe_turn_end(&state, &supervisor, &end).await;
         schedule_after_turn(state, supervisor, end).await;
     });
 }
@@ -211,7 +295,11 @@ async fn run_worker(runner: Arc<dyn crate::state::TurnRunner>, job: TurnJob) -> 
     }
 }
 
-async fn observe_turn_end(state: &AppState, supervisor: &TurnSupervisor, end: &TurnEnd) {
+async fn observe_turn_end(
+    state: &AppState,
+    supervisor: &TurnSupervisor,
+    end: &TurnEnd,
+) -> ark_common::Result<()> {
     let fact = match end {
         TurnEnd::Completed | TurnEnd::CompletedWithPendingCompletions => TurnOutcomeFact::Completed,
         TurnEnd::Failed { message, .. } => TurnOutcomeFact::Failed {
@@ -231,20 +319,30 @@ async fn observe_turn_end(state: &AppState, supervisor: &TurnSupervisor, end: &T
             &fact,
         )
         .await;
+    state
+        .record_turn_terminal(
+            supervisor.thread_id,
+            supervisor.turn_id,
+            supervisor.is_auto_continuation,
+            end,
+        )
+        .await?;
     if let TurnEnd::Failed { message, .. } = end {
-        state
-            .record_turn_terminal(
-                supervisor.thread_id,
-                supervisor.turn_id,
-                supervisor.is_auto_continuation,
-                end,
-            )
-            .await;
         tracing::warn!(turn = %supervisor.turn_id, %message, "turn ended without a terminal event");
     }
+    Ok(())
 }
 
 async fn schedule_after_turn(state: AppState, supervisor: TurnSupervisor, end: TurnEnd) {
+    if !state.automatic_followups_enabled() {
+        if matches!(
+            end,
+            TurnEnd::Completed | TurnEnd::CompletedWithPendingCompletions
+        ) {
+            state.note_turn_completed();
+        }
+        return;
+    }
     match end {
         TurnEnd::CompletedWithPendingCompletions => {
             state.note_turn_completed();
@@ -271,7 +369,7 @@ async fn schedule_after_turn(state: AppState, supervisor: TurnSupervisor, end: T
 }
 
 async fn schedule_model_recovery(state: AppState, supervisor: TurnSupervisor, message: String) {
-    if let Some((text, previous)) = supervisor.recovery {
+    if let Some((text, previous, attachments)) = supervisor.recovery {
         let attempt = if previous == 0 { 1 } else { previous + 1 };
         crate::service::schedule_recovery(
             state,
@@ -279,6 +377,7 @@ async fn schedule_model_recovery(state: AppState, supervisor: TurnSupervisor, me
             Some(text),
             attempt,
             message,
+            attachments,
         )
         .await;
     } else {
@@ -344,6 +443,8 @@ mod tests {
     struct RecordingBroker {
         deny_pre_start: bool,
         events: Mutex<Vec<String>>,
+        end_entered: Option<Arc<tokio::sync::Notify>>,
+        end_release: Option<Arc<tokio::sync::Notify>>,
     }
 
     impl RecordingBroker {
@@ -351,7 +452,28 @@ mod tests {
             Arc::new(Self {
                 deny_pre_start,
                 events: Mutex::new(Vec::new()),
+                end_entered: None,
+                end_release: None,
             })
+        }
+
+        fn blocking() -> (
+            Arc<Self>,
+            Arc<tokio::sync::Notify>,
+            Arc<tokio::sync::Notify>,
+        ) {
+            let entered = Arc::new(tokio::sync::Notify::new());
+            let release = Arc::new(tokio::sync::Notify::new());
+            (
+                Arc::new(Self {
+                    deny_pre_start: false,
+                    events: Mutex::new(Vec::new()),
+                    end_entered: Some(Arc::clone(&entered)),
+                    end_release: Some(Arc::clone(&release)),
+                }),
+                entered,
+                release,
+            )
         }
 
         fn events(&self) -> Vec<String> {
@@ -403,6 +525,12 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("turn_end:{outcome:?}"));
+            if let Some(entered) = &self.end_entered {
+                entered.notify_one();
+            }
+            if let Some(release) = &self.end_release {
+                release.notified().await;
+            }
         }
 
         async fn observe_llm_call(
@@ -416,7 +544,14 @@ mod tests {
     fn state_with(data_dir: &std::path::Path, broker: Arc<RecordingBroker>) -> AppState {
         let sessions =
             Arc::new(FileSessionStore::open(StoreConfig::new(data_dir)).expect("session store"));
-        let store: Arc<dyn SessionStore> = sessions;
+        state_with_store(sessions, broker, data_dir)
+    }
+
+    fn state_with_store(
+        store: Arc<dyn SessionStore>,
+        broker: Arc<RecordingBroker>,
+        data_dir: &std::path::Path,
+    ) -> AppState {
         AppState::new(
             store,
             Arc::new(EmptyTools),
@@ -457,6 +592,116 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shutdown_rejects_a_new_turn_without_registering_it() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let state = state_with(dir.path(), RecordingBroker::new(false));
+        let thread = state.store.create_thread("t").await.expect("thread");
+        state.begin_shutdown();
+
+        let error = start_turn_as(
+            &state,
+            thread.thread_id,
+            TurnSource::User("hello".to_string()),
+            "hello".to_string(),
+            Vec::new(),
+        )
+        .await
+        .expect_err("shutdown must reject a late turn");
+
+        assert_eq!(error.code, ark_common::ArkErrorCode::RuntimeUnavailable);
+        assert!(state.turns.active_for(thread.thread_id).is_none());
+        assert!(state
+            .turns
+            .try_register(thread.thread_id, TurnId::new(), CancelToken::new())
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn the_terminal_hook_finishes_before_the_turn_slot_is_released() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (broker, entered, release) = RecordingBroker::blocking();
+        let state = state_with(dir.path(), Arc::clone(&broker));
+        let thread = state.store.create_thread("t").await.expect("thread");
+        let first = start_turn_as(
+            &state,
+            thread.thread_id,
+            TurnSource::User("first".to_string()),
+            "first".to_string(),
+            Vec::new(),
+        )
+        .await
+        .expect("the first turn starts");
+        tokio::time::timeout(std::time::Duration::from_secs(1), entered.notified())
+            .await
+            .expect("the terminal hook starts");
+
+        let second = start_turn_as(
+            &state,
+            thread.thread_id,
+            TurnSource::User("second".to_string()),
+            "second".to_string(),
+            Vec::new(),
+        )
+        .await;
+        release.notify_waiters();
+
+        let error = second.expect_err("the first turn must still own its slot");
+        assert_eq!(error.code, ark_common::ArkErrorCode::Conflict);
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while state
+                .turns
+                .get(first.turn_id)
+                .is_none_or(|slot| slot.ended_at.is_none())
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the first turn settles after its terminal hook");
+    }
+
+    #[tokio::test]
+    async fn a_completed_runner_without_journal_events_gets_a_synthetic_lifecycle() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let state = state_with(dir.path(), RecordingBroker::new(false));
+        let thread = state.store.create_thread("t").await.expect("thread");
+        let summary = start_turn_as(
+            &state,
+            thread.thread_id,
+            TurnSource::User("hello".to_string()),
+            "hello".to_string(),
+            Vec::new(),
+        )
+        .await
+        .expect("the turn starts");
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while state
+                .turns
+                .get(summary.turn_id)
+                .is_none_or(|slot| slot.ended_at.is_none())
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the supervisor settles the turn");
+
+        let events = state
+            .store
+            .replay_interaction_events(thread.thread_id)
+            .await
+            .expect("lifecycle events");
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ark_contract::RuntimeEvent::TurnStarted { turn_id, .. } if *turn_id == summary.turn_id
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ark_contract::RuntimeEvent::TurnCompleted { turn_id, .. } if *turn_id == summary.turn_id
+        )));
+    }
+
+    #[tokio::test]
     async fn an_allowed_turn_reports_its_outcome_to_the_supervisor_hook() {
         let dir = tempfile::Builder::new()
             .prefix("ark-hook-observe-")
@@ -494,6 +739,59 @@ mod tests {
                 "turn_end:Completed".to_string(),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn failed_terminal_persistence_keeps_the_turn_unsettled() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let sessions =
+            Arc::new(FileSessionStore::open(StoreConfig::new(dir.path())).expect("session store"));
+        let gated = crate::api::handlers::test_support::GatedStore::new(
+            sessions.clone() as Arc<dyn SessionStore>
+        );
+        // The synthesized TurnStarted succeeds; its compensating terminal fails.
+        gated.fail_append_at(2);
+        let state = state_with_store(gated.clone(), RecordingBroker::new(false), dir.path());
+        let thread = state.store.create_thread("t").await.expect("thread");
+        let summary = start_turn_as(
+            &state,
+            thread.thread_id,
+            TurnSource::User("hello".to_string()),
+            "hello".to_string(),
+            Vec::new(),
+        )
+        .await
+        .expect("turn starts");
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            gated.append_failed.notified(),
+        )
+        .await
+        .expect("terminal persistence is attempted");
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+        }
+
+        assert!(
+            state
+                .turns
+                .get(summary.turn_id)
+                .is_some_and(|slot| slot.ended_at.is_none()),
+            "a failed durable close must not release the active turn"
+        );
+        assert_eq!(state.turns_completed(), 0);
+        let events = sessions
+            .replay_interaction_events(thread.thread_id)
+            .await
+            .expect("persisted start");
+        assert!(events.iter().any(|event| {
+            matches!(event, ark_contract::RuntimeEvent::TurnStarted { turn_id, .. }
+                if *turn_id == summary.turn_id)
+        }));
+        assert!(!events.iter().any(|event| {
+            matches!(event, ark_contract::RuntimeEvent::TurnCompleted { turn_id, .. }
+                if *turn_id == summary.turn_id)
+        }));
     }
 
     /// The first user turn names a still-placeholder thread **before** the

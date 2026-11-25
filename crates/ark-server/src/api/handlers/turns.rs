@@ -59,13 +59,8 @@ pub async fn steer(
 ) -> Result<(StatusCode, Json<TurnSummary>), ApiError> {
     let thread_id = parse_thread(&id)?;
     let turn_id = parse_turn(&turn)?;
+    crate::service::turns::validate_turn_text(&body.text)?;
     let text = body.text.trim().to_string();
-    if text.is_empty() {
-        return Err(ApiError::new(
-            ark_common::ArkErrorCode::ValidationError,
-            "steer text must not be empty",
-        ));
-    }
     // Same authorization edge as a turn start: only ids already associated
     // with this thread may ride the correction.
     crate::service::authorize_turn_attachments(&state, thread_id, body.attachment_ids.clone())
@@ -324,6 +319,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oversized_steer_text_is_rejected_before_queueing() {
+        let dir = test_dir();
+        let app_state = state(dir.path(), Arc::new(CountingRunner(AtomicUsize::new(0))));
+        let thread = app_state.store.create_thread("steer limit").await.unwrap();
+        let turn = TurnId::new();
+        app_state
+            .turns
+            .try_register(thread.thread_id, turn, CancelToken::new())
+            .expect("register active turn");
+
+        let error = steer(
+            State(app_state.clone()),
+            Path((thread.thread_id.to_string(), turn.to_string())),
+            Json(TurnRequest {
+                text: "x".repeat(1024 * 1024 + 1),
+                attachment_ids: Vec::new(),
+            }),
+        )
+        .await
+        .expect_err("oversized steering must be rejected");
+
+        assert_eq!(error.0.code, ark_common::ArkErrorCode::ValidationError);
+        assert!(app_state.turns.get(turn).is_some());
+    }
+
+    #[tokio::test]
     async fn late_interrupt_suppresses_a_pending_continuation() {
         let dir = test_dir();
         let temp = dir.path().to_path_buf();
@@ -571,7 +592,8 @@ mod tests {
                     model_request_failed: false,
                 },
             )
-            .await;
+            .await
+            .expect("idempotent terminal close");
 
         let events = state
             .store

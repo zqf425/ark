@@ -219,6 +219,13 @@ pub async fn update(
     Json(body): Json<UpdateThreadRequest>,
 ) -> Result<Json<ThreadSummary>, ApiError> {
     let thread_id = parse_thread(&id)?;
+    // Runtime metadata is the bulk-delete membership key: its read/merge/write
+    // must be atomic with delete's effective-metadata revalidation.
+    let runtime_guard = if body.runtime.is_some() {
+        Some(state.workspace_gate.lock().await)
+    } else {
+        None
+    };
     let mut meta = state.store.get_thread(thread_id).await?;
     if let Some(title) = body.title {
         let trimmed = title.trim();
@@ -238,7 +245,12 @@ pub async fn update(
         state.store.append_event(thread_id, event).await?;
     }
     if let Some(archived) = body.archived {
-        let _workspace_guard = state.workspace_gate.lock().await;
+        let workspace_guard = if runtime_guard.is_none() {
+            Some(state.workspace_gate.lock().await)
+        } else {
+            None
+        };
+        let _workspace_guard = workspace_guard;
         meta = state.store.set_archived(thread_id, archived).await?;
         if archived {
             state.continuations.suppress(thread_id);
@@ -333,33 +345,7 @@ pub async fn remove(
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let thread_id = parse_thread(&id)?;
-    let _workspace_guard = state.workspace_gate.lock().await;
-    // Validate ownership and active state before changing continuation state. A
-    // failed delete must not suppress future work for a thread that still exists.
-    state.store.get_thread(thread_id).await?;
-    if let Some(active) = state.turns.active_for(thread_id) {
-        return Err(ApiError::new(
-            ark_common::ArkErrorCode::Conflict,
-            format!(
-                "thread has a running turn ({}) and cannot be deleted; interrupt it first",
-                active.turn_id
-            ),
-        ));
-    }
-    let was_suppressed = state.continuations.suppress(thread_id);
-    if let Err(error) = state.store.delete_thread(thread_id).await {
-        if !was_suppressed {
-            state.continuations.allow(thread_id);
-            crate::service::schedule_auto_continuation(state.clone(), thread_id).await;
-        }
-        return Err(error.into());
-    }
-    // Thread ids are never reused. Drop the process-local tombstone after the
-    // durable deletion; late child wakeups fail the store existence check.
-    // Also reclaim the turn-registry epoch marker: it is insert-only on
-    // registration and would otherwise leak one entry per deleted thread.
-    state.continuations.allow(thread_id);
-    state.turns.forget_thread(thread_id);
+    crate::service::threads::delete_settled(&state, thread_id, None, None).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -400,9 +386,6 @@ pub async fn remove_by_workspace(
             "workspace query parameter is required",
         ));
     }
-    // Serializes against turn registration and single deletes, the same lock
-    // the single-thread delete takes: a thread cannot be registered mid-sweep.
-    let _workspace_guard = state.workspace_gate.lock().await;
     let response = crate::service::threads::delete_settled_by_workspace(&state, path).await?;
     Ok(Json(response))
 }

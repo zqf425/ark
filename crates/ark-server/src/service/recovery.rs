@@ -28,7 +28,7 @@ use std::time::Duration;
 use ark_common::ThreadId;
 use ark_contract::RuntimeEvent;
 
-use crate::service::turns::start_turn_as;
+use crate::service::turns::start_turn_as_at_epoch;
 use crate::state::{AppState, TurnSource};
 
 /// Backoff between recovery attempts, by attempt number (1-based). Three
@@ -54,13 +54,18 @@ pub const MAX_CONSECUTIVE_MODEL_FAILURES: usize = ark_agent::RECOVERY_MODEL_FAIL
 ///   continuation reruns through its own supervisor instead).
 /// * `attempt`: 1-based number of the attempt being scheduled.
 /// * `failure`: the previous attempt's failure message, for the log.
+/// * `attachments`: the failed turn's already-authorized attachment ids.
 pub async fn schedule_recovery(
     state: AppState,
     thread_id: ThreadId,
     text: Option<String>,
     attempt: u32,
     failure: String,
+    attachments: Vec<ark_common::AttachmentId>,
 ) {
+    if !state.automatic_followups_enabled() {
+        return;
+    }
     let Some(text) = text else {
         tracing::warn!(
             thread = %thread_id,
@@ -79,6 +84,7 @@ pub async fn schedule_recovery(
         );
         return;
     }
+    let expected_epoch = state.turns.latest_for(thread_id);
     if recovery_paused_by_model_failures(&state, thread_id).await {
         return;
     }
@@ -101,16 +107,22 @@ pub async fn schedule_recovery(
         if state.is_shutting_down() {
             return;
         }
-        // One-turn-per-thread is re-checked inside `start_turn_as`; a user who
-        // typed during the backoff window wins the race and cancels nothing.
-        let _ = start_turn_as(
+        // A newer turn changes the lifecycle epoch while this task backs off.
+        // Re-check under the registration gate so a user turn wins atomically.
+        let result = start_turn_as_at_epoch(
             &state,
             thread_id,
             TurnSource::AutoRecovery { text, attempt },
             String::new(),
-            Vec::new(),
+            attachments,
+            expected_epoch,
         )
         .await;
+        if let Err(error) = result {
+            if error.code != ark_common::ArkErrorCode::Conflict {
+                tracing::warn!(thread = %thread_id, attempt, %error, "automatic recovery could not start");
+            }
+        }
     });
 }
 
@@ -149,6 +161,8 @@ async fn recovery_paused_by_model_failures(state: &AppState, thread_id: ThreadId
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::handlers::test_support::GatedStore;
+    use crate::service::turns::start_turn_as;
     use ark_common::TurnId;
     use ark_config::{ConfigStore, RuntimeConfig};
     use ark_obs::UsageRecorder;
@@ -156,7 +170,7 @@ mod tests {
     use ark_store::{FileSessionStore, StoreConfig};
     use chrono::Utc;
     use std::sync::atomic::Ordering;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     struct EmptyTools;
 
@@ -178,11 +192,13 @@ mod tests {
     struct ScriptedRunner {
         runs: std::sync::atomic::AtomicUsize,
         succeed_after: usize,
+        jobs: Mutex<Vec<crate::TurnJob>>,
     }
 
     #[async_trait::async_trait]
     impl crate::TurnRunner for ScriptedRunner {
-        async fn run_turn(&self, _job: crate::TurnJob) -> ark_common::Result<crate::TurnEnd> {
+        async fn run_turn(&self, job: crate::TurnJob) -> ark_common::Result<crate::TurnEnd> {
+            self.jobs.lock().unwrap().push(job);
             let run = self.runs.fetch_add(1, Ordering::SeqCst) + 1;
             if run >= self.succeed_after {
                 Ok(crate::TurnEnd::Completed)
@@ -229,6 +245,7 @@ mod tests {
         let runner = Arc::new(ScriptedRunner {
             runs: std::sync::atomic::AtomicUsize::new(0),
             succeed_after: 1,
+            jobs: Mutex::new(Vec::new()),
         });
         let (state, thread, _dir) = state_with(runner.clone()).await;
         // A thread whose log already holds MAX_CONSECUTIVE failures is paused:
@@ -246,6 +263,7 @@ mod tests {
             Some("do the thing".into()),
             1,
             "boom".into(),
+            Vec::new(),
         )
         .await;
         // Backoff is 5s; give the task a moment, then assert nothing ran.
@@ -258,6 +276,7 @@ mod tests {
         let runner = Arc::new(ScriptedRunner {
             runs: std::sync::atomic::AtomicUsize::new(0),
             succeed_after: 1,
+            jobs: Mutex::new(Vec::new()),
         });
         let (state, thread, _dir) = state_with(runner.clone()).await;
         for _ in 0..MAX_CONSECUTIVE_MODEL_FAILURES {
@@ -291,6 +310,7 @@ mod tests {
             Some("do the thing".into()),
             (RECOVERY_DELAYS.len() + 1) as u32,
             "boom".into(),
+            Vec::new(),
         )
         .await;
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -302,6 +322,7 @@ mod tests {
         let runner = Arc::new(ScriptedRunner {
             runs: std::sync::atomic::AtomicUsize::new(0),
             succeed_after: usize::MAX,
+            jobs: Mutex::new(Vec::new()),
         });
         let (state, thread, _dir) = state_with(runner.clone()).await;
         // Attempt 1 waits RECOVERY_DELAYS[0]; the test only asserts that
@@ -314,6 +335,7 @@ mod tests {
             Some("do the thing".into()),
             1,
             "boom".into(),
+            Vec::new(),
         )
         .await;
         // Nothing ran yet (the first backoff is 5s), and the store has no new
@@ -327,5 +349,174 @@ mod tests {
             .unwrap()
             .iter()
             .all(|event| !matches!(event, RuntimeEvent::TurnStarted { .. })));
+    }
+
+    #[tokio::test]
+    async fn a_user_turn_during_backoff_invalidates_the_pending_recovery() {
+        let runner = Arc::new(ScriptedRunner {
+            runs: std::sync::atomic::AtomicUsize::new(0),
+            succeed_after: 1,
+            jobs: Mutex::new(Vec::new()),
+        });
+        let (state, thread, _dir) = state_with(runner.clone()).await;
+        let failed = TurnId::new();
+        state
+            .turns
+            .try_register(thread, failed, ark_agent::CancelToken::new())
+            .expect("failed turn registers");
+        state.turns.finish(
+            failed,
+            &crate::TurnEnd::Failed {
+                message: "model stream broke".into(),
+                model_request_failed: true,
+            },
+        );
+        schedule_recovery(
+            state.clone(),
+            thread,
+            Some("old request".into()),
+            1,
+            "boom".into(),
+            Vec::new(),
+        )
+        .await;
+        start_turn_as(
+            &state,
+            thread,
+            TurnSource::User("new request".into()),
+            "new request".into(),
+            Vec::new(),
+        )
+        .await
+        .expect("the user turn wins the lifecycle epoch");
+
+        tokio::time::sleep(RECOVERY_DELAYS[0] + Duration::from_millis(200)).await;
+        assert_eq!(
+            runner.runs.load(Ordering::SeqCst),
+            1,
+            "the stale recovery must not start after a newer user turn"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_new_turn_during_failure_inspection_invalidates_the_recovery() {
+        let runner = Arc::new(ScriptedRunner {
+            runs: std::sync::atomic::AtomicUsize::new(0),
+            succeed_after: 1,
+            jobs: Mutex::new(Vec::new()),
+        });
+        let dir = tempfile::tempdir().expect("temp dir");
+        let inner = Arc::new(FileSessionStore::open(StoreConfig::new(dir.path())).unwrap());
+        let thread = inner.create_thread("t").await.unwrap().thread_id;
+        let gated = GatedStore::new(inner.clone() as Arc<dyn SessionStore>);
+        let state = AppState::new(
+            gated.clone(),
+            Arc::new(EmptyTools),
+            Arc::new(ConfigStore::new(RuntimeConfig::default())),
+            Arc::new(UsageRecorder::new()),
+            runner.clone(),
+            dir.path().to_path_buf(),
+            "test",
+        );
+        let failed = TurnId::new();
+        state
+            .turns
+            .try_register(thread, failed, ark_agent::CancelToken::new())
+            .expect("failed turn registers");
+        state.turns.finish(
+            failed,
+            &crate::TurnEnd::Failed {
+                message: "model stream broke".into(),
+                model_request_failed: true,
+            },
+        );
+
+        gated.interaction.enable();
+        let recovery_state = state.clone();
+        let recovery = tokio::spawn(async move {
+            schedule_recovery(
+                recovery_state,
+                thread,
+                Some("old request".into()),
+                1,
+                "boom".into(),
+                Vec::new(),
+            )
+            .await;
+        });
+        tokio::time::timeout(Duration::from_secs(1), gated.interaction.entered.notified())
+            .await
+            .expect("failure inspection pauses at the store");
+        start_turn_as(
+            &state,
+            thread,
+            TurnSource::User("new request".into()),
+            "new request".into(),
+            Vec::new(),
+        )
+        .await
+        .expect("the user turn wins");
+        gated.interaction.resume();
+        gated.interaction.disable();
+        recovery.await.expect("recovery scheduling finishes");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while state.turns.active_for(thread).is_some() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the user turn finishes");
+
+        tokio::time::sleep(RECOVERY_DELAYS[0] + Duration::from_millis(200)).await;
+        assert_eq!(
+            runner.runs.load(Ordering::SeqCst),
+            1,
+            "the failed request must retain its old lifecycle epoch across the inspection await"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_preserves_and_reauthorizes_the_original_attachments() {
+        let runner = Arc::new(ScriptedRunner {
+            runs: std::sync::atomic::AtomicUsize::new(0),
+            succeed_after: 2,
+            jobs: Mutex::new(Vec::new()),
+        });
+        let (state, thread, _dir) = state_with(runner.clone()).await;
+        let attachment = ark_common::AttachmentId::new();
+        state
+            .store
+            .append_event(
+                thread,
+                RuntimeEvent::AttachmentAssociated {
+                    seq: 0,
+                    thread_id: thread,
+                    attachment_id: attachment,
+                    timestamp: Utc::now(),
+                },
+            )
+            .await
+            .expect("attachment association persists");
+        start_turn_as(
+            &state,
+            thread,
+            TurnSource::User("inspect this".into()),
+            "inspect this".into(),
+            vec![attachment],
+        )
+        .await
+        .expect("the first turn starts");
+        tokio::time::timeout(RECOVERY_DELAYS[0] + Duration::from_secs(2), async {
+            while runner.runs.load(Ordering::SeqCst) < 2 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the recovery turn runs");
+
+        let jobs = runner.jobs.lock().unwrap();
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(jobs[0].attachment_ids, vec![attachment]);
+        assert_eq!(jobs[1].attachment_ids, vec![attachment]);
     }
 }

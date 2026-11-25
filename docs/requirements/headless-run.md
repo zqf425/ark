@@ -34,9 +34,13 @@ stdout,然后优雅停机退出。
    gate 摘要),避免无限等待(2026-11-02)。
 4. **停机**:回合终态后 `POST /v1/shutdown`,等待 serve 任务结束(复用既有 drain 语义);
    Ctrl-C 直接走 axum graceful shutdown + drain,不额外处理。
-5. **不做双实现**:SSE 帧解析只依赖 `event:`/`data:` 行与 `id:` 序号,不复刻任何后端语义;
+5. **只执行显式回合**(2026-11-25):`run` 装配关闭 automatic followups。子任务完成通知不会调度
+   auto-continuation，模型请求失败不会调度 auto-recovery，回合结束也不会因 pending completion
+   再开后续回合；启动时亦不运行 scheduler、IM 或 completion listener 循环。无人值守入口的终态
+   仍是唯一退出依据，避免一次性调用隐式变成多轮模型消费。
+6. **不做双实现**:SSE 帧解析只依赖 `event:`/`data:` 行与 `id:` 序号,不复刻任何后端语义;
    终态判定只认事件名,与 web 客户端同一规则(见 web 模块 §SSE)。
-6. **空闲断流重连**(2026-11-02):服务端在 `sse_idle_timeout_secs`(默认 300s)无事件后会发送
+7. **空闲断流重连**(2026-11-02):服务端在 `sse_idle_timeout_secs`(默认 300s)无事件后会发送
    `sse_idle_timeout` 事件并关闭订阅,长检视回合的模型 thinking 超过该窗口是正常形态。headless
    客户端按 SSE 契约从最后收到的 `id:` 序号重连续订(回放语义保证无损、无重复):单次读取的空闲
    上限(`STREAM_TIMEOUT`)超时、建连超时与服务端关闭都会触发重续订,失败归类按「首次建连失败=

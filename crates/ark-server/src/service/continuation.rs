@@ -249,7 +249,7 @@ async fn interrupted_user_lifecycle(state: &AppState, thread_id: ThreadId) -> bo
 
 fn policy_allows_auto_continue(state: &AppState) -> bool {
     let settings = state.config.snapshot().subagents;
-    settings.enabled && settings.auto_continue
+    state.automatic_followups_enabled() && settings.enabled && settings.auto_continue
 }
 
 /// Circuit breaker: consecutive automatic continuations that failed on the

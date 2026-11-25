@@ -172,6 +172,7 @@ pub struct AppState {
     pub hooks: Arc<dyn HookBroker>,
     shutdown: Arc<broadcast::Sender<&'static str>>,
     turns_completed: Arc<AtomicU64>,
+    automatic_followups: Arc<AtomicBool>,
 }
 
 /// The two halves of the sub-agent surface.
@@ -222,6 +223,7 @@ impl AppState {
             hooks: Arc::new(NoHooks),
             shutdown: Arc::new(shutdown),
             turns_completed: Arc::new(AtomicU64::new(0)),
+            automatic_followups: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -323,9 +325,20 @@ impl AppState {
         self
     }
 
+    /// Disable system-origin follow-up turns for one-shot runtimes.
+    pub fn with_automatic_followups(self, enabled: bool) -> Self {
+        self.automatic_followups.store(enabled, Ordering::Release);
+        self
+    }
+
+    pub fn automatic_followups_enabled(&self) -> bool {
+        self.automatic_followups.load(Ordering::Acquire)
+    }
+
     /// Enter shutdown before cancelling work, rejecting late continuation wakes.
     pub fn begin_shutdown(&self) {
         self.shutting_down.store(true, Ordering::Release);
+        self.turns.shutdown();
         self.continuations
             .cancel_all_with_reason(SHUTDOWN_CANCEL_REASON);
     }
@@ -383,23 +396,20 @@ impl AppState {
     ///
     /// Replay-then-append keeps this idempotent: a turn the reactor already
     /// closed, or one that already has a start record, is never duplicated.
+    /// Errors leave the registry entry unsettled rather than claiming a durable
+    /// terminal state that a restart would replay as active.
     pub async fn record_turn_terminal(
         &self,
         thread_id: ThreadId,
         turn_id: TurnId,
         auto_continuation: bool,
         end: &TurnEnd,
-    ) {
+    ) -> ark_common::Result<()> {
         // Narrow query: only turn and gate lifecycle entries are needed, so a
         // long transcript is never cloned just to close one turn.
-        let events = match self.store.replay_interaction_events(thread_id).await {
-            Ok(events) => events,
-            // An unreadable log must not be "fixed" by inventing records; the
-            // warning in the supervisor already reports it.
-            Err(_) => return,
-        };
+        let events = self.store.replay_interaction_events(thread_id).await?;
         if events.iter().any(|event| closes_turn(event, turn_id)) {
-            return;
+            return Ok(());
         }
         if !events.iter().any(|event| starts_turn(event, turn_id)) {
             // The runner failed before the reactor journaled its start. Record it
@@ -421,23 +431,11 @@ impl AppState {
                 attachment_ids: Vec::new(),
                 attachment_outcomes: Vec::new(),
             };
-            if let Err(err) = self.store.append_event(thread_id, started).await {
-                tracing::warn!(
-                    turn = %turn_id,
-                    error = %err.message,
-                    "could not persist the synthesized turn start"
-                );
-                return;
-            }
+            self.store.append_event(thread_id, started).await?;
         }
         let event = terminal_event(thread_id, turn_id, end);
-        if let Err(err) = self.store.append_event(thread_id, event).await {
-            tracing::warn!(
-                turn = %turn_id,
-                error = %err.message,
-                "could not persist a synthesized terminal event"
-            );
-        }
+        self.store.append_event(thread_id, event).await?;
+        Ok(())
     }
 
     /// Abort every live child run (shutdown path, design §7.9).

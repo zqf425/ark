@@ -59,9 +59,10 @@ monthly 空日期回退 `[1]`、标题与提示词截断到契约上限。拒绝
 ## 运行历史:有界环
 
 历史保存在任务文档内部(最近 `SCHEDULE_RUN_HISTORY_LIMIT = 10` 条,最旧在前),不是独立日志:
-设置页要回答的是"这个任务最近怎么样",不是审计。`record_run` 同时追加历史并镜像到
-`last_run`——两处必须一起写,否则 UI 会显示一个日志里不存在的状态。misfire 的 `skipped` 与
-其它结果一样记录。
+设置页要回答的是"这个任务最近怎么样",不是审计。终态由 `record_run` 同时追加历史并镜像到
+`last_run`;misfire 的 `skipped` 与其它结果一样记录。运行中的 `last_run = running` 同时是
+该次运行的所有权标记,不写入历史;期间的 busy/misfire `skipped` 只追加历史,不能覆盖
+`running`,否则真实终态将失去写回资格。终态落盘后,历史最新项与 `last_run` 再次一致。
 
 ## 验证
 
