@@ -56,6 +56,8 @@ export const SETTINGS_PROVIDERS_MESSAGES = {
   ],
   'settings.providerForm.defaultModelBadge': ['默认', 'Default'],
   'settings.providerForm.modelPlaceholder': ['deepseek-chat', 'deepseek-chat'],
+  'settings.providerForm.addModel': ['新增模型', 'Add model'],
+  'settings.providerForm.addModelPlaceholder': ['输入模型 id，回车或点「新增模型」加入清单', 'Enter a model id, press Enter or click Add model'],
   'settings.providerForm.apiKeyPlaceholderKeep': ['留空 = 保留原 key', 'Leave blank to keep the stored key'],
   'settings.providerForm.apiKeyPlaceholderNew': ['sk-…', 'sk-…'],
   'settings.providerForm.apiKeyHintEditing': ['已回填保存的 key；留空表示保留原 key，不会覆盖。', 'The stored key is prefilled; leave it blank to keep it instead of overwriting.'],

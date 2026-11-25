@@ -26,6 +26,7 @@ import {
 } from '../../../shared/contracts'
 import { CheckField, Field, SelectField, TextField } from './Field'
 import {
+  appendManualModel,
   buildCatalogRequest,
   mergeImportedModels,
   updateInventoryItem
@@ -153,8 +154,21 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
   const [catalog, setCatalog] = useState<ProviderModelSummary[]>([])
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
+  /** Pending hand-entered model id; empty input is a no-op on submit. */
+  const [manualModel, setManualModel] = useState('')
   const patch = <K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]): void => {
     setDraft((current) => ({ ...current, [key]: value }))
+  }
+
+  /** Append the pending manual id; a duplicate or default-equal input keeps
+   *  the text so the user can correct it instead of silently dropping it. */
+  const commitManualModel = (): void => {
+    const id = manualModel.trim()
+    if (!id) return
+    const next = appendManualModel(draft, id)
+    setDraft(next)
+    // The helper returns the same draft reference on a no-op.
+    if (next !== draft) setManualModel('')
   }
 
   const resolve = (): ProviderEntry | null => {
@@ -284,6 +298,34 @@ export function ProviderForm({ editing, initial, busy, catalogBusy, onCancel, on
               />
             ))}
           </div>
+          <input
+            id="provider-model-manual"
+            className="ark-field__input ark-provider-form__manual-model"
+            value={manualModel}
+            disabled={busy}
+            spellCheck={false}
+            autoComplete="off"
+            placeholder={t('settings.providerForm.addModelPlaceholder')}
+            aria-label={t('settings.providerForm.addModel')}
+            onChange={(event) => setManualModel(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                // Enter appends the pending id in place, so several models can
+                // be typed in a row without reaching for the button.
+                event.preventDefault()
+                commitManualModel()
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="ark-linkbtn"
+            disabled={busy}
+            aria-label={t('settings.providerForm.addModel')}
+            onClick={commitManualModel}
+          >
+            {t('settings.providerForm.addModel')}
+          </button>
         </Field>
       </div>
 
