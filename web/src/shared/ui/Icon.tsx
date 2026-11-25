@@ -33,6 +33,14 @@ const SHAPES: Record<string, ReactNode> = {
   stop: <rect x="6" y="6" width="12" height="12" rx="2" />,
   expand: <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />,
   more: <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>,
+  refresh: (
+    <>
+      <path d="M20 11a8 8 0 0 0-14-4L4 9" />
+      <path d="M4 4v5h5" />
+      <path d="M4 13a8 8 0 0 0 14 4l2-2" />
+      <path d="M20 20v-5h-5" />
+    </>
+  ),
   undo: <path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" />,
   git: <><circle cx="12" cy="12" r="9" /><path d="M12 7v10M8 12h8" /></>,
   chat: <><path d="M4 5h16v11H9l-5 4z" /><path d="M8 9h8M8 12h5" /></>,

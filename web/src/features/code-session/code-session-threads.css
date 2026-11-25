@@ -35,7 +35,7 @@
   min-width: 0;
 }
 
-.ark-threadlist__more,
+.ark-threadlist__iconbtn,
 .ark-threadlist__refresh {
   display: inline-flex;
   flex: none;
@@ -50,7 +50,7 @@
   cursor: pointer;
 }
 
-.ark-threadlist__more:hover,
+.ark-threadlist__iconbtn:hover,
 .ark-threadlist__refresh:hover {
   background: var(--ark-sidebar-row-hover);
   border-color: var(--ark-sidebar-row-ring);
@@ -58,7 +58,7 @@
 }
 
 .ark-threadlist__refresh {
-  width: 22px;
+  width: 26px;
   height: 22px;
   margin-left: auto;
 }

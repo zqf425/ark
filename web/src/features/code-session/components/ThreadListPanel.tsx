@@ -123,7 +123,6 @@ export function ThreadListPanel(): JSX.Element {
   const [scope, setScope] = useState<ThreadListScope>('recent')
   const [query, setQuery] = useState('')
   const [scheduleOpen, setScheduleOpen] = useState(false)
-  const [headMenu, setHeadMenu] = useState<MenuAnchor | null>(null)
   const [activeWorkspace, setActiveWorkspace] = useState('')
   const searchRef = useRef<HTMLInputElement | null>(null)
 
@@ -199,15 +198,24 @@ export function ThreadListPanel(): JSX.Element {
         <h1 className="ark-threadlist__title">{t('thread.list.title')}</h1>
         <div className="ark-threadlist__head-actions">
           {query ? <span className="ark-threadlist__count">{t('thread.list.matches', { count: visibleThreads.length })}</span> : null}
-          <button type="button" data-menu-trigger className="ark-threadlist__more" aria-label={t('thread.row.menu')} aria-haspopup="menu" aria-expanded={headMenu !== null} onClick={(event) => setHeadMenu((current) => current ? null : menuAnchorOf(event.currentTarget))}>
-            <Icon name="more" size={14} />
+          <button
+            type="button"
+            className="ark-threadlist__iconbtn"
+            title={t('thread.list.scheduleHint')}
+            aria-label={t('thread.list.scheduleHint')}
+            onClick={() => setScheduleOpen(true)}
+          >
+            <Icon name="clock" size={14} />
           </button>
-          {headMenu ? (
-            <div className="ark-threadrow__menu" role="menu">
-              <button type="button" role="menuitem" onClick={() => { setHeadMenu(null); setScheduleOpen(true) }}>{t('thread.list.schedule')}</button>
-              <button type="button" role="menuitem" onClick={() => { setHeadMenu(null); void refresh() }}>{t('thread.list.refresh')}</button>
-            </div>
-          ) : null}
+          <button
+            type="button"
+            className="ark-threadlist__iconbtn"
+            title={t('thread.list.refresh')}
+            aria-label={t('thread.list.refresh')}
+            onClick={() => void refresh()}
+          >
+            <Icon name="refresh" size={14} />
+          </button>
           <Button variant="primary" size="sm" disabled={busy} onClick={() => void create()}>
             {busy ? t('thread.list.creating') : t('thread.list.create')}
           </Button>
@@ -235,7 +243,7 @@ export function ThreadListPanel(): JSX.Element {
             {t('thread.list.scopeArchived')} <span>{archivedCount}</span>
           </button>
           <button type="button" className="ark-threadlist__refresh" title={t('thread.list.refresh')} aria-label={t('thread.list.refresh')} onClick={() => void refresh()}>
-            <Icon name="undo" size={13} />
+            <Icon name="refresh" size={13} />
           </button>
         </div>
       </div>
