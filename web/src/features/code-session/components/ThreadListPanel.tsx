@@ -8,7 +8,7 @@ import { useThreadRunning } from '../hooks/use-thread-running'
 import { getWorkspaceView } from '../../settings/api/workspace-api'
 import { filterThreadsWithWorkspace, type ThreadListScope } from './thread-list-filter'
 import { groupThreadsByProject, workspaceBasename, type ThreadProject } from './thread-projects'
-import { ProjectGroupMenu, RunningDot, ThreadMeta, ThreadRowMenu, menuAnchorOf } from './ThreadListMenus'
+import { RunningDot, ThreadMeta, ThreadRowMenu, menuAnchorOf } from './ThreadListMenus'
 import { ScheduleCreateDialog } from './ScheduleCreateDialog'
 
 type MenuAnchor = ReturnType<typeof menuAnchorOf>
@@ -124,8 +124,6 @@ export function ThreadListPanel(): JSX.Element {
   const [query, setQuery] = useState('')
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const [headMenu, setHeadMenu] = useState<MenuAnchor | null>(null)
-  const [projectMenu, setProjectMenu] = useState<string | null>(null)
-  const [projectAnchor, setProjectAnchor] = useState<MenuAnchor | null>(null)
   const [activeWorkspace, setActiveWorkspace] = useState('')
   const searchRef = useRef<HTMLInputElement | null>(null)
 
@@ -259,7 +257,6 @@ export function ThreadListPanel(): JSX.Element {
           <nav className="ark-threadlist__nav" aria-label={t('thread.list.projectsAria')}>
             {groups.map((group) => {
               const isCollapsed = collapsed.has(group.path)
-              const isMenuOpen = projectMenu === group.path
               return (
                 <section key={group.path || '__default__'} className="ark-projectgroup">
                   <div className="ark-projectgroup__row">
@@ -274,23 +271,24 @@ export function ThreadListPanel(): JSX.Element {
                       <span className="ark-projectgroup__actions">
                         <button
                           type="button"
-                          data-menu-trigger
                           className="ark-projectgroup__action"
-                          aria-label={t('thread.row.menu')}
-                          aria-haspopup="menu"
-                          aria-expanded={isMenuOpen}
-                          onClick={(event) => { setProjectAnchor((current) => current && projectMenu === group.path ? null : menuAnchorOf(event.currentTarget)); setProjectMenu((current) => current === group.path ? null : group.path) }}
+                          title={t('thread.list.groupCreate', { title: group.label })}
+                          aria-label={t('thread.list.groupCreate', { title: group.label })}
+                          disabled={busy}
+                          onClick={() => void handleProjectCreate(group.path)}
                         >
-                          <Icon name="more" size={13} />
+                          <Icon name="plus" size={13} />
                         </button>
-                        <ProjectGroupMenu
-                          anchor={isMenuOpen ? projectAnchor : null}
-                          group={group}
-                          busy={busy}
-                          onCreate={() => void handleProjectCreate(group.path)}
-                          onDelete={() => void handleProjectDelete(group)}
-                          onClose={() => setProjectMenu(null)}
-                        />
+                        <button
+                          type="button"
+                          className="ark-projectgroup__action is-danger"
+                          title={t('thread.list.groupDelete', { title: group.label })}
+                          aria-label={t('thread.list.groupDelete', { title: group.label })}
+                          disabled={busy || group.threads.length === 0}
+                          onClick={() => void handleProjectDelete(group)}
+                        >
+                          <Icon name="archive" size={13} />
+                        </button>
                       </span>
                     ) : null}
                   </div>

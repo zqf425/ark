@@ -5,8 +5,6 @@ import { formatRelative } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
 import { activityKeyOf } from '../state/threads-slice'
 import { exportThread } from '../api/threads-api'
-import type { ThreadProject } from './thread-projects'
-import { workspaceBasename } from './thread-projects'
 
 const MENU_GAP = 4
 const MENU_EDGE = 8
@@ -111,49 +109,23 @@ export function menuAnchorOf(element: HTMLElement | null): Anchor {
   return rect ? { top: rect.top, bottom: rect.bottom, right: rect.right } : { top: 0, bottom: 0, right: MENU_EDGE + MENU_WIDTH }
 }
 
-/** Project group overflow menu: create and bulk delete live behind one `⋯`. */
-export function ProjectGroupMenu({ anchor, group, busy, onCreate, onDelete, onClose }: {
-  anchor: Anchor | null
-  group: ThreadProject
-  busy: boolean
-  onCreate: () => void
-  onDelete: () => void
-  onClose: () => void
-}): JSX.Element | null {
-  const { t } = useI18n()
-  if (!anchor) return null
-  const title = group.label || t('thread.list.defaultProject')
-  return (
-    <MenuSurface position={{ top: 0, bottom: null, left: 0, anchor }} onDismiss={onClose}>
-      <button type="button" role="menuitem" disabled={busy || !group.path} onClick={() => { onClose(); onCreate() }}>
-        {t('thread.list.groupCreate', { title })}
-      </button>
-      <button type="button" role="menuitem" className="is-danger" disabled={busy || !group.path || group.threads.length === 0} onClick={() => { onClose(); onDelete() }}>
-        {t('thread.list.groupDelete', { title })}
-      </button>
-    </MenuSurface>
-  )
-}
-
 /** Compact status dot used by running rows. */
 export function RunningDot(): JSX.Element {
   const { t } = useI18n()
   return (
     <span className="ark-threadrow__running" role="status" aria-label={t('thread.row.running')} title={t('thread.row.running')}>
-      <Icon name="clock" size={11} />
       <span>{t('thread.row.runningShort')}</span>
     </span>
   )
 }
 
-/** Meta line priority: time > fork > workspace on narrow rails. */
+/** Meta line: time > fork > archived. */
 export function ThreadMeta({ thread, sourceTitle }: { thread: ThreadSummary; sourceTitle?: string }): JSX.Element {
   const { t } = useI18n()
   return (
     <span className="ark-threadrow__meta">
       <time>{formatRelative(activityKeyOf(thread), t)}</time>
       {sourceTitle ? <span className="ark-threadrow__fork" title={t('thread.row.forkedFrom', { title: sourceTitle })}><Icon name="branch" size={11} />{t('thread.row.forkedFrom', { title: sourceTitle })}</span> : null}
-      {thread.workspace ? <span className="ark-threadrow__workspace" title={thread.workspace}>{workspaceBasename(thread.workspace)}</span> : null}
       {thread.archived ? <span className="ark-threadrow__archived">{t('thread.row.archived')}</span> : null}
     </span>
   )
