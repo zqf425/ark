@@ -547,11 +547,13 @@
  */
 .ark-mention {
   display: inline;
-  padding: 1px 4px;
-  margin: 0 -4px;
-  border-radius: 4px;
-  background: var(--ark-skill-soft);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ark-skill) 22%, transparent);
+  padding: 2px 5px;
+  margin: 0 -5px;
+  border-radius: 6px;
+  /* Tinted pill like the @file / /command tokens of mainstream agent
+     composers; the faint hairline only adds edge contrast in dark mode. */
+  background: color-mix(in srgb, var(--ark-skill) 13%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ark-skill) 14%, transparent);
   color: var(--ark-skill);
   font-family: inherit;
   font-size: inherit;
@@ -566,8 +568,8 @@
 /* While typing, the reference is not yet resolved: same size and shape, but
    only a hairline — no fill — so the difference reads at a glance. */
 .ark-mention--typing {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--ark-accent-dim);
+  background: color-mix(in srgb, var(--ark-skill) 5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ark-skill) 30%, transparent);
 }
 
 /* ---------- answered input-gate summary row ---------- */
