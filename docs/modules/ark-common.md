@@ -13,7 +13,10 @@
   `Usage::default()` 仅是累加器，不算缺失样本。
 - 路径归一化的唯一实现为 `ark_common::path::normalize`；其它 crate 和前端不得复制逻辑。
 - Windows `canonicalize` 产生的 verbatim 前缀由 `ark_common::path::strip_verbatim` 在归一化入口统一移除；盘符和 UNC 路径均以非 verbatim 形式参与比较。
-- 文本写入必须 UTF-8 无 BOM，原子写入由 `write_text_atomic` 完成。
+- 文本写入必须 UTF-8 无 BOM，原子写入由 `write_text_atomic` 完成：临时文件使用 UUID 唯一名，
+  写完同步文件后 rename，并同步父目录；任一步失败都不删除原文件。
+- `keyed_item_id(namespace)` 是稳定条目 ID 的唯一宿主（双 seed FNV-1a，强制 UUID v8/variant 位）。
+  事件生产者、存储投影和旧日志回退都调用它，其他语言不得复制算法。
 - `ArkErrorCode` 是错误码的唯一枚举，`http_status` 紧跟枚举定义，使得新增一个 code 时必须同时决定
   它的传输状态码，不可能只加变体不加状态：`ValidationError` 400、`Unauthorized` 401、`NotFound` 404、
   `Conflict` 409、`ModelRequestFailed` 502、`ToolExecutionFailed` 500、`RuntimeUnavailable` 503、

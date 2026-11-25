@@ -37,7 +37,8 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         file.sync_all()
             .map_err(|err| io_error("sync temp file", &temp, err))?;
     }
-    std::fs::rename(&temp, path).map_err(|err| io_error("rename into place", path, err))
+    std::fs::rename(&temp, path).map_err(|err| io_error("rename into place", path, err))?;
+    sync_parent_dir(path)
 }
 
 /// Serialize `value` as pretty JSON and write it atomically.
@@ -48,14 +49,41 @@ pub fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<()> {
 
 /// Persist directory entry changes made by rename or remove.
 ///
-/// File fsync alone does not make the containing directory entry durable. This
-/// helper is intentionally called only by the dirty-marker protocol, whose
-/// ordering relative to the authoritative event append is correctness-critical.
+/// File fsync alone does not make the containing directory entry durable. Every
+/// atomic replacement and marker removal calls this after changing the entry.
 pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
     let Some(parent) = path.parent() else {
         return Ok(());
     };
+    #[cfg(test)]
+    if let Some(error) = injected_parent_sync_failure(path) {
+        return Err(error);
+    }
     sync_dir(parent).map_err(|err| io_error("sync parent directory", parent, err))
+}
+
+#[cfg(test)]
+static PARENT_SYNC_FAILURES: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashSet<PathBuf>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn fail_next_parent_sync(path: &Path) {
+    PARENT_SYNC_FAILURES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .insert(path.to_path_buf());
+}
+
+#[cfg(test)]
+fn injected_parent_sync_failure(path: &Path) -> Option<ArkError> {
+    let injected = PARENT_SYNC_FAILURES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .remove(&path.to_path_buf());
+    injected.then(|| ArkError::store("injected parent directory fsync failure"))
 }
 
 #[cfg(unix)]
@@ -104,23 +132,171 @@ pub fn read_json_opt<T: DeserializeOwned>(path: &Path) -> Option<T> {
 
 /// Append one line (caller includes the trailing newline) and flush.
 pub fn append_line_blocking(path: &Path, line: &str, fsync: bool) -> Result<()> {
-    use std::io::Write;
+    append_line_blocking_outcome(path, line, fsync).map_err(|failure| failure.error)
+}
+
+/// An append error together with whether the original file length was restored
+/// and synced. Callers that own sequence allocation must stop when this is false.
+pub(crate) struct AppendFailure {
+    pub(crate) error: ArkError,
+    pub(crate) rolled_back: bool,
+}
+
+pub(crate) fn append_line_blocking_outcome(
+    path: &Path,
+    line: &str,
+    fsync: bool,
+) -> std::result::Result<(), AppendFailure> {
     if let Some(parent) = path.parent() {
-        ensure_dir(parent)?;
+        ensure_dir(parent).map_err(no_append_failure)?;
     }
+    let created = !path_entry_exists(path);
+    // O_APPEND/FILE_APPEND_DATA handles cannot truncate on Windows. Store logs
+    // have one writer actor, so seek to the end on a writable handle instead;
+    // the same handle can then restore the original length after a failure.
     let mut file = std::fs::OpenOptions::new()
         .create(true)
-        .append(true)
+        .truncate(false)
+        .write(true)
         .open(path)
-        .map_err(|err| io_error("open for append", path, err))?;
+        .map_err(|err| io_error("open for append", path, err))
+        .map_err(no_append_failure)?;
+    use std::io::{Seek, SeekFrom};
+    let original_len = file
+        .seek(SeekFrom::End(0))
+        .map_err(|err| io_error("seek append target", path, err))
+        .map_err(no_append_failure)?;
+    let sync_directory_entry = created || original_len == 0;
+    #[cfg(test)]
+    let (mut result, mut injected) = (write_and_sync_append(&mut file, line, fsync), None);
+    #[cfg(not(test))]
+    let mut result = write_and_sync_append(&mut file, line, fsync);
+    #[cfg(test)]
+    if result.is_ok() {
+        injected = take_append_failure(path);
+        if let Some(stage) = injected {
+            result = Err(inject_append_failure(&mut file, line, stage));
+        }
+    }
+    if result.is_ok() && sync_directory_entry {
+        result = sync_parent_dir(path);
+    }
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            #[cfg(test)]
+            let fail_rollback = matches!(injected, Some(TestAppendFailure::RollbackFsync));
+            Err(rollback_append(file, path, original_len, error, created, {
+                #[cfg(test)]
+                {
+                    fail_rollback
+                }
+                #[cfg(not(test))]
+                false
+            }))
+        }
+    }
+}
+
+fn no_append_failure(error: ArkError) -> AppendFailure {
+    AppendFailure {
+        error,
+        rolled_back: true,
+    }
+}
+
+fn write_and_sync_append(file: &mut std::fs::File, line: &str, fsync: bool) -> Result<()> {
+    use std::io::Write;
     file.write_all(line.as_bytes())
-        .map_err(|err| io_error("append", path, err))?;
-    file.flush().map_err(|err| io_error("flush", path, err))?;
+        .map_err(|err| ArkError::store(format!("append failed: {err}")))?;
+    file.flush()
+        .map_err(|err| ArkError::store(format!("append flush failed: {err}")))?;
     if fsync {
         file.sync_all()
-            .map_err(|err| io_error("fsync", path, err))?;
+            .map_err(|err| ArkError::store(format!("append fsync failed: {err}")))?;
     }
     Ok(())
+}
+
+fn rollback_append(
+    file: std::fs::File,
+    path: &Path,
+    original_len: u64,
+    cause: ArkError,
+    created: bool,
+    fail_sync: bool,
+) -> AppendFailure {
+    let mut rolled_back =
+        file.set_len(original_len).is_ok() && !fail_sync && file.sync_all().is_ok();
+    if rolled_back && created {
+        drop(file);
+        rolled_back = match std::fs::remove_file(path) {
+            Ok(()) => sync_parent_dir(path).is_ok(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                sync_parent_dir(path).is_ok()
+            }
+            Err(_) => false,
+        };
+    }
+    let error = if rolled_back {
+        cause
+    } else {
+        ArkError::store(format!(
+            "append failed and rollback could not be confirmed; refusing further writes: {cause}"
+        ))
+    };
+    AppendFailure { error, rolled_back }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(crate) enum TestAppendFailure {
+    PartialWrite,
+    Fsync,
+    RollbackFsync,
+}
+
+#[cfg(test)]
+static APPEND_FAILURES: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, TestAppendFailure>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn fail_next_append(path: &Path, stage: TestAppendFailure) {
+    APPEND_FAILURES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .insert(path.to_path_buf(), stage);
+}
+
+#[cfg(test)]
+fn take_append_failure(path: &Path) -> Option<TestAppendFailure> {
+    APPEND_FAILURES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .remove(&path.to_path_buf())
+}
+
+#[cfg(test)]
+fn inject_append_failure(
+    file: &mut std::fs::File,
+    line: &str,
+    stage: TestAppendFailure,
+) -> ArkError {
+    use std::io::Write;
+    let result = match stage {
+        TestAppendFailure::PartialWrite => {
+            let bytes = line.as_bytes();
+            file.write_all(&bytes[..bytes.len() / 2])
+        }
+        TestAppendFailure::Fsync | TestAppendFailure::RollbackFsync => Err(std::io::Error::new(
+            std::io::ErrorKind::StorageFull,
+            "injected fsync failure",
+        )),
+    };
+    ArkError::store(format!("injected append failure: {result:?}"))
 }
 
 /// Whether any filesystem entry occupies `path`.
@@ -293,6 +469,59 @@ mod tests {
             .filter(|name| name.ends_with(".tmp"))
             .collect();
         assert!(entries.is_empty(), "temp files must be renamed away");
+    }
+
+    #[test]
+    fn atomic_write_propagates_parent_directory_sync_failure() {
+        let dir = TempDir::new("fs-util-parent-sync-failure");
+        let path = dir.path().join("file.json");
+        fail_next_parent_sync(&path);
+        let result = write_atomic(&path, b"durable bytes");
+        assert!(result.is_err(), "rename must be followed by parent fsync");
+        assert_eq!(std::fs::read(&path).unwrap(), b"durable bytes");
+    }
+
+    #[test]
+    fn first_append_propagates_parent_directory_sync_failure() {
+        let dir = TempDir::new("fs-util-first-append-parent-sync");
+        let path = dir.path().join("nested/events.jsonl");
+        fail_next_parent_sync(&path);
+
+        let failure = append_line_blocking_outcome(&path, "first-record\n", true).unwrap_err();
+
+        assert!(failure.rolled_back);
+        assert!(!path.exists(), "a newly created log must be rolled back");
+    }
+
+    #[test]
+    fn append_to_an_empty_existing_log_still_syncs_its_directory_entry() {
+        let dir = TempDir::new("fs-util-empty-append-parent-sync");
+        let path = dir.path().join("events.jsonl");
+        std::fs::write(&path, b"").unwrap();
+        fail_next_parent_sync(&path);
+
+        assert!(append_line_blocking(&path, "record\n", true).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"");
+    }
+
+    #[test]
+    fn partial_append_failure_rolls_back_the_original_length() {
+        let dir = TempDir::new("fs-util-append-partial");
+        let path = dir.path().join("events.jsonl");
+        std::fs::write(&path, b"old\n").unwrap();
+        fail_next_append(&path, TestAppendFailure::PartialWrite);
+        assert!(append_line_blocking(&path, "new-record\n", true).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"old\n");
+    }
+
+    #[test]
+    fn fsync_append_failure_rolls_back_the_complete_record() {
+        let dir = TempDir::new("fs-util-append-fsync");
+        let path = dir.path().join("events.jsonl");
+        std::fs::write(&path, b"old\n").unwrap();
+        fail_next_append(&path, TestAppendFailure::Fsync);
+        assert!(append_line_blocking(&path, "new-record\n", true).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"old\n");
     }
 
     #[test]

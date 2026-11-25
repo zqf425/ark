@@ -19,9 +19,11 @@ use crate::service::writer_registry::WriterRegistry;
 use crate::store::data_lock::DataLock;
 use crate::store::fs_util::{ensure_dir, remove_dir_all, sweep_temp_files, write_json_atomic};
 use crate::store::index::{load_snapshot, save_snapshot, IndexEntry, ThreadIndex};
+use crate::store::writer_actor::WriterObserver;
 use ark_common::{ArkError, Result, ThreadId};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -29,6 +31,64 @@ use std::time::Duration;
 /// excludes ark writers, not foreign programs that may keep a hidden `*.tmp`
 /// open when `--data-dir` points into a shared directory.
 const SWEEP_MIN_FILE_AGE: Duration = Duration::from_secs(5 * 60);
+
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct IndexTestGate {
+    pause_next: std::sync::atomic::AtomicBool,
+    pub(crate) entered: tokio::sync::Notify,
+    pub(crate) release: tokio::sync::Notify,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct ChildDeleteTestGate {
+    pause_next: std::sync::atomic::AtomicBool,
+    pub(crate) entered: tokio::sync::Notify,
+    pub(crate) release: tokio::sync::Notify,
+}
+
+struct IndexObserver {
+    index: Arc<Mutex<ThreadIndex>>,
+    snapshot: PathBuf,
+}
+
+impl WriterObserver for IndexObserver {
+    fn appended(&self, event: &ark_contract::RuntimeEvent) {
+        advance_index(
+            &self.index,
+            &self.snapshot,
+            event.thread_id(),
+            event.seq(),
+            Some(event.timestamp()),
+        );
+    }
+
+    fn rewound(&self, thread: ThreadId, last_seq: u64, last_event_at: Option<DateTime<Utc>>) {
+        advance_index(&self.index, &self.snapshot, thread, last_seq, last_event_at);
+    }
+}
+
+fn advance_index(
+    index: &Arc<Mutex<ThreadIndex>>,
+    snapshot: &Path,
+    thread: ThreadId,
+    seq: u64,
+    at: Option<DateTime<Utc>>,
+) {
+    match index.lock() {
+        Ok(mut index) => {
+            index.set_watermark(&thread, seq);
+            if let Some(at) = at {
+                index.set_last_event_at(&thread, at);
+            }
+            if let Err(error) = save_snapshot(&mut index, snapshot) {
+                tracing::warn!(thread = %thread, %error, "failed to persist the index snapshot");
+            }
+        }
+        Err(error) => tracing::error!(thread = %thread, %error, "index lock poisoned"),
+    }
+}
 
 fn build_child_locator(paths: &DataPaths) -> Result<ChildLocator> {
     let mut locator = ChildLocator::default();
@@ -231,7 +291,7 @@ pub struct FileSessionStore {
     pub(crate) paths: DataPaths,
     pub(crate) registry: WriterRegistry,
     pub(crate) diagnostics: Arc<dyn DiagnosticSink>,
-    pub(crate) index: Mutex<ThreadIndex>,
+    pub(crate) index: Arc<Mutex<ThreadIndex>>,
     pub(crate) children: Mutex<ChildLocator>,
     /// Per-parent serialization for the authoritative child-run log and its
     /// derived index. Atomic rename prevents torn files, but only this lock
@@ -242,6 +302,10 @@ pub struct FileSessionStore {
     /// Declared last so it is the **last** field dropped: every writer actor and
     /// half-finished append must be gone before another process may take over.
     _lock: DataLock,
+    #[cfg(test)]
+    pub(crate) index_test_gate: Arc<IndexTestGate>,
+    #[cfg(test)]
+    pub(crate) child_delete_test_gate: Arc<ChildDeleteTestGate>,
 }
 
 impl FileSessionStore {
@@ -277,16 +341,25 @@ impl FileSessionStore {
         let index = load_snapshot(&paths.index_file());
         repair_top_level_threads(&paths, &index, &diagnostics);
         let children = build_child_locator(&paths)?;
-        let registry = WriterRegistry::new(config.limits().clone(), diagnostics.clone());
+        let index = Arc::new(Mutex::new(index));
+        let observer = Arc::new(IndexObserver {
+            index: Arc::clone(&index),
+            snapshot: paths.index_file(),
+        });
+        let registry = WriterRegistry::new(config.limits().clone(), diagnostics.clone(), observer);
         Ok(Self {
             config,
             paths,
             registry,
             diagnostics,
-            index: Mutex::new(index),
+            index,
             children: Mutex::new(children),
             child_logs: Mutex::new(HashMap::new()),
             _lock: lock,
+            #[cfg(test)]
+            index_test_gate: Arc::new(IndexTestGate::default()),
+            #[cfg(test)]
+            child_delete_test_gate: Arc::new(ChildDeleteTestGate::default()),
         })
     }
 
@@ -300,6 +373,44 @@ impl FileSessionStore {
 
     pub fn diagnostics(&self) -> Arc<dyn DiagnosticSink> {
         self.diagnostics.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pause_next_index_update(&self) {
+        self.index_test_gate
+            .pause_next
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn wait_for_index_test_gate(&self) {
+        if self
+            .index_test_gate
+            .pause_next
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.index_test_gate.entered.notify_one();
+            self.index_test_gate.release.notified().await;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pause_next_child_delete(&self) {
+        self.child_delete_test_gate
+            .pause_next
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn wait_for_child_delete_test_gate(&self) {
+        if self
+            .child_delete_test_gate
+            .pause_next
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.child_delete_test_gate.entered.notify_one();
+            self.child_delete_test_gate.release.notified().await;
+        }
     }
 
     /// Serialize one complete `children/runs.jsonl` transaction for a parent.
@@ -401,17 +512,11 @@ impl FileSessionStore {
         entry.inherited_item_count = file.inherited_item_count;
         entry.workspace = file.workspace.clone();
         let mut index = self.lock_index()?;
-        index.insert(entry);
+        index.upsert_metadata(entry);
         save_snapshot(&mut index, &self.paths.index_file())
     }
 
-    /// Advance the watermark and record `at` as the newest event time.
-    ///
-    /// `at` is the event's own timestamp (the writer stamps it), so a replayed
-    /// backlog or a rewind recompute projects the honest last-activity time
-    /// instead of the moment the index happened to run. `None` keeps the
-    /// current value (callers that only re-watermark, like rewind recovery
-    /// paths that cannot read the log).
+    #[cfg(test)]
     pub(crate) fn index_advance(&self, thread: ThreadId, seq: u64, at: Option<DateTime<Utc>>) {
         match self.lock_index() {
             Ok(mut index) => {
@@ -419,9 +524,6 @@ impl FileSessionStore {
                 if let Some(at) = at {
                     index.set_last_event_at(&thread, at);
                 }
-                // Fire-and-forget is fine for the in-memory watermark (it is
-                // rebuilt from the log), but a failed snapshot write is a
-                // durability regression worth one warning line.
                 if let Err(error) = save_snapshot(&mut index, &self.paths.index_file()) {
                     tracing::warn!(thread = %thread, %error, "failed to persist the index snapshot");
                 }
@@ -476,10 +578,6 @@ impl FileSessionStore {
     /// Remove a thread directory after its writers have been closed.
     pub(crate) fn remove_thread_dir(&self, thread: ThreadId) -> Result<()> {
         let paths = self.thread_paths(thread);
-        if let Some(handle) = self.registry.forget(&paths) {
-            // The actor owns the file handles; dropping the channel stops it.
-            drop(handle);
-        }
         remove_dir_all(paths.dir())?;
         // The row is derived data, but leaving it behind would resurrect the
         // thread in `list_threads` until the next reconciliation pass.
@@ -612,6 +710,37 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn child_metadata_edits_stay_in_the_resolved_child_directory() {
+        let dir = crate::store::tests::TempDir::new("store-child-metadata");
+        let store = test_store(&dir);
+        let parent = store.create_thread("parent").await.unwrap().thread_id;
+        let child = ark_common::ChildId::new();
+        store
+            .create_child_run(parent, child, "worker")
+            .await
+            .unwrap();
+        let child_id = ThreadId::from_uuid(child.as_uuid());
+        let child_paths = store.resolve_paths(child_id);
+
+        let renamed = store
+            .rename_thread(child_id, "renamed child")
+            .await
+            .unwrap();
+        assert_eq!(renamed.title, "renamed child");
+        store.set_archived(child_id, true).await.unwrap();
+        store
+            .set_thread_runtime(child_id, ark_contract::ThreadRuntimeSettings::default())
+            .await
+            .unwrap();
+
+        let file = thread_file::read(&child_paths).expect("child metadata remains readable");
+        assert_eq!(file.title, "renamed child");
+        assert!(file.archived);
+        assert!(!store.thread_paths(child_id).thread_json().exists());
+        assert!(store.lock_index().unwrap().get(&child_id).is_none());
+    }
+
+    #[tokio::test]
     async fn missing_threads_report_not_found() {
         let dir = crate::store::tests::TempDir::new("store-missing");
         let store = test_store(&dir);
@@ -705,6 +834,118 @@ pub(crate) mod tests {
         assert!(detail.contains(&child.to_string()));
         assert!(detail.contains(&first.to_string()));
         assert!(detail.contains(&second.to_string()));
+    }
+
+    #[tokio::test]
+    async fn delete_drains_a_queued_writer_and_blocks_directory_recreation() {
+        let dir = crate::store::tests::TempDir::new("store-delete-writer-race");
+        let store = test_store(&dir);
+        let meta = store.create_thread("gone").await.unwrap();
+        let paths = store.resolve_paths(meta.thread_id);
+        let writer = store.registry.writer_for(meta.thread_id, &paths).unwrap();
+        let mut queued = Box::pin(writer.append(crate::store::tests::event_at(meta.thread_id, 0)));
+        tokio::select! {
+            biased;
+            result = &mut queued => panic!("queued append completed before deletion: {result:?}"),
+            _ = std::future::ready(()) => {}
+        }
+
+        store.delete_thread(meta.thread_id).await.unwrap();
+        let _ = queued.await;
+        assert!(
+            !paths.dir().exists(),
+            "a drained append must not recreate delete"
+        );
+        let late = store
+            .append_event(
+                meta.thread_id,
+                crate::store::tests::event_at(meta.thread_id, 0),
+            )
+            .await;
+        assert!(late.is_err(), "new writers must be rejected after deletion");
+        assert!(!paths.dir().exists());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn delayed_append_completion_cannot_regress_the_index_watermark() {
+        let dir = crate::store::tests::TempDir::new("store-index-append-race");
+        let store = Arc::new(test_store(&dir));
+        let meta = store.create_thread("race").await.unwrap();
+        store.pause_next_index_update();
+        let first = {
+            let store = Arc::clone(&store);
+            let thread = meta.thread_id;
+            tokio::spawn(async move {
+                store
+                    .append_event(thread, crate::store::tests::event_at(thread, 0))
+                    .await
+                    .unwrap()
+            })
+        };
+        store.index_test_gate.entered.notified().await;
+        store
+            .append_event(
+                meta.thread_id,
+                crate::store::tests::event_at(meta.thread_id, 0),
+            )
+            .await
+            .unwrap();
+        store.index_test_gate.release.notify_one();
+        first.await.unwrap();
+
+        let entry = store
+            .lock_index()
+            .unwrap()
+            .get(&meta.thread_id)
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            entry.indexed_seq, 2,
+            "a late completion must not move it back"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn delayed_rewind_completion_cannot_regress_a_newer_append() {
+        let dir = crate::store::tests::TempDir::new("store-index-rewind-race");
+        let store = Arc::new(test_store(&dir));
+        let meta = store.create_thread("race").await.unwrap();
+        for _ in 0..2 {
+            store
+                .append_event(
+                    meta.thread_id,
+                    crate::store::tests::event_at(meta.thread_id, 0),
+                )
+                .await
+                .unwrap();
+        }
+        store.pause_next_index_update();
+        let rewinding = {
+            let store = Arc::clone(&store);
+            let thread = meta.thread_id;
+            tokio::spawn(async move { store.rewind_thread(thread, 2, None).await.unwrap() })
+        };
+        store.index_test_gate.entered.notified().await;
+        store
+            .append_event(
+                meta.thread_id,
+                crate::store::tests::event_at(meta.thread_id, 0),
+            )
+            .await
+            .unwrap();
+        store.index_test_gate.release.notify_one();
+        rewinding.await.unwrap();
+
+        let entry = store
+            .lock_index()
+            .unwrap()
+            .get(&meta.thread_id)
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            entry.indexed_seq, 4,
+            "rewind completion must not overwrite seq 4"
+        );
     }
 
     #[tokio::test]

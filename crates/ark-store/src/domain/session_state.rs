@@ -174,6 +174,7 @@ mod tests {
             seq: 3,
             thread_id: thread(),
             turn_id: TurnId::new(),
+            item_id: None,
             timestamp: Utc::now(),
             message: "boom".into(),
             model_request_failed: false,

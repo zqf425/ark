@@ -439,6 +439,53 @@ fn usage(thread: ThreadId, turn: TurnId, tokens: u64) -> RuntimeEvent {
 }
 
 #[test]
+fn failed_event_append_rolls_back_and_reuses_only_the_unwritten_seq() {
+    let dir = TempDir::new("writer-append-rollback");
+    let thread = ThreadId::new();
+    let mut writer = state(&dir, thread);
+    writer.append(event_at(thread, 0)).unwrap();
+    let before = std::fs::read(writer.paths().events_jsonl()).unwrap();
+    crate::store::fs_util::fail_next_append(
+        &writer.paths().events_jsonl(),
+        crate::store::fs_util::TestAppendFailure::PartialWrite,
+    );
+
+    assert!(writer.append(event_at(thread, 0)).is_err());
+    assert_eq!(writer.watermark(), 1);
+    assert_eq!(
+        std::fs::read(writer.paths().events_jsonl()).unwrap(),
+        before
+    );
+
+    let stored = writer.append(event_at(thread, 0)).unwrap();
+    assert_eq!(stored.seq(), 2);
+    let parsed = crate::store::event_log::read_log_blocking(writer.paths()).unwrap();
+    assert_eq!(parsed.events.len(), 2);
+    assert_eq!(parsed.max_seq, 2);
+    assert_eq!(parsed.malformed, 0);
+}
+
+#[test]
+fn uncertain_append_rollback_blocks_later_appends() {
+    let dir = TempDir::new("writer-append-uncertain");
+    let thread = ThreadId::new();
+    let mut writer = state(&dir, thread);
+    writer.append(event_at(thread, 0)).unwrap();
+    crate::store::fs_util::fail_next_append(
+        &writer.paths().events_jsonl(),
+        crate::store::fs_util::TestAppendFailure::RollbackFsync,
+    );
+
+    assert!(writer.append(event_at(thread, 0)).is_err());
+    assert_eq!(writer.watermark(), 1);
+    assert!(
+        writer.append(event_at(thread, 0)).is_err(),
+        "ambiguous bytes must fail closed until recovery"
+    );
+    assert_eq!(writer.watermark(), 1);
+}
+
+#[test]
 fn append_fsync_skips_deltas_and_respects_the_limit() {
     let mut limits = StoreLimits::for_tests();
     let thread = ThreadId::new();
@@ -467,6 +514,7 @@ fn append_fsync_skips_deltas_and_respects_the_limit() {
         seq: 3,
         thread_id: thread,
         turn_id: turn,
+        item_id: None,
         timestamp: Utc::now(),
         call_id: "call".into(),
         tool: "read".into(),

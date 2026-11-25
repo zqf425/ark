@@ -77,6 +77,27 @@ define_id!(ChildId);
 define_id!(RunId);
 define_id!(AttachmentId);
 
+/// Stable synthetic id for an event whose render identity is a string key.
+pub fn keyed_item_id(namespace: &str) -> ItemId {
+    let hi = fnv1a(namespace.as_bytes(), 0xcbf2_9ce4_8422_2325);
+    let lo = fnv1a(namespace.as_bytes(), 0x8422_2325_cbf2_9ce4);
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&hi.to_be_bytes());
+    bytes[8..].copy_from_slice(&lo.to_be_bytes());
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    ItemId::from_uuid(Uuid::from_bytes(bytes))
+}
+
+fn fnv1a(bytes: &[u8], seed: u64) -> u64 {
+    let mut hash = seed;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,5 +114,11 @@ mod tests {
     #[test]
     fn ids_reject_garbage() {
         assert!(serde_json::from_str::<TurnId>("\"not-a-uuid\"").is_err());
+    }
+
+    #[test]
+    fn keyed_item_ids_are_stable_across_producers() {
+        let id = keyed_item_id("turn_failed:00000000-0000-0000-0000-000000000003");
+        assert_eq!(id.to_string(), "47bfd081-5592-8d05-a602-cad4686b2174");
     }
 }
