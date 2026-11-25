@@ -33,10 +33,9 @@ use ark_common::{ArkError, ArkErrorCode, Result};
 use ark_contract::{ImChannelId, ImChannelKind, ImCredentials};
 use ark_ports::CancelToken;
 use async_trait::async_trait;
-use tokio::sync::mpsc;
 
 use crate::domain::{chunk_text, truncate_inbound, InboundMessage};
-use crate::ImLoginFlow;
+use crate::{ImLoginFlow, InboundSender};
 use crate::{LoginPoll, LoginSession};
 
 /// The packaged iLink app id and its wire client version.
@@ -178,6 +177,55 @@ impl WeixinTransport {
         Ok(payload)
     }
 
+    fn normalize_response(&self, response: &serde_json::Value) -> Vec<InboundMessage> {
+        let Some(messages) = response.get("msgs").and_then(|m| m.as_array()) else {
+            return Vec::new();
+        };
+        let mut normalized = Vec::new();
+        for message in messages {
+            // message_type 2 is the bot's own message.
+            if message.get("message_type").and_then(|t| t.as_i64()) == Some(2) {
+                continue;
+            }
+            let from = message
+                .get("from_user_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            if from.is_empty() {
+                continue;
+            }
+            if let Some(context_token) = message.get("context_token").and_then(|v| v.as_str()) {
+                self.context_tokens
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(from.clone(), context_token.to_string());
+            }
+            let Some(text) =
+                text_from_items(message.get("item_list").unwrap_or(&serde_json::Value::Null))
+            else {
+                continue;
+            };
+            normalized.push(InboundMessage {
+                channel_id: ImChannelId(String::new()),
+                chat_id: from.clone(),
+                sender_id: from,
+                // The iLink push carries the user id only.
+                sender_name: String::new(),
+                message_id: message
+                    .get("message_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("wx-{}", uuid::Uuid::new_v4())),
+                text: truncate_inbound(&text),
+                // iLink bots are 1:1 by protocol.
+                is_dm: true,
+                is_mention: false,
+            });
+        }
+        normalized
+    }
+
     fn set_cursor(&self, next: Option<String>) {
         *self
             .cursor
@@ -192,11 +240,7 @@ impl crate::ImTransport for WeixinTransport {
         ImChannelKind::Weixin
     }
 
-    async fn run(
-        &self,
-        inbound: mpsc::Sender<InboundMessage>,
-        shutdown: CancelToken,
-    ) -> Result<()> {
+    async fn run(&self, inbound: InboundSender, shutdown: CancelToken) -> Result<()> {
         let mut failures = 0u32;
         loop {
             if shutdown.is_cancelled() {
@@ -227,59 +271,23 @@ impl crate::ImTransport for WeixinTransport {
                         // the request timeout so the client never outruns it.
                         let _ = window;
                     }
-                    if let Some(next) = response.get("get_updates_buf").and_then(|v| v.as_str()) {
-                        self.set_cursor(Some(next.to_string()));
-                    }
-                    let messages = response
-                        .get("msgs")
-                        .and_then(|m| m.as_array())
-                        .cloned()
-                        .unwrap_or_default();
-                    for message in messages {
-                        // message_type 2 is the bot's own message.
-                        if message.get("message_type").and_then(|t| t.as_i64()) == Some(2) {
-                            continue;
+                    let next_cursor = response
+                        .get("get_updates_buf")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
+                    let messages = self.normalize_response(&response);
+                    if let Some(next) = &next_cursor {
+                        if messages.is_empty() {
+                            inbound.advance(Some(next.clone())).await?;
+                        } else {
+                            inbound.send_batch(messages, Some(next.clone())).await?;
                         }
-                        let from = message
-                            .get("from_user_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or_default()
-                            .to_string();
-                        if from.is_empty() {
-                            continue;
-                        }
-                        if let Some(context_token) =
-                            message.get("context_token").and_then(|v| v.as_str())
-                        {
-                            self.context_tokens
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .insert(from.clone(), context_token.to_string());
-                        }
-                        let Some(text) = text_from_items(
-                            message.get("item_list").unwrap_or(&serde_json::Value::Null),
-                        ) else {
-                            continue;
-                        };
-                        let inbound_message = InboundMessage {
-                            channel_id: ImChannelId(String::new()),
-                            chat_id: from.clone(),
-                            sender_id: from.clone(),
-                            // The iLink push carries the user id only.
-                            sender_name: String::new(),
-                            message_id: message
-                                .get("message_id")
-                                .and_then(|v| v.as_str())
-                                .map(str::to_string)
-                                .unwrap_or_else(|| format!("wx-{}", uuid::Uuid::new_v4())),
-                            text: truncate_inbound(&text),
-                            // iLink bots are 1:1 by protocol.
-                            is_dm: true,
-                            is_mention: false,
-                        };
-                        if inbound.send(inbound_message).await.is_err() {
-                            return Ok(());
-                        }
+                        // The old implementation committed this before
+                        // inbound.send. Durable admission is now the only path
+                        // that makes the next getupdates cursor safe.
+                        self.set_cursor(Some(next.clone()));
+                    } else if !messages.is_empty() {
+                        inbound.send_batch(messages, None).await?;
                     }
                 }
                 Err(err) => {
@@ -341,13 +349,6 @@ impl crate::ImTransport for WeixinTransport {
         self.post("ilink/bot/getupdates", payload, Duration::from_secs(5))
             .await?;
         Ok(self.owner_user_id.clone())
-    }
-
-    fn cursor(&self) -> Option<String> {
-        self.cursor
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
     }
 }
 

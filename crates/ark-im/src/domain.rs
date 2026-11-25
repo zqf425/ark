@@ -15,6 +15,8 @@ use ark_contract::{
 };
 use chrono::Utc;
 
+pub use ark_ports::InboundMessage;
+
 /// Bounded dedup set per channel (docs/requirements/im-channels.md «入站管线»).
 ///
 /// Memory-only by design: cross-restart replay is bounded by the persisted
@@ -28,41 +30,24 @@ pub fn truncate_inbound(text: &str) -> String {
     truncate_utf8(text, ark_contract::MAX_TURN_TEXT_BYTES).to_string()
 }
 
-/// Platform-normalized inbound message (requirements «数据模型»).
-///
-/// Every adapter folds its events into this shape, so the orchestration never
-/// sees a platform name. `channel_id` is stamped by the orchestration (the
-/// adapter builds messages before a channel id context exists); adapters
-/// report only platform facts — `is_dm` and `is_mention` — and never a policy
-/// verdict.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InboundMessage {
-    pub channel_id: ImChannelId,
-    /// Platform chat identifier: telegram chat id / feishu chat_id or open_id
-    /// / weixin user id.
-    pub chat_id: String,
-    pub sender_id: String,
-    pub sender_name: String,
-    /// Platform message id; the orchestration deduplicates on it.
-    pub message_id: String,
-    pub text: String,
-    pub is_dm: bool,
-    /// Whether a group message @-mentioned the bot.
-    pub is_mention: bool,
-}
-
-/// Bounded LRU of already-seen platform message ids.
+/// Bounded LRU of already-seen `(chat_id, message_id)` pairs.
 #[derive(Debug, Default)]
 pub struct DedupSet {
-    seen: std::collections::HashSet<String>,
-    order: std::collections::VecDeque<String>,
+    seen: std::collections::HashSet<(String, String)>,
+    order: std::collections::VecDeque<(String, String)>,
 }
 
 impl DedupSet {
-    /// `true` when `message_id` was not seen before (and is now recorded).
-    /// Oldest ids are evicted once the set reaches [`DEDUP_CAPACITY`].
-    pub fn insert(&mut self, message_id: &str) -> bool {
-        if self.seen.contains(message_id) {
+    pub fn contains(&self, chat_id: &str, message_id: &str) -> bool {
+        self.seen
+            .contains(&(chat_id.to_string(), message_id.to_string()))
+    }
+
+    /// `true` when the pair was not seen before (and is now recorded).
+    /// Oldest pairs are evicted once the set reaches [`DEDUP_CAPACITY`].
+    pub fn insert(&mut self, chat_id: &str, message_id: &str) -> bool {
+        let key = (chat_id.to_string(), message_id.to_string());
+        if self.seen.contains(&key) {
             return false;
         }
         if self.order.len() >= DEDUP_CAPACITY {
@@ -70,8 +55,8 @@ impl DedupSet {
                 self.seen.remove(&oldest);
             }
         }
-        self.seen.insert(message_id.to_string());
-        self.order.push_back(message_id.to_string());
+        self.seen.insert(key.clone());
+        self.order.push_back(key);
         true
     }
 
@@ -485,14 +470,19 @@ mod tests {
     fn dedup_set_is_bounded_and_lru() {
         let mut set = DedupSet::default();
         for i in 0..DEDUP_CAPACITY {
-            assert!(set.insert(&i.to_string()));
+            assert!(set.insert("100", &i.to_string()));
         }
-        // A retained id is a duplicate; a new id evicts the oldest, which then
-        // reads as new again.
-        assert!(!set.insert("5"));
-        assert!(set.insert("9999"));
-        assert!(set.insert("0"));
+        // A retained pair is a duplicate; a new pair evicts the oldest, which
+        // then reads as new again.
+        assert!(!set.insert("100", "5"));
+        assert!(set.insert("100", "9999"));
+        assert!(set.insert("100", "0"));
         assert_eq!(set.len(), DEDUP_CAPACITY);
+
+        let mut scoped = DedupSet::default();
+        assert!(scoped.insert("100", "7"));
+        assert!(!scoped.insert("100", "7"));
+        assert!(scoped.insert("200", "7"));
     }
 
     #[test]

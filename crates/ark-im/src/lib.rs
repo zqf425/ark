@@ -16,11 +16,13 @@
 
 #![deny(clippy::all)]
 
+pub mod delivery;
 pub mod domain;
 pub mod feishu;
 pub mod telegram;
 pub mod weixin;
 
+pub use delivery::{InboundDelivery, InboundSender};
 pub use domain::{
     apply_update, build_transport, channel_autonomy, chunk_text, ensure_channel_capacity,
     parse_command, prepare_create, truncate_inbound, validate_credentials, Command, DedupSet,
@@ -33,7 +35,6 @@ pub use weixin::{WeixinLoginFlow, WeixinTransport};
 use ark_contract::ImChannelKind;
 use ark_ports::CancelToken;
 use async_trait::async_trait;
-use tokio::sync::mpsc;
 
 /// One platform connection: normalize inbound, send outbound.
 ///
@@ -48,14 +49,11 @@ pub trait ImTransport: Send + Sync {
 
     /// Drive the connection until [`CancelToken::cancelled`] resolves.
     ///
-    /// Normalized messages go to `inbound`. The adapter reports only platform
-    /// facts (`is_dm`, `is_mention`); policy filtering (whitelist, mention
-    /// gating, self-messages) belongs to the orchestration.
-    async fn run(
-        &self,
-        inbound: mpsc::Sender<InboundMessage>,
-        shutdown: CancelToken,
-    ) -> ark_common::Result<()>;
+    /// Normalized messages go through `inbound`, which persists them before
+    /// queue admission and acknowledges only after the server commits the
+    /// cursor. The adapter reports only platform facts (`is_dm`, `is_mention`);
+    /// policy filtering belongs to the orchestration.
+    async fn run(&self, inbound: InboundSender, shutdown: CancelToken) -> ark_common::Result<()>;
 
     /// Send text to one chat, chunking to the platform's per-message limit
     /// (the orchestration hands over the full reply).
@@ -64,15 +62,6 @@ pub trait ImTransport: Send + Sync {
     /// Validate the credentials against the platform, returning a short
     /// identity description (`@bot_username`, an app name, an owner id).
     async fn verify(&self) -> ark_common::Result<String>;
-
-    /// The latest inbound cursor to persist, if this adapter tracks one.
-    ///
-    /// The orchestration reads this on its sync sweep and persists it through
-    /// [`ark_ports::ImStore`] (throttled), so a restart resumes where the
-    /// platform left off instead of replaying a whole window.
-    fn cursor(&self) -> Option<String> {
-        None
-    }
 
     /// Whether `sender_id` is the bot's own account (its own messages must not
     /// trigger a turn). Platforms differ in whether they echo self-messages

@@ -116,10 +116,21 @@ checkpoint 的 `last_turn_id` 初始化 `current_turn`；有合法版本化 mark
 ## IM 渠道存储
 
 `<root>/IM/im.json` 由 `ImFileStore`（`service/im.rs`）持有，模式与 `ScheduleFileStore`
-一致：Mutex 串行读改写 + `write_json_atomic` 原子替换 + 不可读折叠为空表并告警。文档形状
-为 `{ channels: [ImChannelRecord], bindings: [ImBinding] }`：渠道记录携带服务端入站游标
-（由编排层节流落盘，本层不节流），绑定随首条消息写入；渠道与绑定同文档是因为二者同域变更、
-且渠道删除需要原子级联删除其绑定。凭证明文落盘沿用 provider `api_key` 的 v1 简化。
+一致：Mutex 串行读改写 + copy-on-write 快照 + `write_json_atomic` 原子替换 + 不可读折叠
+为空表并告警。文档形状为 `{ channels: [ImChannelRecord], bindings: [ImBinding],
+inbox: [ImInboxEntry], next_cursor_version, applied_cursor_versions }`：渠道记录携带服务端
+入站游标，绑定随首条消息写入,inbox 保存尚未处理完成的归一化消息。渠道与绑定同文档是因为
+二者同域变更、且渠道删除需要原子级联删除其绑定;删除渠道不删除 orphan inbox,由编排层
+告警并在渠道恢复后重放。凭证明文落盘沿用 provider `api_key` 的 v1 简化。
+
+inbox 状态转换全部在锁内一次快照 rewrite 中完成:`persist_inbound_batch` 先验证整批
+渠道存在,再一次性追加所有 `queued=false` 记录,任一校验或写入失败都不改变内存状态;
+`queue_inbound` 同时写入 `queued=true` 与 cursor 并保留记录;`ack_inbound` 删除已完成
+记录;`discard_inbound` 删除终端记录并推进 cursor。每个持久化批次由存储分配单调
+`cursor_version`，只有不旧于该渠道已应用版本的提交才允许推进 cursor；版本随文档重启
+恢复，因此旧 supervisor 的延迟提交或旧 inbox 重放不会把游标移回较早批次。平台 cursor
+本身可能是不透明字符串，比较依赖持久化顺序而非字符串大小。写成功后才替换内存快照,
+因此失败不会暴露半提交状态。重启读取同一文档即可恢复 pending/queued 记录,不依赖进程内队列。
 
 ## 目录与恢复
 

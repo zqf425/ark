@@ -34,10 +34,10 @@ use ark_ports::CancelToken;
 use async_trait::async_trait;
 use base64::Engine;
 use futures::{SinkExt, StreamExt};
-use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::domain::{chunk_text, truncate_inbound, InboundMessage};
+use crate::InboundSender;
 
 const EVENT_CHUNK_TTL: Duration = Duration::from_secs(10);
 /// Per-request client deadline for the REST calls (config pull, token, send).
@@ -229,8 +229,6 @@ pub struct FeishuTransport {
     app_secret: String,
     base: String,
     bot_open_id: Mutex<Option<String>>,
-    /// Feishu pushes events with in-band acks; no replay cursor exists.
-    cursor: Mutex<Option<String>>,
     token: Mutex<Option<(String, Instant)>>,
 }
 
@@ -252,7 +250,6 @@ impl FeishuTransport {
             app_secret,
             base,
             bot_open_id: Mutex::new(None),
-            cursor: Mutex::new(None),
             token: Mutex::new(None),
         }
     }
@@ -400,6 +397,23 @@ impl FeishuTransport {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
+        let is_dm = chat_type == "p2p";
+        let bot_open_id = self
+            .bot_open_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let is_mention = !is_dm
+            && bot_open_id.is_some()
+            && message
+                .get("mentions")
+                .and_then(|m| m.as_array())
+                .is_some_and(|mentions| {
+                    mentions.iter().any(|mention| {
+                        mention.pointer("/id/open_id").and_then(|id| id.as_str())
+                            == bot_open_id.as_deref()
+                    })
+                });
         // The receive_v1 event carries no display name; the chat UI shows it.
         Some(InboundMessage {
             channel_id: ImChannelId(String::new()),
@@ -416,11 +430,8 @@ impl FeishuTransport {
                 .unwrap_or_default()
                 .to_string(),
             text: truncate_inbound(text),
-            is_dm: chat_type == "p2p",
-            is_mention: message
-                .get("mentions")
-                .and_then(|m| m.as_array())
-                .is_some_and(|mentions| !mentions.is_empty()),
+            is_dm,
+            is_mention,
         })
     }
 
@@ -431,7 +442,7 @@ impl FeishuTransport {
         &self,
         url: &str,
         ping_interval: u64,
-        inbound: &mpsc::Sender<InboundMessage>,
+        inbound: &InboundSender,
         shutdown: &CancelToken,
     ) -> Result<()> {
         let (ws, _) = tokio_tungstenite::connect_async(url)
@@ -499,9 +510,15 @@ impl FeishuTransport {
                             let event: serde_json::Value =
                                 serde_json::from_slice(&merged).unwrap_or(serde_json::Value::Null);
                             if let Some(inbound_message) = self.normalize_event(&event) {
-                                if inbound.send(inbound_message).await.is_err() {
-                                    return Ok(());
-                                }
+                                inbound
+                                    .send(inbound_message, None)
+                                    .await
+                                    .map_err(|err| {
+                                        transport_error(format!(
+                                            "feishu durable inbound delivery failed: {}",
+                                            err.message
+                                        ))
+                                    })?;
                             }
                             // Echo ack: same headers plus biz_rt, payload is
                             // base64 of `{"code":200}`.
@@ -530,11 +547,7 @@ impl crate::ImTransport for FeishuTransport {
         ImChannelKind::Feishu
     }
 
-    async fn run(
-        &self,
-        inbound: mpsc::Sender<InboundMessage>,
-        shutdown: CancelToken,
-    ) -> Result<()> {
+    async fn run(&self, inbound: InboundSender, shutdown: CancelToken) -> Result<()> {
         self.ensure_bot_identity().await;
         let mut backoff = RECONNECT_MIN;
         loop {
@@ -616,13 +629,6 @@ impl crate::ImTransport for FeishuTransport {
         Ok(name.to_string())
     }
 
-    fn cursor(&self) -> Option<String> {
-        self.cursor
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-
     fn is_self(&self, sender_id: &str) -> bool {
         self.bot_open_id
             .lock()
@@ -684,6 +690,67 @@ mod tests {
         assert!(cache.parts.is_empty(), "completed events are dropped");
     }
 
+    fn group_event(mentions: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "event": {
+                "message": {
+                    "chat_id": "oc_group",
+                    "chat_type": "group",
+                    "message_type": "text",
+                    "message_id": "om_group",
+                    "content": "{\"text\":\"hello\"}",
+                    "mentions": mentions
+                },
+                "sender": {"sender_id": {"open_id": "ou_user"}}
+            }
+        })
+    }
+
+    fn feishu_transport() -> FeishuTransport {
+        FeishuTransport::new(
+            reqwest::Client::new(),
+            "app".into(),
+            "secret".into(),
+            FeishuDomain::Feishu,
+        )
+    }
+
+    #[test]
+    fn group_mention_requires_the_bot_open_id() {
+        let transport = feishu_transport();
+        *transport
+            .bot_open_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some("ou_bot".into());
+        let event = group_event(serde_json::json!([
+            {"key": "@_user_1", "id": {"open_id": "ou_other"}},
+            {"key": "@_user_2", "id": {"open_id": "ou_bot"}}
+        ]));
+        assert!(transport.normalize_event(&event).unwrap().is_mention);
+    }
+
+    #[test]
+    fn mentioning_someone_else_is_not_a_bot_mention() {
+        let transport = feishu_transport();
+        *transport
+            .bot_open_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some("ou_bot".into());
+        let event = group_event(serde_json::json!([
+            {"key": "@_user_1", "id": {"open_id": "ou_other"}}
+        ]));
+        assert!(!transport.normalize_event(&event).unwrap().is_mention);
+    }
+
+    #[test]
+    fn unknown_bot_identity_fails_closed_for_group_mentions() {
+        let transport = feishu_transport();
+        let event = group_event(serde_json::json!([
+            {"key": "@_user_1", "id": {"open_id": "ou_bot"}}
+        ]));
+        assert!(!transport.normalize_event(&event).unwrap().is_mention);
+    }
+
     #[test]
     fn event_normalization_scopes_to_text_messages() {
         let transport = FeishuTransport::new(
@@ -708,6 +775,10 @@ mod tests {
             }"#,
         )
         .unwrap();
+        *transport
+            .bot_open_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some("ou_bot".into());
         let normalized = transport.normalize_event(&event).expect("normalized");
         assert_eq!(normalized.chat_id, "oc_1");
         assert!(!normalized.is_dm);

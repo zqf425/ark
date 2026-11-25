@@ -19,7 +19,7 @@
 //!   on the bound thread surfaces as `start_turn`'s `Conflict` and is retried
 //!   on a bounded budget before the chat gets a busy reply.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -29,9 +29,11 @@ use ark_contract::{
     ImChannel, ImChannelId, ImChannelRuntime, ImChannelState, ImWeixinLoginStartResponse,
     ImWeixinLoginStatus, ImWeixinLoginWaitResponse,
 };
-use ark_im::{build_transport, DedupSet, ImLoginFlow, ImTransport, InboundMessage, LoginPoll};
-use ark_ports::{CancelToken, ImChannelRecord, ImStore};
-use tokio::sync::{mpsc, Notify};
+use ark_im::{
+    build_transport, DedupSet, ImLoginFlow, ImTransport, InboundDelivery, InboundSender, LoginPoll,
+};
+use ark_ports::{CancelToken, ImChannelRecord, ImInboxId, ImStore};
+use tokio::sync::Notify;
 
 use crate::state::AppState;
 
@@ -52,9 +54,6 @@ pub const IM_BUSY_RETRIES: usize = 5;
 pub const SYNC_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 /// Per-conversation queue depth before a busy reply.
 pub const CONVERSATION_QUEUE_CAP: usize = 4;
-/// Cursor persistence: at most one rewrite per sweep window or per N messages.
-const CURSOR_PERSIST_INTERVAL: Duration = Duration::from_secs(30);
-const CURSOR_PERSIST_MAX_MESSAGES: usize = 10;
 /// An `error`-state channel is retried at most this often (the sweep is the
 /// backoff; nothing spins inside the loop).
 const ERROR_RETRY_COOLDOWN: Duration = Duration::from_secs(60);
@@ -77,16 +76,21 @@ pub struct ChannelHandle {
     pub runtime: Arc<Mutex<ImChannelRuntime>>,
     fingerprint: u64,
     last_started: Instant,
-    /// Last cursor value persisted through the store, so the sweep can tell
-    /// "advanced" from "already on disk".
-    cursor_baseline: Option<String>,
-    cursor_messages_since: usize,
-    cursor_last_persist: Instant,
 }
 
 struct ImRuntimeState {
     channels: HashMap<ImChannelId, ChannelHandle>,
     dedup: HashMap<ImChannelId, DedupSet>,
+    active_inbox: HashSet<ImInboxId>,
+    active_platform: HashMap<(ImChannelId, String, String), ImInboxId>,
+    orphaned_inbox_warnings: HashSet<ImChannelId>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum InboxClaimResult {
+    New,
+    Existing,
+    Duplicate,
 }
 
 /// IM orchestration: one instance per process, built by the composition root.
@@ -123,6 +127,9 @@ impl ImService {
             state: Mutex::new(ImRuntimeState {
                 channels: HashMap::new(),
                 dedup: HashMap::new(),
+                active_inbox: HashSet::new(),
+                active_platform: HashMap::new(),
+                orphaned_inbox_warnings: HashSet::new(),
             }),
             sync_notify: Notify::new(),
             conversations: ConversationQueues::new(),
@@ -339,6 +346,7 @@ impl ImService {
                 return;
             }
         };
+        self.warn_orphaned_inbox(&records);
         let mut desired: HashMap<ImChannelId, &ImChannel> = HashMap::new();
         for record in &records {
             let channel = &record.channel;
@@ -406,8 +414,32 @@ impl ImService {
                 tracing::warn!(channel = %id, error = %err.message, "cannot start im channel");
             }
         }
+    }
 
-        self.persist_cursors(&records);
+    fn warn_orphaned_inbox(&self, records: &[ImChannelRecord]) {
+        let inbox = match self.store.list_inbox() {
+            Ok(inbox) => inbox,
+            Err(err) => {
+                tracing::warn!(error = %err.message, "cannot inspect durable im inbox");
+                return;
+            }
+        };
+        let present: HashSet<&ImChannelId> =
+            records.iter().map(|record| &record.channel.id).collect();
+        let mut runtime = self.lock();
+        runtime
+            .orphaned_inbox_warnings
+            .retain(|id| present.contains(id));
+        for entry in inbox {
+            let id = &entry.message.channel_id;
+            if !present.contains(id) && runtime.orphaned_inbox_warnings.insert(id.clone()) {
+                tracing::warn!(
+                    channel = %id,
+                    inbox = %entry.id,
+                    "preserving durable im inbox entry for a missing channel"
+                );
+            }
+        }
     }
 
     async fn start_channel(
@@ -432,16 +464,20 @@ impl ImService {
             last_error: None,
             last_inbound_at: None,
         }));
-        let (inbound_tx, mut inbound_rx) = mpsc::channel::<InboundMessage>(32);
+        let (inbound, inbound_rx) = InboundSender::new(Arc::clone(&self.store), channel.id.clone());
+        let replay = self
+            .store
+            .list_inbox()?
+            .into_iter()
+            .filter(|entry| entry.message.channel_id == channel.id)
+            .map(InboundDelivery::replay)
+            .collect::<Vec<_>>();
         let handle = ChannelHandle {
             transport: Arc::clone(&transport),
             cancel: cancel.clone(),
             runtime: Arc::clone(&runtime),
             fingerprint: fingerprint(channel),
             last_started: Instant::now(),
-            cursor_baseline: record.cursor.clone(),
-            cursor_messages_since: 0,
-            cursor_last_persist: Instant::now(),
         };
         self.lock().channels.insert(channel.id.clone(), handle);
 
@@ -452,41 +488,9 @@ impl ImService {
             runtime: Arc::clone(&runtime),
         });
         let loop_state = state.clone();
-        tokio::spawn(async move {
-            let run = transport.run(inbound_tx, cancel.clone());
-            tokio::pin!(run);
-            loop {
-                tokio::select! {
-                    message = inbound_rx.recv() => match message {
-                        Some(message) => {
-                            let service = Arc::clone(&service);
-                            let ctx = Arc::clone(&ctx);
-                            let state = loop_state.clone();
-                            tokio::spawn(async move {
-                                service.accept_inbound(&state, &ctx, message).await;
-                            });
-                        }
-                        // The run future owns the sender; when it is gone the
-                        // connection is over either way.
-                        None => break,
-                    },
-                    result = &mut run => {
-                        let mut cell = ctx.runtime.lock().unwrap_or_else(PoisonError::into_inner);
-                        match result {
-                            // Cancelled stop (reconcile or shutdown) is not an error.
-                            Ok(()) if cancel.is_cancelled() => cell.state = ImChannelState::Disabled,
-                            Ok(()) => cell.state = ImChannelState::Error,
-                            Err(err) => {
-                                cell.state = ImChannelState::Error;
-                                cell.last_error = Some(err.message.clone());
-                            }
-                        }
-                        drop(cell);
-                        break;
-                    }
-                }
-            }
-        });
+        tokio::spawn(supervise_channel(
+            service, loop_state, ctx, inbound, inbound_rx, replay, cancel,
+        ));
         tracing::info!(channel = %channel.id, kind = ?channel.kind, "im channel started");
         Ok(())
     }
@@ -502,54 +506,6 @@ impl ImService {
         let handles: Vec<ChannelHandle> = self.lock().channels.drain().map(|(_, h)| h).collect();
         for handle in handles {
             handle.cancel.cancel();
-        }
-    }
-
-    /// Fold cursor advances into `im.json`, throttled per channel.
-    fn persist_cursors(&self, records: &[ImChannelRecord]) {
-        let mut state = self.lock();
-        for record in records {
-            let Some(handle) = state.channels.get_mut(&record.channel.id) else {
-                continue;
-            };
-            let cursor = handle.transport.cursor();
-            if cursor == handle.cursor_baseline {
-                continue;
-            }
-            // The first advance past the persisted baseline persists
-            // immediately (a restart must not replay it); rapid further
-            // advances coalesce within the throttle window.
-            let due = handle.cursor_messages_since == 0
-                || handle.cursor_last_persist.elapsed() >= CURSOR_PERSIST_INTERVAL
-                || handle.cursor_messages_since >= CURSOR_PERSIST_MAX_MESSAGES;
-            handle.cursor_messages_since += 1;
-            if !due {
-                continue;
-            }
-            // Re-read before writing: a PATCH may have changed other fields
-            // since this sweep started, and the cursor must not clobber them.
-            match self.store.get_channel(&record.channel.id) {
-                Ok(mut current) => {
-                    current.cursor = cursor.clone();
-                    match self.store.replace_channel(current) {
-                        Ok(updated) => {
-                            handle.cursor_baseline = updated.cursor;
-                            handle.cursor_messages_since = 0;
-                            handle.cursor_last_persist = Instant::now();
-                        }
-                        Err(err) => tracing::warn!(
-                            channel = %record.channel.id,
-                            error = %err.message,
-                            "cannot persist im channel cursor"
-                        ),
-                    }
-                }
-                Err(err) => tracing::warn!(
-                    channel = %record.channel.id,
-                    error = %err.message,
-                    "cannot re-read im channel for cursor persistence"
-                ),
-            }
         }
     }
 
@@ -575,17 +531,112 @@ impl ImService {
         }
     }
 
-    /// Deduplicate one platform message id for a channel.
-    pub fn is_duplicate(&self, channel_id: &ImChannelId, message_id: &str) -> bool {
+    /// Check one platform message within its channel and chat without marking
+    /// it. Durable delivery marks only after queue admission commits.
+    pub fn has_seen(&self, channel_id: &ImChannelId, chat_id: &str, message_id: &str) -> bool {
+        self.lock()
+            .dedup
+            .get(channel_id)
+            .is_some_and(|set| set.contains(chat_id, message_id))
+    }
+
+    pub fn mark_seen(&self, channel_id: &ImChannelId, chat_id: &str, message_id: &str) {
         let mut state = self.lock();
         let set = state.dedup.entry(channel_id.clone()).or_default();
-        !set.insert(message_id)
+        set.insert(chat_id, message_id);
+    }
+
+    /// Claim a durable id and its platform identity under one lock. A second
+    /// durable id for an already-owned platform message is a gateway redelivery,
+    /// not new work; the caller must durably discard it before acknowledging.
+    pub(super) fn claim_inbox(
+        &self,
+        id: &ImInboxId,
+        message: &ark_im::InboundMessage,
+    ) -> InboxClaimResult {
+        let mut state = self.lock();
+        if !state.active_inbox.insert(id.clone()) {
+            return InboxClaimResult::Existing;
+        }
+        if message.message_id.is_empty() {
+            return InboxClaimResult::New;
+        }
+        let key = (
+            message.channel_id.clone(),
+            message.chat_id.clone(),
+            message.message_id.clone(),
+        );
+        if state.active_platform.contains_key(&key) {
+            state.active_inbox.remove(id);
+            return InboxClaimResult::Duplicate;
+        }
+        state.active_platform.insert(key, id.clone());
+        InboxClaimResult::New
+    }
+
+    pub(super) fn release_inbox(&self, id: &ImInboxId) {
+        let mut state = self.lock();
+        state.active_inbox.remove(id);
+        state.active_platform.retain(|_, owner| owner != id);
     }
 
     fn self_arc(self: &Arc<Self>) -> Arc<Self> {
         Arc::clone(self)
     }
 }
+
+/// Replay durable work before opening the transport, then admit every delivery
+/// already persisted by the adapter before publishing a transport failure.
+async fn supervise_channel(
+    service: Arc<ImService>,
+    state: AppState,
+    ctx: Arc<super::im_inbound::ChannelContext>,
+    inbound: InboundSender,
+    mut inbound_rx: tokio::sync::mpsc::Receiver<InboundDelivery>,
+    replay: Vec<InboundDelivery>,
+    cancel: CancelToken,
+) {
+    for delivery in replay {
+        if cancel.is_cancelled() {
+            return;
+        }
+        service.accept_delivery(&state, &ctx, delivery).await;
+    }
+    let run = ctx.transport.run(inbound, cancel.clone());
+    tokio::pin!(run);
+    let mut outcome = None;
+    loop {
+        tokio::select! {
+            delivery = inbound_rx.recv() => match delivery {
+                Some(delivery) => service.accept_delivery(&state, &ctx, delivery).await,
+                None => break,
+            },
+            result = &mut run, if outcome.is_none() => outcome = Some(result),
+        }
+    }
+    let result = match outcome {
+        Some(result) => result,
+        None => run.await,
+    };
+    record_transport_outcome(&cancel, &ctx.runtime, result);
+}
+
+fn record_transport_outcome(
+    cancel: &CancelToken,
+    runtime: &Arc<Mutex<ImChannelRuntime>>,
+    result: ark_common::Result<()>,
+) {
+    let mut cell = runtime.lock().unwrap_or_else(PoisonError::into_inner);
+    match result {
+        Ok(()) if cancel.is_cancelled() => cell.state = ImChannelState::Disabled,
+        Ok(()) => cell.state = ImChannelState::Error,
+        Err(err) => {
+            cell.state = ImChannelState::Error;
+            cell.last_error = Some(err.message);
+        }
+    }
+}
+
 /// Config fingerprint for reconcile decisions: any user-visible change (fields
 /// or credentials) rebuilds the connection; serialization covers them all.
 fn fingerprint(channel: &ImChannel) -> u64 {
