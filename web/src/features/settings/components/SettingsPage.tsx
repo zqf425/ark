@@ -147,8 +147,8 @@ export function SettingsPage(): JSX.Element {
         <div className="ark-settings__body">
           <header className="ark-settings__hero ark-settings__hero--row">
             <div>
-              <h1>{current ? t('settings.general.title') : ''}</h1>
-              <p>{current ? t('settings.general.desc') : ''}</p>
+              <h1>{current ? t(current.labelKey) : ''}</h1>
+              <p>{current ? t(current.detailKey) : ''}</p>
             </div>
             {/* The scene-level exit back to the code workbench: visible from
                 every section, so leaving settings never depends on the top-bar
@@ -164,7 +164,7 @@ export function SettingsPage(): JSX.Element {
               <span className="ark-settings__back-label">{t('settings.backToWorkbench')}</span>
             </button>
           </header>
-          <SettingsOverview settings={settings} providers={providers} />
+          {activeSection === 'general' ? <SettingsOverview settings={settings} providers={providers} /> : null}
           {body}
         </div>
       </main>
