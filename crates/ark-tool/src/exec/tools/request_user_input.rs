@@ -7,7 +7,7 @@
 //! registry handed the tool to an executor that skips the reactor), the error
 //! must say exactly that instead of silently succeeding.
 
-use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput};
+use ark_ports::{Tool, ToolArgs, ToolConcurrency, ToolContext, ToolOutput};
 
 /// `request_user_input`.
 #[derive(Debug, Clone, Copy, Default)]
@@ -21,6 +21,11 @@ impl Tool for RequestUserInputTool {
 
     fn schema(&self) -> &'static serde_json::Value {
         crate::domain::schema::request_user_input()
+    }
+    /// Intercepted before dispatch; the declaration only matters if a caller
+    /// batches a plan that still contains it.
+    fn concurrency(&self) -> ToolConcurrency {
+        ToolConcurrency::ReadOnly
     }
 
     async fn execute(&self, _ctx: &ToolContext, _raw: ToolArgs) -> ark_common::Result<ToolOutput> {

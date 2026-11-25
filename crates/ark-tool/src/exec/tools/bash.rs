@@ -5,7 +5,7 @@
 //! killed when it expires, and stdout/stderr are capped before they reach the
 //! model context.
 
-use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput};
+use ark_ports::{Tool, ToolArgs, ToolConcurrency, ToolContext, ToolOutput};
 use std::io;
 use std::process::Stdio;
 use std::time::Duration;
@@ -153,6 +153,11 @@ impl Tool for BashTool {
 
     fn schema(&self) -> &'static serde_json::Value {
         schema::bash()
+    }
+    /// One `sh -c` child per call: two shells share no memory, so a round of
+    /// them may run at once (requirements/parallel-tools.md).
+    fn concurrency(&self) -> ToolConcurrency {
+        ToolConcurrency::Isolated
     }
 
     async fn execute(&self, ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
@@ -374,6 +379,30 @@ mod tests {
 
     fn echo(command: &str) -> ToolArgs {
         ToolArgs(serde_json::json!({ "command": command }))
+    }
+
+    /// The batching policy now puts sibling shells in one batch; this proves
+    /// the batch really runs at once instead of the old 3 x 3s = 9s shape.
+    /// `sleep 1` x3 must finish well under the serial 3s.
+    #[tokio::test]
+    async fn sibling_shells_run_concurrently() {
+        let dir = temp_workspace("bash-parallel");
+        let (elapsed, outputs) =
+            crate::exec::testsupport::time_parallel_bash(&dir, 3, "sleep 1").await;
+        assert_eq!(outputs.len(), 3);
+        assert!(outputs.iter().all(|out| out.ok), "{outputs:?}");
+        assert!(
+            elapsed < std::time::Duration::from_millis(2_500),
+            "three `sleep 1` shells took {elapsed:?}; that is the serial 3s shape"
+        );
+    }
+
+    /// A shell is declared process-isolated, which is what lets the policy put
+    /// it in a batch beside reads and other shells.
+    #[test]
+    fn bash_declares_process_isolation() {
+        use ark_ports::{Tool, ToolConcurrency};
+        assert_eq!(BashTool.concurrency(), ToolConcurrency::Isolated);
     }
 
     #[tokio::test]

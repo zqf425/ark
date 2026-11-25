@@ -327,6 +327,7 @@ impl AgentTurnRunner {
                 provider.as_ref(),
             )),
             chunk_buffer: super::turn_common::chunk_buffer_for_turn(&snapshot),
+            concurrency: super::turn_common::concurrency_table(&self.tool_registry),
             steering: Arc::clone(&job.steering),
             steer_attachment_resolver: Some(attachment_resolver),
         });

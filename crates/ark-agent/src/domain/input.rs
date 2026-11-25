@@ -10,6 +10,7 @@ use ark_common::Usage;
 use crate::domain::action::SyntheticResult;
 use crate::domain::limits::TurnLimits;
 use crate::domain::tool::{ToolCallRequest, ToolExecution};
+use crate::policy::parallel::ConcurrencyTable;
 
 /// Cumulative counters for the turn.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -131,6 +132,10 @@ pub struct TurnInput {
     pub approvals: Vec<ApprovalAsk>,
     /// `request_user_input` calls intercepted before dispatch.
     pub user_inputs: Vec<UserInputAsk>,
+    /// Which tools may share a batch this turn. `None` keeps the builtin
+    /// catalogue, so a caller without a registry still batches the shipped
+    /// tools correctly while every plugin tool stays exclusive.
+    pub concurrency: Option<ConcurrencyTable>,
 }
 
 impl TurnInput {
@@ -141,7 +146,14 @@ impl TurnInput {
             kind,
             approvals: Vec::new(),
             user_inputs: Vec::new(),
+            concurrency: None,
         }
+    }
+
+    /// Declare the tool catalogue's concurrency classes for this dispatch.
+    pub fn with_concurrency(mut self, table: ConcurrencyTable) -> Self {
+        self.concurrency = Some(table);
+        self
     }
 
     pub fn with_approvals(mut self, approvals: Vec<ApprovalAsk>) -> Self {

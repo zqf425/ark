@@ -155,6 +155,7 @@ fn gate_test_reactor(gates: Arc<dyn GateBroker>, writer: Arc<dyn SessionWriter>)
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        concurrency: None,
         steer_attachment_resolver: None,
     })
 }
@@ -264,6 +265,7 @@ async fn request_user_input_full_chain_registers_answers_and_backfills() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        concurrency: None,
         steer_attachment_resolver: None,
     });
     reactor.push_user("hi");
@@ -314,6 +316,7 @@ async fn plain_bash_call_still_dispatches_normally() {
         seed: ModelSeed::default(),
         machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
         chunk_buffer: 1,
+        concurrency: None,
         steer_attachment_resolver: None,
     });
     reactor.push_user("hi");

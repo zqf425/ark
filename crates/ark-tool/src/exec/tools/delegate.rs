@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use ark_ports::{
     SubagentOutcome, SubagentPolicySource, SubagentRequest, SubagentRunner, Tool, ToolArgs,
-    ToolContext, ToolOutput,
+    ToolConcurrency, ToolContext, ToolOutput,
 };
 
 use crate::domain::{args, schema};
@@ -74,6 +74,11 @@ impl Tool for DelegateTaskTool {
 
     fn schema(&self) -> &'static serde_json::Value {
         schema::delegate_task()
+    }
+    /// A child run is an independent turn with its own reactor; siblings do
+    /// not share state, so a round may dispatch several at once.
+    fn concurrency(&self) -> ToolConcurrency {
+        ToolConcurrency::Isolated
     }
 
     async fn execute(&self, ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {

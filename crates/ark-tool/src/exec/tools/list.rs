@@ -6,7 +6,7 @@
 //! directories and runs on the blocking pool under the shared scan deadline,
 //! mirroring `grep`.
 
-use ark_ports::{Tool, ToolArgs, ToolContext, ToolOutput};
+use ark_ports::{Tool, ToolArgs, ToolConcurrency, ToolContext, ToolOutput};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -35,6 +35,9 @@ impl Tool for LsTool {
 
     fn schema(&self) -> &'static serde_json::Value {
         schema::ls()
+    }
+    fn concurrency(&self) -> ToolConcurrency {
+        ToolConcurrency::ReadOnly
     }
 
     async fn execute(&self, ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
@@ -88,6 +91,9 @@ impl Tool for FindTool {
 
     fn schema(&self) -> &'static serde_json::Value {
         schema::find()
+    }
+    fn concurrency(&self) -> ToolConcurrency {
+        ToolConcurrency::ReadOnly
     }
 
     async fn execute(&self, ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {

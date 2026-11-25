@@ -158,6 +158,15 @@ pub(crate) fn chunk_buffer_for_turn(snapshot: &RuntimeConfig) -> usize {
     }
 }
 
+/// Snapshot the registry's concurrency declarations for one turn.
+///
+/// Both turn paths call this so a child batches exactly like its parent. The
+/// table is data, not a policy: the sandbox decision still decides what a call
+/// may touch, this only decides what it may share a round with.
+pub(crate) fn concurrency_table(registry: &ark_tool::ToolRegistry) -> ark_agent::ConcurrencyTable {
+    std::sync::Arc::new(registry.concurrency_table())
+}
+
 /// The one tool runner both paths use: `ark-tool`'s registry runner wrapped in
 /// the pre-tool-use hook combinator.
 ///
@@ -312,6 +321,10 @@ pub(crate) struct ReactorSpec {
     pub seed: ModelSeed,
     pub machine: TurnMachine,
     pub chunk_buffer: usize,
+    /// Declared concurrency class per registered tool, snapshotted from the
+    /// registry when the turn is built. Without it the batch policy would fall
+    /// back to the builtin name list and every plugin tool would run alone.
+    pub concurrency: ark_agent::ConcurrencyTable,
     pub steering: Arc<SteerQueue>,
     /// Composition-root resolver for one steer entry's images and outcomes.
     /// `None` keeps steers text-only (child runs, runtimes without attachments).
@@ -330,6 +343,7 @@ pub(crate) fn build_reactor(spec: ReactorSpec) -> Reactor {
         seed: spec.seed,
         machine: spec.machine,
         chunk_buffer: spec.chunk_buffer,
+        concurrency: Some(spec.concurrency),
         steer_attachment_resolver: spec.steer_attachment_resolver,
     })
     .with_steering(spec.steering)

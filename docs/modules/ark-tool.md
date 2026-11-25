@@ -21,9 +21,12 @@
   runner 对 `Deny` 决策与 `NeedsApproval` 同点防御性拒绝，事件配对不受影响。
 - `Strict` 与 `WorkspaceWrite` 的路径先经 `ark_common::path::normalize`，再按真实路径和工作区边界校验；必须拒绝 symlink/junction 逃逸。`Unattended` 派发不可变的 `Unrestricted` 决策，保留畸形路径校验但有意跳过该次调用的工作区包含性检查。
 - 真实路径比较在两侧统一移除 Windows verbatim 前缀、规范分隔符并忽略大小写，因此 `\\?\` 根与普通 Windows 路径是同一工作区。
-- 工具并发由 `ark-agent` 的 `ParallelPolicy` 统一规划（设计刻意保守）：任何变更类调用独占一个批次，
-  即使不同路径也不并行；只有**不同资源**的只读调用可共享批次，同资源的只读调用按资源串行。
-  未知工具名一律按变更类处理。所有输出走统一 UTF-8 安全截断。
+- 工具并发由 `ark-agent` 的 `ParallelPolicy` 统一规划，分类输入是工具自身的 `Tool::concurrency()`
+  声明（`ark_ports::ToolConcurrency`），注册表在建表时缓存并在回合开始时向 agent 提供快照：
+  `read`/`ls`/`find`/`grep`/`web_fetch`/`bash_output` 声明 `ReadOnly`；`bash`/`bash_session`/`bash_kill`/
+  `delegate_task` 声明 `Isolated`（每次调用独占进程或独立回合，彼此无法破坏对方内存）；
+  `write`/`edit` 与任何未声明工具为 `Exclusive`，逐调用独占一批。同资源的只读调用仍按资源串行。
+  声明只影响**能否并批**，不放宽沙箱权限——两个轴相互独立。所有输出走统一 UTF-8 安全截断。
 - `edit` 的锚点匹配前把文件内容与 `old_string` 都归一到 LF，写入时再按文件原有行尾恢复
   （文件是 CRLF 就写回 CRLF，是 LF 就保持 LF）。模型按 `\n` 组织锚点，而 Windows 检出
   （`core.autocrlf=true`）的工作区是 CRLF，字节级精确匹配会让每一个多行锚点都失败：实测一天

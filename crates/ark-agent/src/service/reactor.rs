@@ -35,6 +35,7 @@ use crate::exec::gate::{ApprovalRequest, GateBroker, UserInputRequest};
 use crate::exec::journal::SessionWriter;
 use crate::exec::tool_runner::ToolRunner;
 use crate::policy::budget::{BudgetVerdict, TurnBudget};
+use crate::policy::parallel::ConcurrencyTable;
 use crate::service::machine::TurnMachine;
 use crate::service::step::step;
 
@@ -69,6 +70,10 @@ pub struct ReactorConfig {
     pub machine: TurnMachine,
     /// Channel capacity for model deltas.
     pub chunk_buffer: usize,
+    /// Declared concurrency class per tool, read from the registry by the
+    /// composition root. `None` keeps the builtin classes, which is what a
+    /// caller without a registry (tests, `--dry-run`) already expects.
+    pub concurrency: Option<ConcurrencyTable>,
     /// Resolves one steering entry's attachment ids into model image parts and
     /// durable delivery outcomes. The composition root shares one per-turn
     /// image budget with the initial seed and invokes this exactly once per id.
@@ -118,6 +123,8 @@ pub struct Reactor {
     max_tokens: Option<u32>,
     reasoning_effort: Option<String>,
     chunk_buffer: usize,
+    /// Catalogue snapshot used to batch this turn's tool calls.
+    concurrency: Option<ConcurrencyTable>,
     machine: TurnMachine,
     history: Vec<ModelMessage>,
     pending_user_message: Option<String>,
@@ -203,6 +210,7 @@ impl Reactor {
             seed,
             machine,
             chunk_buffer,
+            concurrency,
             steer_attachment_resolver,
         } = config;
         Self {
@@ -219,6 +227,7 @@ impl Reactor {
             reasoning_effort: seed.reasoning_effort,
             max_tokens: seed.max_tokens,
             chunk_buffer,
+            concurrency,
             machine,
             history: seed.messages,
             pending_user_message: None,
@@ -468,7 +477,11 @@ impl Reactor {
     }
 
     fn input_of(&self, kind: InputKind) -> TurnInput {
-        TurnInput::new(self.machine.limits(), self.machine.progress(), kind)
+        let input = TurnInput::new(self.machine.limits(), self.machine.progress(), kind);
+        match &self.concurrency {
+            Some(table) => input.with_concurrency(table.clone()),
+            None => input,
+        }
     }
 
     fn interrupt_input(&self, reason: &str) -> TurnInput {
