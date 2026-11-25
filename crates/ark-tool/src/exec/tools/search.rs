@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use crate::domain::{args, glob, schema};
 use crate::exec::common::{
-    as_output, is_ignored_dir_name, workspace_path, BlockingScan, ScanDeadline,
+    as_output, entry_inside_root, is_ignored_dir_name, workspace_path, BlockingScan, ScanDeadline,
 };
 use crate::policy::{cap_all, DEFAULT_LIMITS};
 
@@ -127,6 +127,13 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
         return Ok(ToolOutput::ok(format!("no matches for `{empty_notice}`")));
     }
     let target = workspace_path(ctx, parsed.path.as_deref())?;
+    // The containment anchor is resolved once per scan: re-canonicalizing the
+    // root at every recursion level cost one full root resolution per
+    // directory (800 dirs = 800 redundant syscalls on a cold cache).
+    let real_root = match std::fs::canonicalize(&target) {
+        Ok(real_root) => real_root,
+        Err(_) => target.clone(),
+    };
     let scan = BlockingScan::start();
     let line_cap = query.line_cap();
     let hits = scan
@@ -141,6 +148,7 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
             } else {
                 let mut visited = HashSet::new();
                 walk(
+                    &real_root,
                     &target,
                     &target,
                     &query,
@@ -161,8 +169,13 @@ async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput>
     Ok(ToolOutput::ok(body))
 }
 
+/// The walker carries the containment anchor, the display root and the live
+/// budget together; regrouping would touch every recursive call site for zero
+/// behavior change, so the established too-many-arguments precedent applies.
+#[allow(clippy::too_many_arguments)]
 fn walk(
-    root: &Path,
+    real_root: &Path,
+    display_root: &Path,
     dir: &Path,
     query: &Query,
     depth: usize,
@@ -178,16 +191,14 @@ fn walk(
         return;
     }
     // Canonicalize once per directory and never revisit it: a symlink cycle
-    // otherwise re-expands the same tree at every level (T-02).
+    // otherwise re-expands the same tree at every level (T-02). The root's
+    // canonical image was resolved once by the caller.
     let Ok(real_dir) = std::fs::canonicalize(dir) else {
         return;
     };
     if !visited.insert(real_dir) {
         return;
     }
-    let Ok(real_root) = std::fs::canonicalize(root) else {
-        return;
-    };
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -211,16 +222,29 @@ fn walk(
             continue;
         }
         let path = entry.path();
-        let Ok(real_path) = std::fs::canonicalize(&path) else {
-            continue;
-        };
-        if !real_path.starts_with(&real_root) {
+        // Containment re-check — see `common::entry_inside_root` for the
+        // per-platform scoping and the dirent premise it rests on.
+        if !entry_inside_root(kind.is_dir(), &path, real_root) {
             continue;
         }
         if kind.is_dir() {
-            walk(root, &path, query, depth + 1, deadline, out, visited);
+            walk(
+                real_root,
+                display_root,
+                &path,
+                query,
+                depth + 1,
+                deadline,
+                out,
+                visited,
+            );
         } else {
-            scan_file(root, &path, query, deadline, out);
+            let relative = path
+                .strip_prefix(display_root)
+                .or_else(|_| path.strip_prefix(real_root))
+                .map(|rest| rest.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_else(|_| path.to_string_lossy().to_string());
+            scan_file_prefixed(&relative, &path, query, deadline, out);
         }
     }
 }
@@ -282,44 +306,66 @@ fn scan_file(
     deadline: &ScanDeadline,
     out: &mut Vec<String>,
 ) {
+    let relative = file
+        .strip_prefix(root)
+        .map(|rest| rest.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| file.to_string_lossy().to_string());
+    scan_file_prefixed(&relative, file, query, deadline, out);
+}
+
+/// Whether a `--glob` pattern accepts this file: matched against the
+/// relative path first, then the bare file name (master behavior: `*.rs`
+/// must match `src/main.rs` via its name).
+fn glob_matches_file(pattern: &str, relative: &str, file: &Path) -> bool {
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    glob::matches(pattern, relative) || glob::matches(pattern, &name)
+}
+
+/// Scan one file whose output prefix the walker already computed. Keeping the
+/// prefix separate lets the walker stay relative to the user-visible root
+/// spelling (an explicit `path` into an ignored directory still shows
+/// `gen.js`, not the absolute temp path).
+fn scan_file_prefixed(
+    relative: &str,
+    file: &Path,
+    query: &Query,
+    deadline: &ScanDeadline,
+    out: &mut Vec<String>,
+) {
     if out.len() >= query.line_cap() || query.budget_reached() || deadline.is_expired() {
         return;
     }
     if !is_scannable_regular_file(file) {
         return;
     }
-    let relative = file
-        .strip_prefix(root)
-        .map(|rest| rest.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_else(|_| file.to_string_lossy().to_string());
     if let Some(pattern) = &query.file_glob {
-        let name = file
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-        if !glob::matches(pattern, &relative) && !glob::matches(pattern, &name) {
+        if !glob_matches_file(pattern, relative, file) {
             return;
         }
     }
     // Same encoding policy as `read`/`edit`: strict UTF-8 first, then the
     // documented Windows fallbacks. A GBK-encoded file would otherwise look
     // empty to `grep`, which silently hides real matches.
-    let text = match ark_common::read_text(file) {
-        Ok(text) => text,
+    //
+    // A decoded NUL marks object files, images and other binary blobs: the
+    // needle would have to span raw object bytes to match, and one hit inside
+    // them both floods the output and reads as a fact about source code. The
+    // check runs on the decoded text (UTF-16LE without a BOM decodes with
+    // interleaved NULs and is skipped too — `rg` applies the same heuristic).
+    let text = match ark_common::read_text_file(file) {
+        Ok(decoded) => {
+            if decoded.text.contains('\0') {
+                return;
+            }
+            decoded.text
+        }
         Err(_) => return,
     };
     let lines: Vec<&str> = text.lines().collect();
-    // `ignore_case` folds only ASCII in the hot path: per-byte ASCII folding is
-    // length- and char-boundary-preserving, so a byte offset found on the folded
-    // line maps 1:1 onto the original line. Full Unicode `to_lowercase` can
-    // change byte length (ẞ U+1E9E → ß, İ U+0130 → i + combining dot), which
-    // silently shifted `hit_at` off its match and made `cut_line` cut a long
-    // line around the wrong column — offsets must be measured on the line
-    // `cut_line` actually slices. Lines searched under full folding therefore
-    // remap the folded byte offset onto the original line instead.
-    let ascii_fold = query.needle.is_ascii();
-    let lowered_needle = query.needle.to_lowercase();
-    let ascii_needle = ascii_fold_str(&query.needle);
+    let needles = FoldedNeedle::new(query);
     // Mark every line to emit exactly once: ':' for a real match, '-' for
     // context. Adjacent context windows overlap, so a single marker vector
     // deduplicates them while keeping the match marker authoritative. `limit`
@@ -329,26 +375,11 @@ fn scan_file(
     // around its match instead of a fixed prefix.
     let mut emit: Vec<Option<char>> = vec![None; lines.len()];
     let mut hit_at: Vec<usize> = vec![0; lines.len()];
-    let needle_chars = query.needle.chars().count();
     for (index, line) in lines.iter().enumerate() {
         if query.matched.get() >= query.limit {
             break;
         }
-        // Locate on folded text, but anchor on the original line: `hit_at`
-        // indexes `lines[index]`, which `cut_line` slices.
-        let hit_char = if !query.ignore_case {
-            line.find(&query.needle)
-                .map(|byte_at| line[..byte_at].chars().count())
-        } else if ascii_fold {
-            ascii_fold_str(line)
-                .find(&ascii_needle)
-                .map(|byte_at| line[..byte_at].chars().count())
-        } else {
-            line.to_lowercase()
-                .find(&lowered_needle)
-                .map(|folded_at| original_char_offset(line, folded_at))
-        };
-        let Some(hit_char) = hit_char else {
+        let Some(hit_char) = needles.locate(line) else {
             continue;
         };
         query.matched.set(query.matched.get() + 1);
@@ -365,23 +396,125 @@ fn scan_file(
         }
         emit[index] = Some(':');
     }
-    let line_cap = query.line_cap();
-    for (index, marker) in emit.into_iter().enumerate() {
+    emit_rows(
+        &emit,
+        &lines,
+        &hit_at,
+        relative,
+        query.needle.chars().count(),
+        query.line_cap(),
+        out,
+    );
+}
+
+/// The needle in the two foldings a line is searched with.
+///
+/// `ignore_case` folds only ASCII in the hot path: ASCII folding never changes
+/// byte length or char boundaries, so a byte offset found on the folded line
+/// maps 1:1 onto the original line. Full Unicode `to_lowercase` can expand
+/// chars (İ U+0130 → i + combining dot), which silently shifted `hit_at` off
+/// its match and made `cut_line` cut a long line around the wrong column —
+/// offsets must be measured on the line `cut_line` slices, so the
+/// full-folding path remaps the folded byte offset onto the original line
+/// instead. Trade-off, deliberate: the ASCII path misses matches through
+/// non-ASCII chars that fold *into* ASCII (K U+212A → k, İ → i); the old
+/// full-fold behavior found those but also matched whole Turkish lines when
+/// searching `i`.
+struct FoldedNeedle {
+    exact: String,
+    ignore_case: bool,
+    needle_is_ascii: bool,
+    ascii: String,
+    lowered: String,
+}
+
+impl FoldedNeedle {
+    fn new(query: &Query) -> Self {
+        Self {
+            exact: query.needle.clone(),
+            ignore_case: query.ignore_case,
+            needle_is_ascii: query.needle.is_ascii(),
+            ascii: query.needle.to_ascii_lowercase(),
+            lowered: query.needle.to_lowercase(),
+        }
+    }
+
+    /// Char offset of the first match in `line`, anchored on the original
+    /// line, or `None` when the line does not match.
+    ///
+    /// The decision uses `contains` (the SIMD substring kernel for needles up
+    /// to 32 bytes), and only hit rows pay for the second, locating scan:
+    /// hits are sparse relative to scanned lines. Longer needles gain nothing
+    /// from `contains` — both it and `find` fall back to TwoWay, so a single
+    /// `find` decides and locates in one pass. The decision must stay a plain
+    /// OR of the two folds — an ASCII-folded hit IS a hit, and only rows it
+    /// misses pay for the full fold.
+    fn locate(&self, line: &str) -> Option<usize> {
+        if !self.ignore_case {
+            return line
+                .find(&self.exact)
+                .map(|byte_at| line[..byte_at].chars().count());
+        }
+        if self.exact.len() > 32 {
+            // TwoWay for both primitives: one folded pass decides and
+            // locates. The fold is mandatory — `find` on the raw line would
+            // skip case folding entirely and turn every differently-cased
+            // line into a false "no matches" (a P0 caught in review; the
+            // regression below pins it).
+            let folded = line.to_lowercase();
+            return folded
+                .find(&self.lowered)
+                .map(|folded_byte_at| original_char_offset(line, folded_byte_at, &folded));
+        }
+        let ascii_folded = line.to_ascii_lowercase();
+        let ascii_byte_at = ascii_folded
+            .contains(&self.ascii)
+            .then(|| ascii_folded.find(&self.ascii))
+            .flatten();
+        if self.needle_is_ascii {
+            return ascii_byte_at.map(|byte_at| line[..byte_at].chars().count());
+        }
+        if let Some(byte_at) = ascii_byte_at {
+            return Some(line[..byte_at].chars().count());
+        }
+        let unicode_folded = line.to_lowercase();
+        if !unicode_folded.contains(&self.lowered) {
+            return None;
+        }
+        // Anchor on the original line: a decided hit must always carry a
+        // located offset; surfacing a zero here would be papering over a
+        // defect, not handling one.
+        unicode_folded
+            .find(&self.lowered)
+            .map(|folded_byte_at| original_char_offset(line, folded_byte_at, &unicode_folded))
+    }
+}
+
+/// Emit the marked rows with their file prefix, bounded by the line cap.
+fn emit_rows(
+    emit: &[Option<char>],
+    lines: &[&str],
+    hit_at: &[usize],
+    relative: &str,
+    needle_chars: usize,
+    line_cap: usize,
+    out: &mut Vec<String>,
+) {
+    for (index, marker) in emit.iter().enumerate() {
         if out.len() >= line_cap {
             break;
         }
-        if let Some(m) = marker {
-            // Bound each emitted line around its match: minified bundles are
-            // single-line files, and a fixed prefix would cut the match out
-            // of anything past the first 400 columns.
-            let line = cut_line(lines[index], hit_at[index], needle_chars);
-            out.push(format!(
-                "{relative}{m}{}{m}{line}",
-                index + 1,
-                m = m,
-                line = line
-            ));
-        }
+        let Some(m) = marker else { continue };
+        // Bound each emitted line around its match: minified bundles are
+        // single-line files, and a fixed prefix would cut the match out
+        // of anything past the first 400 columns.
+        let line = cut_line(lines[index], hit_at[index], needle_chars);
+        out.push(format!(
+            "{relative}{m}{}{m}{line}",
+            index + 1,
+            m = m,
+            line = line
+        ));
     }
 }
 
@@ -418,29 +551,19 @@ fn char_to_byte(line: &str, index: usize) -> usize {
         .unwrap_or(line.len())
 }
 
-/// Lowercase ASCII bytes in place; other bytes pass through untouched.
-///
-/// Used by the `ignore_case` fast path: unlike full `to_lowercase`, ASCII
-/// folding never changes byte length or char boundaries, so byte offsets found
-/// on the folded text stay valid on the original.
-fn ascii_fold_str(text: &str) -> String {
-    let mut bytes = text.as_bytes().to_vec();
-    bytes.make_ascii_lowercase();
-    // Per-byte ASCII folding cannot split a UTF-8 sequence (all folded bytes
-    // stay < 0x80), so the result is still valid UTF-8.
-    String::from_utf8(bytes).expect("ASCII folding keeps UTF-8 validity")
-}
-
-/// Map a char offset in `line.to_lowercase()` back onto `line`.
+/// Map a byte offset in `folded` (the `to_lowercase()` image of `line`) back
+/// onto a char offset in `line`.
 ///
 /// Full Unicode folding can change byte lengths (ẞ U+1E9E → ß, İ U+0130 →
 /// i + combining dot), so folded text is not a byte image of the original.
-/// Walking both texts in lockstep by char keeps the mapping exact: emit one
-/// original char per folded char, and repeat original chars that folded into
-/// several (İ → i + U+0307 needs one original char for two folded chars).
-fn original_char_offset(line: &str, folded_at: usize) -> usize {
-    let folded = line.to_lowercase();
-    let mut folded_chars = folded[..folded_at].chars().count();
+/// Walking both texts in lockstep by char keeps the mapping exact: consume one
+/// original char per folded char, and one original char may cover several
+/// folded ones (İ → i + U+0307). `folded_byte_at` is a byte offset in
+/// `folded` (what `find` returns), not a char offset. A match starting inside
+/// an expansion sequence anchors at the sequence's first original char — off
+/// by at most one char, invisible in a 400-char cut window.
+fn original_char_offset(line: &str, folded_byte_at: usize, folded: &str) -> usize {
+    let mut folded_chars = folded[..folded_byte_at].chars().count();
     let mut original_chars = 0usize;
     for original in line.chars() {
         if folded_chars == 0 {
@@ -454,572 +577,5 @@ fn original_char_offset(line: &str, folded_at: usize) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::exec::testsupport::{ctx, temp_workspace};
-
-    #[tokio::test]
-    async fn finds_a_line_with_its_position() {
-        let dir = temp_workspace("grep-basic");
-        std::fs::write(dir.join("a.txt"), "alpha\nbeta\ngamma\n").unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "beta" })),
-            )
-            .await
-            .unwrap();
-        assert!(out.ok);
-        assert!(out.content.contains("a.txt:2:beta"), "got {}", out.content);
-    }
-
-    #[tokio::test]
-    async fn match_limit_is_shared_across_files() {
-        let dir = temp_workspace("grep-global-limit");
-        std::fs::write(dir.join("a.txt"), "needle\nneedle\nneedle\n").unwrap();
-        std::fs::write(dir.join("b.txt"), "needle\nneedle\n").unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "needle", "limit": 2, "context": 1 })),
-            )
-            .await
-            .unwrap();
-        assert!(out.ok, "{}", out.content);
-        assert_eq!(
-            out.content
-                .lines()
-                .filter(|line| line.contains(":needle"))
-                .count(),
-            2,
-            "limit must bound matches across the whole walk: {}",
-            out.content
-        );
-    }
-
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn reached_match_budget_skips_later_named_pipe_and_keeps_context() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::Arc;
-        use std::time::Duration;
-        use tokio::io::AsyncWriteExt;
-        use tokio::net::windows::named_pipe::ServerOptions;
-
-        let dir = temp_workspace("grep-budget-pipe");
-        let first = dir.join("a.txt");
-        std::fs::write(&first, "before\nneedle\nneedle\nafter\n").unwrap();
-        let query = Query {
-            needle: "needle".into(),
-            ignore_case: false,
-            file_glob: None,
-            limit: 2,
-            context: 10,
-            matched: Cell::new(0),
-        };
-        let expected = vec![
-            "a.txt-1-before".to_string(),
-            "a.txt:2:needle".to_string(),
-            "a.txt:3:needle".to_string(),
-            "a.txt-4-after".to_string(),
-        ];
-
-        let pipe_name = format!(r"\\.\pipe\ark-grep-budget-{}", std::process::id());
-        let mut pipe = ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(&pipe_name)
-            .unwrap();
-        let connected = Arc::new(AtomicBool::new(false));
-        let server_connected = Arc::clone(&connected);
-        let server = tokio::spawn(async move {
-            if tokio::time::timeout(Duration::from_millis(200), pipe.connect())
-                .await
-                .is_ok_and(|result| result.is_ok())
-            {
-                server_connected.store(true, Ordering::SeqCst);
-                let _ = pipe.write_all(b"needle\n").await;
-            }
-        });
-        let scan = BlockingScan::start();
-        let hits = tokio::time::timeout(
-            Duration::from_secs(2),
-            scan.run(move |deadline| {
-                let mut hits = Vec::new();
-                scan_file(&dir, &first, &query, deadline, &mut hits);
-                assert_eq!(query.matched.get(), 2);
-                assert_eq!(hits, expected, "current-file context must be complete");
-
-                scan_file(&dir, Path::new(&pipe_name), &query, deadline, &mut hits);
-                assert_eq!(hits, expected, "existing results must be returned intact");
-                Ok(hits)
-            }),
-        )
-        .await
-        .expect("a satisfied match budget must not block on a later file")
-        .unwrap();
-        server.await.unwrap();
-
-        assert!(
-            !connected.load(Ordering::SeqCst),
-            "a later file must not be opened after the global match budget is reached"
-        );
-        assert_eq!(hits.len(), 4);
-    }
-
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn skips_non_regular_named_pipe_before_open() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::Arc;
-        use std::time::Duration;
-        use tokio::io::AsyncWriteExt;
-        use tokio::net::windows::named_pipe::ServerOptions;
-
-        let dir = temp_workspace("grep-non-regular-pipe");
-        let query = Query {
-            needle: "needle".into(),
-            ignore_case: false,
-            file_glob: None,
-            limit: 2,
-            context: 0,
-            matched: Cell::new(0),
-        };
-        let pipe_name = format!(r"\\.\pipe\ark-grep-skip-{}", std::process::id());
-        let mut pipe = ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(&pipe_name)
-            .unwrap();
-        let connected = Arc::new(AtomicBool::new(false));
-        let server_connected = Arc::clone(&connected);
-        let server = tokio::spawn(async move {
-            if tokio::time::timeout(Duration::from_millis(200), pipe.connect())
-                .await
-                .is_ok_and(|result| result.is_ok())
-            {
-                server_connected.store(true, Ordering::SeqCst);
-                let _ = pipe.write_all(b"needle\n").await;
-            }
-        });
-
-        let scan = BlockingScan::start();
-        let hits = tokio::time::timeout(
-            Duration::from_secs(2),
-            scan.run(move |deadline| {
-                let mut hits = Vec::new();
-                scan_file(&dir, Path::new(&pipe_name), &query, deadline, &mut hits);
-                Ok(hits)
-            }),
-        )
-        .await
-        .expect("a non-regular file must not block the scan")
-        .unwrap();
-        server.await.unwrap();
-
-        assert!(
-            !connected.load(Ordering::SeqCst),
-            "grep must skip a non-regular file before opening it"
-        );
-        assert!(hits.is_empty());
-    }
-
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn explicit_named_pipe_path_is_skipped_before_top_level_metadata() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::Arc;
-        use std::time::Duration;
-        use tokio::io::AsyncWriteExt;
-        use tokio::net::windows::named_pipe::ServerOptions;
-
-        let dir = temp_workspace("grep-explicit-pipe");
-        let mut context = ctx(&dir);
-        context.sandbox = ark_ports::SandboxDecision::Unrestricted;
-        let pipe_name = format!(r"\\.\pipe\ark-grep-explicit-{}", std::process::id());
-        let mut pipe = ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(&pipe_name)
-            .unwrap();
-        let connected = Arc::new(AtomicBool::new(false));
-        let server_connected = Arc::clone(&connected);
-        let server = tokio::spawn(async move {
-            if tokio::time::timeout(Duration::from_millis(200), pipe.connect())
-                .await
-                .is_ok_and(|result| result.is_ok())
-            {
-                server_connected.store(true, Ordering::SeqCst);
-                let _ = pipe.write_all(b"needle\n").await;
-            }
-        });
-
-        let output = tokio::time::timeout(
-            Duration::from_secs(2),
-            run(
-                &context,
-                ToolArgs(serde_json::json!({ "pattern": "needle", "path": pipe_name })),
-            ),
-        )
-        .await
-        .expect("an explicit named pipe must not block the scan")
-        .unwrap();
-        server.await.unwrap();
-
-        assert!(
-            !connected.load(Ordering::SeqCst),
-            "grep must reject an explicit named pipe before its top-level metadata lookup"
-        );
-        assert!(output.ok);
-        assert!(output.content.contains("no matches"), "{}", output.content);
-    }
-
-    #[tokio::test]
-    async fn ignore_case_matches_differently_cased_text() {
-        let dir = temp_workspace("grep-case");
-        std::fs::write(dir.join("a.txt"), "HELLO\n").unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "hello", "ignore_case": true })),
-            )
-            .await
-            .unwrap();
-        assert!(out.content.contains("HELLO"));
-    }
-
-    #[tokio::test]
-    async fn glob_restricts_the_files_scanned() {
-        let dir = temp_workspace("grep-glob");
-        std::fs::write(dir.join("a.rs"), "needle\n").unwrap();
-        std::fs::write(dir.join("b.txt"), "needle\n").unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "needle", "glob": "*.rs" })),
-            )
-            .await
-            .unwrap();
-        assert!(out.content.contains("a.rs"));
-        assert!(!out.content.contains("b.txt"));
-    }
-
-    #[tokio::test]
-    async fn no_match_is_successful_but_explicit() {
-        let dir = temp_workspace("grep-none");
-        std::fs::write(dir.join("a.txt"), "x\n").unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "zzz" })),
-            )
-            .await
-            .unwrap();
-        assert!(out.ok);
-        assert!(out.content.contains("no matches"));
-    }
-
-    #[tokio::test]
-    async fn empty_pattern_is_refused() {
-        let dir = temp_workspace("grep-empty");
-        let out = GrepTool
-            .execute(&ctx(&dir), ToolArgs(serde_json::json!({ "pattern": "" })))
-            .await
-            .unwrap();
-        assert!(!out.ok);
-    }
-
-    #[tokio::test]
-    async fn regex_looking_patterns_are_refused_not_matched_literally() {
-        let dir = temp_workspace("grep-regex-refused");
-        // The literal sequence `a.c` does not occur; a literal scan would
-        // return "no matches", which once read as a fact about the code.
-        std::fs::write(dir.join("a.txt"), "abc\na.c\n").unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "a.c" })),
-            )
-            .await
-            .unwrap();
-        assert!(!out.ok, "got {}", out.content);
-        assert!(
-            out.content.contains("metacharacters"),
-            "got {}",
-            out.content
-        );
-    }
-
-    #[tokio::test]
-    async fn literal_true_searches_needles_that_look_like_regex() {
-        // The flag exists exactly for this case. Ignoring it meant a model that
-        // already opted into a byte-exact search still had to rewrite the call
-        // through `bash` (22 such refusals observed in one day).
-        let dir = temp_workspace("grep-literal-accepted");
-        std::fs::write(dir.join("a.java"), "int x = getExecType();\n").unwrap();
-        for pattern in ["getExecType()", "ExecType()|Other("] {
-            let out = GrepTool
-                .execute(
-                    &ctx(&dir),
-                    ToolArgs(serde_json::json!({ "pattern": pattern, "literal": true })),
-                )
-                .await
-                .unwrap();
-            assert!(
-                out.ok,
-                "literal search must not be refused: {}",
-                out.content
-            );
-            if pattern == "getExecType()" {
-                assert!(out.content.contains("a.java:1:"), "got {}", out.content);
-            } else {
-                assert!(out.content.contains("no matches"), "got {}", out.content);
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn a_regex_refusal_names_the_literal_flag() {
-        let dir = temp_workspace("grep-refusal-message");
-        std::fs::write(dir.join("a.txt"), "x\n").unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "a.*b" })),
-            )
-            .await
-            .unwrap();
-        assert!(!out.ok);
-        assert!(
-            out.content.contains("literal: true"),
-            "the refusal must name the escape hatch: {}",
-            out.content
-        );
-    }
-
-    #[tokio::test]
-    async fn alternation_patterns_are_refused() {
-        let dir = temp_workspace("grep-regex-alt");
-        std::fs::write(dir.join("a.txt"), "threshold\n").unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({
-                    "pattern": "0\\.8|80%|threshold.*0\\.8"
-                })),
-            )
-            .await
-            .unwrap();
-        assert!(!out.ok, "got {}", out.content);
-    }
-
-    #[tokio::test]
-    async fn build_and_cache_directories_are_skipped() {
-        let dir = temp_workspace("grep-ignore-dirs");
-        for name in [
-            "target",
-            "node_modules",
-            "dist",
-            ".git",
-            ".tmp",
-            ".worktrees",
-        ] {
-            let sub = dir.join(name);
-            std::fs::create_dir_all(&sub).unwrap();
-            std::fs::write(sub.join("gen.js"), "needle-in-generated\n").unwrap();
-        }
-        std::fs::write(dir.join("src.txt"), "needle-in-source\n").unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "needle" })),
-            )
-            .await
-            .unwrap();
-        assert!(out.content.contains("src.txt"), "got {}", out.content);
-        assert!(
-            !out.content.contains("needle-in-generated"),
-            "generated output must not be scanned: {}",
-            out.content
-        );
-    }
-
-    #[tokio::test]
-    async fn an_ignored_directory_can_still_be_searched_explicitly() {
-        let dir = temp_workspace("grep-ignore-explicit");
-        std::fs::create_dir_all(dir.join("target")).unwrap();
-        std::fs::write(dir.join("target/gen.js"), "needle\n").unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "needle", "path": "target" })),
-            )
-            .await
-            .unwrap();
-        // The relative prefix is relative to the explicit search root, so the
-        // file shows as `gen.js`; the point is that the ignored directory was
-        // still searched instead of silently yielding nothing.
-        assert_eq!(out.content, "gen.js:1:needle\n");
-    }
-
-    #[tokio::test]
-    async fn ignore_case_keeps_the_cut_window_on_the_match_when_folding_expands_chars() {
-        let dir = temp_workspace("grep-fold-offset");
-        // Case 1: length-changing chars in the LINE, ASCII needle — the
-        // per-byte ASCII fast path must anchor the offset on the original
-        // line instead of the folded one.
-        let line = format!("{}dotted{}", "İ".repeat(300), "z".repeat(500));
-        std::fs::write(dir.join("fold.txt"), &line).unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "DOTTED", "ignore_case": true })),
-            )
-            .await
-            .unwrap();
-        assert!(out.ok, "{}", out.content);
-        assert!(
-            out.content.contains("dotted"),
-            "the cut window must still contain the match: {}",
-            out.content
-        );
-
-        // Case 2: length-changing chars in the NEEDLE — full folding runs,
-        // and its folded char offset must be remapped onto the original line.
-        let line = format!("{}İdotted{}", "İ".repeat(300), "z".repeat(500));
-        std::fs::write(dir.join("folded-needle.txt"), &line).unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "İDOTTED", "ignore_case": true })),
-            )
-            .await
-            .unwrap();
-        assert!(out.ok, "{}", out.content);
-        assert!(
-            out.content.contains("dotted"),
-            "the cut window must still contain the match: {}",
-            out.content
-        );
-    }
-
-    #[tokio::test]
-    async fn ignore_case_ascii_fast_path_still_matches_case_variants() {
-        let dir = temp_workspace("grep-ascii-fold");
-        std::fs::write(
-            dir.join("a.txt"),
-            "getExecType()\nGETEXECTYPE()\ngetexectype()\n",
-        )
-        .unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "GetExecType", "ignore_case": true })),
-            )
-            .await
-            .unwrap();
-        assert_eq!(out.content.lines().count(), 3, "{}", out.content);
-        assert!(out.content.contains("a.txt:1:getExecType()"));
-        assert!(out.content.contains("a.txt:2:GETEXECTYPE()"));
-        assert!(out.content.contains("a.txt:3:getexectype()"));
-    }
-
-    #[tokio::test]
-    async fn a_minified_single_line_match_is_cut_to_a_bounded_prefix() {
-        let dir = temp_workspace("grep-line-cut");
-        let bundle = format!("{}needle{}", "x".repeat(100_000), "y".repeat(100_000));
-        std::fs::write(dir.join("bundle.js"), bundle).unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "needle" })),
-            )
-            .await
-            .unwrap();
-        assert!(out.ok);
-        assert!(
-            out.content.len() < 2_000,
-            "one match line must stay bounded, got {} chars",
-            out.content.len()
-        );
-        assert!(out.content.contains("needle"));
-    }
-
-    #[tokio::test]
-    async fn overlapping_context_windows_emit_each_line_once() {
-        let dir = temp_workspace("grep-context-overlap");
-        std::fs::write(dir.join("a.txt"), "hit-a\nhit-b\nhit-c\nhit-d\nhit-e\n").unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "hit", "context": 1 })),
-            )
-            .await
-            .unwrap();
-        for n in 1..=5 {
-            let occurrences = out.content.matches(&format!("a.txt-{n}-")).count()
-                + out.content.matches(&format!("a.txt:{n}:")).count();
-            assert_eq!(
-                occurrences, 1,
-                "line {n} must appear exactly once: {}",
-                out.content
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn limit_counts_matches_not_context_rows() {
-        let dir = temp_workspace("grep-limit-context");
-        std::fs::write(dir.join("a.txt"), "m1\nm2\nm3\nm4\nm5\n").unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "m", "limit": 2, "context": 2 })),
-            )
-            .await
-            .unwrap();
-        // Exactly two *matching* lines; later lines may still appear as
-        // context rows (`-`), which is correct, but never as matches (`:`).
-        assert!(out.content.contains("a.txt:1:m1"));
-        assert!(out.content.contains("a.txt:2:m2"));
-        assert!(
-            !out.content.contains("a.txt:3:m3"),
-            "a third real match must not be emitted: {}",
-            out.content
-        );
-        assert!(!out.content.contains("a.txt:5:m5"));
-    }
-
-    #[tokio::test]
-    async fn a_max_usize_context_does_not_panic() {
-        let dir = temp_workspace("grep-overflow");
-        std::fs::write(dir.join("a.txt"), "needle\n").unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "needle", "context": usize::MAX })),
-            )
-            .await
-            .unwrap();
-        assert!(out.ok);
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn grep_does_not_follow_symlinks_out_of_the_workspace() {
-        use std::os::unix::fs::symlink;
-        let dir = temp_workspace("grep-symlink-escape");
-        let outside = temp_workspace("grep-symlink-outside");
-        std::fs::write(outside.join("secret.txt"), "needle-secret\n").unwrap();
-        symlink(&outside, dir.join("link")).unwrap();
-        let out = GrepTool
-            .execute(
-                &ctx(&dir),
-                ToolArgs(serde_json::json!({ "pattern": "needle" })),
-            )
-            .await
-            .unwrap();
-        assert!(
-            !out.content.contains("needle-secret"),
-            "a symlink must not leak external contents: {}",
-            out.content
-        );
-    }
-}
+#[path = "search_tests.rs"]
+mod tests;

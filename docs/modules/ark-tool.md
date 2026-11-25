@@ -104,9 +104,15 @@
   若 16 个任务都仍在运行则新建后台任务返回结构化错误，绝不插入第 17 个。
   组合根以 `builtins_with_shell_session()` 装配父/子两个注册表（各自独立 manager 实例）。
 - `find`/`grep` 的递归遍历跳过固定忽略名单（`target`、`node_modules`、`dist`、`.git`、`.tmp`、
-  `.worktrees`，见 `exec::common::IGNORED_DIR_NAMES`）。名单在搜索根之下的每一层生效；把 `path`
-  显式指进被忽略目录仍会扫描。该名单既是防噪（minified bundle 命中会灌爆上下文）也是防量：忽略前
-  一次 grep 遍历约 41 万个文件（实测 11.9 秒纯遍历），忽略后约 931 个（19 毫秒）。
+  `.worktrees`，以及语言包缓存 `vendor`/`__pycache__`/`.venv`/`venv`、构建系统
+  `build`/`out`/`.next`/`.nuxt`/`DerivedData`/`Pods`/`.gradle`、编辑器状态
+  `.idea`/`.vscode`/`.cache`/`.sass-cache`，见 `exec::common::IGNORED_DIR_NAMES`）。名单在搜索根
+  之下的每一层生效；把 `path` 显式指进被忽略目录仍会扫描（输出前缀相对该显式根）。该名单既是
+  防噪（minified bundle 命中会灌爆上下文）也是防量：忽略前一次 grep 遍历约 41 万个文件（实测
+  11.9 秒纯遍历），忽略后约 931 个（19 毫秒）。名单当前没有 `no_ignore` 类开关，`vendor`、
+  `build`、`.vscode` 等同时是合法工程目录，被跳过是防量优先的已知取舍。
+  `grep` 按解码后文本是否含 NUL 跳过二进制文件（与 `rg` 同启发式）：needle 命中对象码/镜像内
+  原始字节是噪声而非代码事实；UTF-16LE 无 BOM 文本解码后带交替 NUL，同样按二进制跳过。
 - `find`/`grep` 的同步目录扫描经 `tokio::task::spawn_blocking` 执行并受共享扫描预算约束
   （`exec::common::BlockingScan`，复用 bash 的 clamp 超时）。直接在 async 执行器里扫描曾把 tokio
   worker 阻塞十余分钟，回合取消信号无法被 poll，"停止"按钮杀不掉 grep；扫描函数在目录与文件粒度
@@ -121,12 +127,27 @@
   匹配本身截掉），防止单行 minified 文件绕过行数上限灌爆模型上下文（实测一次拉入 254k 字符）。
   全局匹配预算在遍历与文件入口同时检查；达到预算后仍补齐当前文件的上下文，但不再打开后续文件，
   已有结果可在扫描超时前正常返回。
+- 两个 walker 的包含性锚点（`real_root`）在 `run`/`run_find` 里 canonicalize 一次后传参下传，
+  不再每层递归重复解析根；目录身份仍按目录粒度 canonicalize 去重（防符号链接循环 T-02）。
+  Unix 上逐条目的包含性复查只对目录执行（两个 walker 共用 `common::entry_inside_root`）：
+  walker 从不跟随符号链接、`file_type()` 取自 read_dir 的 dirent 而非 stat，文件的父目录已被
+  验证在根内，文件条目因此不可能在根外——若后续把 `kind.is_dir()` 改写为 `path.is_dir()`
+  （stat 语义）该前提即失效，这个依赖要随代码一起读。
+  Windows 保留逐条目 canonicalize + `starts_with`：junction 的 reparse tag 不带 name-surrogate
+  位，`FileType::is_symlink` 对其返回 false，这条检查是 junction 逃逸的唯一防线，不可省略。
 - `ignore_case` 的截断偏移锚在**原行**上：大小写折叠分两级，needle 为纯 ASCII 时用逐字节 ASCII
   折叠（不改变字节长度与 char 边界，折叠文本上找到的字节偏移可直接映射回原行）；needle 含非
   ASCII 时先 ASCII 折叠判否，未命中再走完整 `to_lowercase`，且其 char 偏移经
   `original_char_offset` 逐字符回映射到原行——完整折叠可能扩张 char 数（İ U+0130 → i + 组合点），
   在折叠文本上数偏移会把 `cut_line` 的窗口中心推离匹配、把 needle 整个截掉（回归测试以 300 个
-  İ 锁定该行为）。
+  İ 锁定该行为）。匹配判定走 `contains`（needle ≤32 字节时是 `simd_contains`，比 `find` 的
+  TwoWay 快约 5 倍）；>32 字节 TwoWay 下两者同速，改为在**折叠后**的文本上单次 `find` 同时判定
+  与定位（在原始行上 find 会跳过折叠，把所有异大小写行误判为不匹配，P0 级回归靠
+  "长 needle + 异大小写"回归钉住）。只有命中的行才再付一次定位扫描。判定的两级折叠必须是普通"或"：ASCII 折叠命中即为命中，只有它未命中的
+  行才做完整折叠——取反曾让所有不匹配行都变成命中（P0 级回归，现有测试当时全绿，靠
+  "非 ASCII needle + 不命中行"回归锁住）。ASCII-only 折叠的已知取舍：经非 ASCII 字符折叠
+  *变成* ASCII 的匹配不再命中（K U+212A → k、İ → i），旧的全折叠行为能找到它们，但搜 `i`
+  时也会把整段土耳其语文本判成命中；该取舍有回归钉住，改动须是显式决定。
 
 ## 验证
 
@@ -136,11 +157,13 @@
 孙进程必须退出；外层 `tokio::time::timeout` 取消调用时同样必须退出。Windows 的 `taskkill /T /F`
 分支只有编译覆盖，需在 Windows 上单独验证。
 
-`find`/`grep` 另有：忽略名单回归（六个目录不进、显式 `path` 指进被忽略目录仍可搜）、正则元字符
+`find`/`grep` 另有：忽略名单回归（两个工具的测试都迭代 `IGNORED_DIR_NAMES` 常量本身，新名字
+不落测试即编译失败、显式 `path` 指进被忽略目录仍可搜）、NUL 二进制跳过（同文件树里文本命中
+保留、NUL 文件不出现）、非 ASCII needle 不误报不命中行（P0-1 回归）、正则元字符
 pattern 拒绝（含交替 `|` 场景）、`literal: true` 时含元字符的 pattern 按字面量搜出结果、拒绝消息点明
 该开关、单行 bundle 命中按匹配位置截断（输出长度有界且仍含 needle）。`ignore_case` 另有：ASCII
 快路径保持大小写变体全命中、折叠扩张 char 时截断窗口仍以匹配为中心（旧实现会在该场景把 needle
-截掉，回归测试以 300 个 İ 触发）。Windows 命名管道回归同时
+截掉，回归测试以 300 个 İ 触发）、ASCII 折叠漏过 K/İ 展开字符的取舍被钉住。Windows 命名管道回归同时
 证明预算耗尽后不连接后续文件且保留当前文件上下文、非普通文件在元数据查询前被跳过，以及显式
 管道搜索根不会触发顶层元数据查询。
 `grep` 的 blocking 执行正确性由并发测试与 `bash` 树回归共同覆盖；扫描超时路径依赖
