@@ -87,8 +87,7 @@ export function liveActiveMs(
   gatePendingSinceMs: number | null
 ): number | null {
   const reported = turnActiveMs(rounds, turnId)
-  if (reported === null) return null
-  if (lastEventAtMs === null) return Math.max(0, reported)
+  if (lastEventAtMs === null) return reported === null ? null : Math.max(0, reported)
   const horizon = gatePendingSinceMs != null ? Math.min(nowMs, gatePendingSinceMs) : nowMs
-  return Math.max(0, reported + Math.max(0, horizon - lastEventAtMs))
+  return Math.max(0, (reported ?? 0) + Math.max(0, horizon - lastEventAtMs))
 }

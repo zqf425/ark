@@ -105,7 +105,12 @@ pub fn write_text(path: &std::path::Path, text: &str) -> Result<()> {
 /// NUL bytes are kept as-is: a command that emits them is reporting binary
 /// data, and silently stripping the terminator would misreport the content.
 pub fn decode_shell_output(bytes: &[u8]) -> String {
-    ark_common::decode_to_string(bytes)
+    decode_shell_output_status(bytes).text
+}
+
+/// Decode shell output while retaining which shared encoding policy matched.
+pub(crate) fn decode_shell_output_status(bytes: &[u8]) -> ark_common::DecodedText {
+    ark_common::decode(bytes)
 }
 
 /// Attach a detail string to an output.
@@ -150,7 +155,12 @@ impl BlockingScan {
         let started = std::time::Instant::now();
         let handle = tokio::task::spawn_blocking(move || {
             let expired = ScanDeadline { started, deadline };
-            scan(&expired)
+            let result = scan(&expired);
+            // A cooperative walker may notice the deadline and return its
+            // partial accumulator just before the outer timeout wins the race.
+            // That is still a timeout, never a successful complete scan.
+            expired.check()?;
+            result
         });
         match tokio::time::timeout(deadline, handle).await {
             Ok(Ok(result)) => result,
@@ -158,15 +168,19 @@ impl BlockingScan {
                 ark_common::ArkErrorCode::ToolExecutionFailed,
                 format!("background scan failed: {join_err}"),
             )),
-            Err(_) => Err(ArkError::new(
-                ark_common::ArkErrorCode::ToolExecutionFailed,
-                format!(
-                    "scan timed out after {} ms; narrow the search path or add a glob",
-                    deadline.as_millis()
-                ),
-            )),
+            Err(_) => Err(scan_timeout(deadline)),
         }
     }
+}
+
+fn scan_timeout(deadline: Duration) -> ArkError {
+    ArkError::new(
+        ark_common::ArkErrorCode::ToolExecutionFailed,
+        format!(
+            "scan timed out after {} ms; narrow the search path or add a glob",
+            deadline.as_millis()
+        ),
+    )
 }
 
 /// Cooperative deadline the inner walk checks between entries.
@@ -180,6 +194,16 @@ impl ScanDeadline {
     /// per file so a huge tree stops within one entry of the deadline.
     pub(crate) fn is_expired(&self) -> bool {
         self.started.elapsed() >= self.deadline
+    }
+
+    /// Convert an expired cooperative scan into the same structured failure as
+    /// the outer timeout, including when the walker already returned partial data.
+    pub(crate) fn check(&self) -> Result<()> {
+        if self.is_expired() {
+            Err(scan_timeout(self.deadline))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -219,6 +243,26 @@ mod tests {
         let mut context = ctx(&dir);
         context.sandbox = SandboxDecision::Unrestricted;
         assert!(workspace_path(&context, Some("C:/Windows/System32")).is_ok());
+    }
+
+    #[test]
+    fn expired_scan_rejects_partial_results() {
+        let deadline = ScanDeadline {
+            started: std::time::Instant::now() - Duration::from_secs(1),
+            deadline: Duration::from_secs(1),
+        };
+        let partial = vec!["partial result"];
+        let result = deadline.check().map(|()| partial);
+        assert!(result.is_err(), "an expired scan must not report success");
+    }
+
+    #[test]
+    fn active_scan_can_return_a_complete_result() {
+        let deadline = ScanDeadline {
+            started: std::time::Instant::now(),
+            deadline: Duration::from_secs(60),
+        };
+        assert!(deadline.check().is_ok());
     }
 
     #[test]

@@ -1,6 +1,17 @@
 import type { StateCreator } from 'zustand'
 import { loadPersistedDrafts, persistDrafts } from './draft-storage'
 
+declare const queuedMessageBrand: unique symbol
+export type QueuedMessageId = string & { readonly [queuedMessageBrand]: true }
+export type QueuedMessage = { id: QueuedMessageId; text: string }
+
+let fallbackQueueId = 0
+function nextQueuedMessageId(): QueuedMessageId {
+  const id = globalThis.crypto?.randomUUID?.() ??
+    `queued-${Date.now().toString(36)}-${(++fallbackQueueId).toString(36)}`
+  return id as QueuedMessageId
+}
+
 export type RuntimeSlice = {
   online: 'unknown' | 'online' | 'offline'
   healthVersion: string | null
@@ -14,6 +25,8 @@ export type RuntimeSlice = {
   commandError: string | null
   /** Unsent composer drafts keyed by thread id (survive thread switches). */
   drafts: Record<string, string>
+  /** ID-based delivery queues keyed by thread id; UI state, never wire state. */
+  queuedMessages: Record<string, QueuedMessage[]>
   /** Restore the persisted draft mirror into the store (once at mount). */
   hydrateDrafts: () => void
   setHealth: (payload: { online: boolean; version?: string | null; error?: string | null }) => void
@@ -23,6 +36,10 @@ export type RuntimeSlice = {
   setCommandError: (message: string | null) => void
   setDraft: (threadId: string, text: string) => void
   clearDraft: (threadId: string) => void
+  queueMessage: (threadId: string, text: string) => void
+  removeQueuedMessage: (threadId: string, id: QueuedMessageId) => void
+  /** Remove the accepted head only if it is still the message being drained. */
+  dequeueMessage: (threadId: string, id: QueuedMessageId) => void
 }
 
 export const createRuntimeSlice: StateCreator<RuntimeSlice, [], [], RuntimeSlice> = (set) => ({
@@ -37,6 +54,7 @@ export const createRuntimeSlice: StateCreator<RuntimeSlice, [], [], RuntimeSlice
   interrupting: false,
   commandError: null,
   drafts: {},
+  queuedMessages: {},
 
   // The renderer reloads outside the app's control (arkd restart tears the
   // window's connections and the desktop shell reloads, a dev HMR swap does
@@ -78,5 +96,34 @@ export const createRuntimeSlice: StateCreator<RuntimeSlice, [], [], RuntimeSlice
       delete next[threadId]
       persistDrafts(next)
       return { drafts: next }
+    }),
+
+  queueMessage: (threadId, text) =>
+    set((state) => ({
+      queuedMessages: {
+        ...state.queuedMessages,
+        [threadId]: [...(state.queuedMessages[threadId] ?? []), { id: nextQueuedMessageId(), text }]
+      }
+    })),
+  removeQueuedMessage: (threadId, id) =>
+    set((state) => {
+      const queue = state.queuedMessages[threadId]
+      const index = queue?.findIndex((message) => message.id === id) ?? -1
+      if (!queue || index < 0) return state
+      const next = queue.filter((message) => message.id !== id)
+      const queuedMessages = { ...state.queuedMessages }
+      if (next.length > 0) queuedMessages[threadId] = next
+      else delete queuedMessages[threadId]
+      return { queuedMessages }
+    }),
+  dequeueMessage: (threadId, id) =>
+    set((state) => {
+      const queue = state.queuedMessages[threadId]
+      if (!queue?.length || queue[0]?.id !== id) return state
+      const next = queue.slice(1)
+      const queuedMessages = { ...state.queuedMessages }
+      if (next.length > 0) queuedMessages[threadId] = next
+      else delete queuedMessages[threadId]
+      return { queuedMessages }
     })
 })

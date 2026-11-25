@@ -67,6 +67,76 @@ fn open_refuses_a_log_with_mid_file_garbage_without_modifying_it() {
 }
 
 #[test]
+fn open_backfills_legacy_item_ids_for_replay() {
+    let dir = TempDir::new("writer-open-legacy-item-id");
+    let thread = ThreadId::new();
+    let turn = TurnId::new();
+    let paths = ThreadPaths::new(dir.path().join("thread"));
+    crate::store::fs_util::ensure_dir(paths.dir()).unwrap();
+    let legacy = RuntimeEvent::ToolCallStarted {
+        seq: 1,
+        thread_id: thread,
+        turn_id: turn,
+        item_id: None,
+        timestamp: Utc::now(),
+        call_id: "legacy-call".into(),
+        tool: "read".into(),
+        arguments: serde_json::json!({}),
+    };
+    std::fs::write(paths.events_jsonl(), encode_event(&legacy).unwrap()).unwrap();
+
+    let state = WriterState::open(
+        thread,
+        paths,
+        StoreLimits::for_tests(),
+        Arc::new(MemoryDiagnostics::new()),
+    )
+    .unwrap();
+    let replayed = state.replay(0);
+
+    assert_eq!(replayed.len(), 1);
+    match &replayed[0] {
+        RuntimeEvent::ToolCallStarted { item_id, .. } => assert_eq!(
+            *item_id,
+            Some(ark_common::keyed_item_id("tool_call:legacy-call"))
+        ),
+        other => panic!("unexpected replayed event: {other:?}"),
+    }
+}
+
+#[test]
+fn append_backfills_legacy_item_ids_before_fanout() {
+    let dir = TempDir::new("writer-append-legacy-item-id");
+    let thread = ThreadId::new();
+    let turn = TurnId::new();
+    let mut state = state(&dir, thread);
+    let mut subscription = state.snapshot_and_subscribe(0).unwrap();
+    let legacy = RuntimeEvent::ToolCallStarted {
+        seq: 0,
+        thread_id: thread,
+        turn_id: turn,
+        item_id: None,
+        timestamp: Utc::now(),
+        call_id: "legacy-call".into(),
+        tool: "read".into(),
+        arguments: serde_json::json!({}),
+    };
+
+    let stored = state.append(legacy).unwrap();
+    let fanned_out = subscription.live.try_recv().unwrap();
+
+    for event in [stored, fanned_out] {
+        match event {
+            RuntimeEvent::ToolCallStarted { item_id, .. } => assert_eq!(
+                item_id,
+                Some(ark_common::keyed_item_id("tool_call:legacy-call"))
+            ),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn compaction_keeps_an_unacknowledged_child_completion() {
     let dir = TempDir::new("completion-compaction");
     let thread = ThreadId::new();
@@ -439,6 +509,53 @@ fn usage(thread: ThreadId, turn: TurnId, tokens: u64) -> RuntimeEvent {
 }
 
 #[test]
+fn failed_event_append_rolls_back_and_reuses_only_the_unwritten_seq() {
+    let dir = TempDir::new("writer-append-rollback");
+    let thread = ThreadId::new();
+    let mut writer = state(&dir, thread);
+    writer.append(event_at(thread, 0)).unwrap();
+    let before = std::fs::read(writer.paths().events_jsonl()).unwrap();
+    crate::store::fs_util::fail_next_append(
+        &writer.paths().events_jsonl(),
+        crate::store::fs_util::TestAppendFailure::PartialWrite,
+    );
+
+    assert!(writer.append(event_at(thread, 0)).is_err());
+    assert_eq!(writer.watermark(), 1);
+    assert_eq!(
+        std::fs::read(writer.paths().events_jsonl()).unwrap(),
+        before
+    );
+
+    let stored = writer.append(event_at(thread, 0)).unwrap();
+    assert_eq!(stored.seq(), 2);
+    let parsed = crate::store::event_log::read_log_blocking(writer.paths()).unwrap();
+    assert_eq!(parsed.events.len(), 2);
+    assert_eq!(parsed.max_seq, 2);
+    assert_eq!(parsed.malformed, 0);
+}
+
+#[test]
+fn uncertain_append_rollback_blocks_later_appends() {
+    let dir = TempDir::new("writer-append-uncertain");
+    let thread = ThreadId::new();
+    let mut writer = state(&dir, thread);
+    writer.append(event_at(thread, 0)).unwrap();
+    crate::store::fs_util::fail_next_append(
+        &writer.paths().events_jsonl(),
+        crate::store::fs_util::TestAppendFailure::RollbackFsync,
+    );
+
+    assert!(writer.append(event_at(thread, 0)).is_err());
+    assert_eq!(writer.watermark(), 1);
+    assert!(
+        writer.append(event_at(thread, 0)).is_err(),
+        "ambiguous bytes must fail closed until recovery"
+    );
+    assert_eq!(writer.watermark(), 1);
+}
+
+#[test]
 fn append_fsync_skips_deltas_and_respects_the_limit() {
     let mut limits = StoreLimits::for_tests();
     let thread = ThreadId::new();
@@ -467,6 +584,7 @@ fn append_fsync_skips_deltas_and_respects_the_limit() {
         seq: 3,
         thread_id: thread,
         turn_id: turn,
+        item_id: None,
         timestamp: Utc::now(),
         call_id: "call".into(),
         tool: "read".into(),

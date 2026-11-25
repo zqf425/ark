@@ -54,7 +54,9 @@ ImChannelPolicy {
                            # 丢弃(不提示——避免向任意第三方发消息)。
                            # weixin 渠道额外按 owner_user_id 过滤 sender。
   require_mention: bool    # 群聊必须 @bot 才响应;默认 true(serde default + 归一化
-                           # 回退双保险)。v1 仅飞书群有群聊,Telegram v1 仅私聊
+                           # 回退双保险)。v1 仅飞书群有群聊,Telegram v1 仅私聊。
+                           # 飞书 is_mention 只匹配 bot/v3/info 的 open_id;提到其他
+                           # 成员或 bot 身份未知时 fail closed
 }
 ImChannel {                  # 落盘与服务端内部形状;出现在 im.json,不出现在任何
   id, kind, title, enabled   # 请求体(kind 创建后不可变,凭证形状随 kind)
@@ -93,11 +95,14 @@ ImSettings { enabled: false }# config.im,ReloadClass::Hot,总开关只门控连�
                              # 主动开启,避免升级后自动连上已配置渠道
 ```
 
-落盘记录类型 `ImChannelRecord { channel, cursor: Option<String> }` **居 `ark-ports`**
-(与 `ThreadMeta`/`ChildRunRecord` 先例同宿主:`ImStore` 端口签名要命名它;不登记
-`ts_export`,不出现在 `web/src/generated`)。`cursor` 为服务端入站游标(telegram update
-offset 等平台游标,统一以 `Option<String>` 落盘,offset 用十进制串),
-GET 不回传,客户端不可写。
+落盘记录类型 `ImChannelRecord { channel, cursor: Option<String> }`、`InboundMessage`、
+`ImInboxId` 与 `ImInboxEntry` **居 `ark-ports`**(与 `ThreadMeta`/`ChildRunRecord` 先例同宿主:
+`ImStore` 端口签名要命名它们;不登记 `ts_export`,不出现在 `web/src/generated`)。
+`cursor` 为服务端入站游标(telegram update offset 等平台游标,统一以 `Option<String>`
+落盘,offset 用十进制串),GET 不回传,客户端不可写。inbox 记录携带消息、批次最终
+`next_cursor` 与 `queued` 状态,直到处理终态才删除。存储为每个持久化批次分配内部
+`cursor_version`,只有不旧于该渠道已应用版本的提交才推进 cursor,防止旧 supervisor 或
+旧 inbox 的延迟提交把游标回退;版本随 `im.json` 重启恢复,不进入 wire。
 
 - 渠道数上限 `MAX_IM_CHANNELS = 20`(常量居 ark-contract,与 schedules 常量同宿主);
   容量校验 `ensure_channel_capacity` 居 `ark-im`(同 `ark-schedule::ensure_capacity`
@@ -131,23 +136,42 @@ GET 不回传,客户端不可写。
 
 ### 入站管线(ark-server `service/im.rs` 编排,平台无关)
 
-1. **过滤**:bot 自身消息、白名单外会话(空白名单按安全默认拒绝并提示;非空白名单外的
-   静默丢弃)、群聊未 @(`require_mention` 生效时)、weixin 非 owner sender、空文本
-   一律丢弃,不触发回合。
-2. **去重**:每渠道有界 LRU `message_id` 集(内存,`DEDUP_CAPACITY = 1024`);跨重启的
-   重复投递由持久化游标收敛。游标落盘**节流**(每渠道每 10 条或每 30 秒,取先)且
-   **不阻塞入站 select 循环**(独立写任务或 `spawn_blocking`),避免每条消息重写整份
-   `im.json`;写失败只记 `runtime.last_error`,不丢消息。已知限制:游标写入与回合启动
-   之间的崩溃窗口内,窗口内消息重启后可能重复触发回合(上限即节流窗口 10 条),列入
-   验收的已知限制。
-3. **会话映射与建线**:见上节。
-4. **派发**:每 conversation 串行——该会话已有回合在跑时入队(每会话队列上限 4,溢出
-   回复 busy 提示);不阻塞同渠道其它会话(一个回合可跑数分钟)。队列只串行化 IM 自己
-   派发的回合;桌面端正在该线程跑回合时 `start_turn` 返回 `Conflict`(409),此时按
-   `IM_BUSY_RETRY_SECS = 30` 有界重试(至多 5 次),耗尽后回复 busy 提示——队列与
-   `state.turns` 的关系是"队列消解 IM 侧并发,registry 是唯一冲突仲裁"。
-5. **回合**:`start_turn(state, thread_id, text, [])`;文本超 `MAX_TURN_TEXT_BYTES` 时
-   截断到上限。不持有 `workspace_gate` 做任何长耗时动作(红线 §7.5)。
+1. **批量原子落盘**:适配器归一化一批平台消息后,由 `InboundSender` 经
+   `ImStore::persist_inbound_batch` 在**一次原子 rewrite** 中全部追加为
+   `queued=false` 的 inbox 记录;任一校验或写入失败不得部分可见,也不推进平台 cursor。
+   空批次才直接 `advance_channel_cursor`。
+2. **过滤、命令与去重**:bot 自身消息、白名单外会话(空白名单按安全默认拒绝并提示;
+   非空白名单外静默丢弃)、群聊未 @(`require_mention` 生效时)、weixin 非 owner sender、
+   空文本一律终端丢弃;`/new` 与未知命令处理完后也终端丢弃。live 消息按每渠道有界
+   LRU(`DEDUP_CAPACITY = 1024`)的 `(chat_id, message_id)` 去重,不同 chat 的同一
+   message id 不得互相误杀。
+3. **持久入队与 adapter ack**:普通消息先由 `queue_inbound` 在一次原子 rewrite 中写入
+   `queued=true`、推进到批次最终 cursor 并保留记录,再放入内存 conversation queue,
+   最后才向适配器发 admission ack。磁盘与内存没有跨介质原子事务,因此采用 write-ahead
+   顺序而非“先改内存再落盘”:任何崩溃点都留下可重放记录,不会出现 cursor 已前进而消息
+   只存在于已丢失的内存队列。提交或入队失败时 withhold adapter ack。
+4. **重启/重连重放**:新 transport 启动前按插入顺序重放 pending 与 queued 记录。重放
+   按 `ImInboxId` 跳过仍由 live queue/处理任务持有的同一记录,避免 reconnect 重复执行;
+   对不在内存中的同一 durable id 绕过平台去重,避免旧 dedup 缓存把 queued 记录误判为
+   新重复消息。另一 durable id 若指向同一活跃平台消息,先原子删除重复记录再 ack;
+   transport 失败时先 admit/ack 已落盘的缓冲 delivery,再发布失败运行态。重放遇到满队列
+   时保留记录并在当前 supervisor 内等待容量,不回复 busy 或删除;transport 要等该条
+   重放完成入队后才启动,以维持同一会话的重放顺序。
+5. **会话映射与建线**:见上节。
+6. **派发**:每 conversation 串行——该会话已有回合在跑时入队(每会话队列上限 4)。新
+   live 消息溢出回复 busy 后终端丢弃;durable replay 溢出只保留并在容量释放后由
+   本次运行继续入队。队列不阻塞同渠道其它
+   会话(一个回合可跑数分钟)。队列只串行化 IM 自己派发的回合;桌面端正在该线程跑回合时
+   `start_turn_as` 返回 `Conflict`(409),此时按 `IM_BUSY_RETRY_SECS = 30` 有界重试
+   (至多 5 次),耗尽后回复 busy 提示——队列与 `state.turns` 的关系是"队列消解 IM 侧
+   并发,registry 是唯一冲突仲裁"。
+7. **回合与完成 ack**:`start_turn_as(..., TurnSource::Im, ...)`;文本超
+   `MAX_TURN_TEXT_BYTES` 时截断到上限。只有回合到达终态才 `ack_inbound` 删除 inbox
+   记录;建线、订阅或启动失败、shutdown 中断、等待超时均保留供后续重放。不持有
+   `workspace_gate` 做任何长耗时动作(红线 §7.5)。
+
+该协议提供**至少一次**投递:处理完成但 ack 前崩溃可能重复执行回合;不再有旧的“每
+10 条或 30 秒节流游标、最多重放 10 条”限制。
 
 ### 回复路径
 
@@ -159,9 +183,9 @@ GET 不回传,客户端不可写。
   `turn_id` 过滤的最后一条非空 assistant 文本;本回合无 assistant 文本(失败/中止)时
   按终态分支发失败/中止提示,**不回退到历史回合文本**(投影保证 lag 时回复仍完整,
   turn_id 过滤保证不会把上一回合的答案发给用户)。
-- **超时解耦**:回合超过 `IM_ACK_SECS = 120` 未
-  完成先发 ack("正在处理…"),后台继续等待至多 `IM_MAX_WAIT_SECS = 1800`,超时回复失败
-  提示并放弃等待(回合本身继续跑到终态,结果留在会话线程里)。
+- **超时解耦**:回合超过 `IM_ACK_SECS = 120` 未完成先发 ack("正在处理…"),后台继续
+  等待至多 `IM_MAX_WAIT_SECS = 1800`,超时提示“回合仍在后台运行”并放弃等待(回合本身
+  继续跑到终态,结果留在会话线程里)。此时消息处理尚未完成,inbox 记录不得 ack 删除。
 - 发送按平台上限分块(Telegram 4096 字符等);发送失败降级为截断纯文本,再失败记录
   `runtime.last_error`。
 - v1 不回传工具过程/推理内容,只回传最终 assistant 文本。
@@ -203,9 +227,9 @@ GET 不回传,客户端不可写。
 | 职责 | 宿主 | 依据 |
 |---|---|---|
 | 渠道/绑定/凭据/策略 wire DTO + ts_export | `ark-contract`(`im.rs`) | Rust 类型是 wire 唯一真源 |
-| `ImStore` 端口(trait,**同步**,与 `ScheduleStore` 同性质:整份文档一次进程内锁临界区读写,锁内不做网络 IO)与 `ImChannelRecord` 落盘记录类型(不登记 ts_export) | `ark-ports` | 端口签名要命名落盘记录(同 `ThreadMeta` 先例);实现由组合根注入,编排不认识文件系统 |
-| `ImFileStore`(`im.json`,Mutex 串行 + tmp+rename 原子写) | `ark-store` | 与 ScheduleFileStore 同模式 |
-| 归一化消息模型、`ImTransport` trait、三平台适配器、去重/分块/命令纯函数、容量校验 | 新 crate `ark-im` | 长连接网络 IO 无法进插件(无 WS/监听能力),也不能进 `ark-server`(它会反向依赖适配器实现) |
+| `ImStore` 端口(trait,**同步**,与 `ScheduleStore` 同性质:整份文档一次进程内锁临界区读写,锁内不做网络 IO)与 `ImChannelRecord`/`InboundMessage`/`ImInboxEntry`/`ImInboxId` 落盘类型(不登记 ts_export) | `ark-ports` | 端口签名要命名落盘记录(同 `ThreadMeta` 先例);实现由组合根注入,编排不认识文件系统 |
+| `ImFileStore`(`im.json`,Mutex 串行 + copy-on-write + tmp+rename 原子写) | `ark-store` | 与 ScheduleFileStore 同模式;批量落盘、queued+cursor、ack 均为单次原子状态转换 |
+| 归一化消息模型的转出、`ImTransport` trait、`InboundSender` durable delivery 边界、三平台适配器、去重/分块/命令纯函数、容量校验 | `ark-im` | 长连接网络 IO 无法进插件(无 WS/监听能力),也不能进 `ark-server`(它会反向依赖适配器实现) |
 | 入站编排、绑定、回合驱动、回复订阅、HTTP 路由 | `ark-server`(`service/im.rs` 等) | 与 scheduler 同层,复用 `start_turn`/`SessionStore::subscribe`/gate 语义 |
 | 装配(构建适配器与登录流对象、注入经治理的 HTTP client、注册路由、连接循环启动、shutdown 挂钩) | `apps/arkd` | 唯一组合根;适配器与登录流的 `reqwest::Client` 由组合根经 `ark_http::transport_client`(同一 `HttpPolicy` 的代理/TLS 设置)构造注入,IM 不自建裸 client |
 | 管理界面 | `web` 设置页 | 只消费生成契约 |
@@ -234,18 +258,23 @@ GET 不回传,客户端不可写。
 
 ## 验收
 
-- 单元:ark-im 归一化/分块/去重 LRU 有界/命令解析/凭证按 kind 必填校验/容量校验;
-  ark-server 假 transport 下入站→白名单(空提示/非空静默)/去重/队列→绑定→`start_turn`→
-  终态→按 turn_id 投影取文本→`send_text` 回发全链路(含失败/中止回合的终态提示分支),
-  @提及、游标节流恢复、409 有界重试、超时 ack 分支,渠道 CRUD/上限/verify 路由,
-  `turn_source_texts` 对 `TurnSource::Im` 的用户消息映射。
+- 单元:ark-im 归一化/分块/`(chat_id, message_id)` 去重 LRU 有界/飞书 bot `open_id`
+  提及判定/批次持久化失败不部分落盘/命令解析/凭证按 kind 必填校验/容量校验;
+  ark-server 假 transport 下入站→白名单(空提示/非空静默)/去重/队列→绑定→
+  `start_turn_as`→终态→按 turn_id 投影取文本→`send_text` 回发全链路(含失败/中止回合
+  的终态提示分支),pending/queued 重启重放、处理中不 ack、同一 inbox id 幂等重放、
+  同一活跃平台消息的不同 durable id 去重、transport 失败先 drain 已持久 delivery、
+  live 队列满删除而 durable replay 队列满保留并等待容量后继续处理、409 有界重试、超时保留分支,
+  渠道 CRUD/上限/verify 路由,`turn_source_texts` 对 `TurnSource::Im` 的用户消息映射;
+  ark-store 覆盖批量原子落盘、原子 rewrite 失败不暴露半提交、queued+cursor 同写、
+  乱序提交与重启后 cursor 不回退、ack/discard 与重开恢复。
 - 契约:`cargo test -p ark-contract --lib ts_export` 后 `web/src/generated` 零 diff。
 - 质量:`cargo fmt --check`、`cargo check`、`cargo clippy -D warnings`(受影响包),
   `cargo test --workspace --exclude ark-desktop`;`dependency_direction.rs` 含 ark-im 新行。
 - 端到端(发布验收):真实 Telegram bot 私聊发消息→自动建线完成回合→回复送达;渠道停用
-  后不再响应;重启后绑定与游标恢复,重复回合以节流窗口为上限(已知限制);阶段 3/4
-  各自的降级判定验收(飞书长连接不可用时按预设标准切 `send_only` 或移出范围;微信
-  协议受阻时按退出条件处理)。
+  后不再响应;重启后绑定、游标与未完成 inbox 恢复,queue 后崩溃不丢消息,重复执行符合
+  至少一次语义;阶段 3/4 各自的降级判定验收(飞书长连接不可用时按预设标准切
+  `send_only` 或移出范围;微信协议受阻时按退出条件处理)。
 
 ## 实施阶段
 
@@ -282,11 +311,12 @@ classify/diagnostics/snapshot 落点,默认关)。
 
 阶段 2(编排与 Telegram)已实现:`ark-im` crate(归一化消息模型、`ImTransport` trait、
 create/update 载荷归一化、去重 LRU、分块、命令解析、容量校验、`build_transport` 工厂,
-13 个单测)与 Telegram 适配器(getUpdates 长轮询、指数退避、HTML 转义与纯文本降级、游标
-上报、`is_self`);`ark-server` 的 `service/im.rs`(sync 对账/渠道启停/游标节流落盘)与
-`service/im_inbound.rs`(白名单空提示/非空静默、@提及、weixin owner、去重、每会话串行
-队列、`TurnSource::Im` 回合、订阅探测终态 + 注册表轮询兜底、按 turn_id 投影取回复、
-超时 ack、busy 有界重试);HTTP 路由 `/v1/im/channels`(CRUD/verify)与 `/v1/im/bindings`;
+13 个初始单测)与 Telegram 适配器(getUpdates 长轮询、指数退避、HTML 转义与纯文本降级、
+durable admission、`is_self`);`ark-server` 的 `service/im.rs`(sync 对账/渠道启停/
+inbox 启动重放)与 `service/im_inbound.rs`(白名单空提示/非空静默、@提及、weixin owner、
+`(chat_id, message_id)` 去重、每会话串行队列、`TurnSource::Im` 回合、订阅探测终态 +
+注册表轮询兜底、按 turn_id 投影取回复、超时保留、busy 有界重试);HTTP 路由
+`/v1/im/channels`(CRUD/verify)与 `/v1/im/bindings`;
 arkd 装配(`ImFileStore` + 经治理的 transport client + `im.spawn`,仅随 serve 启动)。
 测试:ark-server 173 用例(含 7 个 IM 编排集成测试)、ark-im 13 用例;依赖方向表已含
 `ark-im` 行;文档同步清单第 1、2 行均已回填。
@@ -297,15 +327,16 @@ arkd 装配(`ImFileStore` + 经治理的 transport client + `im.spawn`,仅随 se
 LogID/service/method/headers/payload 九字段)、ping/pong 心跳、事件按 message_id/sum/seq
 分片重组(10s TTL)、echo ack 回帧(`{"code":200}` base64);REST 侧 tenant_access_token
 缓存刷新、`im/v1/messages` 文本发送(按 kind 上限分块)、`bot/v3/info` 身份与 `is_self`。
-群聊 `is_mention` 由事件 `mentions` 非空判定,`require_mention` 策略在编排层生效。降级
-判定未触发:协议完整提取,无需 `send_only`。4 个单测(帧编解码回环、未知字段跳过、分片
-重组、事件归一化)。飞书无重放游标(网关在带内 ack,重投递由网关重试窗口与去重集合兜底),
-`cursor()` 恒为 `None`。
+群聊 `is_mention` 只匹配 `mentions[].id.open_id` 与 `bot/v3/info` 返回的 bot `open_id`,
+提到其他成员或身份未知时 fail closed;`require_mention` 策略在编排层生效。echo 在
+durable admission 成功后确认。降级判定未触发:协议完整提取,无需 `send_only`。飞书无
+平台重放游标(网关在带内 ack,重投递由网关重试窗口与 durable inbox/去重集合兜底)。
 
 阶段 4(微信)已实现:`ark-im/src/weixin.rs` iLink bot 协议原生实现(参照
 `@tencent-weixin/openclaw-weixin` 2.4.3,不引 Node 依赖):
-`getupdates` 长轮询(游标 `get_updates_buf` 随渠道持久化)、`message_type==2` 自过滤、
-TEXT/VOICE 文本提取、`context_token` 按发送者缓存(主动推送凭据)、`sendmessage`
+`getupdates` 长轮询(一批 `msgs` 原子写入 durable inbox,server admission 确认后才持久化
+并推进 `get_updates_buf`)、`message_type==2` 自过滤、TEXT/VOICE 文本提取、`context_token`
+按发送者缓存在进程内(主动推送凭据,不随 inbox 持久化)、`sendmessage`
 (BOT/FINISH/TEXT,分块)、`ret`/`errcode` 业务错误检查、连续失败退避(2s/30s)。二维码登录
 `WeixinLoginFlow`(`get_bot_qrcode` + `get_qrcode_status` 状态机 wait/scaned/expired/
 confirmed;`need_verifycode`/`verify_code_blocked` 显式失败):HTTP 路由
@@ -334,4 +365,12 @@ ImChannelForm/WeixinLoginDialog;上限后放宽至 1000 行)通过。
 `qrcode.react` 编码为二维码(白底容器保证深色主题下可扫);新增 3 个对话框渲染单测。
 依赖变更:web `dependencies` 新增 `qrcode.react@^4.2.0`(无传递
 依赖,约 10KB gzip 量级进主 chunk)。
+
+**durable inbox 审计补强(P2-19/P2-20/P2-21)**:飞书群聊提及改为匹配 bot `open_id`;
+Telegram 去重键改为 `(chat_id, message_id)`;Telegram/微信统一经 `InboundSender` 批量
+原子落盘,server 以 queued+cursor 单写确认入队,处理终态才 ack。回归测试覆盖批次失败
+不部分落盘、queued/pending 重启重放、处理中保留、同一 inbox id 幂等重放,以及满队列
+不丢弃 durable replay 且容量释放后无需重启即可继续处理;存储按持久化批次版本阻止
+乱序提交回退 cursor。已知边界:微信 `context_token` 仍是进程内状态,durable inbox
+保证入站不丢,不保证重启后主动回复一定具备平台上下文。
 

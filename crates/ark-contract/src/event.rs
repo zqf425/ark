@@ -352,6 +352,8 @@ pub enum RuntimeEvent {
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        item_id: Option<ark_common::ItemId>,
         timestamp: DateTime<Utc>,
         message: String,
         /// `true` when the failure was caused by the model request itself
@@ -429,6 +431,8 @@ pub enum RuntimeEvent {
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        item_id: Option<ark_common::ItemId>,
         timestamp: DateTime<Utc>,
         call_id: String,
         tool: String,
@@ -441,6 +445,8 @@ pub enum RuntimeEvent {
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        item_id: Option<ark_common::ItemId>,
         timestamp: DateTime<Utc>,
         call_id: String,
         tool: String,
@@ -496,6 +502,8 @@ pub enum RuntimeEvent {
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        item_id: Option<ark_common::ItemId>,
         timestamp: DateTime<Utc>,
         request_id: String,
         prompt: String,
@@ -505,6 +513,8 @@ pub enum RuntimeEvent {
         seq: u64,
         thread_id: ThreadId,
         turn_id: ark_common::TurnId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        item_id: Option<ark_common::ItemId>,
         timestamp: DateTime<Utc>,
         request_id: String,
         answer: String,

@@ -41,6 +41,11 @@ gated 在 `Notice` kind 上）。取消原因词表与自治权词表不在本 c
 该 id 已关联到**本线程**，本阶段只记录本回合引用了哪些附件，不向模型传字节。`TurnStarted` 的
 `attachment_ids` 同样带 serde default，使旧日志可读。
 
+`ToolCallStarted/Finished`、`UserInputRequested/Resolved` 与 `TurnFailed` 携带可选
+`item_id`，由 Rust 生产者通过 `ark_common::keyed_item_id` 生成；live 渲染层直接消费该 ID，
+不再实现或镜像哈希算法。字段带 serde default 且空值省略，旧日志缺少时由存储投影按原 namespace
+回退生成，保持历史回放兼容。
+
 `ToolStormSuppressed` 除 `tool`/`count` 外还携带 `arguments`（serde default，旧行省略时读为 null）：
 被熔断抑制的调用必须留下"重复的是什么"的原始参数记录，且不要求审计方把抑制事件与配对的
 `ToolCallStarted` 做跨事件 join。`with_seq` 的逐变体重写集中在 `event/with_seq.rs`；每行拼写一个
@@ -65,6 +70,10 @@ runtime 每轮结算的 usage 事件写入（`ark-llm` 解析的 provider payloa
 加计 harness 重试/续跑的回合间退避；由 `ark-server` 的 `ActiveClock` 投影从回合生命周期与门禁
 事件推导（见 `docs/modules/ark-server.md`），`gate_suspensions` 计数被扣除的门禁次数。渲染层不
 自行计时，只消费该字段并在运行中回合上按秒延伸（上限为门禁 `requested_at`）。
+
+`ThreadUsageResponse.last_seq: Option<u64>`（serde default，省略空值）是本次聚合覆盖的权威事件日志
+水位，供渲染层区分 HTTP 已包含的 live usage 样本与仍需重放的 SSE 样本。空日志为 `None`；旧服务端
+不返回该字段时，兼容客户端只能退回请求时的样本数基线，不能把 lifetime `samples` 当成实时尾部覆盖数。
 
 `TurnStarted.auto_recovery: u32`（serde default `0`，序列化时省略零值）标记 harness 自动恢复
 回合及其尝试序号：前一个回合因瞬态模型请求失败（`model_request_failed = true`）终结后，恢复调度器

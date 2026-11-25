@@ -13,6 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installBrowserStubs, mountWithProviders, settle, type ReactHarness } from '../../../shared/testing/react-harness'
 import type { ProviderView } from '../../../shared/contracts'
 import { useCodeSessionStore } from '../state/store'
+import { getThread, updateThread } from '../api/threads-api'
+import { useThreadRuntime } from '../hooks/use-thread-runtime'
 import { AutonomyPicker, ModelPicker } from './ComposerRuntimeControls'
 
 const THREAD_A = '00000000-0000-0000-0000-00000000000a'
@@ -81,6 +83,9 @@ describe('composer runtime pills read the selected session only', () => {
 
   beforeEach(() => {
     installBrowserStubs()
+    vi.mocked(getThread).mockClear()
+    vi.mocked(updateThread).mockClear()
+    vi.mocked(getThread).mockResolvedValue({ runtime: {} } as never)
     // A is pinned to another provider/model; B stores nothing.
     useCodeSessionStore.setState({
       threadRuntime: {
@@ -91,7 +96,7 @@ describe('composer runtime pills read the selected session only', () => {
   })
 
   afterEach(async () => {
-    useCodeSessionStore.setState({ threadRuntime: {} })
+    useCodeSessionStore.setState({ threadRuntime: {}, threadRuntimeGeneration: {} })
     await harness?.unmount()
     harness = null
   })
@@ -151,5 +156,79 @@ describe('composer runtime pills read the selected session only', () => {
       await harness!.render(<ModelPicker threadId={'00000000-0000-0000-0000-00000000000c'} />)
     })
     expect(modelPill(harness.host)).not.toContain('model-b')
+  })
+
+  it('ignores an older same-thread runtime reload that resolves last', async () => {
+    let resolveFirst!: (value: unknown) => void
+    let resolveSecond!: (value: unknown) => void
+    const first = new Promise((resolve) => { resolveFirst = resolve })
+    const second = new Promise((resolve) => { resolveSecond = resolve })
+    vi.mocked(getThread).mockReturnValueOnce(first as never).mockReturnValueOnce(second as never)
+    function ReloadProbe(): JSX.Element {
+      const { reload } = useThreadRuntime(THREAD_A)
+      return <button type="button" onClick={() => void reload()}>reload</button>
+    }
+    harness = await mountWithProviders(<ReloadProbe />)
+    const button = harness.host.querySelector<HTMLButtonElement>('button')!
+    await act(async () => { button.click(); await Promise.resolve() })
+    await act(async () => { button.click(); await Promise.resolve() })
+    await act(async () => {
+      resolveSecond({ runtime: { model: 'new-model' } })
+      await Promise.resolve()
+    })
+    await act(async () => {
+      resolveFirst({ runtime: { model: 'old-model' } })
+      await Promise.resolve()
+    })
+    expect(useCodeSessionStore.getState().threadRuntime[THREAD_A]?.model).toBe('new-model')
+  })
+
+  it('shares reload ownership across pill instances so an older response cannot win', async () => {
+    let resolveFirst!: (value: unknown) => void
+    let resolveSecond!: (value: unknown) => void
+    const first = new Promise((resolve) => { resolveFirst = resolve })
+    const second = new Promise((resolve) => { resolveSecond = resolve })
+    vi.mocked(getThread).mockReturnValueOnce(first as never).mockReturnValueOnce(second as never)
+    function ReloadProbe({ name }: { name: string }): JSX.Element {
+      const { reload } = useThreadRuntime(THREAD_A)
+      return <button type="button" data-probe={name} onClick={() => void reload()}>{name}</button>
+    }
+    harness = await mountWithProviders(<><ReloadProbe name="first" /><ReloadProbe name="second" /></>)
+    const firstButton = harness.host.querySelector<HTMLButtonElement>('[data-probe="first"]')!
+    const secondButton = harness.host.querySelector<HTMLButtonElement>('[data-probe="second"]')!
+    await act(async () => { firstButton.click(); await Promise.resolve() })
+    await act(async () => { secondButton.click(); await Promise.resolve() })
+    await act(async () => {
+      resolveSecond({ runtime: { model: 'new-model' } })
+      await Promise.resolve()
+    })
+    await act(async () => {
+      resolveFirst({ runtime: { model: 'old-model' } })
+      await Promise.resolve()
+    })
+    expect(useCodeSessionStore.getState().threadRuntime[THREAD_A]?.model).toBe('new-model')
+  })
+
+  it('PATCHes only provider/model instead of echoing unrelated runtime overrides', async () => {
+    vi.mocked(getThread).mockResolvedValue({
+      runtime: { workspace: '/tmp/workspace', autonomy: 'strict', reasoning_effort: 'high' }
+    } as never)
+    harness = await mountWithProviders(<ModelPicker threadId={THREAD_A} />)
+    await act(async () => {
+      harness!.host.querySelector<HTMLButtonElement>('.ark-composer__pill--model')!.click()
+      await Promise.resolve()
+    })
+    await settle()
+    const provider = [...harness.host.querySelectorAll<HTMLButtonElement>('.ark-mpm__provider')]
+      .find((node) => node.textContent?.includes('Provider One'))!
+    await act(async () => { provider.click(); await Promise.resolve() })
+    const model = [...harness.host.querySelectorAll<HTMLButtonElement>('.ark-mpm__model')]
+      .find((node) => node.textContent?.includes('default-model'))!
+    await act(async () => { model.click(); await Promise.resolve() })
+    await settle()
+
+    expect(updateThread).toHaveBeenCalledWith(THREAD_A, {
+      runtime: { provider_id: 'p1', model: 'default-model' }
+    })
   })
 })

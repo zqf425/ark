@@ -7,7 +7,7 @@ mod runtime;
 
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_notification::NotificationExt;
-use tauri_plugin_shell::ShellExt;
+use tauri_plugin_opener::OpenerExt;
 
 /// Native folder picker for the settings workspace field.
 ///
@@ -83,8 +83,8 @@ fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(format!("refusing to open a {} url", parsed.scheme()));
     }
-    app.shell()
-        .open(parsed.as_str(), None)
+    app.opener()
+        .open_url(parsed.as_str(), None::<&str>)
         .map_err(|error| error.to_string())
 }
 
@@ -92,6 +92,7 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .manage(runtime::ManagedRuntime::default())
         .invoke_handler(tauri::generate_handler![

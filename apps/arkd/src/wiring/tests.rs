@@ -9,6 +9,7 @@ use super::turns::{
 use super::*;
 
 mod registration;
+mod startup;
 
 #[test]
 fn serve_user_turn_keeps_the_interactive_gate() {
@@ -125,100 +126,6 @@ async fn unattended_allow_approves_without_registering_an_interactive_gate() {
 
     assert!(reply.approved());
     assert!(interactive.pending_approval_ids().is_empty());
-}
-
-/// Collects formatted log lines so the startup test can assert on the real
-/// warning instead of only on the data behind it.
-#[derive(Clone, Default)]
-struct CaptureWriter(Arc<std::sync::Mutex<Vec<u8>>>);
-
-impl CaptureWriter {
-    fn text(&self) -> String {
-        String::from_utf8_lossy(&self.0.lock().expect("capture lock")).into_owned()
-    }
-}
-
-impl std::io::Write for CaptureWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().expect("capture lock").extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CaptureWriter {
-    type Writer = Self;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        self.clone()
-    }
-}
-
-/// Run `body` under a scoped subscriber: the process-global subscriber is
-/// left alone, so parallel tests never race on tracing installation.
-fn capture_startup_logs<T>(body: impl FnOnce() -> T) -> (T, String) {
-    let writer = CaptureWriter::default();
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(writer.clone())
-        .with_ansi(false)
-        .finish();
-    let value = tracing::subscriber::with_default(subscriber, body);
-    (value, writer.text())
-}
-
-/// Defect D2: the GUI writes `serve`/`models`/`runtime`, so a copied file
-/// used to start the runtime on pure defaults without a single log line.
-#[test]
-fn gui_shaped_config_warns_at_startup_and_keeps_defaults() {
-    let data_dir = TestDataDir::new();
-    std::fs::write(
-        ark_config::config_path(data_dir.path()),
-        br#"{"serve":{"port":18801},"models":[],"runtime":{"logLevel":"debug"}}"#,
-    )
-    .expect("config is writable");
-
-    let (loaded, logs) = capture_startup_logs(|| load_startup_config(data_dir.path()));
-    let loaded = loaded.expect("a parseable document still loads");
-
-    assert_eq!(loaded.subagents.max_concurrency, 2);
-    assert!(loaded.subagents.auto_continue);
-    assert!(logs.contains("WARN"), "startup must warn: {logs}");
-    assert!(logs.contains("defaulted=[port"), "{logs}");
-    assert!(logs.contains("ignored=[models"), "{logs}");
-}
-
-#[test]
-fn matching_config_starts_without_a_warning() {
-    let data_dir = TestDataDir::new();
-    let path = ark_config::config_path(data_dir.path());
-    let mut config = RuntimeConfig::default();
-    config.subagents.max_concurrency = 5;
-    config.subagents.auto_continue = true;
-    ark_config::save(&path, &config).expect("config is writable");
-
-    let (loaded, logs) = capture_startup_logs(|| load_startup_config(data_dir.path()));
-
-    assert_eq!(loaded.expect("config loads"), config);
-    assert!(logs.is_empty(), "a matching file must stay silent: {logs}");
-}
-
-#[test]
-fn missing_config_is_a_silent_first_run() {
-    let data_dir = TestDataDir::new();
-    let (loaded, logs) = capture_startup_logs(|| load_startup_config(data_dir.path()));
-    assert_eq!(loaded.expect("defaults load"), RuntimeConfig::default());
-    assert!(logs.is_empty(), "a first run must stay silent: {logs}");
-}
-
-#[test]
-fn unparseable_config_still_fails_startup() {
-    let data_dir = TestDataDir::new();
-    std::fs::write(ark_config::config_path(data_dir.path()), b"{ not json")
-        .expect("config is writable");
-    assert!(load_startup_config(data_dir.path()).is_err());
 }
 
 #[test]
@@ -522,6 +429,119 @@ impl TestDataDir {
     fn path(&self) -> &std::path::Path {
         self.0.path()
     }
+}
+
+#[tokio::test]
+async fn unattended_build_does_not_schedule_pending_auto_continuations() {
+    let data_dir = TestDataDir::new();
+    let store = FileSessionStore::open(StoreConfig::new(data_dir.path())).unwrap();
+    let thread = store.create_thread("parent").await.unwrap().thread_id;
+    store
+        .append_event(
+            thread,
+            RuntimeEvent::ChildCompleted {
+                seq: 0,
+                thread_id: thread,
+                timestamp: Utc::now(),
+                notification_id: "child:pending".to_string(),
+                child_id: ChildId::new(),
+                label: "inspect runtime".to_string(),
+                status: ark_common::ChildRunStatus::Completed,
+                summary: Some("done".to_string()),
+                error: None,
+                usage: None,
+                tool_invocations: None,
+            },
+        )
+        .await
+        .unwrap();
+    let pending_seq = store.highest_seq(thread).await.unwrap();
+    drop(store);
+
+    let args = ServeArgs {
+        port: 0,
+        data_dir: data_dir.path().to_path_buf(),
+        auth_token: None,
+        workspace: data_dir.path().to_path_buf(),
+    };
+
+    let wiring = build(&args, true).await.expect("unattended runtime builds");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    assert!(wiring.state.turns.active_for(thread).is_none());
+    assert_eq!(
+        wiring
+            .store
+            .replay_interaction_events(thread)
+            .await
+            .unwrap()
+            .len(),
+        0,
+        "headless startup must not create a background continuation turn"
+    );
+    assert_eq!(pending_seq, 1);
+    ark_server::schedule_auto_continuation(wiring.state.clone(), thread).await;
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(
+        wiring.state.turns.active_for(thread).is_none(),
+        "headless runtime must ignore later continuation wakeups"
+    );
+    assert_eq!(
+        wiring
+            .store
+            .replay_interaction_events(thread)
+            .await
+            .unwrap()
+            .len(),
+        0,
+        "headless runtime must not turn a completion into another model turn"
+    );
+    wiring.state.begin_shutdown();
+}
+
+#[tokio::test]
+async fn unattended_build_does_not_recover_a_failed_turn() {
+    let data_dir = TestDataDir::new();
+    let args = ServeArgs {
+        port: 0,
+        data_dir: data_dir.path().to_path_buf(),
+        auth_token: None,
+        workspace: data_dir.path().to_path_buf(),
+    };
+    let wiring = build(&args, true).await.expect("unattended runtime builds");
+    let thread = wiring
+        .store
+        .create_thread("one shot")
+        .await
+        .unwrap()
+        .thread_id;
+
+    ark_server::service::schedule_recovery(
+        wiring.state.clone(),
+        thread,
+        ark_common::TurnId::new(),
+        Some("run exactly once".into()),
+        1,
+        "model stream broke".into(),
+        Vec::new(),
+    )
+    .await;
+    tokio::time::sleep(
+        ark_server::service::recovery::RECOVERY_DELAYS[0] + std::time::Duration::from_millis(200),
+    )
+    .await;
+
+    assert!(wiring.state.turns.active_for(thread).is_none());
+    assert!(
+        wiring
+            .store
+            .replay_interaction_events(thread)
+            .await
+            .unwrap()
+            .is_empty(),
+        "headless runtime must not retry its explicit turn automatically"
+    );
+    wiring.state.begin_shutdown();
 }
 
 #[tokio::test]

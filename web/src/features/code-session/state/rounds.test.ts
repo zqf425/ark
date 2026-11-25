@@ -101,6 +101,20 @@ describe('roundsFromTurnUsage', () => {
     expect(turnModelMs(rounds, T2)).toBe(5_000)
   })
 
+  it('never lets an older HTTP response move a live or settled clock backwards', () => {
+    const previous = [
+      { turnId: T1, durationMs: 8_000, activeMs: 20_000 },
+      { turnId: T2, durationMs: 4_000, activeMs: null }
+    ]
+    const merged = roundsFromTurnUsage(response([
+      { turn_id: T1, duration_ms: 1_000, active_ms: 5_000 },
+      { turn_id: T2, duration_ms: 2_000 }
+    ]), previous)
+    expect(turnActiveMs(merged, T1)).toBe(20_000)
+    expect(turnActiveMs(merged, T2)).toBeNull()
+    expect(merged.map((row) => row.turnId)).toEqual([T1, T2])
+  })
+
   it('ignores non-finite and non-positive spans', () => {
     const rounds = roundsFromTurnUsage(
       response([
@@ -132,6 +146,19 @@ describe('appendRound', () => {
     expect(turnModelMs(live, T2)).toBe(800)
     // A live-first turn has no server-reported active span yet.
     expect(turnActiveMs(live, T2)).toBeNull()
+  })
+
+  it('updates an indexed turn without scanning historical rounds', () => {
+    const seeded = new Proxy([{ turnId: T1, durationMs: 10_000, activeMs: null }], {
+      get(target, property, receiver) {
+        if (property === 'find' || property === 'some') throw new Error('round scan')
+        return Reflect.get(target, property, receiver)
+      }
+    })
+    const index = { [T1]: 0 }
+    expect(appendRound(seeded, { turnId: T1, durationMs: 5 }, index)).toEqual([
+      { turnId: T1, durationMs: 10_005, activeMs: null }
+    ])
   })
 
   it('does not mutate the caller’s list', () => {

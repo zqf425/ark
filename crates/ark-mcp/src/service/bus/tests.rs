@@ -4,6 +4,7 @@ use super::*;
 use crate::service::registry::McpHandler;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
+use std::time::Duration;
 
 /// Returns its arguments unchanged and records how often it ran.
 struct Echo {
@@ -40,6 +41,19 @@ impl McpHandler for Reenter {
         let args = serde_json::json!({ "parent_depth": ctx.depth });
         bus.call(&self.caller, &self.provider, &self.tool, args)
             .await
+    }
+}
+
+/// Blocks until cancelled after recording that the handler was entered.
+struct Blocking {
+    entered: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait]
+impl McpHandler for Blocking {
+    async fn call(&self, _ctx: &CallContext, _args: serde_json::Value) -> Result<McpCallResult> {
+        self.entered.notify_one();
+        std::future::pending().await
     }
 }
 
@@ -84,6 +98,54 @@ async fn in_process_call_returns_the_handler_result() {
     assert_eq!(result.content["q"], 1);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert!(!result.trace_id.is_empty(), "trace id must be propagated");
+}
+
+#[tokio::test]
+async fn cancelling_a_waiting_call_releases_its_graph_edge() {
+    let bus = bus();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let _blocked = bus
+        .expose_with_handlers(
+            "ark.b",
+            vec![(
+                spec("ark.b", "run"),
+                Arc::new(Blocking {
+                    entered: Arc::clone(&entered),
+                }) as Arc<dyn McpHandler>,
+            )],
+        )
+        .unwrap();
+    let _echo = bus
+        .expose_with_handlers(
+            "ark.a",
+            vec![(
+                spec("ark.a", "run"),
+                Arc::new(Echo {
+                    calls: Arc::new(AtomicUsize::new(0)),
+                }) as Arc<dyn McpHandler>,
+            )],
+        )
+        .unwrap();
+    let calling = Arc::clone(&bus);
+    let waiting = tokio::spawn(async move {
+        calling
+            .call("ark.a", "ark.b", "run", serde_json::json!({}))
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(1), entered.notified())
+        .await
+        .expect("blocked handler was entered");
+    waiting.abort();
+    assert!(waiting.await.unwrap_err().is_cancelled());
+
+    let reverse = tokio::time::timeout(
+        Duration::from_secs(1),
+        bus.call("ark.b", "ark.a", "run", serde_json::json!({})),
+    )
+    .await
+    .expect("cancelled wait must not leave a stale edge")
+    .unwrap();
+    assert!(reverse.ok);
 }
 
 #[tokio::test]

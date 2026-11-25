@@ -2,6 +2,11 @@ import type { StateCreator } from 'zustand'
 import type { ThreadId, ThreadRuntimeSettings, ThreadSummary } from '../../../shared/contracts'
 import type { LoadStatus } from './types'
 
+export type RuntimeRequest = {
+  owner: ThreadId
+  generation: number
+}
+
 export type ThreadsSlice = {
   threads: ThreadSummary[]
   activeThreadId: ThreadId | null
@@ -19,8 +24,12 @@ export type ThreadsSlice = {
    * entry means "not read yet", never "no overrides stored".
    */
   threadRuntime: Record<string, ThreadRuntimeSettings>
-  /** Record one thread's stored overrides (detail seed, PATCH echo, reload). */
-  setThreadRuntime: (threadId: ThreadId, runtime: ThreadRuntimeSettings) => void
+  /** Newest detail/reload request per thread; shared by every pill instance. */
+  threadRuntimeGeneration: Record<string, number>
+  beginThreadRuntime: (threadId: ThreadId) => RuntimeRequest
+  isThreadRuntimeCurrent: (request: RuntimeRequest) => boolean
+  /** Commit only the request that still owns this thread; return whether accepted. */
+  setThreadRuntime: (threadId: ThreadId, runtime: ThreadRuntimeSettings, request: RuntimeRequest) => boolean
   setThreads: (threads: ThreadSummary[]) => void
   upsertThread: (thread: ThreadSummary) => void
   /** Monotonically advance one row's durable watermark from the live stream. */
@@ -67,18 +76,34 @@ function sortByServerOrder(threads: ThreadSummary[]): ThreadSummary[] {
   })
 }
 
-export const createThreadsSlice: StateCreator<ThreadsSlice, [], [], ThreadsSlice> = (set) => ({
+export const createThreadsSlice: StateCreator<ThreadsSlice, [], [], ThreadsSlice> = (set, get) => ({
   threads: [],
   activeThreadId: null,
   listStatus: 'idle',
   listError: null,
   threadRuntime: {},
+  threadRuntimeGeneration: {},
 
-  setThreadRuntime: (threadId, runtime) => set((state) => ({
-    // Merge, never replace: one snapshot only ever carries one thread's values,
-    // and other threads stay cached across switches.
-    threadRuntime: { ...state.threadRuntime, [threadId]: runtime }
-  })),
+  beginThreadRuntime: (threadId) => {
+    const generation = (get().threadRuntimeGeneration[threadId] ?? 0) + 1
+    set((state) => ({
+      threadRuntimeGeneration: { ...state.threadRuntimeGeneration, [threadId]: generation }
+    }))
+    return { owner: threadId, generation }
+  },
+
+  isThreadRuntimeCurrent: (request) =>
+    get().threadRuntimeGeneration[request.owner] === request.generation,
+
+  setThreadRuntime: (threadId, runtime, request) => {
+    let accepted = false
+    set((state) => {
+      if (request.owner !== threadId || state.threadRuntimeGeneration[threadId] !== request.generation) return {}
+      accepted = true
+      return { threadRuntime: { ...state.threadRuntime, [threadId]: runtime } }
+    })
+    return accepted
+  },
 
   setThreads: (threads) => set({ threads: sortByServerOrder(threads), listStatus: 'ready', listError: null }),
 

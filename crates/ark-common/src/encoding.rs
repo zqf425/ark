@@ -312,7 +312,40 @@ pub fn write_text_atomic(path: &Path, text: &str) -> Result<()> {
         file.sync_all()
             .map_err(|err| io_error("sync", &temp, err))?;
     }
-    std::fs::rename(&temp, path).map_err(|err| io_error("rename", path, err))
+    std::fs::rename(&temp, path).map_err(|err| io_error("rename", path, err))?;
+    sync_parent_dir(path)
+}
+
+/// Persist the directory entry changed by an atomic rename.
+fn sync_parent_dir(path: &Path) -> Result<()> {
+    let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return Ok(());
+    };
+    #[cfg(test)]
+    if let Some(error) = injected_parent_sync_failure(path) {
+        return Err(error);
+    }
+    sync_dir(parent).map_err(|err| io_error("sync parent directory", parent, err))
+}
+
+#[cfg(unix)]
+fn sync_dir(path: &Path) -> std::io::Result<()> {
+    std::fs::File::open(path)?.sync_all()
+}
+
+#[cfg(windows)]
+fn sync_dir(path: &Path) -> std::io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)?
+        .sync_all()
 }
 
 /// Write text as UTF-8 without a BOM (no atomicity, for append-style surfaces).
@@ -329,8 +362,41 @@ pub fn write_json_file<T: serde::Serialize>(path: &Path, value: &T) -> Result<()
 
 fn temp_sibling(path: &Path) -> std::path::PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".tmp-{}", std::process::id()));
+    name.push(format!(".{}.tmp", uuid::Uuid::new_v4()));
     path.with_file_name(name)
+}
+
+#[cfg(test)]
+static PARENT_SYNC_FAILURES: std::sync::OnceLock<std::sync::Mutex<Option<std::path::PathBuf>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(test)]
+fn fail_next_parent_sync(path: &Path) {
+    *PARENT_SYNC_FAILURES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap() = Some(path.to_path_buf());
+}
+
+#[cfg(test)]
+fn injected_parent_sync_failure(path: &Path) -> Option<ArkError> {
+    let mut failures = PARENT_SYNC_FAILURES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap();
+    if failures.as_deref() == Some(path) {
+        failures.take();
+        Some(io_error(
+            "sync parent directory",
+            path,
+            std::io::Error::new(
+                std::io::ErrorKind::StorageFull,
+                "injected parent directory fsync failure",
+            ),
+        ))
+    } else {
+        None
+    }
 }
 
 fn io_error(action: &str, path: &Path, err: std::io::Error) -> ArkError {
@@ -388,6 +454,65 @@ fn decode_euc_kr(bytes: &[u8]) -> Option<String> {
 /// never fail. Mirrors the TypeScript `latin1` branch.
 fn decode_latin1(bytes: &[u8]) -> Option<String> {
     Some(latin1(bytes))
+}
+
+/// Bytes at the end of a chunk that may still become one UTF-8 or GB18030 codepoint.
+pub fn incomplete_encoded_suffix(bytes: &[u8]) -> usize {
+    let utf8 = match std::str::from_utf8(bytes) {
+        Ok(_) => return 0,
+        Err(error) if error.error_len().is_none() => bytes.len() - error.valid_up_to(),
+        Err(_) => 0,
+    };
+    utf8.max(incomplete_gb18030_suffix(bytes))
+}
+
+fn incomplete_gb18030_suffix(bytes: &[u8]) -> usize {
+    fn lead(byte: u8) -> bool {
+        (0x81..=0xfe).contains(&byte)
+    }
+
+    fn four_byte_digit(byte: u8) -> bool {
+        (0x30..=0x39).contains(&byte)
+    }
+
+    fn two_byte_trail(byte: u8) -> bool {
+        (0x40..=0x7e).contains(&byte) || (0x80..=0xfe).contains(&byte)
+    }
+
+    let mut index = 0;
+    while index < bytes.len() {
+        let first = bytes[index];
+        if first <= 0x80 {
+            index += 1;
+            continue;
+        }
+        if !lead(first) {
+            return 0;
+        }
+        let Some(&second) = bytes.get(index + 1) else {
+            return 1;
+        };
+        if four_byte_digit(second) {
+            let Some(&third) = bytes.get(index + 2) else {
+                return 2;
+            };
+            if !lead(third) {
+                return 0;
+            }
+            let Some(&fourth) = bytes.get(index + 3) else {
+                return 3;
+            };
+            if !four_byte_digit(fourth) {
+                return 0;
+            }
+            index += 4;
+        } else if two_byte_trail(second) {
+            index += 2;
+        } else {
+            return 0;
+        }
+    }
+    0
 }
 
 fn latin1(bytes: &[u8]) -> String {
@@ -448,6 +573,27 @@ mod tests {
     }
 
     #[test]
+    fn incomplete_encoded_suffix_keeps_gb18030_codepoint_boundaries() {
+        let character = [0x95_u8, 0x32, 0x82, 0x36];
+        for split in 1..character.len() {
+            assert_eq!(incomplete_encoded_suffix(&character[..split]), split);
+        }
+        assert_eq!(incomplete_encoded_suffix(&character), 0);
+
+        let mut prefixed = b"ok".to_vec();
+        prefixed.extend_from_slice(&character[..2]);
+        assert_eq!(incomplete_encoded_suffix(&prefixed), 2);
+    }
+
+    #[test]
+    fn incomplete_encoded_suffix_keeps_utf8_boundaries_but_not_malformed_input() {
+        let character = "中".as_bytes();
+        assert_eq!(incomplete_encoded_suffix(&character[..2]), 2);
+        assert_eq!(incomplete_encoded_suffix(character), 0);
+        assert_eq!(incomplete_encoded_suffix(&[0xff, 0x81]), 0);
+    }
+
+    #[test]
     fn invalid_utf8_falls_back_instead_of_emitting_replacement_chars() {
         let bytes = [0x61u8, 0xFF, 0x62];
         let decoded = decode(&bytes);
@@ -482,6 +628,24 @@ mod tests {
         assert_eq!(written.last(), Some(&b'\n'));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn atomic_write_propagates_parent_directory_sync_failure() {
+        let dir = std::env::temp_dir().join(format!("ark-enc-sync-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        fail_next_parent_sync(&path);
+        let result = write_text_atomic(&path, "content");
+        assert!(result.is_err(), "rename must be followed by parent fsync");
+        assert_eq!(std::fs::read(&path).unwrap(), b"content");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn atomic_temp_siblings_are_unique_within_one_process() {
+        let path = std::path::Path::new("nested/config.json");
+        assert_ne!(temp_sibling(path), temp_sibling(path));
     }
 
     #[test]

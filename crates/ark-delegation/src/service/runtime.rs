@@ -238,6 +238,7 @@ impl DelegationRuntime {
         let parked = self.core.take_unclaimed_prepared();
         for prepared in parked {
             let child = prepared.record.child_id;
+            let handle = self.core.lock_handles().get(&child).cloned();
             let _ = self
                 .core
                 .finish(
@@ -245,7 +246,9 @@ impl DelegationRuntime {
                     ChildTurnReport::aborted("aborted while awaiting execution"),
                 )
                 .await;
-            self.core.lock_handles().remove(&child);
+            if let Some(handle) = handle {
+                self.core.remove_handle(child, &handle);
+            }
             self.core.settled.notify_waiters();
         }
     }
@@ -335,6 +338,12 @@ impl DelegationRuntime {
         }
         let record = prepared.record.clone();
         let child = record.child_id;
+        let handle = self
+            .core
+            .lock_handles()
+            .get(&child)
+            .cloned()
+            .expect("a supervised child must have a control handle before spawning");
         let core = Arc::clone(&self.core);
         let worker_core = Arc::clone(&core);
         let worker = tokio::spawn(async move { worker_core.execute(prepared).await });
@@ -345,7 +354,7 @@ impl DelegationRuntime {
                 Err(join) => {
                     // `RunSlot` removes this after slot acquisition; this covers
                     // a panic before the slot/guard exists as well.
-                    core.lock_handles().remove(&child);
+                    core.remove_handle(child, &handle);
                     let message = if join.is_panic() {
                         "child executor panicked"
                     } else {
@@ -408,13 +417,26 @@ struct RunSlot {
     handles: Arc<Mutex<HashMap<ChildId, Arc<RunningChild>>>>,
     active: Arc<AtomicU32>,
     child: ChildId,
+    handle: Arc<RunningChild>,
+}
+
+fn remove_handle_if_current(
+    handles: &Arc<Mutex<HashMap<ChildId, Arc<RunningChild>>>>,
+    child: ChildId,
+    handle: &Arc<RunningChild>,
+) {
+    let mut handles = handles.lock().unwrap_or_else(PoisonError::into_inner);
+    if handles
+        .get(&child)
+        .is_some_and(|current| Arc::ptr_eq(current, handle))
+    {
+        handles.remove(&child);
+    }
 }
 
 impl Drop for RunSlot {
     fn drop(&mut self) {
-        if let Ok(mut handles) = self.handles.lock() {
-            handles.remove(&self.child);
-        }
+        remove_handle_if_current(&self.handles, self.child, &self.handle);
         self.active.fetch_sub(1, Ordering::Relaxed);
     }
 }

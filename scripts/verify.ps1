@@ -45,12 +45,14 @@ function Invoke-CoreChecks {
     Enable-GnuToolchain
     Invoke-CheckedNative cargo @('fmt', '--all', '--', '--check')
     Invoke-CheckedNative cargo @('check', '--workspace')
+    Invoke-CheckedNative cargo @('clippy', '--workspace', '--all-targets', '--', '-D', 'warnings')
     Invoke-CheckedNative cargo @('test', '--workspace', '--exclude', 'ark-desktop')
     & "$PSScriptRoot/check-architecture.ps1"
 }
 
 function Invoke-WebChecks {
     Invoke-CheckedNative npm @('--prefix', 'web', 'test')
+    Invoke-CheckedNative npm @('--prefix', 'web', 'run', 'typecheck')
     Invoke-CheckedNative npm @('--prefix', 'web', 'run', 'check:rules')
     Invoke-CheckedNative npm @('--prefix', 'web', 'run', 'build')
 }
@@ -62,6 +64,8 @@ function Invoke-ContractChecks {
 }
 
 function Invoke-DesktopChecks {
+    Enable-GnuToolchain
+    Invoke-CheckedNative cargo @('check', '-p', 'ark-desktop')
     Invoke-CheckedNative node @('--test', 'apps/ark-desktop/scripts/desktop-layout.test.mjs')
     Invoke-CheckedNative npm @('--prefix', 'apps/ark-desktop', 'run', 'build:web')
 }

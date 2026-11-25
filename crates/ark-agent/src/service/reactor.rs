@@ -69,29 +69,23 @@ pub struct ReactorConfig {
     pub machine: TurnMachine,
     /// Channel capacity for model deltas.
     pub chunk_buffer: usize,
-    /// Resolves the attachment ids a steer was queued with into image parts at
-    /// round-build time. `None` keeps steers text-only; the composition root
-    /// injects a resolver built on its attachment store (with the same vision
-    /// gate and per-turn image budget as a turn start), so the reactor never
-    /// touches the filesystem.
-    pub steer_image_resolver: Option<SteerImageResolver>,
-    /// Records the delivery outcomes of a steered correction's attachments for
-    /// the durable item, mirroring the seed-time rules. `None` keeps steered
-    /// items bare (tests, runtimes without attachments).
-    pub steer_outcome_recorder: Option<SteerOutcomeRecorder>,
+    /// Resolves one steering entry's attachment ids into model image parts and
+    /// durable delivery outcomes. The composition root shares one per-turn
+    /// image budget with the initial seed and invokes this exactly once per id.
+    pub steer_attachment_resolver: Option<SteerAttachmentResolver>,
 }
 
-/// Synchronous resolver the composition root installs so staged steering
-/// corrections can carry image parts. `ids` are the ids drained with the
-/// round's corrections; the result is one image part per id that resolved
-/// (degraded/skipped ones simply produce no part, matching seed-time rules).
-pub type SteerImageResolver = Arc<dyn Fn(&[AttachmentId]) -> Vec<ModelImage> + Send + Sync>;
+/// One steering entry's resolved multimodal content and delivery audit rows.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SteerAttachments {
+    pub images: Vec<ModelImage>,
+    pub outcomes: Vec<TurnAttachmentOutcome>,
+}
 
-/// Synchronous recorder for the delivery outcomes of a steered correction's
-/// attachments. Mirrors the seed-time rules (vision gate, budget, preview
-/// fallback) so the durable item shows the same chips a turn start would.
-pub type SteerOutcomeRecorder =
-    Arc<dyn Fn(&[AttachmentId]) -> Vec<TurnAttachmentOutcome> + Send + Sync>;
+/// Synchronous resolver installed by the composition root. Keeping images and
+/// outcomes in one result prevents a second resolution from resetting the
+/// per-turn attachment budget or disagreeing with what the model received.
+pub type SteerAttachmentResolver = Arc<dyn Fn(&[AttachmentId]) -> SteerAttachments + Send + Sync>;
 
 impl std::fmt::Debug for ReactorConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -152,17 +146,12 @@ pub struct Reactor {
     steer: Option<Arc<SteerQueue>>,
     /// Corrections drained for the in-flight round but not yet committed to
     /// history/journal. They join the request through `request()` and are only
-    /// committed once the model round actually consumes them (AG-02). Each
-    /// entry keeps the attachment ids it was queued with so a cancel restores
-    /// it intact.
+    /// committed once the model round actually consumes them (AG-02). Resolved
+    /// images and outcomes stay with their own entry; a cancel restores the
+    /// original text and attachment ids together.
     staged_steering: Vec<StagedSteering>,
-    /// Flat view of the ids above, in order, used by the image resolver at
-    /// request-build time.
-    staged_steering_attachments: Vec<AttachmentId>,
-    /// Composition-root resolver turning staged ids into image parts.
-    steer_image_resolver: Option<SteerImageResolver>,
-    /// Composition-root recorder for the committed item's delivery outcomes.
-    steer_outcome_recorder: Option<SteerOutcomeRecorder>,
+    /// Composition-root resolver for one staged entry's attachments.
+    steer_attachment_resolver: Option<SteerAttachmentResolver>,
     /// Guards against a second `turn_started` when `run()` is retried (AG-01).
     turn_started_written: bool,
     /// Recorded outcome, so a repeated `run()` is idempotent (AG-01).
@@ -175,13 +164,14 @@ pub struct Reactor {
     model_label: Option<String>,
 }
 
-/// One correction staged for the in-flight model round: the text plus the
-/// attachment ids it was queued with. Images resolve at request build time;
-/// the ids ride along so a cancel can restore the entry intact.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One correction staged for the in-flight model round. Images and delivery
+/// outcomes are resolved once, per entry, and reused by the request and commit.
+#[derive(Debug, Clone, PartialEq)]
 struct StagedSteering {
     text: String,
     attachment_ids: Vec<AttachmentId>,
+    images: Vec<ModelImage>,
+    outcomes: Vec<TurnAttachmentOutcome>,
 }
 
 /// `provider:model` of the client this turn will call. The label is a
@@ -213,8 +203,7 @@ impl Reactor {
             seed,
             machine,
             chunk_buffer,
-            steer_image_resolver,
-            steer_outcome_recorder,
+            steer_attachment_resolver,
         } = config;
         Self {
             model_label: model_label_of(model.as_ref()),
@@ -243,9 +232,7 @@ impl Reactor {
             denied: Vec::new(),
             steer: None,
             staged_steering: Vec::new(),
-            staged_steering_attachments: Vec::new(),
-            steer_image_resolver,
-            steer_outcome_recorder,
+            steer_attachment_resolver,
             turn_started_written: false,
             terminal_outcome: None,
             gate_seq: 0,
@@ -356,7 +343,18 @@ impl Reactor {
             InputKind::Start,
         );
         loop {
-            let action = step(self.machine.state(), &input);
+            let mut action = step(self.machine.state(), &input);
+            if matches!(action, Action::CallModel { .. })
+                && (self.has_pending_steering() || !self.staged_steering.is_empty())
+            {
+                // Staging changes the next prompt. Re-run the pure gate with the
+                // new estimate before entering `AwaitingModel`; otherwise a late
+                // correction could bypass compaction or the context hard limit.
+                self.stage_steering();
+                self.refresh_prompt_estimate();
+                input.progress = self.machine.progress();
+                action = step(self.machine.state(), &input);
+            }
             let action = match action {
                 Action::Finish { outcome } => self.rescue_pending_steering(outcome).await?,
                 other => other,
@@ -445,28 +443,14 @@ impl Reactor {
         }
     }
 
-    /// Resolves the staged corrections' attachment ids into image parts. With
-    /// no resolver installed (tests, non-attachment runtimes) a steer stays
-    /// text-only.
-    fn staged_images(&self) -> Vec<ModelImage> {
-        match &self.steer_image_resolver {
-            Some(resolve) if !self.staged_steering_attachments.is_empty() => {
-                resolve(&self.staged_steering_attachments)
-            }
-            _ => Vec::new(),
-        }
-    }
-
     fn request(&self) -> ModelRequest {
         let mut messages = self.history.clone();
         // Staged corrections travel with the request but are committed to
         // `history` only once the stream confirms the model consumed them.
-        // Attachments referenced by a steer resolve through the composition
-        // root's resolver (text keeps the preview fallback path); the reactor
-        // never reads the filesystem itself.
+        // Each entry owns only the images resolved from its own attachment ids.
         for staged in &self.staged_steering {
             let mut message = ModelMessage::user(staged.text.clone());
-            message.images = self.staged_images();
+            message.images = staged.images.clone();
             messages.push(message);
         }
         ModelRequest {
@@ -476,6 +460,11 @@ impl Reactor {
             max_tokens: self.max_tokens,
             reasoning_effort: self.reasoning_effort.clone(),
         }
+    }
+
+    fn refresh_prompt_estimate(&mut self) {
+        let estimate = TokenEstimator::new().estimate_request(&self.request());
+        self.machine.set_prompt_estimate(estimate);
     }
 
     fn input_of(&self, kind: InputKind) -> TurnInput {
@@ -495,9 +484,6 @@ impl Reactor {
     /// inside `pump` restores them to the queue instead of silently dropping a
     /// 202-accepted steer (AG-02).
     async fn round_input(&mut self) -> Result<TurnInput> {
-        self.stage_steering();
-        let estimate = TokenEstimator::new().estimate_request(&self.request());
-        self.machine.set_prompt_estimate(estimate);
         match self.pump().await? {
             Round::Settled(response, duration_ms) => {
                 self.commit_steering().await?;
@@ -517,17 +503,25 @@ impl Reactor {
 
     fn stage_steering(&mut self) {
         let entries = self.steer.as_ref().map(|q| q.drain()).unwrap_or_default();
-        self.staged_steering = entries
-            .iter()
-            .map(|entry| StagedSteering {
-                text: entry.text.clone(),
-                attachment_ids: entry.attachment_ids.clone(),
-            })
-            .collect();
-        self.staged_steering_attachments = entries
-            .iter()
-            .flat_map(|entry| entry.attachment_ids.iter().copied())
-            .collect();
+        let resolver = &self.steer_attachment_resolver;
+        self.staged_steering
+            .extend(entries.into_iter().map(|entry| {
+                let attachments = if entry.attachment_ids.is_empty() {
+                    SteerAttachments::default()
+                } else {
+                    resolver
+                        .as_ref()
+                        .map_or_else(SteerAttachments::default, |resolve| {
+                            resolve(&entry.attachment_ids)
+                        })
+                };
+                StagedSteering {
+                    text: entry.text,
+                    attachment_ids: entry.attachment_ids,
+                    images: attachments.images,
+                    outcomes: attachments.outcomes,
+                }
+            }));
     }
 
     /// Commit staged corrections to history + durable journal. Only called
@@ -537,9 +531,13 @@ impl Reactor {
     /// same chips the live stream showed. A queue without ids produces the
     /// old bare item.
     async fn commit_steering(&mut self) -> Result<()> {
-        self.staged_steering_attachments.clear();
-        for staged in std::mem::take(&mut self.staged_steering) {
-            self.history.push(ModelMessage::user(staged.text.clone()));
+        // Keep each entry staged until its durable item is written. If an append
+        // fails, finish() restores the current entry and every later one.
+        while !self.staged_steering.is_empty() {
+            let staged = self.staged_steering[0].clone();
+            let mut message = ModelMessage::user(staged.text.clone());
+            message.images = staged.images.clone();
+            self.history.push(message);
             self.writer
                 .append(self.events.turn_steered(&staged.text))
                 .await?;
@@ -549,13 +547,11 @@ impl Reactor {
             if let Some(label) = self.model_label.clone() {
                 item = item.with_model(label);
             }
-            if let Some(resolve) = &self.steer_outcome_recorder {
-                let outcomes = resolve(&staged.attachment_ids);
-                if !outcomes.is_empty() {
-                    item = item.with_attachments(outcomes);
-                }
+            if !staged.outcomes.is_empty() {
+                item = item.with_attachments(staged.outcomes);
             }
             self.writer.append(self.events.item_created(item)).await?;
+            self.staged_steering.remove(0);
         }
         Ok(())
     }
@@ -564,7 +560,6 @@ impl Reactor {
     /// the attachment ids they were queued with (AG-02).
     fn restore_steering(&mut self) {
         let staged = std::mem::take(&mut self.staged_steering);
-        self.staged_steering_attachments.clear();
         if let Some(queue) = &self.steer {
             queue.restore(
                 staged
@@ -576,12 +571,6 @@ impl Reactor {
                     .collect(),
             );
         }
-    }
-
-    /// Stage + commit for the rescue path (no model stream of its own).
-    async fn apply_steering(&mut self) -> Result<()> {
-        self.stage_steering();
-        self.commit_steering().await
     }
 
     fn has_pending_steering(&self) -> bool {
@@ -608,7 +597,9 @@ impl Reactor {
         {
             return Ok(Action::Finish { outcome });
         }
-        self.apply_steering().await?;
+        // Leave the correction queued. The zero-batch dispatch routes the next
+        // decision through the normal staging + context gate; committing here
+        // would journal a message before knowing whether it can be delivered.
         Ok(Action::Dispatch(DispatchPlan::default()))
     }
 
@@ -718,6 +709,16 @@ impl Reactor {
         }
     }
 
+    async fn reconcile_assistant_item(&mut self, final_text: &str) -> Result<()> {
+        if self.assistant_message_item.is_none() && !final_text.is_empty() {
+            self.ensure_stream_item(ItemKind::AssistantMessage).await?;
+        }
+        if let Some(item) = self.assistant_message_item.as_mut() {
+            item.text = final_text.to_string();
+        }
+        Ok(())
+    }
+
     /// Complete each item opened by the current model round exactly once.
     async fn complete_stream_items(&mut self) -> Result<()> {
         for item in [
@@ -778,6 +779,7 @@ impl Reactor {
             }
             calls.push(call);
         }
+        self.reconcile_assistant_item(&response.text).await?;
         self.record_assistant_turn(&response.text, &calls);
         self.machine.note_usage(&usage);
         self.writer.append(self.events.usage(usage.clone())).await?;
@@ -843,6 +845,9 @@ impl Reactor {
 
     /// Write the terminal event, then land on the terminal state.
     async fn finish(&mut self, outcome: TurnOutcome) -> Result<TurnOutcome> {
+        // Staged corrections have not reached the model. Restore them before
+        // every terminal or error finish so accepted steers are never dropped.
+        self.restore_steering();
         // Rendering items are best-effort: their append must never cost the
         // turn its terminal event (the old ordering did exactly that, AG-01).
         let _ = self.complete_stream_items().await;
@@ -857,55 +862,6 @@ impl Reactor {
             .map_err(|err| ArkError::internal(err.to_string()))?;
         self.terminal_outcome = Some(outcome.clone());
         Ok(outcome)
-    }
-
-    /// Close every call of the current round that has no tool result yet.
-    /// A gate cancelled mid-wait otherwise leaves the assistant's `tool_calls`
-    /// dangling with no paired `finished` row (AG-03).
-    pub(super) async fn converge_pending_calls_on_cancel(&mut self) -> Result<()> {
-        let mut paired: Vec<String> = self
-            .history
-            .iter()
-            .filter(|m| m.role == ModelRole::Tool)
-            .filter_map(|m| m.tool_call_id.clone())
-            .collect();
-        // Clone the round's calls: appending tool history needs `&mut self`,
-        // so the loop must not hold an immutable borrow of `self`.
-        let pending_calls = self.pending_calls.clone();
-        for call in &pending_calls {
-            if let Some(pos) = paired.iter().position(|id| id == &call.call_id) {
-                paired.remove(pos);
-                continue;
-            }
-            let detail = "cancelled before the call completed".to_string();
-            self.writer
-                .append(self.events.tool_call_started(
-                    &call.call_id,
-                    &call.tool,
-                    call.arguments.clone(),
-                ))
-                .await?;
-            self.writer
-                .append(self.events.tool_call_finished(
-                    &call.call_id,
-                    &call.tool,
-                    false,
-                    0,
-                    String::new(),
-                    Some(detail.clone()),
-                ))
-                .await?;
-            let execution = ToolExecution {
-                call_id: call.call_id.clone(),
-                tool: call.tool.clone(),
-                ok: false,
-                content: String::new(),
-                duration_ms: 0,
-                detail: Some(detail),
-            };
-            self.append_tool_history(call, &execution);
-        }
-        Ok(())
     }
 }
 

@@ -9,6 +9,9 @@
   web 在 detail 水位建立 SSE 前恢复 active turn 与待处理 gate。
 - 当前已实现：arkd 启动时扫描每个 thread 的 turn 生命周期，对遗留非终态 parent turn 幂等追加
   `TurnAborted`，reason 固定为 `runtime restarted before turn could finish`。
+- 当前已实现：supervisor 的终态补偿先回放窄生命周期事件，再按需补 `turn_started` 并追加终态；
+  回放或追加失败会保留 active registry entry，finish、完成计数和后续调度均不执行。shutdown drain
+  在超时后仍有未收敛 turn/child 时返回 `runtime_unavailable`，由 serve 向上传播。
 
 ## 目标与非目标
 
@@ -62,7 +65,9 @@ detail 与随后 SSE 水位允许有短暂竞态：SSE 的 resolved/terminal 事
   reactor，Drop 移除 waiter，reactor 持久化唯一终态。
 - arkd 重启：reconcile 后扫描每线程的最新非终态 parent turn，一次性追加 `TurnAborted`，reason 为
   `runtime restarted before turn could finish`；不得追加 gate resolved、重放工具/模型或重建 waiter。
-- 正常 shutdown 先按既有流程取消并等待；下次扫描必须幂等，已终态回合不再写入。
+- 正常 shutdown 先按既有流程取消并等待；只有终态补偿持久化成功且 registry/child 均收敛才视为
+  drain 成功。持久化失败保留未结算状态并让 serve 返回 `runtime_unavailable`；下次启动扫描仍幂等，
+  已落盘终态的回合不再写入，缺失终态的遗留回合按重启规则收敛。
 
 ## 模块责任
 
@@ -78,5 +83,6 @@ detail 与随后 SSE 水位允许有短暂竞态：SSE 的 resolved/terminal 事
 ## 验收与验证
 
 覆盖旧 detail JSON、DTO/TS 导出、gate request/resolve/terminal 投影、跨线程 interrupt 拒绝、刷新后
-Steer/interrupt/gate 操作、resolve 与取消竞争、restart 单次收敛和正常 shutdown 幂等。此变更涉及契约、
+Steer/interrupt/gate 操作、resolve 与取消竞争、restart 单次收敛和正常 shutdown 幂等，并覆盖终态补写
+失败时 finish/shutdown 不释放 active turn、不报告结算的故障路径。此变更涉及契约、
 存储、并发与组合根，实施完成必须执行 workspace 测试、fmt/check/clippy、契约生成检查及真实浏览器刷新。

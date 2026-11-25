@@ -28,6 +28,10 @@ impl RuntimeCore {
         self.lock_handles().contains_key(&child)
     }
 
+    pub(super) fn remove_handle(&self, child: ChildId, handle: &Arc<RunningChild>) {
+        super::remove_handle_if_current(&self.handles, child, handle);
+    }
+
     /// Take every prepared run that no task has claimed yet.
     ///
     /// `run_child` removes its entry when it claims a run, so the map contains
@@ -174,6 +178,9 @@ impl RuntimeCore {
             record.summary = None;
             record.resume_count = Some(resume_count);
             record.prompt = Some(prompt.clone());
+            record.model = request.model.clone().or(existing.model.clone());
+            record.provider_id = request.provider_id.clone().or(existing.provider_id.clone());
+            record.autonomy = request.autonomy.clone().or(existing.autonomy.clone());
             record.notify_parent = notify_parent;
             // Reserve before the awaited append: `known` now reports `queued`.
             known.insert(child_id, record.clone());
@@ -198,9 +205,9 @@ impl RuntimeCore {
             parent_turn_id: request.parent_turn_id,
             prompt,
             workspace: request.workspace.map(std::path::PathBuf::from),
-            model: request.model.or(existing.model),
-            provider_id: request.provider_id.or(existing.provider_id),
-            autonomy: request.autonomy.or(existing.autonomy),
+            model: record.model.clone(),
+            provider_id: record.provider_id.clone(),
+            autonomy: record.autonomy.clone(),
             cancel: Arc::new(ark_ports::CancelToken::new()),
             steer: Arc::new(ark_ports::SteerQueue::new()),
         };
@@ -230,6 +237,11 @@ impl RuntimeCore {
         // `start_supervised` installed this handle synchronously before spawning
         // the worker. Public `execute` uses the same path.
         let cancel = Arc::clone(&ctx.cancel);
+        let handle = self
+            .lock_handles()
+            .get(&child)
+            .cloned()
+            .expect("a supervised child must have a control handle before execution");
 
         // Claim a slot, but let an abort win while we wait. Dropping a pending
         // acquire is safe: the gate skips waiters whose receiver went away.
@@ -240,7 +252,7 @@ impl RuntimeCore {
             acquired = &mut acquire => match acquired {
                 Ok(guard) => guard,
                 Err(err) => {
-                    self.lock_handles().remove(&child);
+                    self.remove_handle(child, &handle);
                     // Never leave the `queued` record behind: a saturated budget
                     // is a caller-visible conflict, not a run that still waits.
                     let _ = self
@@ -251,7 +263,7 @@ impl RuntimeCore {
                 }
             },
             _ = cancel_for_wait.cancelled() => {
-                self.lock_handles().remove(&child);
+                self.remove_handle(child, &handle);
                 let aborted = self
                     .finish(
                         record,
@@ -268,6 +280,7 @@ impl RuntimeCore {
             handles: Arc::clone(&self.handles),
             active: Arc::clone(&self.active),
             child,
+            handle,
         };
 
         // A cancel that landed between acquiring the slot and here must not start

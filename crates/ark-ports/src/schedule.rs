@@ -48,13 +48,22 @@ pub trait ScheduleStore: Send + Sync {
     /// task's history.
     fn insert(&self, task: ScheduledTask) -> Result<ScheduledTask>;
 
-    /// Overwrite an existing task by id.
+    /// Overwrite an existing task by id. An absent id is `not_found`.
     ///
-    /// This is the single write path for run bookkeeping: appending a history
-    /// record and mirroring `last_run` are one task mutation, so they must not
-    /// be two calls that could interleave with an update from the UI. An absent
-    /// id is `not_found`.
+    /// Mutable bookkeeping and edits prefer [`ScheduleStore::update`] so they
+    /// cannot race another writer with a stale document.
     fn replace(&self, task: ScheduledTask) -> Result<ScheduledTask>;
+
+    /// Read, mutate and persist one task while holding the store's write lock.
+    ///
+    /// Scheduler bookkeeping and HTTP edits use this instead of a stale
+    /// `get`/`replace` pair. The candidate is cloned first, so a failed write
+    /// leaves the in-memory document unchanged.
+    fn update(
+        &self,
+        id: &str,
+        mutate: &mut dyn FnMut(&mut ScheduledTask) -> Result<()>,
+    ) -> Result<ScheduledTask>;
 
     /// Remove one task and its history.
     ///

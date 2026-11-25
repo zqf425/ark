@@ -10,8 +10,12 @@
 
 ## 当前实现
 
-- `scripts/verify.ps1` 是 Rust core、wire 契约、web 与 desktop 的统一验证入口。Windows GNU 环境必须在 PATH 中提供 `dlltool.exe`，也可通过 `ARK_MINGW_BIN` 指定其目录；脚本逐项检查原生命令退出码，绝不把缺失工具链或失败的子命令伪装为代码通过。
-- `.github/workflows/verify.yml` 在 Windows MSVC 工具链上执行 core、契约与 web 检查，并用独立 job 执行 desktop 的 Node/Vite 验证。
+- `scripts/verify.ps1` 是 Rust core、wire 契约、web 与 desktop 的统一验证入口。core scope 在 workspace `cargo check` 后执行
+  `cargo clippy --workspace --all-targets -- -D warnings`；web scope 显式执行
+  `npm --prefix web run typecheck`；desktop scope 在 Node/Vite 验证前执行 `cargo check -p ark-desktop`。
+  Windows GNU 环境必须在 PATH 中提供 `dlltool.exe`，也可通过 `ARK_MINGW_BIN` 指定其目录；脚本逐项检查原生命令退出码，绝不把缺失工具链或失败的子命令伪装为代码通过。
+- `.github/workflows/verify.yml` 在 Windows MSVC 工具链上执行 core、契约与 web 检查，并用独立 Windows
+  desktop job 通过同一脚本执行 Rust host `cargo check`、Node 宿主测试和 Vite 生产构建。
 - `scripts/change-impact.json` 是机器可读的影响矩阵。每条规则声明路径、应阅读的模块设计和最小验证命令；它是辅助导航，不替代修改前阅读实际受影响模块的义务。当前覆盖全部 workspace member（21 个 crate 与 2 个 app 组合）。
 - `scripts/check-change-impact.mjs` 是该矩阵的覆盖自检：解析根 `Cargo.toml` 的 `members`，断言每个 member 至少命中一个 area、每条 area 的设计文档真实存在且声明了验证命令；新增 crate 漏登记会直接失败。运行 `node scripts/check-change-impact.mjs`。
 - `scripts/check-architecture.ps1` 检查 Rust 文件规模和禁止 glob re-export。上限与 `AGENTS.md` 第 4 节一致，为 1000 行；豁免表当前为空（最后一个豁免 `crates/ark-agent/src/service/reactor.rs` 已拆分回限内），超线即失败。
@@ -21,7 +25,7 @@
 
 - Rust agent 回归测试证明执行器启动时已存在对应的 `ToolCallStarted`。
 - `verify.ps1` 的每个 scope 必须可独立运行，CI 使用同一脚本而不是重复编写命令。
-- 契约 scope 执行 TypeScript 导出并验证生成物无漂移；web 与 desktop scope 保留各自真实构建/测试。
+- 契约 scope 执行 TypeScript 导出并验证生成物无漂移；web 与 desktop scope 保留各自真实构建/测试，并分别强制执行 typecheck 与 Rust host `cargo check`；core 的严格 Clippy 失败会直接阻断 CI。
 - 架构检查对超长 Rust 文件或 `pub use *` 失败；如未来需要豁免，必须在脚本中显式登记并说明理由，保持可审查。
 - 影响矩阵自检对未覆盖的 workspace member、缺失的设计文档或空验证命令失败；门禁口径（1000 行）与 `AGENTS.md`、`web/scripts/check-hard-rules.mjs` 保持一致。
 

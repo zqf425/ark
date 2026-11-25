@@ -8,7 +8,7 @@ use crate::domain::thread_file::ThreadFile;
 use crate::service::store::FileSessionStore;
 use crate::store::child_store::rebuild_child_index_blocking;
 use crate::store::index::IndexEntry;
-use ark_common::{ArkError, Result, ThreadId};
+use ark_common::{ArkError, ArkErrorCode, Result, ThreadId};
 use ark_contract::{RuntimeEvent, ThreadItem};
 use ark_ports::{ChildRunRecord, SessionStore, SubscribeTicket, ThreadMeta};
 
@@ -48,8 +48,10 @@ impl FileSessionStore {
         let mut file = self.require_thread_file(thread)?;
         file.title = crate::domain::thread_file::normalize_title(title);
         file.touch();
-        crate::store::fs_util::write_json_atomic(&self.thread_paths(thread).thread_json(), &file)?;
-        self.index_upsert(&file, self.highest_seq_of(thread)?)?;
+        crate::store::fs_util::write_json_atomic(&self.resolve_paths(thread).thread_json(), &file)?;
+        if file.parent_thread_id.is_none() {
+            self.index_upsert(&file, self.highest_seq_of(thread)?)?;
+        }
         self.meta_with_seq(&file)
     }
 
@@ -61,8 +63,10 @@ impl FileSessionStore {
         let mut file = self.require_thread_file(thread)?;
         file.archived = archived;
         file.touch();
-        crate::store::fs_util::write_json_atomic(&self.thread_paths(thread).thread_json(), &file)?;
-        self.index_upsert(&file, self.highest_seq_of(thread)?)?;
+        crate::store::fs_util::write_json_atomic(&self.resolve_paths(thread).thread_json(), &file)?;
+        if file.parent_thread_id.is_none() {
+            self.index_upsert(&file, self.highest_seq_of(thread)?)?;
+        }
         self.meta_with_seq(&file)
     }
 
@@ -78,8 +82,10 @@ impl FileSessionStore {
         file.autonomy = runtime.autonomy;
         file.reasoning_effort = runtime.reasoning_effort;
         file.touch();
-        crate::store::fs_util::write_json_atomic(&self.thread_paths(thread).thread_json(), &file)?;
-        self.index_upsert(&file, self.highest_seq_of(thread)?)?;
+        crate::store::fs_util::write_json_atomic(&self.resolve_paths(thread).thread_json(), &file)?;
+        if file.parent_thread_id.is_none() {
+            self.index_upsert(&file, self.highest_seq_of(thread)?)?;
+        }
         self.meta_with_seq(&file)
     }
 
@@ -101,21 +107,28 @@ impl FileSessionStore {
         }
         // Propagate the log error: falling back to 0 on a corrupt log would
         // silently rewrite the index watermark while the bad line stays on disk.
-        Ok(crate::store::event_log::read_log_blocking(&self.thread_paths(thread))?.max_seq)
+        Ok(crate::store::event_log::read_log_blocking(&self.resolve_paths(thread))?.max_seq)
     }
 
     /// Write a forked copy of `(0, upto_seq]` into a brand-new thread directory.
     pub(crate) fn fork_blocking(&self, thread: ThreadId, upto_seq: u64) -> Result<ThreadMeta> {
         let source = self.require_thread_file(thread)?;
-        let events: Vec<RuntimeEvent> =
-            crate::store::event_log::read_log_blocking(&self.thread_paths(thread))?
-                .events
-                .into_iter()
-                .filter(|event| event.seq() <= upto_seq)
-                .collect();
-        if events.is_empty() && upto_seq > 0 {
+        let source_paths = self.resolve_paths(thread);
+        if crate::store::fs_util::path_entry_exists(&source_paths.compacted_jsonl()) {
+            return Err(ArkError::conflict(format!(
+                "cannot fork thread {thread}: source log is compacted"
+            )));
+        }
+        let events = crate::store::event_log::read_log_blocking(&source_paths)?
+            .events
+            .into_iter()
+            .filter(|event| event.seq() <= upto_seq)
+            .collect::<Vec<_>>();
+        let source_max = events.iter().map(RuntimeEvent::seq).max().unwrap_or(0);
+        let copied_max = events.last().map(RuntimeEvent::seq).unwrap_or(0);
+        if upto_seq > source_max || (upto_seq > 0 && copied_max != upto_seq) {
             return Err(ArkError::validation(format!(
-                "cannot fork thread {thread} at seq {upto_seq}: no durable events at or below it"
+                "cannot fork thread {thread} at seq {upto_seq}: source log ends at {source_max}"
             )));
         }
         let target = ThreadId::new();
@@ -156,6 +169,8 @@ impl FileSessionStore {
         self.with_child_log_lock(record.parent_thread_id, || {
             let parent = record.parent_thread_id;
             let parent_paths = self.thread_paths(parent);
+            let child_paths = self.paths.child(&parent, &record.child_id);
+            self.registry.ensure_not_deleting(&child_paths)?;
             let location = crate::domain::child_index::ChildLocation::new(
                 parent,
                 self.paths.child_rel(&parent, &record.child_id),
@@ -245,12 +260,19 @@ impl SessionStore for FileSessionStore {
     async fn delete_thread(&self, thread: ThreadId) -> Result<()> {
         self.require_thread_file(thread)?;
         self.ensure_no_active_children(thread)?;
+        let paths = self.thread_paths(thread);
+        let deletion = self.registry.begin_delete(&paths)?;
+        deletion.drain().await;
         let tombstone = self.child_store(thread).tombstone_children();
-        self.remove_thread_dir(thread)?;
-        if let Some(tombstone) = tombstone {
-            let _ = crate::store::child_store::finish_children_delete_blocking(&tombstone);
-        }
-        Ok(())
+        let result = (|| {
+            self.remove_thread_dir(thread)?;
+            if let Some(tombstone) = tombstone {
+                let _ = crate::store::child_store::finish_children_delete_blocking(&tombstone);
+            }
+            Ok(())
+        })();
+        deletion.complete(result.is_ok())?;
+        result
     }
 
     async fn append_event(&self, thread: ThreadId, event: RuntimeEvent) -> Result<RuntimeEvent> {
@@ -259,10 +281,10 @@ impl SessionStore for FileSessionStore {
         let paths = self.resolve_paths(thread);
         let writer = self.registry.writer_for(thread, &paths)?;
         let stored = writer.append(event).await?;
-        // The stored timestamp is the honest last-activity time: the list
-        // orders by it, so a clock skew must move the row by the skew, not by
-        // the append latency.
-        self.index_advance(thread, stored.seq(), Some(stored.timestamp()));
+        // Test-only scheduling point: the actor has already updated the index.
+        // Delaying this caller's completion must not change the watermark.
+        #[cfg(test)]
+        self.wait_for_index_test_gate().await;
         Ok(stored)
     }
 
@@ -328,12 +350,9 @@ impl SessionStore for FileSessionStore {
         let paths = self.resolve_paths(thread);
         let writer = self.registry.writer_for(thread, &paths)?;
         let result = writer.rewind(rewind_from_seq, target_turn_id).await?;
-        // The rewind truncated the suffix: recompute the activity time from the
-        // surviving log instead of keeping the (now stale) tail timestamp.
-        let last_event_at = crate::store::event_log::read_log_blocking(&paths)
-            .ok()
-            .and_then(|log| log.events.last().map(|event| event.timestamp()));
-        self.index_advance(thread, result.last_seq, last_event_at);
+        // The actor recomputed both watermark and last activity before acking.
+        #[cfg(test)]
+        self.wait_for_index_test_gate().await;
         Ok(result)
     }
 
@@ -357,8 +376,13 @@ impl SessionStore for FileSessionStore {
         self.require_thread_file(parent)?;
         // `create_child_dir` enforces the depth policy, so a child of a child is
         // refused at the one place that can actually create directories.
-        self.child_store(parent).create_child_dir(child, label)?;
-        Ok(())
+        self.with_child_log_lock(parent, || {
+            let paths = self.paths.child(&parent, &child);
+            self.registry.ensure_not_deleting(&paths)?;
+            self.child_store(parent)
+                .create_child_dir(child, label)
+                .map(|_| ())
+        })
     }
 
     async fn append_child_run(&self, record: ChildRunRecord) -> Result<()> {
@@ -376,28 +400,37 @@ impl SessionStore for FileSessionStore {
 
     async fn delete_child_run(&self, parent: ThreadId, child: ark_common::ChildId) -> Result<bool> {
         self.require_thread_file(parent)?;
+        let paths = self.thread_paths(parent);
+        let child_paths = self.paths.child(&parent, &child);
+        // Block new event writers first, then drain without holding the parent
+        // log lock. The authoritative record is removed only inside the final
+        // synchronous critical section, so cancellation leaves it replayable.
+        let deletion = match self.registry.begin_delete(&child_paths) {
+            Ok(deletion) => deletion,
+            Err(error) if error.code == ArkErrorCode::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        deletion.drain().await;
+        #[cfg(test)]
+        self.wait_for_child_delete_test_gate().await;
         self.with_child_log_lock(parent, || {
-            let paths = self.thread_paths(parent);
-            // Order matters: drop the record first so a crash leaves an orphan
-            // directory (which reconciliation reports) rather than a record that
-            // points at a directory nothing can reopen.
             let removed = crate::store::child_store::remove_child_run_blocking(
                 &paths,
                 child,
                 self.config.limits().fsync_on_append,
             )?;
             if !removed {
+                deletion.complete(false)?;
                 return Ok(false);
             }
-            // The child's event writer must be closed before its directory goes,
-            // or the actor keeps appending into an unlinked file.
-            if let Some(handle) = self.registry.forget(&self.paths.child(&parent, &child)) {
-                drop(handle);
+            let result = crate::store::child_store::remove_child_dir_blocking(&paths, child);
+            if result.is_ok() {
+                if let Ok(mut locator) = self.children.lock() {
+                    locator.remove(&child);
+                }
             }
-            crate::store::child_store::remove_child_dir_blocking(&paths, child)?;
-            if let Ok(mut locator) = self.children.lock() {
-                locator.remove(&child);
-            }
+            deletion.complete(result.is_ok())?;
+            result?;
             Ok(true)
         })
     }
@@ -612,6 +645,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deleting_an_already_deleted_child_returns_false() {
+        let dir = TempDir::new("thread-ops-child-delete-repeat");
+        let store = test_store(&dir);
+        let parent = store.create_thread("parent").await.unwrap().thread_id;
+        let child = ChildId::new();
+        store
+            .append_child_run(child_record(
+                parent,
+                child,
+                ark_common::ChildRunStatus::Completed,
+            ))
+            .await
+            .unwrap();
+
+        assert!(store.delete_child_run(parent, child).await.unwrap());
+        assert!(!store.delete_child_run(parent, child).await.unwrap());
+    }
+
+    #[tokio::test]
     async fn appends_are_monotonic_and_durable_across_reopen() {
         let dir = TempDir::new("thread-ops-seq");
         let meta = {
@@ -686,6 +738,23 @@ mod tests {
             3,
             "fork keeps the original seq numbering"
         );
+    }
+
+    #[tokio::test]
+    async fn fork_rejects_a_watermark_beyond_the_source_log() {
+        let dir = TempDir::new("thread-ops-fork-watermark");
+        let store = test_store(&dir);
+        let meta = store.create_thread("parent").await.unwrap();
+        for _ in 0..3 {
+            store
+                .append_event(meta.thread_id, event_at(meta.thread_id, 1))
+                .await
+                .unwrap();
+        }
+
+        let error = store.fork_thread(meta.thread_id, 5).await.unwrap_err();
+        assert_eq!(error.code, ark_common::ArkErrorCode::ValidationError);
+        assert_eq!(store.list_threads().await.unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -893,3 +962,7 @@ mod tests {
         assert_eq!(meta.updated_at, row.updated_at);
     }
 }
+
+#[cfg(test)]
+#[path = "thread_ops_review_tests.rs"]
+mod review_tests;

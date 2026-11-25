@@ -113,6 +113,9 @@ export function ThreadStream({
   const itemOrder = useCodeSessionStore((s) => s.itemOrder)
   const itemsById = useCodeSessionStore((s) => s.itemsById)
   const turnState = useCodeSessionStore((s) => s.turnState)
+  const changedItemIds = useCodeSessionStore((s) => s.changedItemIds)
+  const itemOrderChanged = useCodeSessionStore((s) => s.itemOrderChanged)
+  const liveItemCount = useCodeSessionStore((s) => s.liveItemCount)
   const activeTurnId = useCodeSessionStore((s) => s.activeTurnId)
   const approvalsById = useCodeSessionStore((s) => s.approvals)
   const userInputsById = useCodeSessionStore((s) => s.userInputs)
@@ -135,18 +138,33 @@ export function ThreadStream({
     [itemView, foldedCount, showInherited]
   )
   const turnView = useMemo<TurnView>(
-    () => ({ itemOrder: visibleItemView.itemOrder, itemsById: visibleItemView.itemsById, turnState }),
-    [visibleItemView, turnState]
+    () => ({
+      itemOrder: visibleItemView.itemOrder,
+      itemsById: visibleItemView.itemsById,
+      turnState,
+      changedItemIds,
+      itemOrderChanged
+    }),
+    [visibleItemView, turnState, changedItemIds, itemOrderChanged]
   )
 
   // Group identity is carried across recomputes so memoized turn blocks bail
   // out; the ref is a cache, not state (the result is a pure function of view).
-  const previousGroups = useRef<readonly TurnGroup[]>([])
+  // It is reset at the thread boundary because sequence/item channels are not
+  // comparable across sessions.
+  const groupCache = useRef<{ threadId: string | null; groups: readonly TurnGroup[]; view: TurnView | null }>({
+    threadId,
+    groups: [],
+    view: null
+  })
   const groups = useMemo(() => {
-    const next = groupByTurn(turnView, previousGroups.current)
-    previousGroups.current = next
+    if (groupCache.current.threadId !== threadId) {
+      groupCache.current = { threadId, groups: [], view: null }
+    }
+    const next = groupByTurn(turnView, groupCache.current.groups, groupCache.current.view ?? undefined)
+    groupCache.current = { threadId, groups: next, view: turnView }
     return next
-  }, [turnView])
+  }, [turnView, threadId])
 
   const rewindByTurn = useMemo(
     () => rewindAvailabilityByTurn({ activeTurnId, turnState, itemsById, itemOrder }),
@@ -170,7 +188,10 @@ export function ThreadStream({
   // the in-memory channel.
   const userInputs = useMemo(() => userInputCards({ userInputs: userInputsById }), [userInputsById])
     .filter((request) => request.status === 'pending')
-  const live = useMemo(() => hasLiveItems(visibleItemView), [visibleItemView])
+  const live = useMemo(
+    () => hasLiveItems({ ...visibleItemView, liveItemCount }),
+    [visibleItemView, liveItemCount]
+  )
 
   const { scrollRef, contentRef, atBottom, scrollToBottom } = useStickToBottom(threadId)
 

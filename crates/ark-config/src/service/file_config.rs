@@ -16,6 +16,18 @@
 
 use crate::domain::{diagnose, ConfigDiagnostics, RuntimeConfig};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
+
+/// Serializes replacements of the same process's config document. Unique temp
+/// names isolate writers, while this lock avoids Windows sharing violations
+/// between simultaneous `MoveFileExW` calls.
+static SAVE_LOCK: Mutex<()> = Mutex::new(());
+
+fn save_lock() -> MutexGuard<'static, ()> {
+    SAVE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 /// `data/config.json` under `data_dir`.
 pub fn config_path(data_dir: &Path) -> PathBuf {
@@ -100,15 +112,64 @@ pub fn load_or_default(path: &Path) -> Result<RuntimeConfig, String> {
 /// Write the config atomically (temp file + rename), creating the directory.
 pub fn save(path: &Path, config: &RuntimeConfig) -> Result<(), String> {
     config.validate()?;
+    let _save_guard = save_lock();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|err| format!("cannot create {}: {err}", parent.display()))?;
     }
     let body = serde_json::to_string_pretty(config)
         .map_err(|err| format!("cannot encode config: {err}"))?;
-    let temp = path.with_extension("json.tmp");
-    std::fs::write(&temp, body).map_err(|err| format!("cannot write {}: {err}", temp.display()))?;
-    std::fs::rename(&temp, path).map_err(|err| format!("cannot replace {}: {err}", path.display()))
+    let temp = temp_path(path);
+    let result = write_temp(&temp, body.as_bytes()).and_then(|()| replace_file(&temp, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result.map_err(|err| format!("cannot replace {}: {err}", path.display()))
+}
+
+fn temp_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("config.json");
+    path.with_file_name(format!(".{name}.{}.tmp", uuid::Uuid::new_v4()))
+}
+
+fn write_temp(path: &Path, body: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(body)?;
+    file.sync_all()
+}
+
+#[cfg(windows)]
+fn replace_file(temp: &Path, path: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+    let wide =
+        |value: &Path| -> Vec<u16> { value.as_os_str().encode_wide().chain(Some(0)).collect() };
+    let from = wide(temp);
+    let to = wide(path);
+    // SAFETY: both NUL-terminated buffers live for the synchronous call.
+    let moved = unsafe {
+        MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file(temp: &Path, path: &Path) -> std::io::Result<()> {
+    std::fs::rename(temp, path)
 }
 
 #[cfg(test)]
@@ -197,6 +258,50 @@ mod tests {
         config.tuning.max_rounds = 7;
         save(&path, &config).unwrap();
         assert_eq!(load_or_default(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn save_replaces_an_existing_document_on_windows() {
+        let dir = temp_dir("replace");
+        let path = config_path(&dir);
+        let first = RuntimeConfig {
+            log_level: "debug".into(),
+            ..RuntimeConfig::default()
+        };
+        save(&path, &first).unwrap();
+        let mut second = first.clone();
+        second.log_level = "warn".into();
+        save(&path, &second).unwrap();
+        assert_eq!(load_or_default(&path).unwrap(), second);
+    }
+
+    #[test]
+    fn concurrent_saves_use_independent_temp_files() {
+        let dir = temp_dir("concurrent");
+        let path = Arc::new(config_path(&dir));
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let threads: Vec<_> = (0..8)
+            .map(|index| {
+                let path = Arc::clone(&path);
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    let mut config = RuntimeConfig::default();
+                    barrier.wait();
+                    for round in 0..20 {
+                        config.tuning.max_rounds = index * 100 + round + 1;
+                        save(&path, &config).expect("concurrent save succeeds");
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().expect("save thread");
+        }
+        let stored = load_or_default(&path).expect("final document is complete");
+        let round = stored.tuning.max_rounds % 100;
+        let writer = stored.tuning.max_rounds / 100;
+        assert!((1..=20).contains(&round), "unexpected round: {round}");
+        assert!(writer <= 7, "unexpected writer: {writer}");
     }
 
     #[test]

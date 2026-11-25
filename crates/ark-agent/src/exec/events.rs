@@ -138,6 +138,10 @@ impl TurnEvents {
             seq: Self::UNASSIGNED,
             thread_id: self.thread_id,
             turn_id: self.turn_id,
+            item_id: Some(ark_common::keyed_item_id(&format!(
+                "turn_failed:{}",
+                self.turn_id
+            ))),
             timestamp: Utc::now(),
             message: message.into(),
             model_request_failed,
@@ -216,6 +220,7 @@ impl TurnEvents {
             seq: Self::UNASSIGNED,
             thread_id: self.thread_id,
             turn_id: self.turn_id,
+            item_id: Some(ark_common::keyed_item_id(&format!("tool_call:{call_id}"))),
             timestamp: Utc::now(),
             call_id: call_id.to_string(),
             tool: tool.to_string(),
@@ -236,6 +241,7 @@ impl TurnEvents {
             seq: Self::UNASSIGNED,
             thread_id: self.thread_id,
             turn_id: self.turn_id,
+            item_id: Some(ark_common::keyed_item_id(&format!("tool_call:{call_id}"))),
             timestamp: Utc::now(),
             call_id: call_id.to_string(),
             tool: tool.to_string(),
@@ -291,6 +297,9 @@ impl TurnEvents {
             seq: Self::UNASSIGNED,
             thread_id: self.thread_id,
             turn_id: self.turn_id,
+            item_id: Some(ark_common::keyed_item_id(&format!(
+                "user_input:{request_id}"
+            ))),
             timestamp: Utc::now(),
             request_id: request_id.to_string(),
             prompt: prompt.to_string(),
@@ -302,6 +311,9 @@ impl TurnEvents {
             seq: Self::UNASSIGNED,
             thread_id: self.thread_id,
             turn_id: self.turn_id,
+            item_id: Some(ark_common::keyed_item_id(&format!(
+                "user_input:{request_id}"
+            ))),
             timestamp: Utc::now(),
             request_id: request_id.to_string(),
             answer: answer.to_string(),

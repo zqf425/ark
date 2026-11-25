@@ -78,10 +78,10 @@ async fn a_terminal_frame_ends_the_stream_without_waiting_for_eof() {
         .any(|chunk| matches!(chunk, ModelChunk::TextDelta { .. })));
 }
 
-/// A stream that closes with no sentinel still has to publish the tool call it
-/// assembled: `response.tool_calls` and the sink must not diverge.
+/// EOF without a protocol terminal frame is a truncated response. Incomplete
+/// tool calls must not be published as though the provider completed them.
 #[tokio::test]
-async fn eof_without_a_terminal_frame_still_publishes_assembled_tool_calls() {
+async fn eof_without_a_terminal_frame_fails_without_publishing_partial_tool_calls() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let server = std::thread::spawn(move || {
@@ -103,22 +103,17 @@ async fn eof_without_a_terminal_frame_still_publishes_assembled_tool_calls() {
     let client = client(address);
     let (sink, mut drain) = mpsc::channel(16);
 
-    let response = client
+    let error = client
         .stream(request(), sink)
         .await
-        .expect("an EOF without [DONE] is still a usable response");
+        .expect_err("EOF without a terminal frame must fail");
     server.join().unwrap();
 
-    assert_eq!(response.tool_calls.len(), 1, "the response owns the call");
-    assert_eq!(response.tool_calls[0].1, "read");
-    let mut chunks = Vec::new();
+    assert!(error.message.contains("terminal frame"));
     while let Ok(chunk) = drain.try_recv() {
-        chunks.push(chunk);
+        assert!(
+            !matches!(chunk, ModelChunk::ToolCall { .. }),
+            "a truncated stream must not publish a partial tool call"
+        );
     }
-    assert!(
-        chunks
-            .iter()
-            .any(|chunk| matches!(chunk, ModelChunk::ToolCall { tool, .. } if tool == "read")),
-        "the sink must see the same tool call the response reports"
-    );
 }

@@ -77,7 +77,7 @@ impl StreamAccumulator {
                 chunks.shrink_to_fit();
                 chunks
             }
-            StreamEvent::Ignored => Vec::new(),
+            StreamEvent::Error(_) | StreamEvent::Ignored => Vec::new(),
         }
     }
 

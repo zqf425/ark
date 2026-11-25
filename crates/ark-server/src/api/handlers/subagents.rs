@@ -19,16 +19,16 @@ pub async fn configure(
     Json(settings): Json<SubagentSettings>,
 ) -> Result<Json<ApplyResult>, ApiError> {
     let before = state.config.snapshot().subagents;
-    let result = state.config.apply(ConfigPatch {
-        subagents: Some(settings),
-        ..ConfigPatch::default()
-    });
+    let path = ark_config::config_path(&state.config_dir);
+    let result = state.config.apply_with(
+        ConfigPatch {
+            subagents: Some(settings),
+            ..ConfigPatch::default()
+        },
+        |snapshot| ark_config::save(&path, snapshot),
+    );
     if matches!(result, ark_contract::ApplyResult::Applied { .. }) {
         let snapshot = state.config.snapshot();
-        let path = ark_config::config_path(&state.config_dir);
-        if let Err(message) = ark_config::save(&path, &snapshot) {
-            tracing::warn!(%message, "subagent config applied in memory but not persisted");
-        }
         let after = snapshot.subagents;
         if before.enabled != after.enabled || before.auto_continue != after.auto_continue {
             crate::service::continuation::sync_auto_continue_policy(state.clone()).await;

@@ -248,6 +248,30 @@ impl ThreadIndex {
         self.dirty = true;
     }
 
+    /// Refresh metadata without replacing fields owned by event projection.
+    pub fn upsert_metadata(&mut self, entry: IndexEntry) {
+        match self
+            .entries
+            .iter_mut()
+            .find(|existing| existing.thread_id == entry.thread_id)
+        {
+            Some(existing) => {
+                existing.parent_thread_id = entry.parent_thread_id;
+                existing.title = entry.title;
+                existing.updated_at = entry.updated_at;
+                existing.created_at = entry.created_at;
+                existing.archived = entry.archived;
+                existing.path_rel = entry.path_rel;
+                existing.forked_from = entry.forked_from;
+                existing.fork_at_seq = entry.fork_at_seq;
+                existing.inherited_item_count = entry.inherited_item_count;
+                existing.workspace = entry.workspace;
+            }
+            None => self.entries.push(entry),
+        }
+        self.dirty = true;
+    }
+
     pub fn remove(&mut self, thread: &ThreadId) -> Option<IndexEntry> {
         let position = self
             .entries

@@ -65,6 +65,7 @@ impl RuntimeEvent {
             TurnFailed {
                 thread_id,
                 turn_id,
+                item_id,
                 timestamp,
                 message,
                 model_request_failed
@@ -119,6 +120,7 @@ impl RuntimeEvent {
             ToolCallStarted {
                 thread_id,
                 turn_id,
+                item_id,
                 timestamp,
                 call_id,
                 tool,
@@ -127,6 +129,7 @@ impl RuntimeEvent {
             ToolCallFinished {
                 thread_id,
                 turn_id,
+                item_id,
                 timestamp,
                 call_id,
                 tool,
@@ -162,6 +165,7 @@ impl RuntimeEvent {
             UserInputRequested {
                 thread_id,
                 turn_id,
+                item_id,
                 timestamp,
                 request_id,
                 prompt
@@ -169,6 +173,7 @@ impl RuntimeEvent {
             UserInputResolved {
                 thread_id,
                 turn_id,
+                item_id,
                 timestamp,
                 request_id,
                 answer

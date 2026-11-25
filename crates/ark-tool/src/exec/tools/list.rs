@@ -117,6 +117,7 @@ async fn run_find(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOu
                 &mut found,
                 &mut visited,
             );
+            deadline.check()?;
             Ok(found)
         })
         .await?;

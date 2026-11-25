@@ -1,103 +1,74 @@
 /**
- * Per-turn active-time spans for the session strip and the turn total.
- *
- * One authoritative `usage` event closes exactly one model round (ark-server
- * diagnostics); the wire does not carry a bare `round` item, so the renderer
- * keeps its own lightweight fold: the thread usage aggregate seeds the settled
- * per-turn spans, and a live `usage` event appends the round it closes,
- * measured from the turn-start/round boundary to the event timestamp.
- * Millis-clock live values are estimates; the next HTTP refresh is
- * authoritative and replaces the list wholesale, so the two never drift.
- *
- * `RoundTiming` now carries the turn's **active** span — wall clock minus the
- * windows the turn sat on an approval / user-input gate (server-folded in
- * `active_ms`), plus harness recovery/continuation gaps — not the sum of
- * measured model-call time, which stays in `durationMs` for the "model time"
- * readout.
+ * Per-turn model and active spans. HTTP usage snapshots seed every turn; live
+ * samples add model time while the reducer banks active wall time. Snapshot
+ * merges are monotonic so a late response cannot roll either clock backwards.
  */
 import type { ThreadUsageResponse, TurnId } from '../../../shared/contracts'
+import type { RoundTiming } from './types'
 
-/** One settled turn's clock as the renderer needs it. */
-export type RoundTiming = {
-  turnId: TurnId
-  /**
-   * Sum of measured model-call wall time, milliseconds (the old readout).
-   * Still folded live from `usage` events; the seed carries the server's sum.
-   */
-  durationMs: number
-  /**
-   * Active span: wall clock from `turn_started` to the terminal event minus
-   * user-gate waits, milliseconds. Seeded from the server aggregate's
-   * `active_ms`; live turns extend it against the renderer clock while no
-   * gate is pending. `null` until the server has reported one for the turn.
-   */
-  activeMs: number | null
-}
+export type { RoundTiming } from './types'
 
-/**
- * Fold the thread's authoritative per-turn usage into the renderer's list.
- *
- * Deliberately *not* `GET /v1/debug/llm-rounds`: that route is a bounded
- * diagnostics page (`LLM_ROUNDS_MAX_LIMIT`), so in a long session whole turns
- * fell past the page and their clocks quietly rendered as a few seconds —
- * the "100+ steps in 11 seconds" report. The thread usage aggregate replays
- * the entire log per turn, so every turn keeps its real span.
- *
- * A turn with no measured duration (a log written before the field existed)
- * keeps `durationMs: null` rather than faking 0: a turn with no clock beats a
- * confident lie. Turns that never produced usage (failed before the first
- * model round) still appear, because the server now emits their active spans.
- *
- * `previous` carries the renderer's live rows. Rows the seed also reports are
- * replaced wholesale (the server fold is authoritative); rows it does **not**
- * report survive untouched — chiefly the running turn, which finished no
- * rounds at fetch time and would otherwise vanish mid-run, killing the live
- * extension ("890+ calls showed 2 minutes": the seed replaced the list, the
- * running turn's row disappeared, and the total collapsed to the seed alone).
- */
+const laterSpan = (current: number | null, incoming: number | null): number | null =>
+  current == null ? incoming : incoming == null ? current : Math.max(current, incoming)
+
+/** Merge the complete server fold with newer live rows without regressing clocks. */
 export function roundsFromTurnUsage(
   response: ThreadUsageResponse,
   previous: readonly RoundTiming[] = []
 ): RoundTiming[] {
-  // `turn_usage` is required on the wire but defensively optional here: an
-  // older runtime answers without the breakdown, and a missing array must
-  // degrade to "no per-turn clocks" rather than throwing mid-render.
-  const seeded = (response.turn_usage ?? []).map((turn) => ({
-    turnId: turn.turn_id,
-    durationMs:
+  const prior = new Map(previous.map((row) => [row.turnId, row]))
+  const seeded = (response.turn_usage ?? []).map((turn) => {
+    const existing = prior.get(turn.turn_id)
+    const durationMs =
       typeof turn.duration_ms === 'number' && Number.isFinite(turn.duration_ms) && turn.duration_ms > 0
         ? turn.duration_ms
-        : 0,
-    activeMs: typeof turn.active_ms === 'number' && Number.isFinite(turn.active_ms) ? turn.active_ms : null
-  }))
+        : 0
+    const activeMs =
+      typeof turn.active_ms === 'number' && Number.isFinite(turn.active_ms) ? turn.active_ms : null
+    return {
+      turnId: turn.turn_id,
+      durationMs: Math.max(existing?.durationMs ?? 0, durationMs),
+      activeMs: laterSpan(existing?.activeMs ?? null, activeMs)
+    }
+  })
   const seededIds = new Set(seeded.map((row) => row.turnId))
-  const carried = previous.filter((row) => !seededIds.has(row.turnId))
-  return [...seeded, ...carried]
+  return [...seeded, ...previous.filter((row) => !seededIds.has(row.turnId))]
 }
 
-/**
- * Add the round a live `usage` event closes to its turn's entry.
- *
- * The list is one entry per **turn**, not per round (the seed above is
- * per-turn), so a running turn accumulates into the single entry it already
- * has instead of growing a second row that would double count it. A turn that
- * has no entry yet is inserted at the end, which is chronological because the
- * log is append-only. `activeMs` is left untouched here: it is owned by the
- * server fold and the live tick, never by per-round additions.
- */
-export function appendRound(current: RoundTiming[], timing: { turnId: TurnId; durationMs: number }): RoundTiming[] {
+/** Build the constant-time lookup kept alongside the ordered clock rows. */
+export function indexRounds(rounds: readonly RoundTiming[]): Record<TurnId, number> {
+  const index: Record<TurnId, number> = {}
+  rounds.forEach((round, position) => {
+    index[round.turnId] = position
+  })
+  return index
+}
+
+/** Add measured model time without changing the active span. */
+export function appendRound(
+  current: RoundTiming[],
+  timing: { turnId: TurnId; durationMs: number },
+  index?: Record<TurnId, number>
+): RoundTiming[] {
   if (!(timing.durationMs > 0)) return current
-  const existing = current.find((round) => round.turnId === timing.turnId)
+  const position = index?.[timing.turnId]
+  const existing = index === undefined
+    ? current.find((round) => round.turnId === timing.turnId)
+    : position === undefined ? undefined : current[position]
   if (!existing) {
+    if (index) index[timing.turnId] = current.length
     return [...current, { turnId: timing.turnId, durationMs: timing.durationMs, activeMs: null }]
   }
-  // Replace in place: the entry keeps its position so the list stays ordered
-  // by turn, which is what the strip and the header both assume.
-  return current.map((round) =>
-    round.turnId === timing.turnId
-      ? { ...round, durationMs: round.durationMs + timing.durationMs }
-      : round
-  )
+  if (index === undefined || position === undefined) {
+    return current.map((round) =>
+      round.turnId === timing.turnId
+        ? { ...round, durationMs: round.durationMs + timing.durationMs }
+        : round
+    )
+  }
+  const next = current.slice()
+  next[position] = { ...existing, durationMs: existing.durationMs + timing.durationMs }
+  return next
 }
 
 /** Sum of one turn's measured model rounds; rounds without a duration count as 0. */
@@ -105,7 +76,7 @@ export function turnModelMs(rounds: readonly RoundTiming[], turnId: TurnId): num
   return rounds.reduce((total, round) => (round.turnId === turnId ? total + round.durationMs : total), 0)
 }
 
-/** One turn's active span from the fold; `null` when the server has not reported one. */
+/** One turn's banked or server-reported active span, or null when unknown. */
 export function turnActiveMs(rounds: readonly RoundTiming[], turnId: TurnId): number | null {
   return rounds.find((round) => round.turnId === turnId)?.activeMs ?? null
 }

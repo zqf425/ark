@@ -33,16 +33,23 @@
 - steer 与回合起点共用同一 `TurnRequest` 信封与同一附件授权裁决：`enqueue_steering` 前先
   `authorize_turn_attachments`（按本线程关联事件，未关联统一 404），id 随文本进入同一条
   `SteerEntry`，不存在第二条附件通道。
-- `workspace_gate` 是全进程串行启动门，锁内只做注册表变更与必要的轻量存在性检查，不得 await
-  磁盘 I/O 或全量事件回放。附件授权（`authorize_turn_attachments`，回放整段事件日志）在取锁前
-  完成；`get_thread` 单文件存在性检查与删除路由共用同一 gate，保留在锁内以避免删除竞态。
+- `workspace_gate` 是全进程串行启动与线程删除提交门，锁内只做注册表变更、必要的轻量存在性检查、
+  单线程元数据读写与删除提交，不得 await 模型/工具等长耗时动作或全量事件回放。附件授权
+  （`authorize_turn_attachments`，回放整段事件日志）在取锁前完成；`get_thread` 单文件存在性检查与
+  删除路由共用同一 gate，避免删除竞态。含 `runtime` 的 `PATCH /v1/threads/{id}` 在读取旧元数据前
+  取同一 gate，并把合并、写回保留到 guard 释放；归档写入也复用该 guard，不递归重取。
 - 手动 `/compact` 在 gate 内通过 `TurnRegistry::reserve_compaction` 预留线程压缩位，活动回合或已有
   压缩预留时返回 `Conflict`；预留同时阻止新回合与第二次压缩，随后释放 gate，全量历史读取、checkpoint
   生成和持久 Notice 写入均在磁盘 I/O 期间不持 gate。RAII 守卫在成功、错误和取消路径都释放预留。
   手动路径复用 `ark_agent::model_history` 与 checkpoint 提取规则，并按当前 provider 阈值限制 checkpoint；
   下一回合的完整请求预算仍由自动压缩按实际工具 schema 和动态 seed 计算。
 - `/v1/shutdown`、Ctrl-C 和任务 panic 走同一收敛流程：先阻止新的 completion wakeup，再取消待调度
-  continuation 与活动回合，等待有限时间、落终态并清理 registry。
+  continuation 与活动回合，等待有限时间、落终态并清理 registry。终态补偿的日志回放、缺失
+  `turn_started` 的补写和终态追加都必须成功；任一写入失败时不得释放 `TurnRegistry` entry、不得
+  计数完成或调度后续动作。drain 超时后仍有活动 turn/child 时返回 `runtime_unavailable`，由
+  `AppHandle::serve` 向上传播，不能把未持久化终态报告为已收敛。HTTP 入口返回 202，表示停机已受理而非
+  进程已退出；`service::serve::DRAIN_TIMEOUT` 当前为 10 秒。桌面宿主据此等待最多 12 秒；超时会强杀
+  子进程及其专属进程组，子进程提前退出也会清理该组残余后代（见 [ark-desktop](ark-desktop.md)）。
 - 后台 child 的持久 `child_completed` 成功写入后会唤醒 per-thread continuation supervisor。
   `subagents.auto_continue` 默认开启；仅当它与 `subagents.enabled` 同时开启时，同一父线程 250 ms 内的
   通知共享一个可取消 debounce，关闭任一开关会立即取消待调度 continuation。默认开启会使后台完成产生
@@ -55,6 +62,9 @@
   或 sandbox，也不会写入伪用户消息。
 - 回合因模型请求失败（`model_request_failed`，网关抖动/断流/流超时）终结时，`service::recovery`
   调度自动恢复：以同一请求文本（`TurnSource::AutoRecovery`）重开回合，退避 5s/10s/20s，最多 3 次；
+  失败回合的 lifecycle epoch 由 supervisor 在释放槽位前持有并传入恢复任务，退避后及 `workspace_gate`
+  注册临界区内再次核对；期间任何新回合都会使旧恢复以 `conflict` 失效，不能越过用户的新输入继续执行。失败回合已授权的附件 id
+  随恢复作业保留，并在注册前重新经过 `authorize_turn_attachments`，不能凭旧授权直接复用。
   尝试号写入 `turn_started.auto_recovery`，恢复回合先写一条 Notice 说明自动重试原因。恢复是**续跑**
   而非新请求：失败回合已把用户消息落盘并在重放历史末尾出现，`arkd` 组合根据此不再重复 `push_user_message`
   （见 [arkd](arkd.md)），因此一个用户请求在会话流里只有一条用户气泡，恢复只追加 Notice 与 Error 行。
@@ -83,9 +93,14 @@
 - `DELETE /v1/threads?workspace=…`（`service::threads::delete_settled_by_workspace`）按项目批量删除
   **已结束**的线程：匹配遵循渲染层项目分组规则（显式 override 与路径规范化后比对，无 override 回退
   运行时 active root；默认组不被此动词服务），"已结束"复用列表 busy 标记的同一持久折叠
-  （`durable_running_ids`，注册表与日志同源，两种判定永不漂移）。整段 sweep 持 `workspace_gate`，
-  与回合注册、单线程删除互斥；运行中/删除失败的线程逐行进入响应 `skipped`（结构化 `ArkErrorCode`，
-  运行中为 `conflict`），不令整个请求失败。响应 `BulkDeleteThreadsResponse`（`deleted`/`skipped`）。
+  （`durable_running_ids`，注册表与日志同源，两种判定永不漂移）。全量 list、durable running 判定与
+  候选线程水位读取均在锁外完成；每个候选删除只在其提交临界区持有 `workspace_gate`，并复核 active
+  turn、扫描时的水位与当前有效 workspace，扫描期间启动的新回合、新增事件或 active root
+  切换会使该候选重新求值而非按旧快照删除。runtime PATCH 与删除提交共用 `workspace_gate`，因此
+  有效 workspace 的复核与物理删除之间不能插入元数据变更；确定性回归覆盖“删除已持 gate、PATCH
+  等待、删除提交后 PATCH 观察到 NotFound”的合法串行顺序。
+  运行中/删除失败的线程逐行进入响应 `skipped`（结构化 `ArkErrorCode`，运行中为 `conflict`），
+  不令整个请求失败。响应 `BulkDeleteThreadsResponse`（`deleted`/`skipped`）。
 - `GET /v1/threads/{id}` 的 `child_completions` 是最新 50 个不同通知 ID 的有界视图；它从 store 的窄
   completion 查询投影，不能全量回放普通会话事件。
 - `InteractiveGates` 只做 HTTP 决议与 reactor gate future 的一次性 rendezvous；`prepare_*` 同步插入
@@ -126,8 +141,10 @@
   `http://tauri.localhost` 与 macOS/Linux 的 `tauri://localhost` origin，且只允许 GET/POST/PATCH/DELETE
   和 `accept`、`authorization`、`content-type` headers；禁止将其放宽为 `*`。
 - `POST /v1/threads/{id}/rewind` 仅在没有活动回合时接受 `turn_id` 或 `seq` 之一；目标 turn 从其
-  `turn_started` 处开始物理删除。成功响应含新的 `last_seq`，重复请求同一已记录目标幂等返回；SSE 的
-  `thread_rewound` 事件要求客户端重新读取线程详情。
+  `turn_started` 处开始物理删除。目标扫描与历史回放在 `workspace_gate` 外完成；提交前在锁内复核
+  active turn、lifecycle epoch 与扫描时的日志水位，过期即释放锁并重新求值，不能依据旧快照截断新回合。
+  成功响应含新的 `last_seq`，重复请求同一已记录目标幂等返回；SSE 的 `thread_rewound` 事件要求客户端
+  重新读取线程详情。
 - `POST /v1/subagents/config` 是子代理开关和并发上限的专用热更新入口，内部复用
   `ConfigPatch.subagents` 的校验、替换和持久化语义，并与 `/v1/runtime/config` 一样返回
   `ApplyResult`；不得路由到其他 split-config 占位 handler。
@@ -135,7 +152,8 @@
   provider，且非空 model 必须有可解析 provider；校验失败不得写入 store。覆盖字段按
   `merge_runtime` 的 `patch.or(current)` 逐项合并（本端点不支持经 PATCH 单项清空覆盖）；`autonomy`
   经 `Autonomy::parse` 校验，`reasoning_effort` 仅接受 `REASONING_EFFORTS`（`off|low|medium|high`），
-  空串视为未设置。覆盖语义在回合侧的解析见 [arkd](arkd.md)。
+  空串视为未设置。覆盖语义在回合侧的解析见 [arkd](arkd.md)。请求含 `runtime` 时，读取、合并与写回
+  都在 `workspace_gate` 内完成，与 bulk-delete 的有效 workspace 复核/物理删除串行。
   `POST /v1/threads/{id}/turns` 在注册回合前拒绝超过 `ark_contract::MAX_TURN_TEXT_BYTES` 的 UTF-8 文本。
 - `POST /v1/workspace/validate` 只转发 `WorkspaceService::validate` 的目录存在性校验，并使用
   `ark_common::path::normalize` 返回规范化路径；handler 不得复制工作区解析规则。
@@ -154,7 +172,9 @@
   （不含工具执行），并作为轮次耗时的唯一 wire 载体。线程 usage 聚合直接对这些样本做严格折叠，不为
   旧日志缺失值补时；只有诊断用的 llm-rounds 投影会在单个旧样本缺少耗时时回退到回合边界窗口。
   同一次重放还发布 `last_valid_prompt_tokens`：只接受正 `prompt_tokens`，全零样本照常计数和累计，
-  但不覆盖最近一次有效读数；从未出现有效读数时省略该字段。
+  但不覆盖最近一次有效读数；从未出现有效读数时省略该字段。`ThreadUsageResponse.last_seq` 返回同一份
+  事件输入的最后一条持久日志序号（空日志为 `None`），让客户端能精确重放响应水位之后的 live usage 帧，
+  避免首次加载时把 lifetime 样本数误当成实时覆盖数。
 - **同一路由还投影"活跃时长"读数**（`ActiveClock`，与 usage 折叠同一次日志重放）：每个回合的
   `active_ms` 是 `turn_started` 到终态事件之间的挂钟时间，**扣除回合停在审批/用户输入门禁上的窗口**
   （`ApprovalRequested/UserInputRequested` 冻结时钟，对应 Resolve 事件恢复；gate 打开即计入
@@ -246,14 +266,32 @@ continuation/recovery 使用各自的系统来源，并直接使用 `ArkError`�
 错误到状态码的映射仍集中在 `api::error`。
 
 IM 渠道编排（[IM 渠道接入需求](../requirements/im-channels.md)）居 `service/im.rs`
-（生命周期：sync 对账、渠道启停、游标节流落盘）与 `service/im_inbound.rs`（消息管线：
-过滤/去重/每会话串行队列/`start_turn_as(TurnSource::Im)`/回复等待与投影）。回合经
-`TurnSource::Im` 走与 HTTP 同一 `start_turn` 校验路径；回复文本在终态后按本回合
+（生命周期：sync 对账、渠道启停、启动前重放 durable inbox）与 `service/im_inbound.rs`
+（消息管线：过滤/去重/每会话串行队列/`start_turn_as(TurnSource::Im)`/回复等待与投影）。
+回合经 `TurnSource::Im` 走与 HTTP 同一 `start_turn` 校验路径；回复文本在终态后按本回合
 `turn_id` 从线程投影取（同 scheduler 摘要先例），不用 delta 累积。路由
 `/v1/im/channels`(CRUD)、`/v1/im/channels/{id}/verify`、`/v1/im/bindings`、
 `/v1/im/weixin/login/{start,wait}`(确认后端直接建渠道,经容量校验、默认停用)只解包
 HTTP；
 总开关 `config.im.enabled` 只门控连接不门控编辑。
+
+IM durable inbox 的提交顺序是 write-ahead：适配器的一批消息经 `ImStore` 一次原子
+rewrite 全部落盘；server 对每条消息先原子提交 `queued=true` 与最终平台 cursor 并保留
+记录，再放入内存 conversation queue，最后才向适配器发 admission ack。磁盘与内存
+之间没有跨介质原子事务，因此“先提交可重放记录、再入内存”确保任何崩溃点都不会出现
+cursor 已前进而消息无持久副本。新渠道 transport 启动前重放 pending 与 queued 记录；
+重放按 `ImInboxId` 跳过仍被 live queue/处理任务持有的同一记录，避免 reconnect 重复
+执行，同时绕过平台 `(chat_id, message_id)` 去重，避免旧 dedup 缓存误删失去内存队列的
+queued 记录。live claim 还按 `(channel_id, chat_id, message_id)` 持有平台身份：若另一
+durable id 指向同一活跃平台消息，先原子 `discard_inbound` 再 ack，原记录仍负责后续完成；
+删除失败时 withhold ack。transport 失败后 supervisor 继续 admit/ack 已落盘的缓冲 delivery，
+待 sender 关闭才发布错误运行态，不会因失败分支先结束而丢失可重放记录。
+
+只有消息处理到达回合终态才 `ack_inbound` 删除。建线、订阅或启动失败、shutdown 中断、
+1800s 等待超时都保留记录供后续重放;新消息遇到已满队列仍回复 busy 后终端丢弃,但
+durable replay 遇到满队列只保留记录,并在当前 supervisor 内等待容量后继续入队,
+不能把已入队工作降级成 busy 丢弃或停到下次重启。该协议是至少
+一次语义:回合已完成而 ack 尚未写入时崩溃,重启可能再次执行同一回合。
 
 ## 路由清单
 
@@ -292,3 +330,12 @@ generation，客户端必须丢弃 generation 已变的旧响应。
 `/v1/memory` 的 GET、POST、PATCH、DELETE 及 `/v1/memory/diagnostics` 仅解包 HTTP 并调用
 `MemoryService`。服务未装配时返回 `runtime_unavailable`/503；输入和不存在 id 的错误保持端口的
 结构化错误码，handler 不复制持久化或校验规则。
+
+## 验证
+
+- `cargo test -p ark-server diagnostics::tests` 覆盖 usage 折叠、LLM round 诊断和 `ActiveClock` 的
+  completed/failed/aborted 终态、gate 排除与时钟偏移路径。
+- `cargo test -p ark-server shutdown` 覆盖停机取消与迟到 completion wakeup 抑制；真实 listener 的
+  优雅停机还需验证 202 响应后进程在 drain 预算内退出。
+- core 验证在 workspace check 后执行 `cargo clippy --workspace --all-targets -- -D warnings`；
+  diagnostics 的终态匹配显式忽略不参与计时的 `turn_id`，保证该门禁不被未使用绑定阻断。

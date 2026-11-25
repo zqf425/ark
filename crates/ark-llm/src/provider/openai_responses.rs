@@ -170,7 +170,10 @@ impl StreamParser for ResponsesParser {
             "response.output_item.added" => self.output_item_added(&value),
             "response.function_call_arguments.delta" => self.arguments_delta(&value),
             "response.completed" => self.completed(&value),
-            "response.failed" | "error" => vec![StreamEvent::Ignored],
+            "response.failed" | "error" => vec![crate::domain::event::provider_error(
+                &value,
+                "provider stream error",
+            )],
             _ => vec![StreamEvent::Ignored],
         }
     }
@@ -429,10 +432,13 @@ mod tests {
     }
 
     #[test]
-    fn failed_response_is_ignored_not_fatal() {
+    fn failed_response_preserves_the_provider_error() {
         let mut parser = ResponsesParser::new();
-        let events = parser.parse(&data_frame(json!({"type": "response.failed"})));
-        assert_eq!(events, vec![StreamEvent::Ignored]);
+        let events = parser.parse(&data_frame(json!({
+            "type": "response.failed",
+            "response": {"error": {"message": "model overloaded"}}
+        })));
+        assert_eq!(events, vec![StreamEvent::Error("model overloaded".into())]);
     }
 
     #[test]

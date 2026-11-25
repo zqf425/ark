@@ -10,9 +10,12 @@
 结果（output/ok/duration_ms）内嵌在该条目的 tool payload 中，不会产生独立的 `ToolResult` 条目。
 下游（如组合根的回合种子回放）必须按此折叠形状消费，不得假设两条目配对。
 
-终态 `TurnFailed` 事件同样由条目投影折叠：每个失败的回合产出一个 `error` 条目（确定性 id
-`turn_failed:{turn_id}`，`status=failed`，text 为失败原因，归属该回合），这是渲染器在**中断处**
-内联展示失败原因的唯一数据源，live 流与重启/压缩后的回放因此渲染一致。`TurnAborted` 不投影条目
+终态 `TurnFailed` 事件同样由条目投影折叠：每个失败的回合产出一个 `error` 条目（ID 取事件
+`item_id`，旧日志缺字段时回退 `ark_common::keyed_item_id("turn_failed:{turn_id}")`，
+`status=failed`，text 为失败原因，归属该回合），这是渲染器在**中断处**
+内联展示失败原因的唯一数据源，live 流与重启/压缩后的回放因此渲染一致。工具与用户输入事件同样
+优先使用 wire `item_id`，稳定 ID 只在 `ark-common` 生成；writer 在加载旧日志和追加新事件时统一
+回填缺失字段，使 replay、subscribe 与 child events 的消费者不会收到 `None`。`TurnAborted` 不投影条目
 （主动中断无失败语义）。`Error` 事件仍按 `error:{seq}` 投影为独立条目，`transient_retry` 只进
 事件日志，不投影渲染行。
 
@@ -66,7 +69,13 @@ checkpoint 的 `last_turn_id` 初始化 `current_turn`；有合法版本化 mark
 
 ## 一致性与并发
 
-- 每个线程由一个 writer actor 分配序号并追加事件；同一数据目录由 `data/.lock` 独占。
+- 每个线程由一个 writer actor 分配序号并追加事件；同一数据目录由 `data/.lock` 独占。append 的
+  部分写或 fsync 失败先按原长度回滚；新建日志还必须 fsync 父目录，失败时删除新文件并再次同步
+  父目录。回滚本身不确定时 writer 进入失败态，禁止继续追加。
+  child JSONL 的无换行合法尾记录在追加前先分隔，撕裂尾截断，避免两条记录粘行。
+- 删除与 writer 生命周期共用父级锁：删除先关闭并排空已注册 writer，再在父级临界区内移除权威
+  child 记录和目录；删除中的 child 创建、记录追加与事件打开均被 registry 拒绝，取消删除则保留记录。
+  fork 水位超过源日志最大 seq 或源存在 compaction sidecar 时拒绝，child 元数据始终解析到 inlined child 目录。
 - `subscribe` 必须在同一 actor 临界区完成“定水位、读取 backlog、注册 live channel”；慢订阅者
   断开后用 `since_seq` 重连，绝不反压 writer。
 - 同父目录的 child append、删除、索引重建共用父级锁。锁表 mutex 只用于登记锁的短暂取用，在获取
@@ -91,9 +100,10 @@ checkpoint 的 `last_turn_id` 初始化 `current_turn`；有合法版本化 mark
   `rewinds.json` 的独立幂等记录
   使后续压缩移除通知事件也不改变重复回退语义。仍拒绝未终结回合、任意 compaction sidecar，以及
   `.derived-dirty.json` 存在时的 rewind；dirty marker 也继续阻止 compaction。
-- `fork`（`fork_thread(thread, upto_seq)`）同样物理复制：按序号复制目标前缀的 `events.jsonl` 等权威
-  文件到新线程目录，新线程从复制前缀的末尾继续分配序号，并从该前缀重建全部投影。fork 是新线程
-  而非分支指针，不与原线程共享任何文件。
+- `fork`（`fork_thread(thread, upto_seq)`）同样物理复制：仅允许未压缩源，按序号复制目标前缀的
+  `events.jsonl` 等权威文件到新线程目录，新线程从复制前缀的末尾继续分配序号，并从该前缀重建全部
+  投影。存在 compaction sidecar 时拒绝 fork，避免只复制 retained suffix 却丢掉 checkpoint 前缀。
+  fork 是新线程而非分支指针，不与原线程共享任何文件。
 
 ## 定时任务存储
 
@@ -106,10 +116,21 @@ checkpoint 的 `last_turn_id` 初始化 `current_turn`；有合法版本化 mark
 ## IM 渠道存储
 
 `<root>/IM/im.json` 由 `ImFileStore`（`service/im.rs`）持有，模式与 `ScheduleFileStore`
-一致：Mutex 串行读改写 + `write_json_atomic` 原子替换 + 不可读折叠为空表并告警。文档形状
-为 `{ channels: [ImChannelRecord], bindings: [ImBinding] }`：渠道记录携带服务端入站游标
-（由编排层节流落盘，本层不节流），绑定随首条消息写入；渠道与绑定同文档是因为二者同域变更、
-且渠道删除需要原子级联删除其绑定。凭证明文落盘沿用 provider `api_key` 的 v1 简化。
+一致：Mutex 串行读改写 + copy-on-write 快照 + `write_json_atomic` 原子替换 + 不可读折叠
+为空表并告警。文档形状为 `{ channels: [ImChannelRecord], bindings: [ImBinding],
+inbox: [ImInboxEntry], next_cursor_version, applied_cursor_versions }`：渠道记录携带服务端
+入站游标，绑定随首条消息写入,inbox 保存尚未处理完成的归一化消息。渠道与绑定同文档是因为
+二者同域变更、且渠道删除需要原子级联删除其绑定;删除渠道不删除 orphan inbox,由编排层
+告警并在渠道恢复后重放。凭证明文落盘沿用 provider `api_key` 的 v1 简化。
+
+inbox 状态转换全部在锁内一次快照 rewrite 中完成:`persist_inbound_batch` 先验证整批
+渠道存在,再一次性追加所有 `queued=false` 记录,任一校验或写入失败都不改变内存状态;
+`queue_inbound` 同时写入 `queued=true` 与 cursor 并保留记录;`ack_inbound` 删除已完成
+记录;`discard_inbound` 删除终端记录并推进 cursor。每个持久化批次由存储分配单调
+`cursor_version`，只有不旧于该渠道已应用版本的提交才允许推进 cursor；版本随文档重启
+恢复，因此旧 supervisor 的延迟提交或旧 inbox 重放不会把游标移回较早批次。平台 cursor
+本身可能是不透明字符串，比较依赖持久化顺序而非字符串大小。写成功后才替换内存快照,
+因此失败不会暴露半提交状态。重启读取同一文档即可恢复 pending/queued 记录,不依赖进程内队列。
 
 ## 目录与恢复
 
@@ -196,6 +217,9 @@ autonomy/reasoning_effort，即 `ThreadRuntimeSettings` 的逐字段平铺；全
 尾部回填——三条路径都取事件自身时间，不取写入时的墙钟，列表排序由此跨重启稳定。`ThreadIndex::sorted`
 按（archived、`last_event_at ?? updated_at` 降序、thread_id）排序；重命名等只触碰 `updated_at` 的
 元数据操作不会把一个没有新事件的线程顶到正在流式输出的线程前面。
+重命名、归档和运行时设置刷新索引时只更新元数据字段；`indexed_seq`、`last_event_at`、状态与
+usage 始终由事件投影路径维护，避免并发 append/rewind 后被旧元数据快照覆盖。索引行缺失时才用
+日志水位初始化新行。
 
 ## 长期 memory
 

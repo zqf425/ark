@@ -62,6 +62,8 @@ pub(crate) struct TaskOutput {
     base_offset: u64,
     /// Absolute byte position returned by the previous poll.
     read_offset: u64,
+    /// Incomplete encoded suffix withheld until the collector supplies its tail.
+    decode_tail: Vec<u8>,
     finished: bool,
     exit_code: Option<i32>,
 }
@@ -82,6 +84,20 @@ impl TaskOutput {
         let bytes: Vec<u8> = self.buf.iter().copied().collect();
         decode_shell_output(&bytes)
     }
+}
+
+/// Decode only complete UTF-8 or GB18030, retaining an incomplete suffix for the next read.
+/// Non-UTF-8 input still uses the shared legacy-codepage decoder.
+fn decode_incremental_output(bytes: &[u8], final_chunk: bool) -> (String, Vec<u8>) {
+    let complete = if final_chunk {
+        bytes.len()
+    } else {
+        bytes.len() - ark_common::encoding::incomplete_encoded_suffix(bytes)
+    };
+    (
+        decode_shell_output(&bytes[..complete]),
+        bytes[complete..].to_vec(),
+    )
 }
 
 /// The per-runtime shell state: session cwd plus live background tasks.
@@ -231,8 +247,15 @@ impl ShellSessionManager {
         let retained_start = output.base_offset;
         let retained_end = retained_start + snapshot_bytes.len() as u64;
         let new_from = output.read_offset.max(retained_start).min(retained_end);
+        if retained_start > output.read_offset {
+            // The withheld suffix itself fell out of the ring before this poll.
+            output.decode_tail.clear();
+        }
         let relative = (new_from - retained_start) as usize;
-        let chunk = decode_shell_output(&snapshot_bytes[relative..]);
+        let mut pending = std::mem::take(&mut output.decode_tail);
+        pending.extend_from_slice(&snapshot_bytes[relative..]);
+        let (chunk, decode_tail) = decode_incremental_output(&pending, output.finished);
+        output.decode_tail = decode_tail;
         output.read_offset = retained_end;
         Some(TaskSnapshot {
             task_id: task_id.clone(),

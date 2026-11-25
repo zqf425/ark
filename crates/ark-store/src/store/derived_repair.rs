@@ -62,7 +62,7 @@ fn repair_items_full(
 ) -> bool {
     let mut projector = ItemProjector::new();
     for event in events {
-        projector.apply(event);
+        projector.apply_in_place(event);
     }
     let expected = projector.snapshot_records();
     let (rows, all_valid) = read_item_rows_checked_blocking(paths);

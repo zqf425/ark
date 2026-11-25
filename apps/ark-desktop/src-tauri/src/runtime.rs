@@ -19,10 +19,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 const RUNTIME_PORT: u16 = 18_791;
 const RUNTIME_ADDRESS: &str = "127.0.0.1:18791";
+/// The server drains for 10 seconds; leave time for its final process teardown.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(12);
+const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// How often the readiness watcher re-probes `/health`.
 const READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -39,7 +43,12 @@ const READY_TIMEOUT_ENV: &str = "ARK_DESKTOP_READY_TIMEOUT_SECS";
 /// user-managed runtime. The mutex only protects ownership transfer; it is not
 /// held while waiting for a process to exit.
 #[derive(Default)]
-pub struct ManagedRuntime(Mutex<Option<tauri_plugin_shell::process::CommandChild>>);
+pub struct ManagedRuntime(Mutex<Option<ManagedProcess>>);
+
+struct ManagedProcess {
+    child: tauri_plugin_shell::process::CommandChild,
+    exited: Arc<AtomicBool>,
+}
 
 /// Start the local runtime unless a verified `arkd` listener already owns its port.
 ///
@@ -63,12 +72,14 @@ pub fn launch(app: &AppHandle) -> tauri::Result<()> {
     let (mut events, child) = command
         .spawn()
         .map_err(|error| tauri::Error::Anyhow(anyhow::anyhow!(error)))?;
-    app.state::<ManagedRuntime>().set(child);
-
     // The runtime's exit is observable outside the logging task: the readiness
     // watcher aborts as soon as the child dies instead of burning its whole
     // timeout against a process that will never bind.
     let exited = Arc::new(AtomicBool::new(false));
+    app.state::<ManagedRuntime>().set(ManagedProcess {
+        child,
+        exited: exited.clone(),
+    });
 
     tauri::async_runtime::spawn({
         let exited = exited.clone();
@@ -83,13 +94,13 @@ pub fn launch(app: &AppHandle) -> tauri::Result<()> {
                     }
                     CommandEvent::Terminated(payload) => {
                         log::warn!("arkd exited: {payload:?}");
-                        exited.store(true, Ordering::Relaxed);
+                        exited.store(true, Ordering::Release);
                     }
                     _ => {}
                 }
             }
             // The event stream closing also means the process is gone.
-            exited.store(true, Ordering::Relaxed);
+            exited.store(true, Ordering::Release);
         }
     });
 
@@ -224,7 +235,7 @@ fn open_in_browser(app: &AppHandle, url: &tauri::Url) {
         log::warn!("refusing to open a non-web url externally: {url}");
         return;
     }
-    if let Err(error) = app.shell().open(url.as_str(), None) {
+    if let Err(error) = app.opener().open_url(url.as_str(), None::<&str>) {
         log::warn!("failed to open {url} in the system browser: {error}");
     }
 }
@@ -259,25 +270,72 @@ fn is_arkd_health_response(response: &str) -> bool {
         && response.contains("\"version\":")
 }
 
-/// Stop only the process this shell started, including its process group.
+/// Drain the managed runtime, then reclaim its owned process group.
 pub fn shutdown(app: &AppHandle) {
-    if let Some(child) = app.state::<ManagedRuntime>().take() {
-        if let Err(error) = child.kill() {
+    if let Some(ManagedProcess { child, exited }) = app.state::<ManagedRuntime>().take() {
+        let result = wait_for_runtime_shutdown(
+            || exited.load(Ordering::Acquire),
+            || request_runtime_shutdown(RUNTIME_ADDRESS),
+            || child.kill().map_err(|error| error.to_string()),
+            SHUTDOWN_TIMEOUT,
+            std::thread::sleep,
+        );
+        if let Err(error) = result {
             log::warn!("failed to stop the managed arkd process: {error}");
         }
     }
 }
 
+fn request_runtime_shutdown(address: &str) -> std::io::Result<()> {
+    let address = address
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "no address"))?;
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(1))?;
+    stream.set_write_timeout(Some(Duration::from_secs(1)))?;
+    stream.write_all(
+        format!(
+            "POST /v1/shutdown HTTP/1.1\r\nHost: {RUNTIME_ADDRESS}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .as_bytes(),
+    )
+}
+
+fn wait_for_runtime_shutdown(
+    mut has_exited: impl FnMut() -> bool,
+    request_shutdown: impl FnOnce() -> std::io::Result<()>,
+    kill_owned_group: impl FnOnce() -> Result<(), String>,
+    timeout: Duration,
+    mut sleep: impl FnMut(Duration),
+) -> Result<(), String> {
+    // The leader can exit before its tool processes. Dropping CommandChild would
+    // close the Windows job without terminating them, so every path must clean
+    // the owned group; the shell plugin scopes this to our child, never by name.
+    if has_exited() {
+        return kill_owned_group();
+    }
+    if let Err(error) = request_shutdown() {
+        log::warn!("failed to request graceful arkd shutdown: {error}");
+    }
+    let mut waited = Duration::ZERO;
+    while !has_exited() && waited < timeout {
+        let delay = (timeout - waited).min(SHUTDOWN_POLL_INTERVAL);
+        sleep(delay);
+        waited += delay;
+    }
+    kill_owned_group()
+}
+
 impl ManagedRuntime {
-    fn set(&self, child: tauri_plugin_shell::process::CommandChild) {
+    fn set(&self, process: ManagedProcess) {
         let mut guard = self
             .0
             .lock()
             .expect("managed runtime mutex is not poisoned");
-        *guard = Some(child);
+        *guard = Some(process);
     }
 
-    fn take(&self) -> Option<tauri_plugin_shell::process::CommandChild> {
+    fn take(&self) -> Option<ManagedProcess> {
         self.0
             .lock()
             .expect("managed runtime mutex is not poisoned")
@@ -305,6 +363,7 @@ fn runtime_command(app: &AppHandle) -> tauri::Result<tauri_plugin_shell::process
         .shell()
         .command("cargo")
         .set_process_group(true)
+        .kill_on_drop(false)
         .current_dir(&root)
         .args(["run", "--package", "arkd", "--"])
         .args(runtime_args(&data_dir, &workspace)))
@@ -318,6 +377,7 @@ fn runtime_command(app: &AppHandle) -> tauri::Result<tauri_plugin_shell::process
         .map(|command| {
             command
                 .set_process_group(true)
+                .kill_on_drop(false)
                 .args(runtime_args(&data_dir, &workspace))
         })
         .map_err(|error| tauri::Error::Anyhow(anyhow::anyhow!(error)))
@@ -353,6 +413,8 @@ fn desktop_paths_from(home: &Path) -> (PathBuf, PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::BufRead;
+    use std::net::TcpListener;
     use std::sync::atomic::AtomicUsize;
 
     #[test]
@@ -474,6 +536,125 @@ mod tests {
         let url = |raw: &str| tauri::Url::parse(raw).unwrap();
         assert!(is_internal_url(&url("tauri://localhost/"), None));
         assert!(!is_internal_url(&url("http://127.0.0.1:5273/"), None));
+    }
+
+    #[test]
+    fn shutdown_request_posts_to_the_loopback_shutdown_endpoint() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("test listener binds");
+        let address = listener.local_addr().expect("test listener has an address");
+
+        request_runtime_shutdown(&address.to_string()).expect("shutdown request is sent");
+
+        let (mut stream, _) = listener.accept().expect("shutdown request is received");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .expect("read timeout is set");
+        let mut reader = std::io::BufReader::new(&mut stream);
+        let mut request = String::new();
+        loop {
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("request line is readable");
+            if line == "\r\n" {
+                break;
+            }
+            request.push_str(&line);
+        }
+        assert!(request.starts_with("POST /v1/shutdown HTTP/1.1\r\n"));
+        assert!(request.contains("Host: 127.0.0.1:18791\r\n"));
+        assert!(request.contains("Content-Length: 0\r\n"));
+    }
+
+    #[test]
+    fn shutdown_cleans_the_owned_group_when_the_child_already_exited() {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let kills = Arc::new(AtomicUsize::new(0));
+        let request_count = requests.clone();
+        let kill_count = kills.clone();
+        let result = wait_for_runtime_shutdown(
+            || true,
+            || {
+                request_count.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+            || {
+                kill_count.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+            Duration::from_secs(12),
+            |_| panic!("an exited child must not be waited on"),
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(requests.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            kills.load(Ordering::SeqCst),
+            1,
+            "the exited leader may still have descendants in its owned group"
+        );
+    }
+
+    #[test]
+    fn shutdown_terminates_the_owned_group_only_after_the_graceful_timeout_expires() {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let kills = Arc::new(AtomicUsize::new(0));
+        let slept = Arc::new(Mutex::new(Duration::ZERO));
+        let request_count = requests.clone();
+        let kill_count = kills.clone();
+        let slept_before_kill = slept.clone();
+        let timeout = Duration::from_millis(250);
+        let result = wait_for_runtime_shutdown(
+            || false,
+            || {
+                request_count.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+            || {
+                assert_eq!(*slept_before_kill.lock().unwrap(), timeout);
+                kill_count.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+            timeout,
+            |delay| *slept.lock().unwrap() += delay,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert_eq!(kills.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn shutdown_cleans_the_owned_group_without_waiting_for_timeout_after_child_exit() {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let kills = Arc::new(AtomicUsize::new(0));
+        let polls = Arc::new(AtomicUsize::new(0));
+        let slept = Arc::new(Mutex::new(Duration::ZERO));
+        let request_count = requests.clone();
+        let kill_count = kills.clone();
+        let poll_count = polls.clone();
+        let timeout = Duration::from_secs(12);
+        let result = wait_for_runtime_shutdown(
+            || {
+                let count = poll_count.fetch_add(1, Ordering::SeqCst);
+                count >= 2
+            },
+            || {
+                request_count.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+            || {
+                kill_count.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+            timeout,
+            |delay| *slept.lock().unwrap() += delay,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert_eq!(kills.load(Ordering::SeqCst), 1);
+        assert!(*slept.lock().unwrap() < timeout);
     }
 
     /// Tiny shared counter so the injected probe can report how often it ran.

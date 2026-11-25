@@ -29,7 +29,11 @@ HTTP resume 仍走后台结果通道。该默认只改派发入口，不改变�
 工具集不得包含 `delegate_task`。
 
 父回合中断不代表子任务被遗弃：运行时必须显式取消子任务、等待/兜底落终态。队列满、执行失败、
-持久化异常都只影响该子任务，不得毒化后续队列。
+持久化异常都只影响该子任务，不得毒化后续队列。并发槽从释放者通过 `oneshot` 消息转移给等待者，
+等待任务在 send 成功后被取消也会由接收端 drop 归还槽位；发送失败的槽位由释放者继续转交。
+每次执行捕获自己的 `RunningChild` 句柄，旧 run 的 panic、取消或 `RunSlot` drop 只删除仍指向该句柄的
+map 项，不得误删同一 child 后续 resume 安装的新句柄。resume 持久化请求中的 provider/model/autonomy
+有效覆盖，后续 hydrate 与执行都从该记录恢复。
 
 `ChildRunRecord.notify_parent` 持久化结果回传模式：后台派发和 HTTP resume 为 `true`，同步前台派发为
 `false`；旧记录缺省按 `true` 恢复。只有 `notify_parent=true` 的后台终态记录写入后，运行时才向父线程

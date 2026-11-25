@@ -18,9 +18,9 @@ use ark_contract::ImChannelKind;
 use ark_ports::CancelToken;
 use async_trait::async_trait;
 use serde_json::Value;
-use tokio::sync::mpsc;
 
 use crate::domain::{chunk_text, truncate_inbound, InboundMessage};
+use crate::InboundSender;
 
 /// Server-side long-poll window; the client deadline adds margin for TLS and
 /// body drain.
@@ -124,11 +124,7 @@ impl crate::ImTransport for TelegramTransport {
         ImChannelKind::Telegram
     }
 
-    async fn run(
-        &self,
-        inbound: mpsc::Sender<InboundMessage>,
-        shutdown: CancelToken,
-    ) -> Result<()> {
+    async fn run(&self, inbound: InboundSender, shutdown: CancelToken) -> Result<()> {
         // One identity lookup up front: it validates the token (fail fast
         // instead of a poll loop that 401s forever) and enables self-filtering.
         let me = self.call("getMe", serde_json::json!({})).await?;
@@ -182,24 +178,16 @@ impl crate::ImTransport for TelegramTransport {
                     continue;
                 }
             };
-            for update in updates {
-                let offset = update.get("update_id").and_then(Value::as_i64);
-                if let Some(message) = update.get("message").filter(|m| m.is_object()) {
-                    if let Some(inbound_message) = normalize_message(message) {
-                        // A full inbound queue means the orchestration is
-                        // wedged; dropping the poll result (and advancing the
-                        // cursor) loses messages but cannot wedge the runtime.
-                        if inbound.send(inbound_message).await.is_err() {
-                            tracing::warn!("inbound queue closed; stopping telegram poll");
-                            return Ok(());
-                        }
-                    }
+            let (messages, next_cursor) = normalize_updates(&updates);
+            if let Some(next) = next_cursor {
+                if messages.is_empty() {
+                    inbound.advance(Some(next.to_string())).await?;
+                } else {
+                    inbound.send_batch(messages, Some(next.to_string())).await?;
                 }
-                // The cursor advances past every update, processed or
-                // filtered, so a restart never replays a stuck update forever.
-                if let Some(offset) = offset {
-                    self.set_cursor(offset + 1);
-                }
+                // Only durable admission of the entire batch makes this local
+                // resume cursor safe to expose to the next poll.
+                self.set_cursor(next);
             }
         }
     }
@@ -235,13 +223,6 @@ impl crate::ImTransport for TelegramTransport {
         Ok(format!("@{username}"))
     }
 
-    fn cursor(&self) -> Option<String> {
-        self.cursor
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-
     fn is_self(&self, sender_id: &str) -> bool {
         self.bot_user_id
             .lock()
@@ -249,6 +230,24 @@ impl crate::ImTransport for TelegramTransport {
             .as_deref()
             == Some(sender_id)
     }
+}
+
+/// Normalize one poll batch and retain its final offset, including updates
+/// whose payload is filtered out (media, unsupported update types).
+fn normalize_updates(updates: &[Value]) -> (Vec<InboundMessage>, Option<i64>) {
+    let mut messages = Vec::new();
+    let mut next_cursor = None;
+    for update in updates {
+        if let Some(offset) = update.get("update_id").and_then(Value::as_i64) {
+            next_cursor = Some(offset + 1);
+        }
+        if let Some(message) = update.get("message").filter(|m| m.is_object()) {
+            if let Some(inbound) = normalize_message(message) {
+                messages.push(inbound);
+            }
+        }
+    }
+    (messages, next_cursor)
 }
 
 /// Fold one Telegram message object into the normalized shape, or `None` for

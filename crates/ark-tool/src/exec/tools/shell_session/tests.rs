@@ -217,6 +217,43 @@ mod manager_tests {
     }
 
     #[test]
+    fn incremental_output_keeps_utf8_split_between_collector_reads() {
+        let manager = ShellSessionManager::new();
+        let ws = fixture("incremental-utf8");
+        let output = Arc::new(Mutex::new(TaskOutput::default()));
+        let id = manager
+            .register_task(ws, shared_child(), orphan_tree(), Arc::clone(&output))
+            .unwrap();
+        let character = "中".as_bytes();
+        output.lock().unwrap().push(&character[..2]);
+        let first = manager.task_output(&id).unwrap();
+        assert_eq!(first.new_output, "");
+        assert!(!first.full_text.contains('\u{fffd}'));
+        output.lock().unwrap().push(&character[2..]);
+        let second = manager.task_output(&id).unwrap();
+        assert_eq!(second.new_output, "中");
+        assert_eq!(second.full_text, "中");
+    }
+
+    #[test]
+    fn incremental_output_keeps_gb18030_split_between_collector_reads() {
+        let manager = ShellSessionManager::new();
+        let ws = fixture("incremental-gb18030");
+        let output = Arc::new(Mutex::new(TaskOutput::default()));
+        let id = manager
+            .register_task(ws, shared_child(), orphan_tree(), Arc::clone(&output))
+            .unwrap();
+        let character = [0x95_u8, 0x32, 0x82, 0x36];
+        output.lock().unwrap().push(&character[..3]);
+        let first = manager.task_output(&id).unwrap();
+        assert_eq!(first.new_output, "");
+        output.lock().unwrap().push(&character[3..]);
+        let second = manager.task_output(&id).unwrap();
+        assert_eq!(second.new_output, "𠀀");
+        assert_eq!(second.full_text, "𠀀");
+    }
+
+    #[test]
     fn overflowed_output_drops_the_oldest_bytes() {
         let mut output = TaskOutput::default();
         let big = vec![b'x'; TASK_OUTPUT_CAP + 10];

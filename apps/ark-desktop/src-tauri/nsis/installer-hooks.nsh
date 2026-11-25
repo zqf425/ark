@@ -12,9 +12,35 @@
 
 !macro ark_stop_sidecar
   ${If} ${FileExists} "$INSTDIR\arkd.exe"
-    nsExec::Exec '"$SYSDIR\taskkill.exe" /F /IM arkd.exe'
-    Pop $0
-    ; taskkill returns before the kernel drops the image section.
+    ; Match the full executable path, not the image name: another installation
+    ; or a user-managed arkd may legitimately be running at the same time.
+    ClearErrors
+    InitPluginsDir
+    CreateDirectory "$PLUGINSDIR"
+    ClearErrors
+    FileOpen $0 "$PLUGINSDIR\ark-stop-sidecar.ps1" w
+    ${If} ${Errors}
+      DetailPrint "warning: could not create the sidecar shutdown script."
+    ${Else}
+      ClearErrors
+      FileWrite $0 'param([Parameter(Mandatory = $$true)][string]$$ExecutablePath)$\r$\n'
+      FileWrite $0 '$$ErrorActionPreference = "Stop"$\r$\n'
+      FileWrite $0 '$$targets = @(Get-Process -Name arkd -ErrorAction SilentlyContinue | Where-Object { $$_.Path -eq $$ExecutablePath })$\r$\n'
+      FileWrite $0 'if ($$targets.Count -eq 0) { exit 0 }$\r$\n'
+      FileWrite $0 '$$targets | Stop-Process -Force$\r$\n'
+      FileWrite $0 'exit 0$\r$\n'
+      FileClose $0
+      ${If} ${Errors}
+        DetailPrint "warning: could not write the sidecar shutdown script."
+      ${Else}
+        nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ark-stop-sidecar.ps1" "$INSTDIR\arkd.exe"'
+        Pop $0
+        ${If} $0 != 0
+          DetailPrint "warning: failed to stop $INSTDIR\arkd.exe (exit code $0)."
+        ${EndIf}
+      ${EndIf}
+    ${EndIf}
+    ; Process termination returns before the kernel drops the image section.
     Sleep 800
   ${EndIf}
 !macroend

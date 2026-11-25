@@ -480,23 +480,27 @@ mod tests {
 
         config.skills.extra_dirs = vec!["~/my-skills".to_string()];
         assert!(config.validate().is_ok());
-        config.skills.extra_dirs = vec!["/tmp/my-skills".to_string()];
+        let absolute = std::env::temp_dir().join("my-skills");
+        let absolute = absolute.to_string_lossy().into_owned();
+        config.skills.extra_dirs = vec![absolute.clone()];
         assert!(config.validate().is_ok());
     }
 
     #[test]
     fn skills_patch_is_trimmed_before_it_is_stored() {
         let config = RuntimeConfig::default();
+        let absolute = std::env::temp_dir().join("skills");
+        let absolute = absolute.to_string_lossy().into_owned();
         let patch = ConfigPatch {
             skills: Some(SkillsSettings {
                 enabled: true,
-                extra_dirs: vec!["  /tmp/skills  ".to_string(), "~/sk".to_string()],
+                extra_dirs: vec![format!("  {absolute}  "), "~/sk".to_string()],
             }),
             ..ConfigPatch::default()
         };
         let (next, changed) = config.candidate(&patch).expect("valid patch");
         assert_eq!(changed, vec![FieldPath::new("skills")]);
-        assert_eq!(next.skills.extra_dirs, vec!["/tmp/skills", "~/sk"]);
+        assert_eq!(next.skills.extra_dirs, vec![absolute, "~/sk".to_string()]);
         assert!(next.validate().is_ok());
     }
 

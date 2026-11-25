@@ -16,6 +16,7 @@
 //! stream survives. See [`DEFAULT_PHASE_TIMEOUT`].
 
 use std::time::Duration;
+use tokio::time::Instant;
 
 use ark_common::{ArkError, ArkErrorCode, Result};
 use ark_ports::{ModelChunk, ModelClient, ModelRequest, ModelResponse};
@@ -38,6 +39,11 @@ use crate::provider::StreamParser;
 /// body". Bounding the silence between reads instead lets a live stream run as
 /// long as it needs while a stalled one still fails promptly.
 const DEFAULT_PHASE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Error responses are diagnostics, not model output. Stop reading once enough
+/// bytes have been retained for the summary instead of buffering an arbitrary
+/// upstream HTML/JSON body.
+const MAX_ERROR_BODY_BYTES: usize = 512;
 
 /// HTTP-backed [`ModelClient`].
 pub struct HttpModelClient {
@@ -275,14 +281,8 @@ impl HttpModelClient {
             .map(|value| value.to_string());
         let retry_after = retry_after
             .and_then(|value| parse_retry_after(Some(&value), std::time::SystemTime::now()));
-        // Removing the reqwest total deadline also removed its bound on this
-        // diagnostic read, so cap it explicitly: a hung error body must not
-        // wedge the retry loop.
-        let text = match tokio::time::timeout(self.timeout, response.text()).await {
-            Ok(Ok(text)) => text,
-            _ => String::new(),
-        };
-        let summary = ark_common::text::truncate_utf8(&text, 512).to_string();
+        let text = read_error_body(response, self.timeout).await;
+        let summary = ark_common::text::truncate_utf8(&text, MAX_ERROR_BODY_BYTES).to_string();
         Err(AttemptError {
             kind: FailureKind::from_status(status.as_u16()),
             error: ArkError::new(
@@ -313,20 +313,19 @@ impl HttpModelClient {
         let mut family = Family::of(&self.config);
         let mut accumulator = StreamAccumulator::new();
         let mut published = false;
-        let mut text = String::new();
         let mut pending: Vec<u8> = Vec::new();
+        let mut frame_deadline = Instant::now() + self.timeout;
 
         loop {
-            // Bound the *silence* between frames, not the length of the turn:
-            // a live long-running reasoning stream must never be cut off by a
-            // wall-clock deadline. Each received frame starts a fresh window.
-            let chunk = match tokio::time::timeout(self.timeout, stream.next()).await {
+            // Only a complete SSE frame resets this deadline. Trickling bytes
+            // of one unfinished frame cannot keep a truncated stream alive.
+            let chunk = match tokio::time::timeout_at(frame_deadline, stream.next()).await {
                 Ok(Some(chunk)) => chunk,
                 Ok(None) => break,
                 Err(_) => {
                     return Err(AttemptError {
                         error: ArkError::model(format!(
-                            "model stream timed out after {:?} without new data for {} {}",
+                            "model stream timed out after {:?} without a complete SSE frame for {} {}",
                             self.timeout, self.config.provider_id, self.config.model
                         )),
                         kind: FailureKind::Transient,
@@ -336,60 +335,56 @@ impl HttpModelClient {
                 }
             };
             let bytes = chunk.map_err(|error| stream_failure(&error, published))?;
-            // Bytes are decoded only down to the longest valid UTF-8 prefix:
-            // a multi-byte codepoint split across TCP chunks must survive
-            // into a later chunk, which per-chunk `from_utf8_lossy` would
-            // have corrupted into U+FFFD.
             pending.extend_from_slice(&bytes);
-            decode_utf8_prefix(&mut pending, &mut text);
-            let drained = std::mem::take(&mut text);
-            let (complete, rest) = split_at_last_complete_line(&drained);
-            text.push_str(rest);
-            for frame in sse.push(complete) {
-                if accumulator.is_finished() {
-                    // A terminal frame already arrived; bytes after it (e.g. a
-                    // provider holding the connection open past `[DONE]`) are
-                    // not part of the response and must not be published.
-                    break;
-                }
-                let events = family.parse(&frame);
-                published |= forward(&mut accumulator, events, sink).await?;
+            let mut decoded = String::new();
+            decode_utf8_prefix(&mut pending, &mut decoded);
+            let progressed = forward_frames(
+                &mut sse,
+                &decoded,
+                &mut family,
+                &mut accumulator,
+                &mut published,
+                sink,
+            )
+            .await?;
+            if progressed {
+                // Start the next window after sink backpressure, not before it.
+                frame_deadline = Instant::now() + self.timeout;
             }
             if accumulator.is_finished() {
-                // `[DONE]` / `message_stop` / `response.completed` ends the
-                // turn. Waiting for EOF here would let a provider that keeps
-                // the connection alive trip the phase timeout, turning an
-                // already-completed stream into a transient error and a retry.
+                // A provider may hold the connection open after `[DONE]`.
                 break;
             }
         }
         if !accumulator.is_finished() {
-            if !pending.is_empty() {
-                // EOF with a truncated trailing codepoint: keep the old lossy
-                // tail behaviour instead of silently dropping those bytes.
-                text.push_str(&String::from_utf8_lossy(&pending));
-            }
-            let drained = std::mem::take(&mut text);
-            // Hand the remaining lines to the parser so `finish` below can still
-            // flush a final frame whose blank line never arrived.
-            for frame in sse.push(&drained) {
-                let events = family.parse(&frame);
-                published |= forward(&mut accumulator, events, sink).await?;
-            }
-            for frame in sse.finish() {
-                let events = family.parse(&frame);
-                published |= forward(&mut accumulator, events, sink).await?;
-            }
+            return Err(eof_failure(&sse, !pending.is_empty(), published));
         }
         let events = family.finish();
-        published |= forward(&mut accumulator, events, sink).await?;
-        // `finish` commits any tool call still being assembled. Forward those
-        // chunks too: a provider that closes without a terminal frame would
-        // otherwise report tool_calls in the response that the sink never saw.
-        published |= flush_tail(&mut accumulator, sink).await?;
-        let _ = published;
+        forward(&mut accumulator, events, sink, published).await?;
+        flush_tail(&mut accumulator, sink).await?;
         Ok(accumulator.response())
     }
+}
+
+async fn read_error_body(response: reqwest::Response, timeout: Duration) -> String {
+    let mut stream = response.bytes_stream();
+    let mut retained = Vec::new();
+    let read = async {
+        while let Some(chunk) = stream.next().await {
+            let Ok(chunk) = chunk else {
+                break;
+            };
+            let remaining = MAX_ERROR_BODY_BYTES.saturating_sub(retained.len());
+            retained.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+            if retained.len() == MAX_ERROR_BODY_BYTES {
+                break;
+            }
+        }
+    };
+    if tokio::time::timeout(timeout, read).await.is_err() {
+        return String::new();
+    }
+    String::from_utf8_lossy(&retained).into_owned()
 }
 
 /// Decode the longest valid UTF-8 prefix of `pending` into `text`.
@@ -440,9 +435,9 @@ fn sink_closed() -> AttemptError {
 
 /// Publish tool calls that only become complete when the stream is finalized.
 ///
-/// `StreamAccumulator::finish` returns the chunks assembled at EOF; forwarding
-/// them keeps the sink and the returned `ModelResponse.tool_calls` in sync. A
-/// terminal frame already flushed these calls, so this is a no-op there.
+/// `StreamAccumulator::finish` returns the chunks assembled at the provider's
+/// terminal frame; forwarding them keeps the sink and the returned
+/// `ModelResponse.tool_calls` in sync. A truncated EOF fails before this point.
 async fn flush_tail(
     accumulator: &mut StreamAccumulator,
     sink: &mpsc::Sender<ModelChunk>,
@@ -462,9 +457,18 @@ async fn forward(
     accumulator: &mut StreamAccumulator,
     events: Vec<crate::domain::event::StreamEvent>,
     sink: &mpsc::Sender<ModelChunk>,
+    already_published: bool,
 ) -> std::result::Result<bool, AttemptError> {
     let mut published = false;
     for event in events {
+        if let crate::domain::event::StreamEvent::Error(message) = event {
+            return Err(AttemptError {
+                error: ArkError::model(format!("provider stream failed: {message}")),
+                kind: FailureKind::Transient,
+                published: already_published || published,
+                retry_after: None,
+            });
+        }
         for chunk in accumulator.push(event) {
             published = true;
             if sink.send(chunk).await.is_err() {
@@ -476,11 +480,52 @@ async fn forward(
     Ok(published)
 }
 
-/// Split a buffer at the last newline so a partial line is never parsed.
-pub(super) fn split_at_last_complete_line(buffer: &str) -> (&str, &str) {
-    match buffer.rfind('\n') {
-        Some(index) => (&buffer[..=index], &buffer[index + 1..]),
-        None => ("", buffer),
+async fn forward_frames(
+    sse: &mut SseParser,
+    input: &str,
+    family: &mut Family,
+    accumulator: &mut StreamAccumulator,
+    published: &mut bool,
+    sink: &mpsc::Sender<ModelChunk>,
+) -> std::result::Result<bool, AttemptError> {
+    let batch = sse
+        .push(input)
+        .map_err(|error| sse_failure(error, *published))?;
+    for frame in batch.events {
+        if accumulator.is_finished() {
+            break;
+        }
+        let events = family.parse(&frame);
+        *published |= forward(accumulator, events, sink, *published).await?;
+    }
+    Ok(batch.made_progress)
+}
+
+fn eof_failure(sse: &SseParser, partial_utf8: bool, published: bool) -> AttemptError {
+    let reason = if partial_utf8 {
+        "incomplete UTF-8 codepoint".to_string()
+    } else {
+        match sse.finish() {
+            Ok(()) => "missing terminal frame".to_string(),
+            Err(error) => format!("missing terminal frame ({error})"),
+        }
+    };
+    AttemptError {
+        error: ArkError::model(format!(
+            "model stream ended without a terminal frame: {reason}"
+        )),
+        kind: FailureKind::Transient,
+        published,
+        retry_after: None,
+    }
+}
+
+fn sse_failure(error: crate::common::sse::SseError, published: bool) -> AttemptError {
+    AttemptError {
+        error: ArkError::model(format!("invalid model SSE stream: {error}")),
+        kind: FailureKind::Permanent,
+        published,
+        retry_after: None,
     }
 }
 
