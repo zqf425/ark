@@ -12,13 +12,16 @@
 .ark-settings__section {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
   min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--ark-border);
+  border-radius: var(--ark-radius-lg);
+  background: var(--ark-bg-canvas);
 }
 
 .ark-settings__section + .ark-settings__section {
-  padding-top: 22px;
-  border-top: 1px solid var(--ark-border-muted);
+  margin-top: 16px;
 }
 
 .ark-settings__head {
@@ -26,7 +29,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 4px 12px;
-  padding: 0 0 12px;
+  padding: 0 0 10px;
   border-bottom: 1px solid var(--ark-border-muted);
 }
 

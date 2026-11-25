@@ -22,7 +22,7 @@ import { MemorySection } from './MemorySection'
 import { SkillsSection } from './SkillsSection'
 import { ScheduleSection } from './ScheduleSection'
 import { ImSection } from './ImSection'
-import { SETTINGS_SECTIONS, type SettingsSectionId } from './settings-navigation'
+import { SETTINGS_SECTIONS, SETTINGS_SECTION_GROUPS, type SettingsSectionId } from './settings-navigation'
 import '../settings.css'
 import '../settings-import-dialog.css'
 import '../settings-agent.css'
@@ -117,23 +117,30 @@ export function SettingsPage(): JSX.Element {
           <strong>{t('settings.title')}</strong>
           <p>{t('settings.description')}</p>
         </div>
-        <nav className="ark-settings__nav">
-          {SETTINGS_SECTIONS.map((section) => (
-            <button
-              key={section.id}
-              type="button"
-              className={section.id === activeSection ? 'is-active' : ''}
-              aria-current={section.id === activeSection ? 'page' : undefined}
-              onClick={() => setActiveSection(section.id)}
-            >
-              <span className="ark-settings__nav-icon"><Icon name={section.icon} size={15} /></span>
-              <span className="ark-settings__nav-copy">
-                <span>{t(section.labelKey)}</span>
-                <small>{t(section.detailKey)}</small>
-              </span>
-            </button>
+        <div className="ark-settings__nav-groups">
+          {SETTINGS_SECTION_GROUPS.map((group) => (
+            <div className="ark-settings__nav-group" key={group.id}>
+              <div className="ark-settings__nav-label">{t(group.labelKey)}</div>
+              <nav className="ark-settings__nav" aria-label={t(group.labelKey)}>
+                {SETTINGS_SECTIONS.filter((section) => section.group === group.id).map((section) => (
+                  <button
+                    key={section.id}
+                    type="button"
+                    className={section.id === activeSection ? 'is-active' : ''}
+                    aria-current={section.id === activeSection ? 'page' : undefined}
+                    onClick={() => setActiveSection(section.id)}
+                  >
+                    <span className="ark-settings__nav-icon"><Icon name={section.icon} size={15} /></span>
+                    <span className="ark-settings__nav-copy">
+                      <span>{t(section.labelKey)}</span>
+                      <small>{t(section.detailKey)}</small>
+                    </span>
+                  </button>
+                ))}
+              </nav>
+            </div>
           ))}
-        </nav>
+        </div>
       </aside>
 
       <main className="ark-settings__scroll">
@@ -157,9 +164,31 @@ export function SettingsPage(): JSX.Element {
               <span className="ark-settings__back-label">{t('settings.backToWorkbench')}</span>
             </button>
           </header>
+          <SettingsOverview settings={settings} providers={providers} />
           {body}
         </div>
       </main>
+    </div>
+  )
+}
+
+/** Read-only runtime snapshot shown above every settings section. */
+function SettingsOverview({ settings, providers }: { settings: ReturnType<typeof useSettings>; providers: ReturnType<typeof useProviders> }): JSX.Element {
+  const { t } = useI18n()
+  const config = settings.config
+  const defaultProvider = providers.defaultProviderId ?? '—'
+  const activeProvider = providers.activeProviderId ?? '—'
+  const loading = settings.status === 'loading' || settings.status === 'idle' || providers.status === 'loading' || providers.status === 'idle'
+  const failed = settings.status === 'error' || providers.status === 'error'
+  return (
+    <div className="ark-settings__overview" role="status" aria-live="polite">
+      <span className={`ark-settings__overview-dot${failed ? ' is-error' : ''}`} />
+      <strong>{failed ? t('settings.overview.error') : t('settings.overview.title')}</strong>
+      <span>{t('settings.overview.defaultProvider')} <code>{defaultProvider}</code></span>
+      <span>{t('settings.overview.activeProvider')} <code>{activeProvider}</code></span>
+      <span className="ark-settings__overview-spacer" />
+      {config ? <code className="ark-settings__overview-endpoint">:{config.port}</code> : null}
+      {loading ? <span>{t('settings.overview.loading')}</span> : null}
     </div>
   )
 }
