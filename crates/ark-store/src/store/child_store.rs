@@ -554,6 +554,39 @@ mod tests {
     }
 
     #[test]
+    fn a_valid_tail_without_newline_is_separated_before_append() {
+        let dir = TempDir::new("child-valid-tail");
+        let paths = parent_paths(&dir);
+        let parent = ThreadId::new();
+        let first = ChildId::new();
+        append_child_run_blocking(
+            &paths,
+            &record(first, parent, ark_common::ChildRunStatus::Running),
+            false,
+        )
+        .unwrap();
+        let mut raw = std::fs::read_to_string(paths.children_runs()).unwrap();
+        assert!(raw.ends_with('\n'));
+        raw.pop();
+        std::fs::write(paths.children_runs(), raw).unwrap();
+
+        let second = ChildId::new();
+        append_child_run_blocking(
+            &paths,
+            &record(second, parent, ark_common::ChildRunStatus::Queued),
+            false,
+        )
+        .unwrap();
+
+        let raw = std::fs::read_to_string(paths.children_runs()).unwrap();
+        assert_eq!(raw.lines().count(), 2, "records need a newline separator");
+        let records = read_child_runs_blocking(&paths);
+        assert_eq!(records.len(), 2, "valid records must not be glued together");
+        assert_eq!(records[0].child_id, first);
+        assert_eq!(records[1].child_id, second);
+    }
+
+    #[test]
     fn terminated_but_invalid_lines_are_kept_as_mid_file_damage() {
         // A byte-for-byte invalid line that *is* newline-terminated cannot corrupt
         // the next record, so it must stay on disk: silently truncating it would

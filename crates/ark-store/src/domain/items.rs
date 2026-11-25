@@ -9,6 +9,7 @@
 //! handler, which keeps every function well under the review limit and makes
 //! the fold order obvious.
 
+pub use ark_common::keyed_item_id;
 use ark_common::{ItemId, TurnId};
 use ark_contract::item::{ItemKind, ToolPayload};
 use ark_contract::{ItemStatus, RuntimeEvent, ThreadItem};
@@ -16,32 +17,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-
-/// Stable synthetic `ItemId` for events that only carry a string key
-/// (`call_id`, `approval_id`, `request_id`, `seq`).
-///
-/// Deterministic on purpose: a rebuild must produce the same ids as the
-/// incremental log, otherwise the renderer would remount every row.
-pub fn keyed_item_id(namespace: &str) -> ItemId {
-    let hi = fnv1a(namespace.as_bytes(), 0xcbf2_9ce4_8422_2325);
-    let lo = fnv1a(namespace.as_bytes(), 0x8422_2325_cbf2_9ce4);
-    let mut bytes = [0u8; 16];
-    bytes[..8].copy_from_slice(&hi.to_be_bytes());
-    bytes[8..].copy_from_slice(&lo.to_be_bytes());
-    // Force a valid variant and a non-standard version nibble (8 = custom).
-    bytes[6] = (bytes[6] & 0x0f) | 0x80;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    ItemId::from_uuid(Uuid::from_bytes(bytes))
-}
-
-fn fnv1a(bytes: &[u8], seed: u64) -> u64 {
-    let mut hash = seed;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
-}
 
 /// The zero turn id used when an event has no turn (diagnostics only).
 fn orphan_turn() -> TurnId {
@@ -141,26 +116,34 @@ pub(crate) fn projected_item_id(event: &RuntimeEvent) -> Option<ItemId> {
         | RuntimeEvent::ItemCompleted { item, .. } => Some(item.item_id),
         RuntimeEvent::AssistantTextDelta { item_id, .. }
         | RuntimeEvent::AssistantReasoningDelta { item_id, .. } => Some(*item_id),
-        RuntimeEvent::ToolCallStarted { call_id, .. }
-        | RuntimeEvent::ToolCallFinished { call_id, .. } => {
-            Some(keyed_item_id(&format!("tool_call:{call_id}")))
+        RuntimeEvent::ToolCallStarted {
+            item_id, call_id, ..
         }
+        | RuntimeEvent::ToolCallFinished {
+            item_id, call_id, ..
+        } => Some((*item_id).unwrap_or_else(|| keyed_item_id(&format!("tool_call:{call_id}")))),
         RuntimeEvent::ApprovalRequested { approval_id, .. }
         | RuntimeEvent::ApprovalResolved { approval_id, .. } => {
             Some(keyed_item_id(&format!("approval:{approval_id}")))
         }
-        RuntimeEvent::UserInputRequested { request_id, .. }
-        | RuntimeEvent::UserInputResolved { request_id, .. } => {
-            Some(keyed_item_id(&format!("user_input:{request_id}")))
+        RuntimeEvent::UserInputRequested {
+            item_id,
+            request_id,
+            ..
         }
+        | RuntimeEvent::UserInputResolved {
+            item_id,
+            request_id,
+            ..
+        } => Some((*item_id).unwrap_or_else(|| keyed_item_id(&format!("user_input:{request_id}")))),
         RuntimeEvent::Error { seq, .. } => Some(keyed_item_id(&format!("error:{seq}"))),
         // A terminal `turn_failed` is the interruption point the renderer must
         // show inline: the projector folds it into one durable `error` item
         // attributed to the failed turn, so the live stream and a replay after
         // a restart render the same row at the same place.
-        RuntimeEvent::TurnFailed { turn_id, .. } => {
-            Some(keyed_item_id(&format!("turn_failed:{turn_id}")))
-        }
+        RuntimeEvent::TurnFailed {
+            item_id, turn_id, ..
+        } => Some((*item_id).unwrap_or_else(|| keyed_item_id(&format!("turn_failed:{turn_id}")))),
         // `CompactionCompleted` is a control event, not a render row. The
         // reactor already appended one `ItemCreated` checkpoint notice for the
         // same compaction; projecting it again produced a second, redundant
@@ -221,14 +204,18 @@ impl ItemProjector {
 
     /// Apply one event; returns the updated snapshot of the touched item.
     pub fn apply(&mut self, event: &RuntimeEvent) -> Option<ThreadItem> {
+        let id = self.apply_in_place(event)?;
+        self.items.get(&id).cloned()
+    }
+
+    /// Apply without cloning; only callers that need a persisted snapshot clone it.
+    pub(crate) fn apply_in_place(&mut self, event: &RuntimeEvent) -> Option<ItemId> {
         self.note_turn(event);
         self.apply_projected(event)
     }
 
-    /// Apply an event only when its item checkpoint has not covered its seq.
-    /// Turn context is observed even for an already-covered event so a later
-    /// error event is projected with the same turn as a full replay.
-    pub(crate) fn apply_after_watermark(&mut self, event: &RuntimeEvent) -> Option<ThreadItem> {
+    /// Skip covered items while still observing the turn used by later errors.
+    pub(crate) fn apply_after_watermark(&mut self, event: &RuntimeEvent) -> Option<ItemId> {
         self.note_turn(event);
         if projected_item_id(event)
             .is_some_and(|item_id| self.watermark_of(&item_id) >= event.seq())
@@ -238,9 +225,9 @@ impl ItemProjector {
         self.apply_projected(event)
     }
 
-    fn apply_projected(&mut self, event: &RuntimeEvent) -> Option<ThreadItem> {
+    fn apply_projected(&mut self, event: &RuntimeEvent) -> Option<ItemId> {
         let seq = event.seq();
-        let item = match event {
+        let item_id = match event {
             RuntimeEvent::ItemCreated { item, .. } | RuntimeEvent::ItemUpdated { item, .. } => {
                 self.upsert(item.clone())
             }
@@ -267,14 +254,20 @@ impl ItemProjector {
             } => self.apply_delta(*item_id, *turn_id, *timestamp, ItemKind::Reasoning, delta),
             RuntimeEvent::ToolCallStarted {
                 turn_id,
+                item_id,
                 call_id,
                 tool,
                 arguments,
                 timestamp,
                 ..
-            } => self.apply_tool_started(*turn_id, call_id, tool, arguments, *timestamp),
+            } => {
+                let id =
+                    (*item_id).unwrap_or_else(|| keyed_item_id(&format!("tool_call:{call_id}")));
+                self.apply_tool_started(id, *turn_id, call_id, tool, arguments, *timestamp)
+            }
             RuntimeEvent::ToolCallFinished {
                 turn_id,
+                item_id,
                 call_id,
                 tool,
                 ok,
@@ -283,18 +276,23 @@ impl ItemProjector {
                 detail,
                 timestamp,
                 ..
-            } => self.apply_tool_finished(
-                *turn_id,
-                &ToolFinished {
-                    call_id,
-                    tool,
-                    ok: *ok,
-                    duration_ms: *duration_ms,
-                    output,
-                    detail: detail.as_deref(),
-                },
-                *timestamp,
-            ),
+            } => {
+                let id =
+                    (*item_id).unwrap_or_else(|| keyed_item_id(&format!("tool_call:{call_id}")));
+                self.apply_tool_finished(
+                    id,
+                    *turn_id,
+                    &ToolFinished {
+                        call_id,
+                        tool,
+                        ok: *ok,
+                        duration_ms: *duration_ms,
+                        output,
+                        detail: detail.as_deref(),
+                    },
+                    *timestamp,
+                )
+            }
             RuntimeEvent::ApprovalRequested {
                 turn_id,
                 approval_id,
@@ -312,18 +310,28 @@ impl ItemProjector {
             } => self.apply_approval_resolved(*turn_id, approval_id, *approved, *timestamp),
             RuntimeEvent::UserInputRequested {
                 turn_id,
+                item_id,
                 request_id,
                 prompt,
                 timestamp,
                 ..
-            } => self.apply_user_input_requested(*turn_id, request_id, prompt, *timestamp),
+            } => {
+                let id = (*item_id)
+                    .unwrap_or_else(|| keyed_item_id(&format!("user_input:{request_id}")));
+                self.apply_user_input_requested(id, *turn_id, prompt, *timestamp)
+            }
             RuntimeEvent::UserInputResolved {
                 turn_id,
+                item_id,
                 request_id,
                 answer,
                 timestamp,
                 ..
-            } => self.apply_user_input_resolved(*turn_id, request_id, answer, *timestamp),
+            } => {
+                let id = (*item_id)
+                    .unwrap_or_else(|| keyed_item_id(&format!("user_input:{request_id}")));
+                self.apply_user_input_resolved(id, *turn_id, answer, *timestamp)
+            }
             RuntimeEvent::Error {
                 seq,
                 timestamp,
@@ -332,15 +340,20 @@ impl ItemProjector {
             } => self.apply_error(*seq, message, *timestamp),
             RuntimeEvent::TurnFailed {
                 turn_id,
+                item_id,
                 timestamp,
                 message,
                 ..
-            } => self.apply_turn_failed(*turn_id, message, *timestamp),
+            } => {
+                let id =
+                    (*item_id).unwrap_or_else(|| keyed_item_id(&format!("turn_failed:{turn_id}")));
+                self.apply_turn_failed(id, *turn_id, message, *timestamp)
+            }
             _ => return None,
         };
-        self.first.entry(item.item_id).or_insert(seq);
-        self.touched.insert(item.item_id, seq);
-        Some(item)
+        self.first.entry(item_id).or_insert(seq);
+        self.touched.insert(item_id, seq);
+        Some(item_id)
     }
 
     /// First event `seq` that touched the item (render order on rebuild).
@@ -351,6 +364,10 @@ impl ItemProjector {
     /// Last event `seq` folded into the item (0 when it was never touched).
     pub fn watermark_of(&self, item_id: &ItemId) -> u64 {
         self.touched.get(item_id).copied().unwrap_or(0)
+    }
+
+    pub(crate) fn item(&self, item_id: &ItemId) -> Option<&ThreadItem> {
+        self.items.get(item_id)
     }
 
     /// Fold every event and return items in first-appearance order.
@@ -405,7 +422,7 @@ impl ItemProjector {
         self.items.is_empty()
     }
 
-    fn apply_item_completed(&mut self, incoming: &ThreadItem) -> ThreadItem {
+    fn apply_item_completed(&mut self, incoming: &ThreadItem) -> ItemId {
         let mut item = incoming.clone();
         if !matches!(item.status, ItemStatus::Failed | ItemStatus::Aborted) {
             item.status = ItemStatus::Completed;
@@ -420,38 +437,49 @@ impl ItemProjector {
         at: DateTime<Utc>,
         kind: ItemKind,
         delta: &str,
-    ) -> ThreadItem {
-        let mut item = self.ensure(id, turn, kind, at);
-        item.push_delta(delta);
-        self.upsert(item)
+    ) -> ItemId {
+        let id = self.ensure(id, turn, kind, at);
+        self.items
+            .get_mut(&id)
+            .expect("ensure inserted the delta item")
+            .push_delta(delta);
+        id
     }
 
     fn apply_tool_started(
         &mut self,
+        id: ItemId,
         turn: TurnId,
         call_id: &str,
         tool: &str,
         arguments: &serde_json::Value,
         at: DateTime<Utc>,
-    ) -> ThreadItem {
-        let id = keyed_item_id(&format!("tool_call:{call_id}"));
-        let mut item = self.ensure(id, turn, ItemKind::ToolCall, at);
-        let payload = tool_payload(&mut item, call_id, tool);
+    ) -> ItemId {
+        let id = self.ensure(id, turn, ItemKind::ToolCall, at);
+        let item = self
+            .items
+            .get_mut(&id)
+            .expect("ensure inserted the tool item");
+        let payload = tool_payload(item, call_id, tool);
         payload.tool = tool.to_string();
         payload.arguments = (!arguments.is_null()).then(|| arguments.clone());
         item.status = ItemStatus::Streaming;
-        self.upsert(item)
+        id
     }
 
     fn apply_tool_finished(
         &mut self,
+        id: ItemId,
         turn: TurnId,
         finished: &ToolFinished<'_>,
         at: DateTime<Utc>,
-    ) -> ThreadItem {
-        let id = keyed_item_id(&format!("tool_call:{}", finished.call_id));
-        let mut item = self.ensure(id, turn, ItemKind::ToolCall, at);
-        let payload = tool_payload(&mut item, finished.call_id, finished.tool);
+    ) -> ItemId {
+        let id = self.ensure(id, turn, ItemKind::ToolCall, at);
+        let item = self
+            .items
+            .get_mut(&id)
+            .expect("ensure inserted the tool item");
+        let payload = tool_payload(item, finished.call_id, finished.tool);
         payload.ok = Some(finished.ok);
         payload.duration_ms = Some(finished.duration_ms);
         payload.output = (!finished.output.is_empty()).then(|| finished.output.to_string());
@@ -461,7 +489,7 @@ impl ItemProjector {
         } else {
             ItemStatus::Failed
         };
-        self.upsert(item)
+        id
     }
 
     fn apply_approval_requested(
@@ -471,7 +499,7 @@ impl ItemProjector {
         tool: &str,
         summary: &str,
         at: DateTime<Utc>,
-    ) -> ThreadItem {
+    ) -> ItemId {
         let id = keyed_item_id(&format!("approval:{approval_id}"));
         let mut item = build(id, turn, ItemKind::Approval, at);
         item.text = Some(summary.to_string());
@@ -485,26 +513,29 @@ impl ItemProjector {
         approval_id: &str,
         approved: bool,
         at: DateTime<Utc>,
-    ) -> ThreadItem {
+    ) -> ItemId {
         let id = keyed_item_id(&format!("approval:{approval_id}"));
-        let mut item = self.ensure(id, turn, ItemKind::Approval, at);
+        let id = self.ensure(id, turn, ItemKind::Approval, at);
+        let item = self
+            .items
+            .get_mut(&id)
+            .expect("ensure inserted the approval item");
         item.status = ItemStatus::Completed;
         item.detail = Some(if approved {
             "approved".to_string()
         } else {
             "rejected".to_string()
         });
-        self.upsert(item)
+        id
     }
 
     fn apply_user_input_requested(
         &mut self,
+        id: ItemId,
         turn: TurnId,
-        request_id: &str,
         prompt: &str,
         at: DateTime<Utc>,
-    ) -> ThreadItem {
-        let id = keyed_item_id(&format!("user_input:{request_id}"));
+    ) -> ItemId {
         let mut item = build(id, turn, ItemKind::UserInput, at);
         item.text = Some(prompt.to_string());
         self.upsert(item)
@@ -512,19 +543,22 @@ impl ItemProjector {
 
     fn apply_user_input_resolved(
         &mut self,
+        id: ItemId,
         turn: TurnId,
-        request_id: &str,
         answer: &str,
         at: DateTime<Utc>,
-    ) -> ThreadItem {
-        let id = keyed_item_id(&format!("user_input:{request_id}"));
-        let mut item = self.ensure(id, turn, ItemKind::UserInput, at);
+    ) -> ItemId {
+        let id = self.ensure(id, turn, ItemKind::UserInput, at);
+        let item = self
+            .items
+            .get_mut(&id)
+            .expect("ensure inserted the user-input item");
         item.status = ItemStatus::Completed;
         item.text = Some(answer.to_string());
-        self.upsert(item)
+        id
     }
 
-    fn apply_error(&mut self, seq: u64, message: &str, at: DateTime<Utc>) -> ThreadItem {
+    fn apply_error(&mut self, seq: u64, message: &str, at: DateTime<Utc>) -> ItemId {
         let id = keyed_item_id(&format!("error:{seq}"));
         let turn = self.current_turn.unwrap_or_else(orphan_turn);
         let mut item = build(id, turn, ItemKind::Error, at);
@@ -537,8 +571,13 @@ impl ItemProjector {
     /// turn. The id is deterministic on the turn id, so a replay (possibly
     /// after compaction or a restart) reproduces the same row the live stream
     /// appended; a duplicate fold keeps the first snapshot untouched.
-    fn apply_turn_failed(&mut self, turn: TurnId, message: &str, at: DateTime<Utc>) -> ThreadItem {
-        let id = keyed_item_id(&format!("turn_failed:{turn}"));
+    fn apply_turn_failed(
+        &mut self,
+        id: ItemId,
+        turn: TurnId,
+        message: &str,
+        at: DateTime<Utc>,
+    ) -> ItemId {
         let mut item = build(id, turn, ItemKind::Error, at);
         item.text = Some(message.to_string());
         item.status = ItemStatus::Failed;
@@ -571,28 +610,21 @@ impl ItemProjector {
         }
     }
 
-    fn ensure(
-        &mut self,
-        id: ItemId,
-        turn: TurnId,
-        kind: ItemKind,
-        at: DateTime<Utc>,
-    ) -> ThreadItem {
-        if let Some(existing) = self.items.get(&id) {
-            return existing.clone();
+    fn ensure(&mut self, id: ItemId, turn: TurnId, kind: ItemKind, at: DateTime<Utc>) -> ItemId {
+        if !self.items.contains_key(&id) {
+            self.order.push(id);
+            self.items.insert(id, build(id, turn, kind, at));
         }
-        let item = build(id, turn, kind, at);
-        self.order.push(id);
-        self.items.insert(id, item.clone());
-        item
+        id
     }
 
-    fn upsert(&mut self, item: ThreadItem) -> ThreadItem {
-        if !self.items.contains_key(&item.item_id) {
-            self.order.push(item.item_id);
+    fn upsert(&mut self, item: ThreadItem) -> ItemId {
+        let id = item.item_id;
+        if !self.items.contains_key(&id) {
+            self.order.push(id);
         }
-        self.items.insert(item.item_id, item.clone());
-        item
+        self.items.insert(id, item);
+        id
     }
 }
 
@@ -630,7 +662,7 @@ pub fn fold_item_snapshots(snapshots: impl IntoIterator<Item = ThreadItem>) -> V
 pub fn project_items(events: &[RuntimeEvent]) -> Vec<ThreadItem> {
     let mut projector = ItemProjector::new();
     for event in events {
-        projector.apply(event);
+        projector.apply_in_place(event);
     }
     projector.finish()
 }
@@ -694,6 +726,7 @@ mod tests {
                 seq: 1,
                 thread_id: thread,
                 turn_id: turn,
+                item_id: None,
                 timestamp: now,
                 call_id: "call_1".into(),
                 tool: "read".into(),
@@ -703,6 +736,7 @@ mod tests {
                 seq: 2,
                 thread_id: thread,
                 turn_id: turn,
+                item_id: None,
                 timestamp: now,
                 call_id: "call_1".into(),
                 tool: "read".into(),
@@ -745,6 +779,7 @@ mod tests {
                 seq: 2,
                 thread_id: thread,
                 turn_id: turn,
+                item_id: None,
                 timestamp: now,
                 request_id: "ui_1".into(),
                 prompt: "which file?".into(),
@@ -756,6 +791,74 @@ mod tests {
         assert_eq!(items[0].text.as_deref(), Some("run rm"));
         assert_eq!(items[1].kind, ItemKind::UserInput);
         assert_eq!(items[1].text.as_deref(), Some("which file?"));
+    }
+
+    #[test]
+    fn projected_events_use_the_supplied_item_id() {
+        let turn = turn();
+        let thread = ark_common::ThreadId::new();
+        let now = Utc::now();
+        let supplied = ItemId::new();
+        let events = vec![
+            RuntimeEvent::ToolCallStarted {
+                seq: 1,
+                thread_id: thread,
+                turn_id: turn,
+                item_id: Some(supplied),
+                timestamp: now,
+                call_id: "call_1".into(),
+                tool: "read".into(),
+                arguments: serde_json::json!({ "path": "src/main.rs" }),
+            },
+            RuntimeEvent::UserInputRequested {
+                seq: 2,
+                thread_id: thread,
+                turn_id: turn,
+                item_id: Some(ItemId::new()),
+                timestamp: now,
+                request_id: "ui_1".into(),
+                prompt: "which file?".into(),
+            },
+            RuntimeEvent::TurnFailed {
+                seq: 3,
+                thread_id: thread,
+                turn_id: turn,
+                item_id: Some(ItemId::new()),
+                timestamp: now,
+                message: "failed".into(),
+                model_request_failed: false,
+            },
+        ];
+
+        let items = project_items(&events);
+
+        assert_eq!(items[0].item_id, supplied);
+    }
+
+    #[test]
+    fn legacy_projected_events_fall_back_to_stable_ids() {
+        let turn = turn();
+        let thread = ark_common::ThreadId::new();
+        let event = RuntimeEvent::ToolCallFinished {
+            seq: 1,
+            thread_id: thread,
+            turn_id: turn,
+            item_id: None,
+            timestamp: Utc::now(),
+            call_id: "legacy_call".into(),
+            tool: "read".into(),
+            ok: true,
+            duration_ms: 1,
+            output: "contents".into(),
+            detail: None,
+        };
+        let json = serde_json::to_value(event).unwrap();
+        assert!(json.get("item_id").is_none());
+        let event: RuntimeEvent = serde_json::from_value(json).unwrap();
+
+        let items = project_items(&[event]);
+
+        assert_eq!(items[0].item_id, keyed_item_id("tool_call:legacy_call"));
     }
 
     #[test]
@@ -811,6 +914,7 @@ mod tests {
                 seq: 2,
                 thread_id: thread,
                 turn_id: turn,
+                item_id: None,
                 timestamp: now,
                 message: "turn budget: max model rounds reached".into(),
                 model_request_failed: false,

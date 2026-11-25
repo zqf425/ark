@@ -13,7 +13,10 @@
   `Usage::default()` 仅是累加器，不算缺失样本。
 - 路径归一化的唯一实现为 `ark_common::path::normalize`；其它 crate 和前端不得复制逻辑。
 - Windows `canonicalize` 产生的 verbatim 前缀由 `ark_common::path::strip_verbatim` 在归一化入口统一移除；盘符和 UNC 路径均以非 verbatim 形式参与比较。
-- 文本写入必须 UTF-8 无 BOM，原子写入由 `write_text_atomic` 完成。
+- 文本写入必须 UTF-8 无 BOM，原子写入由 `write_text_atomic` 完成：临时文件使用 UUID 唯一名，
+  写完同步文件后 rename，并同步父目录；任一步失败都不删除原文件。
+- `keyed_item_id(namespace)` 是稳定条目 ID 的唯一宿主（双 seed FNV-1a，强制 UUID v8/variant 位）。
+  事件生产者、存储投影和旧日志回退都调用它，其他语言不得复制算法。
 - `context::compaction_threshold` 是 provider 压缩阈值算术的唯一宿主：先以饱和减法预留
   `max_output_tokens`，再按 80% 计算，极小窗口至少返回 1。`ark-llm` 与 `ark-server` 手动压缩
   都调用它，不得在调用方复制比例公式。
