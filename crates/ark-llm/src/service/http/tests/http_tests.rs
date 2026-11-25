@@ -6,7 +6,7 @@
 use crate::common::retry::RetryPolicy;
 use crate::config::endpoint::{EndpointFormat, ProviderConfig};
 use crate::provider::route::Family;
-use crate::service::http::{decode_utf8_prefix, split_at_last_complete_line, HttpModelClient};
+use crate::service::http::{decode_utf8_prefix, HttpModelClient};
 use ark_ports::{ModelChunk, ModelClient, ModelMessage, ModelRequest};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -262,6 +262,8 @@ async fn codepoint_split_across_chunks_is_reassembled() {
         wire.extend_from_slice(piece);
         wire.extend_from_slice(b"\r\n");
     }
+    let done = "data: [DONE]\n\n";
+    wire.extend_from_slice(format!("{:x}\r\n{done}\r\n", done.len()).as_bytes());
     wire.extend_from_slice(b"0\r\n\r\n");
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -334,20 +336,6 @@ fn invalid_bytes_are_replaced_without_stalling() {
     assert!(pending.is_empty());
 }
 
-#[test]
-fn partial_lines_are_held_back() {
-    let (complete, rest) = split_at_last_complete_line("data: a\ndata: par");
-    assert_eq!(complete, "data: a\n");
-    assert_eq!(rest, "data: par");
-}
-
-#[test]
-fn a_buffer_without_a_newline_is_all_rest() {
-    let (complete, rest) = split_at_last_complete_line("data: a");
-    assert!(complete.is_empty());
-    assert_eq!(rest, "data: a");
-}
-
 /// Regression for the 120s cut-off: a live stream that keeps delivering
 /// frames must survive well past the per-phase bound. The old reqwest
 /// request-level `timeout()` was a *total* deadline covering the body, so
@@ -379,6 +367,10 @@ async fn a_live_long_stream_is_not_cut_off_by_the_phase_bound() {
                 .unwrap();
             let _ = socket.flush();
         }
+        let done = "data: [DONE]\n\n";
+        socket
+            .write_all(format!("{:x}\r\n{done}\r\n", done.len()).as_bytes())
+            .unwrap();
         socket.write_all(b"0\r\n\r\n").unwrap();
     });
     let client = HttpModelClient::with_config(
@@ -527,4 +519,286 @@ fn debug_output_points_at_the_endpoint() {
     let text = format!("{client:?}");
     assert!(text.contains("deepseek"));
     assert!(text.contains("chat/completions"));
+}
+
+fn serve_once(
+    listener: std::net::TcpListener,
+    response: &'static [u8],
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        use std::io::{Read, Write};
+        let (mut socket, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 4_096];
+        let _ = socket.read(&mut request).unwrap();
+        let _ = socket.write_all(response);
+    })
+}
+
+fn sse_response(body: &str) -> Vec<u8> {
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
+fn client_at(address: std::net::SocketAddr, format: EndpointFormat) -> HttpModelClient {
+    HttpModelClient::with_config(
+        ProviderConfig::new("test", "test-model")
+            .with_base_url(format!("http://{address}"))
+            .with_format(format)
+            .with_api_key("test-key"),
+    )
+    .with_retry(RetryPolicy::none())
+    .with_timeout(Duration::from_millis(150))
+}
+
+async fn assert_stream_failure(format: EndpointFormat, body: &'static str, expected: &str) {
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let server = serve_once(
+        listener,
+        Box::leak(response.into_bytes().into_boxed_slice()),
+    );
+    let (sink, _drain) = mpsc::channel(16);
+
+    let error = client_at(address, format)
+        .stream(request(), sink)
+        .await
+        .expect_err("a provider error frame must fail the request");
+    server.join().unwrap();
+
+    assert!(error.message.contains(expected), "unexpected: {error:?}");
+}
+
+#[tokio::test]
+async fn http_200_chat_error_is_an_attempt_failure() {
+    assert_stream_failure(
+        EndpointFormat::OpenAiChat,
+        "data: {\"error\":{\"message\":\"quota exhausted\"}}\n\n",
+        "quota exhausted",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn http_200_responses_failed_is_an_attempt_failure() {
+    assert_stream_failure(
+        EndpointFormat::OpenAiResponses,
+        "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"model overloaded\"}}}\n\n",
+        "model overloaded",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn http_200_anthropic_error_is_an_attempt_failure() {
+    assert_stream_failure(
+        EndpointFormat::AnthropicMessages,
+        "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"capacity unavailable\"}}\n\n",
+        "capacity unavailable",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn stream_error_after_a_delta_is_not_retried() {
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let body = "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\ndata: {\"error\":{\"message\":\"upstream stopped\"}}\n\n";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let server = serve_once(
+        listener.try_clone().unwrap(),
+        Box::leak(response.into_bytes().into_boxed_slice()),
+    );
+    let client = client_at(address, EndpointFormat::OpenAiChat).with_retry(RetryPolicy {
+        max_attempts: 4,
+        base: Duration::from_millis(1),
+        max_delay: Duration::from_millis(2),
+        rate_limit_floor: Duration::from_millis(1),
+    });
+    let (sink, mut drain) = mpsc::channel(16);
+
+    let error = client.stream(request(), sink).await.unwrap_err();
+    server.join().unwrap();
+    assert!(error.message.contains("upstream stopped"));
+    assert!(matches!(
+        drain.recv().await,
+        Some(ModelChunk::TextDelta { .. })
+    ));
+    listener.set_nonblocking(true).unwrap();
+    assert!(
+        listener.accept().is_err(),
+        "an error after published content must not retry"
+    );
+}
+
+/// Role-only and ping frames publish no chunks. They must not clear the fact
+/// that an earlier delta reached the sink, or a later provider error would
+/// replay the request and duplicate already-visible text.
+#[tokio::test]
+async fn stream_error_after_delta_and_silent_frames_is_not_retried() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let server_requests = Arc::clone(&requests);
+    let server = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        server_requests.fetch_add(1, Ordering::SeqCst);
+        let mut request = [0_u8; 4_096];
+        let _ = socket.read(&mut request).unwrap();
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+            "event: ping\ndata: {}\n\n",
+            "data: {\"error\":{\"message\":\"upstream stopped\"}}\n\n",
+        );
+        socket.write_all(&sse_response(body)).unwrap();
+
+        // A regressed retry arrives within a few milliseconds. Keep the
+        // listener available briefly and answer it with visibly duplicate text.
+        listener.set_nonblocking(true).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_millis(300);
+        loop {
+            match listener.accept() {
+                Ok((mut retry, _)) => {
+                    server_requests.fetch_add(1, Ordering::SeqCst);
+                    let _ = retry.read(&mut request);
+                    let retry_body = concat!(
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"duplicate\"}}]}\n\n",
+                        "data: [DONE]\n\n",
+                    );
+                    let _ = retry.write_all(&sse_response(retry_body));
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if std::time::Instant::now() >= deadline {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("retry listener failed: {error}"),
+            }
+        }
+    });
+    let client = client_at(address, EndpointFormat::OpenAiChat).with_retry(RetryPolicy {
+        max_attempts: 4,
+        base: Duration::from_millis(1),
+        max_delay: Duration::from_millis(2),
+        rate_limit_floor: Duration::from_millis(1),
+    });
+    let (sink, mut drain) = mpsc::channel(16);
+
+    let result = client.stream(request(), sink).await;
+    server.join().unwrap();
+
+    let error = result.expect_err("the provider error must remain terminal");
+    assert!(error.message.contains("upstream stopped"));
+    assert_eq!(requests.load(Ordering::SeqCst), 1, "must not retry");
+    let mut text = String::new();
+    while let Ok(chunk) = drain.try_recv() {
+        if let ModelChunk::TextDelta { delta } = chunk {
+            text.push_str(&delta);
+        }
+    }
+    assert_eq!(text, "partial", "published text must not be replayed");
+}
+
+#[tokio::test]
+async fn an_incomplete_frame_cannot_extend_its_deadline_with_more_bytes() {
+    use std::io::Write;
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        use std::io::Read as _;
+        let (mut socket, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 4_096];
+        let _ = socket.read(&mut request).unwrap();
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        for _ in 0..20 {
+            let piece = b"data: x";
+            if socket
+                .write_all(format!("{:x}\r\n", piece.len()).as_bytes())
+                .is_err()
+                || socket.write_all(piece).is_err()
+                || socket.write_all(b"\r\n").is_err()
+            {
+                break;
+            }
+            let _ = socket.flush();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut probe = [0_u8; 1];
+        let _ = socket.read(&mut probe);
+    });
+    let client = client_at(address, EndpointFormat::OpenAiChat)
+        .with_retry(RetryPolicy::none())
+        .with_timeout(Duration::from_millis(60));
+    let (sink, _drain) = mpsc::channel(16);
+
+    let error = client.stream(request(), sink).await.unwrap_err();
+    server.join().unwrap();
+    assert!(error.message.contains("without a complete SSE frame"));
+}
+
+#[tokio::test]
+async fn oversized_error_body_read_stops_after_the_diagnostic_limit() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 4_096];
+        let _ = socket.read(&mut request).unwrap();
+        socket
+            .write_all(
+                b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 4096\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        socket.write_all(&[b'x'; 1_024]).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_millis(250)))
+            .unwrap();
+        let mut probe = [0_u8; 1];
+        let _ = socket.read(&mut probe);
+        let _ = socket.write_all(&[b'x'; 3_072]);
+    });
+    let (sink, _drain) = mpsc::channel(1);
+
+    let started = std::time::Instant::now();
+    let error = client_at(address, EndpointFormat::OpenAiChat)
+        .with_timeout(Duration::from_secs(1))
+        .stream(request(), sink)
+        .await
+        .unwrap_err();
+    let elapsed = started.elapsed();
+    server.join().unwrap();
+    assert!(
+        elapsed < Duration::from_millis(200),
+        "client waited for the rest of the body: {elapsed:?}"
+    );
+    assert!(error.detail.is_some_and(|detail| detail.len() <= 512));
 }

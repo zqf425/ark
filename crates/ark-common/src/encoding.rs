@@ -456,6 +456,65 @@ fn decode_latin1(bytes: &[u8]) -> Option<String> {
     Some(latin1(bytes))
 }
 
+/// Bytes at the end of a chunk that may still become one UTF-8 or GB18030 codepoint.
+pub fn incomplete_encoded_suffix(bytes: &[u8]) -> usize {
+    let utf8 = match std::str::from_utf8(bytes) {
+        Ok(_) => return 0,
+        Err(error) if error.error_len().is_none() => bytes.len() - error.valid_up_to(),
+        Err(_) => 0,
+    };
+    utf8.max(incomplete_gb18030_suffix(bytes))
+}
+
+fn incomplete_gb18030_suffix(bytes: &[u8]) -> usize {
+    fn lead(byte: u8) -> bool {
+        (0x81..=0xfe).contains(&byte)
+    }
+
+    fn four_byte_digit(byte: u8) -> bool {
+        (0x30..=0x39).contains(&byte)
+    }
+
+    fn two_byte_trail(byte: u8) -> bool {
+        (0x40..=0x7e).contains(&byte) || (0x80..=0xfe).contains(&byte)
+    }
+
+    let mut index = 0;
+    while index < bytes.len() {
+        let first = bytes[index];
+        if first <= 0x80 {
+            index += 1;
+            continue;
+        }
+        if !lead(first) {
+            return 0;
+        }
+        let Some(&second) = bytes.get(index + 1) else {
+            return 1;
+        };
+        if four_byte_digit(second) {
+            let Some(&third) = bytes.get(index + 2) else {
+                return 2;
+            };
+            if !lead(third) {
+                return 0;
+            }
+            let Some(&fourth) = bytes.get(index + 3) else {
+                return 3;
+            };
+            if !four_byte_digit(fourth) {
+                return 0;
+            }
+            index += 4;
+        } else if two_byte_trail(second) {
+            index += 2;
+        } else {
+            return 0;
+        }
+    }
+    0
+}
+
 fn latin1(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| *byte as char).collect()
 }
@@ -511,6 +570,27 @@ mod tests {
         let decoded = decode(&bytes);
         assert_eq!(decoded.encoding, TextEncoding::Gb18030);
         assert_eq!(decoded.text, "中文");
+    }
+
+    #[test]
+    fn incomplete_encoded_suffix_keeps_gb18030_codepoint_boundaries() {
+        let character = [0x95_u8, 0x32, 0x82, 0x36];
+        for split in 1..character.len() {
+            assert_eq!(incomplete_encoded_suffix(&character[..split]), split);
+        }
+        assert_eq!(incomplete_encoded_suffix(&character), 0);
+
+        let mut prefixed = b"ok".to_vec();
+        prefixed.extend_from_slice(&character[..2]);
+        assert_eq!(incomplete_encoded_suffix(&prefixed), 2);
+    }
+
+    #[test]
+    fn incomplete_encoded_suffix_keeps_utf8_boundaries_but_not_malformed_input() {
+        let character = "中".as_bytes();
+        assert_eq!(incomplete_encoded_suffix(&character[..2]), 2);
+        assert_eq!(incomplete_encoded_suffix(character), 0);
+        assert_eq!(incomplete_encoded_suffix(&[0xff, 0x81]), 0);
     }
 
     #[test]
