@@ -18,6 +18,7 @@ pub mod im;
 pub mod item;
 pub mod schedule;
 pub mod trace_stats;
+pub mod trace_timeline;
 /// TypeScript binding generation (design §6.1).
 ///
 /// Test-only: it writes into `web/src/generated/`, and the checked-in output is
@@ -85,4 +86,7 @@ pub use schedule::{
 pub use trace_stats::{
     ToolStat, TraceErrorEntry, TraceRuntimeError, TraceSlowCall, TraceStatsResponse, TurnStat,
     TRACE_SLOW_CALLS_LIMIT,
+};
+pub use trace_timeline::{
+    TraceSpan, TraceSpanKind, TraceTimeline, TRACE_TIMELINE_SNIPPET_MAX_CHARS,
 };

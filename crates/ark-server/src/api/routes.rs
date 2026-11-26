@@ -220,6 +220,10 @@ fn diagnostics_routes() -> Router<AppState> {
             get(crate::api::handlers::trace_stats::trace_stats),
         )
         .route(
+            "/v1/threads/{id}/trace-timeline",
+            get(crate::api::handlers::trace_timeline::trace_timeline),
+        )
+        .route(
             "/v1/debug/llm-rounds",
             get(crate::api::handlers::diagnostics::llm_rounds),
         )

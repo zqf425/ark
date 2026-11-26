@@ -96,6 +96,247 @@
   height: 72px;
 }
 
+/* ---------- v2 drill-down: clickable per-turn rows ---------- */
+
+/*
+ * The turn chart is a list of real buttons (keyboard reachable by default).
+ * The gauge is a div bar whose width is set through the custom property the
+ * component writes from the data (`--ark-trace-turn-ratio`); no inline width,
+ * so the ratio stays a pure data projection.
+ */
+.ark-trace__turns {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ark-trace__turnrow {
+  display: grid;
+  grid-template-columns: 3ch minmax(0, 1fr) auto;
+  grid-template-areas:
+    'index gauge time'
+    'index meta meta';
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.ark-trace__turnrow:hover {
+  background: var(--ark-bg-hover);
+}
+
+.ark-trace__turnrow:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: 1px;
+}
+
+.ark-trace__turnrow.is-expanded {
+  border-color: var(--ark-accent);
+  background: var(--ark-accent-soft);
+}
+
+.ark-trace__turnrow-index {
+  grid-area: index;
+  align-self: start;
+  font-variant-numeric: tabular-nums;
+  color: var(--ark-text-dim);
+  font-size: calc(11.5px * var(--ark-scale));
+}
+
+.ark-trace__turnrow-gauge {
+  grid-area: gauge;
+  height: 8px;
+  width: var(--ark-trace-turn-ratio, 0%);
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--ark-accent);
+}
+
+.ark-trace__turnrow-gauge.is-fail {
+  background: var(--ark-error);
+}
+
+.ark-trace__turnrow-time {
+  grid-area: time;
+  font-variant-numeric: tabular-nums;
+  color: var(--ark-text-dim);
+  white-space: nowrap;
+  font-size: calc(11.5px * var(--ark-scale));
+}
+
+.ark-trace__turnrow-meta {
+  grid-area: meta;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ark-text-faint);
+  font-size: calc(11px * var(--ark-scale));
+}
+
+/* Table rows that drill into a turn: the row itself stays quiet, the action
+   cell carries the visible affordance so the target is discoverable. */
+.ark-trace__table tr.is-clickable:hover td {
+  background: var(--ark-bg-hover);
+}
+
+.ark-trace__table td.is-action {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ark-trace__error-action {
+  display: block;
+  margin-top: 2px;
+}
+
+/* ---------- v2 drill-down: timeline panel ---------- */
+
+/*
+ * Vertical span list. The chip colour is per-kind through one custom property
+ * picked in CSS (kind lives in `data-span-kind`); failure overrides the chip
+ * and the label colour with the shared error token. Every token here exists
+ * in both themes (tokens.css / theme.css), so light/dark parity holds.
+ */
+.ark-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius);
+  background: var(--ark-bg-raised);
+}
+
+.ark-timeline__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ark-timeline__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: calc(12px * var(--ark-scale));
+}
+
+.ark-timeline__chip {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--ark-timeline-kind, var(--ark-text-faint));
+  /* Keep the dot on the text line without a nested flex baseline dance. */
+  align-self: center;
+}
+
+.ark-timeline__kind {
+  flex: none;
+  font-weight: 600;
+  color: var(--ark-text);
+}
+
+.ark-timeline__row[data-span-kind='user_message'] {
+  --ark-timeline-kind: var(--ark-accent);
+}
+
+.ark-timeline__row[data-span-kind='assistant_text'] {
+  --ark-timeline-kind: var(--ark-ok);
+}
+
+.ark-timeline__row[data-span-kind='reasoning'] {
+  --ark-timeline-kind: var(--ark-skill);
+}
+
+.ark-timeline__row[data-span-kind='tool_call'] {
+  --ark-timeline-kind: var(--console-blue);
+}
+
+.ark-timeline__row[data-span-kind='approval'] {
+  --ark-timeline-kind: var(--ark-warn);
+}
+
+.ark-timeline__row[data-span-kind='user_input'] {
+  --ark-timeline-kind: var(--ark-accent);
+}
+
+.ark-timeline__row[data-span-kind='compaction'] {
+  --ark-timeline-kind: var(--tk-ty);
+}
+
+.ark-timeline__row[data-span-kind='model_call'] {
+  --ark-timeline-kind: var(--tk-fn);
+}
+
+.ark-timeline__row[data-span-kind='error'] {
+  --ark-timeline-kind: var(--ark-error);
+}
+
+.ark-timeline__row[data-span-kind='notice'] {
+  --ark-timeline-kind: var(--ark-text-faint);
+}
+
+.ark-timeline__label {
+  flex: none;
+  font-family: var(--ark-mono);
+  font-size: calc(11.5px * var(--ark-scale));
+  color: var(--ark-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40%;
+}
+
+.ark-timeline__failed {
+  flex: none;
+  color: var(--ark-error);
+  font-weight: 600;
+}
+
+.ark-timeline__row.is-failed .ark-timeline__kind {
+  color: var(--ark-error);
+}
+
+.ark-timeline__snippet {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ark-text-dim);
+}
+
+.ark-timeline__when {
+  flex: none;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--ark-text-faint);
+  font-size: calc(11px * var(--ark-scale));
+}
+
+.ark-timeline__duration {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--ark-text);
+  font-size: calc(11.5px * var(--ark-scale));
+}
+
+.ark-timeline__row.is-failed .ark-timeline__duration {
+  color: var(--ark-error);
+}
+
 /* ---------- tables ---------- */
 
 .ark-trace__table {

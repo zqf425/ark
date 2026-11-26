@@ -8,7 +8,7 @@
  * exclusively behind `startAnalysis`, and the button stays disabled until the
  * stats have loaded.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, EmptyState, useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import type { ThreadSummary } from '../../../shared/contracts'
@@ -28,6 +28,7 @@ import { translateNow } from '../../../shared/i18n/current'
 import { useMounted } from '../../../shared/api/use-mounted'
 import { LoadError, Notice, SettingsSection, Skeleton } from './SectionShell'
 import { TraceCharts } from './TraceCharts'
+import { TraceTimelinePanel } from './TraceTimelinePanel'
 import { formatDurationWordsMs } from './trace-format'
 
 /** One metric card: label above, value below (provider-stats row pattern). */
@@ -108,6 +109,11 @@ export function TraceSection(): JSX.Element {
   const [statsStatus, setStatsStatus] = useState<LoadStatus>('idle')
   const [statsError, setStatsError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
+  // §v2 drill-down: at most one turn's timeline is expanded at a time; the
+  // same click collapses it again. The ref anchors the scroll so table-row
+  // jumps land on the chart area without DOM-query selector strings.
+  const [expandedTurnId, setExpandedTurnId] = useState<string | null>(null)
+  const chartsRef = useRef<HTMLDivElement | null>(null)
 
   // One list load per mount; the picker never re-fetches on selection.
   useEffect(() => {
@@ -173,6 +179,25 @@ export function TraceSection(): JSX.Element {
     [threads, selectedId]
   )
 
+  // §v2: the single owner of the expand/collapse state. A new selection resets
+  // it — timeline ids from another thread must not leak into this one.
+  useEffect(() => {
+    setExpandedTurnId(null)
+  }, [selectedId])
+
+  const toggleTurn = useCallback((turnId: string): void => {
+    setExpandedTurnId((current) => (current === turnId ? null : turnId))
+  }, [])
+
+  // Scroll after React commits the expansion render: keyed on the expanded id,
+  // so a collapse (null) or a switch to another turn both re-anchor the chart
+  // area. An effect keeps this deterministic — no rAF timing, and it fires in
+  // tests as soon as `act` flushes.
+  useEffect(() => {
+    if (!expandedTurnId) return
+    chartsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [expandedTurnId])
+
   // The only path to the two POSTs. Everything above is read-only.
   const startAnalysis = async (): Promise<void> => {
     if (!stats || !selectedThread || starting) return
@@ -222,7 +247,14 @@ export function TraceSection(): JSX.Element {
       {statsLoaded && stats ? (
         <>
           <MetricRow stats={stats} locale={locale} />
-          <TraceCharts stats={stats} />
+          {/* Scroll anchor for the §v2 table-row jumps: a real element ref,
+              no `getElementById` selector strings. */}
+          <div ref={chartsRef}>
+            <TraceCharts stats={stats} expandedTurnId={expandedTurnId} onToggleTurn={toggleTurn} />
+          </div>
+          {expandedTurnId && selectedId ? (
+            <TraceTimelinePanel threadId={selectedId} turnId={expandedTurnId} key={expandedTurnId} />
+          ) : null}
         </>
       ) : null}
 

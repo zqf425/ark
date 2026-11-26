@@ -6,14 +6,17 @@
  * wire shape is re-exported from the generated contract, and the only logic
  * here is the prompt composition the requirement assigns to the web api layer.
  */
-import { get, post } from '../../../shared/api/client'
+import { ApiError, get, post } from '../../../shared/api/client'
 import type { ThreadId, ThreadSummary, TurnSummary, Usage } from '../../../shared/contracts'
 import type {
   ToolStat,
   TraceErrorEntry,
   TraceRuntimeError,
   TraceSlowCall,
+  TraceSpan as TraceTimelineSpan,
+  TraceSpanKind as TraceTimelineSpanKind,
   TraceStatsResponse,
+  TraceTimeline,
   TurnStat
 } from '../../../generated'
 
@@ -23,6 +26,9 @@ export type {
   TraceRuntimeError,
   TraceSlowCall,
   TraceStatsResponse,
+  TraceTimeline,
+  TraceTimelineSpan,
+  TraceTimelineSpanKind,
   TurnStat
 }
 
@@ -53,6 +59,30 @@ export function traceTokenTotals(usage: Usage | undefined): TraceTokenTotals {
 /** `GET /v1/threads/{id}/trace-stats` — read-only projection, nothing persisted. */
 export function fetchTraceStats(threadId: ThreadId, signal?: AbortSignal): Promise<TraceStatsResponse> {
   return get<TraceStatsResponse>(`/v1/threads/${threadId}/trace-stats`, signal ? { signal } : {})
+}
+
+/**
+ * `GET /v1/threads/{id}/trace-timeline?turn_id=<id>` — single-turn readout.
+ *
+ * `404` is a **value**, not a failure: a turn from an extremely old log has no
+ * timeline data, and the panel renders its empty state rather than an error.
+ * Every other rejection keeps the shared `ApiError` so `describeError` stays
+ * the single wording channel. The runtime path lives only here (api layer).
+ */
+export async function fetchTraceTimeline(
+  threadId: ThreadId,
+  turnId: string,
+  signal?: AbortSignal
+): Promise<TraceTimeline | null> {
+  try {
+    return await get<TraceTimeline>(
+      `/v1/threads/${threadId}/trace-timeline`,
+      signal ? { signal, query: { turn_id: turnId } } : { query: { turn_id: turnId } }
+    )
+  } catch (reason) {
+    if (reason instanceof ApiError && reason.status === 404) return null
+    throw reason
+  }
 }
 
 /**

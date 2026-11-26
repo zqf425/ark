@@ -1,6 +1,8 @@
 # 设置内链路分析(trace analysis)
 
 > 状态:已批准计划(基于 smart-ark ark 模式同名功能的 ark 原生移植;LLM span 事件为后续里程碑,首版以既有事件投影)。
+>
+> v2(2026-11-26):新增耗时下钻——单回合时间线端点 + 图表行点击展开(见 §v2)。
 
 ## 背景与目标
 
@@ -85,3 +87,38 @@ smart-ark 的 ark 模式在「系统管理 → 链路分析」提供会话级统
 - i18n:catalog-completeness 测试通过(中英齐全)。
 - 手动验证:`cargo run -p arkd -- serve` + web dev,选一个有工具调用的线程
   看图表;点「启动 AI 分析」生成新会话;刷新后图表仍在、无自动分析。
+
+## v2:耗时下钻(单回合时间线)
+
+对齐 smart-ark ThreadStatsPanel 的下钻能力(工具明细/逐轮时间线/异常详情),
+v1 只给了聚合数字与 Top 清单,无法回答"这个回合的 2 分钟花在哪"。
+
+### 端点与契约
+
+- `GET /v1/threads/{id}/trace-timeline?turn_id=<id>`:单回合、有界读侧
+  (未知 turn_id 返回 404,与 parse_thread 语义一致)。
+- 契约类型 `TraceTimeline`(ark-contract,ts-rs 生成),核心是按
+  `created_at` 升序的 span 列表;每个 span:
+  - `kind`:`user_message | assistant_text | reasoning | tool_call |
+    approval | user_input | compaction | model_call | error | notice`
+    (对齐 `ItemKind` + `model_call` 来自 usage 事件)。
+  - `started_at`/`duration_ms`:工具与模型调用有真实耗时
+    (`ToolPayload.duration_ms`、`Usage.duration_ms`);文本类 item 只有
+    created_at,`duration_ms` 为 None(契约注释注明)。
+  - `label`(工具名/模型名)、`text_snippet`(截断 200 字)、
+    `is_error`、`item_id`(可跳回会话画布)。
+- 折叠规则:thread detail 同源——`ItemCreated/Updated/Completed` 按
+  item_id 取最后版本(与 store 投影一致,避免流式多版本重复);
+  `Usage` 事件生成 `model_call` span;`RuntimeEvent::Error` 生成
+  error span。LLM 精确计时仍受 `LlmSpanStart/End` 未实现限制,
+  `model_call` 用 usage 事件墙钟近似——契约注释如实声明。
+- 事件正文不进时间线(原文太长),文本只留 200 字摘要;要看全文走
+  既有 thread detail。
+
+### web 交互
+
+- 图表行可点击:逐回合耗时条形(TraceCharts)每行 → 展开该回合
+  时间线面板;慢调用/错误表格行 → 定位到所属回合并展开。
+- 时间线面板:垂直 span 列表(色块 = kind,右侧耗时,failed 红标),
+  加载态与空态;不新增依赖,不新增 npm 包。
+- 仅在用户点击时请求该端点(每回合一次,无预取)。

@@ -69,5 +69,30 @@ export const SETTINGS_TRACE_MESSAGES = {
     'Creates a new session seeded with the stats digest; the model reads the source log on demand. This page never starts one automatically.'
   ],
   'settings.trace.analyzeSucceeded': ['分析会话已创建：{title}', 'Analysis session created: {title}'],
-  'settings.trace.analyzeFailed': ['启动 AI 分析失败', 'Failed to start AI analysis']
+  'settings.trace.analyzeFailed': ['启动 AI 分析失败', 'Failed to start AI analysis'],
+
+  'settings.trace.timeline.loading': ['正在加载回合时间线…', 'Loading turn timeline…'],
+  'settings.trace.timeline.empty': ['该回合没有可展示的时间线数据。', 'No timeline data for this turn.'],
+  'settings.trace.timeline.emptyHint': [
+    '可能来自极早的日志，或该回合没有留下任何事件。',
+    'The turn may predate timeline data, or it left no events behind.'
+  ],
+  'settings.trace.timeline.loadFailed': ['时间线加载失败', 'Failed to load the timeline'],
+  'settings.trace.timeline.title': ['回合时间线', 'Turn timeline'],
+  'settings.trace.timeline.hint': [
+    '点击回合条形可展开或收起该回合的时间线。',
+    'Click a turn bar to expand or collapse its timeline.'
+  ],
+  'settings.trace.timeline.locate': ['定位回合', 'Locate turn'],
+  'settings.trace.span.kind.user_message': ['用户消息', 'User message'],
+  'settings.trace.span.kind.assistant_text': ['助手回复', 'Assistant text'],
+  'settings.trace.span.kind.reasoning': ['思考', 'Reasoning'],
+  'settings.trace.span.kind.tool_call': ['工具调用', 'Tool call'],
+  'settings.trace.span.kind.approval': ['审批', 'Approval'],
+  'settings.trace.span.kind.user_input': ['用户输入', 'User input'],
+  'settings.trace.span.kind.compaction': ['上下文压缩', 'Compaction'],
+  'settings.trace.span.kind.model_call': ['模型调用', 'Model call'],
+  'settings.trace.span.kind.error': ['错误', 'Error'],
+  'settings.trace.span.kind.notice': ['提示', 'Notice'],
+  'settings.trace.span.failed': ['失败', 'failed'],
 } as const

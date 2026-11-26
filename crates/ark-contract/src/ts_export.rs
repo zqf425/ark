@@ -48,12 +48,12 @@ use crate::{
     TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadExport, ThreadItem,
     ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSkillsResponse,
     ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest, ToolStat,
-    TraceErrorEntry, TraceRuntimeError, TraceSlowCall, TraceStatsResponse, TuningSettings,
-    TurnRequest, TurnStat, TurnSummary, TurnUsage, UiCatalog, UpdateImChannelRequest,
-    UpdateMemoryRequest, UpdateScheduleRequest, UpdateThreadRequest, UsageResponse,
-    WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
-    WorkspaceDiffFile, WorkspaceFilePreview, WorkspaceStatus, WorkspaceValidateResponse,
-    WorkspaceView,
+    TraceErrorEntry, TraceRuntimeError, TraceSlowCall, TraceSpan, TraceSpanKind,
+    TraceStatsResponse, TraceTimeline, TuningSettings, TurnRequest, TurnStat, TurnSummary,
+    TurnUsage, UiCatalog, UpdateImChannelRequest, UpdateMemoryRequest, UpdateScheduleRequest,
+    UpdateThreadRequest, UsageResponse, WorkspaceChange, WorkspaceChangesResponse,
+    WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile, WorkspaceFilePreview, WorkspaceStatus,
+    WorkspaceValidateResponse, WorkspaceView,
 };
 use ark_common::{
     ArkErrorCode, ArkErrorPayload, AttachmentId, ChildId, ItemId, ThreadId, TurnId, Usage,
@@ -128,6 +128,9 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     TraceSlowCall::export_all_to(dir)?;
     TraceErrorEntry::export_all_to(dir)?;
     TraceRuntimeError::export_all_to(dir)?;
+    TraceTimeline::export_all_to(dir)?;
+    TraceSpan::export_all_to(dir)?;
+    TraceSpanKind::export_all_to(dir)?;
     SessionResumeResponse::export_all_to(dir)?;
     ReviewRequest::export_all_to(dir)?;
     ThreadExport::export_all_to(dir)?;
@@ -296,6 +299,9 @@ const ROOT_NAMES: &[&str] = &[
     "TraceSlowCall",
     "TraceErrorEntry",
     "TraceRuntimeError",
+    "TraceTimeline",
+    "TraceSpan",
+    "TraceSpanKind",
     "SessionResumeResponse",
     "ReviewRequest",
     "ThreadExport",

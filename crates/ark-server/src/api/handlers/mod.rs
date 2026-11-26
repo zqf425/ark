@@ -27,6 +27,7 @@ pub mod sessions;
 pub mod subagents;
 pub mod threads;
 pub mod trace_stats;
+pub mod trace_timeline;
 pub mod turns;
 pub mod workbench;
 
