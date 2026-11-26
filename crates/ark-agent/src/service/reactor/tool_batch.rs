@@ -24,6 +24,10 @@ impl Reactor {
             executions.extend(results);
             ran.extend(batch);
             if interrupted {
+                // Remaining batches never ran: their calls sit in `ran` with no
+                // journal row. Converge them so the assistant's tool_calls keep
+                // paired results and resume stays provider-legal (AG-03 class).
+                self.converge_pending_calls_on_cancel().await?;
                 let reason = self.cancellation_reason("turn interrupted during tool dispatch");
                 return Ok(self.interrupt_input(&reason));
             }
@@ -214,7 +218,12 @@ impl Reactor {
         // of its own tool results is the only order the provider history may
         // show, and duplicate call ids each keep their own slot).
         let mut slots: Vec<Option<ToolExecution>> = vec![None; batch.len()];
-        let mut interrupted = false;
+        // Two independent facts (review fix: they were conflated before). Only
+        // a cancel that left unsettled slots makes the turn interrupted; a
+        // forwarder panic settles the missing calls as failures and the turn
+        // continues, so the model still sees every sibling result (§2.4/§2.5).
+        let mut cancel_hit = false;
+        let mut panic_detail: Option<String> = None;
 
         let calls = batch.to_vec();
         let tools = Arc::clone(&self.tools);
@@ -238,7 +247,7 @@ impl Reactor {
                             open.remove(&slot_exec.call_id);
                         }
                     }
-                    interrupted = true;
+                    cancel_hit = true;
                     break;
                 }
                 item = stream.next() => {
@@ -256,19 +265,18 @@ impl Reactor {
             }
         }
         // A panic inside the forwarder is invisible to the channel (the task
-        // dies without closing through join_all), so ask the join handle: a
-        // panic means every not-yet-settled call lost its result and needs a
-        // synthetic row (§2.5).
-        if stream.join().await.is_err() {
-            tracing::error!("tool batch task failed: forwarder panicked");
-            interrupted = true;
+        // dies without closing through join_all), so ask the join handle. The
+        // abort of the cancel path also lands here, but a cancelled join is
+        // not an error; only a real panic surfaces (§2.5).
+        if let Err(join_error) = stream.join().await {
+            let detail = format!("tool batch task failed: {join_error}");
+            tracing::error!("{detail}");
+            panic_detail = Some(detail);
         }
-        if slots.iter().any(Option::is_none) {
-            // Cancel or panic: settled calls keep their real result (§2.3);
-            // the never-settled rest is synthetic (§2.4/§2.5).
-            let cancelled = "cancelled before the call completed".to_string();
-            let panicked = "tool batch task failed: forwarder panicked".to_string();
-            let synthetic_detail = if interrupted { cancelled } else { panicked };
+        // Synthetic rows for the never-settled rest: cancelled detail on the
+        // cancel path, the panic summary on the panic path. Settled calls keep
+        // their real result either way (§2.3).
+        if let Some(panic_detail) = panic_detail {
             for (slot, missing) in slots.iter_mut().enumerate() {
                 if missing.is_some() {
                     continue;
@@ -280,7 +288,28 @@ impl Reactor {
                     ok: false,
                     content: String::new(),
                     duration_ms: 0,
-                    detail: Some(synthetic_detail.clone()),
+                    detail: Some(panic_detail.clone()),
+                };
+                self.finish_call(&execution).await?;
+                open.remove(&call.call_id);
+                *missing = Some(execution);
+            }
+        }
+        let had_gaps_before_synthetic = slots.iter().any(Option::is_none);
+        if had_gaps_before_synthetic {
+            let detail = "cancelled before the call completed".to_string();
+            for (slot, missing) in slots.iter_mut().enumerate() {
+                if missing.is_some() {
+                    continue;
+                }
+                let call = &batch[slot];
+                let execution = ToolExecution {
+                    call_id: call.call_id.clone(),
+                    tool: call.tool.clone(),
+                    ok: false,
+                    content: String::new(),
+                    duration_ms: 0,
+                    detail: Some(detail.clone()),
                 };
                 self.finish_call(&execution).await?;
                 open.remove(&call.call_id);
@@ -302,9 +331,12 @@ impl Reactor {
             }
         }
         let executions: Vec<ToolExecution> = slots.into_iter().flatten().collect();
-        // When the whole batch was already settled when cancel fired, converge
-        // to the normal completion path (§2.4): the drive loop's terminal
-        // handling still observes the cancel and ends the turn.
+        // §2.4 convergence: a cancel that fired when every call had already
+        // settled (no synthetic rows were needed) resolves as a normal
+        // completion — the select! double-ready race then cannot flip a fully
+        // successful batch into an aborted turn. The drive loop still observes
+        // the cancel token afterwards and ends the turn.
+        let interrupted = cancel_hit && had_gaps_before_synthetic;
         Ok((executions, interrupted))
     }
 

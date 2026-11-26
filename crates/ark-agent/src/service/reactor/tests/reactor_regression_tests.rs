@@ -444,6 +444,152 @@ async fn a_cancelled_batch_keeps_results_that_reached_settlement() {
     );
 }
 
+/// §2.4 convergence: a cancel that fires only after every call of the batch
+/// settled (double-ready select race) must NOT abort the turn — the batch is
+/// fully successful, so the reactor returns a normal completion and the drive
+/// loop's own cancel handling ends the turn.
+#[tokio::test]
+async fn a_cancel_after_every_call_settled_does_not_interrupt() {
+    struct Quick;
+    #[async_trait::async_trait]
+    impl ToolRunner for Quick {
+        async fn execute(&self, _call: &ToolCallRequest) -> Result<ToolOutput> {
+            Ok(ToolOutput::ok("done"))
+        }
+    }
+    let writer = Arc::new(MemoryWriter::new());
+    let events = crate::exec::TurnEvents::new(ThreadId::new(), TurnId::new());
+    let cancel = CancelToken::new();
+    let mut reactor = Reactor::new(ReactorConfig {
+        model: Arc::new(NoopModel),
+        tools: Arc::new(Quick),
+        writer: writer.clone(),
+        gates: Arc::new(AllowAllGates),
+        sandbox: Arc::new(ReadOnlySandbox),
+        events,
+        cancel: cancel.clone(),
+        seed: ModelSeed::default(),
+        machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+        chunk_buffer: 1,
+        concurrency: None,
+        steer_attachment_resolver: None,
+    });
+    let batch = vec![
+        ToolCallRequest::new("c1", "read", serde_json::json!({ "path": "a" })),
+        ToolCallRequest::new("c2", "read", serde_json::json!({ "path": "b" })),
+    ];
+    reactor.record_assistant_turn("", &batch);
+
+    // Cancel fires after both calls settled: the select! race may pick the
+    // cancel branch, but with no unsettled slots the batch must converge.
+    // The batch runs in a spawned task so it is polled (current-thread
+    // runtime) before the cancel trips.
+    let runner = tokio::spawn(async move {
+        let result = reactor.run_batch(&batch).await;
+        (reactor, result)
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    cancel.cancel();
+    let (_reactor, batch_result) = runner.await.unwrap();
+    let (executions, interrupted) = batch_result.unwrap();
+
+    assert!(
+        !interrupted,
+        "a fully-settled batch never reports interruption"
+    );
+    assert_eq!(executions.len(), 2);
+    assert!(executions.iter().all(|execution| execution.ok));
+    for execution in &executions {
+        assert_eq!(
+            execution.detail, None,
+            "real results carry no cancel detail"
+        );
+    }
+    let recorded = writer.recorded();
+    let synthetic = recorded
+        .iter()
+        .filter(|event| matches!(event, RuntimeEvent::ToolCallFinished { detail: Some(detail), .. } if detail == "cancelled before the call completed"))
+        .count();
+    assert_eq!(synthetic, 0, "no synthetic cancel rows for a settled batch");
+}
+
+/// §2.5: a panicking tool future fails only its own batch remainder with the
+/// JoinError summary in `detail`; the turn continues so the model sees every
+/// sibling result, and the panic summary is not a bare static string.
+#[tokio::test]
+async fn a_panicking_batch_fails_the_rest_without_aborting() {
+    struct PanicsThenHangs;
+    #[async_trait::async_trait]
+    impl ToolRunner for PanicsThenHangs {
+        async fn execute(&self, call: &ToolCallRequest) -> Result<ToolOutput> {
+            if call.call_id == "boom" {
+                panic!("tool exploded: {}", call.call_id);
+            }
+            std::future::pending::<Result<ToolOutput>>().await
+        }
+    }
+    let writer = Arc::new(MemoryWriter::new());
+    let events = crate::exec::TurnEvents::new(ThreadId::new(), TurnId::new());
+    let mut reactor = Reactor::new(ReactorConfig {
+        model: Arc::new(NoopModel),
+        tools: Arc::new(PanicsThenHangs),
+        writer: writer.clone(),
+        gates: Arc::new(AllowAllGates),
+        sandbox: Arc::new(ReadOnlySandbox),
+        events,
+        cancel: CancelToken::new(),
+        seed: ModelSeed::default(),
+        machine: TurnMachine::new(crate::domain::TurnLimits::tiny()),
+        chunk_buffer: 1,
+        concurrency: None,
+        steer_attachment_resolver: None,
+    });
+    let batch = vec![
+        ToolCallRequest::new("boom", "read", serde_json::json!({ "path": "a" })),
+        ToolCallRequest::new("hang", "read", serde_json::json!({ "path": "b" })),
+    ];
+    reactor.record_assistant_turn("", &batch);
+
+    let (executions, interrupted) = reactor.run_batch(&batch).await.unwrap();
+    // Panic is not a cancel: the turn keeps going with failure rows.
+    assert!(!interrupted, "a forwarder panic must not abort the turn");
+    assert_eq!(executions.len(), 2);
+    let hang = executions
+        .iter()
+        .find(|execution| execution.call_id == "hang")
+        .expect("the hanging call settles synthetically");
+    assert!(!hang.ok);
+    let detail = hang.detail.as_deref().unwrap_or_default();
+    assert!(
+        detail.starts_with("tool batch task failed:"),
+        "the synthetic row carries the JoinError summary, got: {detail}"
+    );
+    assert!(
+        !detail.ends_with("panicked"),
+        "the summary must not be the bare static string"
+    );
+    let recorded = writer.recorded();
+    // join_all drops the whole future tree when one branch panics, including
+    // the panicking call's own future: it never produces a channel item, so
+    // slot 0 gets the same synthetic failure row as the never-polled sibling.
+    let boom_finished = recorded
+        .iter()
+        .find_map(|event| match event {
+            RuntimeEvent::ToolCallFinished {
+                call_id, detail, ..
+            } if call_id == "boom" => Some(detail.clone()),
+            _ => None,
+        })
+        .expect("the panicking call still needs a paired finished row");
+    assert!(
+        boom_finished
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("tool batch task failed:"),
+        "its synthetic row carries the panic summary, got: {boom_finished:?}"
+    );
+}
+
 // ---- Full-code-review regressions: AG-01 .. AG-05 -------------------------
 
 /// Writer that fails on one chosen append (but still allows `finish`), so we
