@@ -217,38 +217,12 @@
 
 /* Top ruler: compact relative labels over the shared axis, aligned with
    the lane column (chip corner + duration corner on the sides). */
-.ark-timeline__ruler {
-  display: grid;
-  grid-template-columns: 9px minmax(0, 1fr) 64px;
-  column-gap: 8px;
-  align-items: end;
-  margin-bottom: 4px;
-  font-size: calc(10px * var(--ark-scale));
-  color: var(--ark-text-faint);
-}
 
-.ark-timeline__ruler-lane {
-  position: relative;
-  height: 14px;
-}
 
-.ark-timeline__ruler-tick {
-  position: absolute;
-  left: var(--ark-tick-at, 0%);
-  transform: translateX(-50%);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
 
 /* First and last ticks read from their edge, not centered, so they hug the
    axis ends instead of overflowing. */
-.ark-timeline__ruler-tick:first-child {
-  transform: none;
-}
 
-.ark-timeline__ruler-tick:last-child {
-  transform: translateX(-100%);
-}
 
 .ark-timeline__list {
   margin: 0;
@@ -259,158 +233,35 @@
   gap: 6px;
 }
 
-.ark-timeline__row {
-  display: grid;
-  grid-template-columns: 9px minmax(0, 1fr) 64px;
-  grid-template-areas:
-    'chip main when';
-  column-gap: 8px;
-  align-items: center;
-  min-width: 0;
-  font-size: calc(12px * var(--ark-scale));
-}
 
-.ark-timeline__chip {
-  grid-area: chip;
-  width: 9px;
-  height: 9px;
-  border-radius: 3px;
-  background: var(--ark-timeline-kind, var(--ark-text-faint));
-}
 
-.ark-timeline__main {
-  grid-area: main;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
 
-.ark-timeline__lane {
-  position: relative;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--ark-bg-hover);
-  overflow: hidden;
-}
 
-.ark-timeline__meta {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
 
 /* Shared-axis Gantt bar: left/width are the server-reported start/duration
    mapped to the turn's time window (§v2); the CSS custom properties come from
    SpanRow, the projection stays in one place. */
-.ark-timeline__bar {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  left: var(--ark-span-left, 0%);
-  width: var(--ark-span-width, auto);
-  min-width: 2px;
-  border-radius: 2px;
-  background: var(--ark-timeline-kind, var(--ark-text-faint));
-}
 
-.ark-timeline__row.is-failed .ark-timeline__bar {
-  background: var(--ark-error);
-}
 
 /* Zero-length spans (text rows without a measured duration) render as a
    fixed tick at their start: visible on the axis, never reading as a fake
    duration. */
-.ark-timeline__bar.is-tick {
-  width: 3px;
-  min-width: 3px;
-  border-radius: 1px;
-}
 
-.ark-timeline__kind {
-  font-weight: 600;
-  color: var(--ark-text);
-}
 
-.ark-timeline__row[data-span-kind='user_message'] {
-  --ark-timeline-kind: var(--ark-accent);
-}
 
-.ark-timeline__row[data-span-kind='assistant_text'] {
-  --ark-timeline-kind: var(--ark-ok);
-}
 
-.ark-timeline__row[data-span-kind='reasoning'] {
-  --ark-timeline-kind: var(--ark-skill);
-}
 
-.ark-timeline__row[data-span-kind='tool_call'] {
-  --ark-timeline-kind: var(--console-blue);
-}
 
-.ark-timeline__row[data-span-kind='approval'] {
-  --ark-timeline-kind: var(--ark-warn);
-}
 
-.ark-timeline__row[data-span-kind='user_input'] {
-  --ark-timeline-kind: var(--ark-accent);
-}
 
-.ark-timeline__row[data-span-kind='compaction'] {
-  --ark-timeline-kind: var(--tk-ty);
-}
 
-.ark-timeline__row[data-span-kind='model_call'] {
-  --ark-timeline-kind: var(--tk-fn);
-}
 
-.ark-timeline__row[data-span-kind='error'] {
-  --ark-timeline-kind: var(--ark-error);
-}
 
-.ark-timeline__row[data-span-kind='notice'] {
-  --ark-timeline-kind: var(--ark-text-faint);
-}
 
-.ark-timeline__label {
-  flex: none;
-  font-family: var(--ark-mono);
-  font-size: calc(11.5px * var(--ark-scale));
-  color: var(--ark-text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 40%;
-}
 
-.ark-timeline__failed {
-  flex: none;
-  color: var(--ark-error);
-  font-weight: 600;
-}
 
-.ark-timeline__row.is-failed .ark-timeline__kind {
-  color: var(--ark-error);
-}
 
-.ark-timeline__snippet {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ark-text-dim);
-}
 
-.ark-timeline__when {
-  grid-area: when;
-  justify-self: end;
-  font-variant-numeric: tabular-nums;
-  color: var(--ark-text-faint);
-  font-size: calc(11px * var(--ark-scale));
-  white-space: nowrap;
-}
 
 
 
@@ -504,4 +355,174 @@
   border: 1px solid var(--ark-border-muted);
   border-radius: var(--ark-radius-sm);
   background: var(--ark-bg-hover);
+}
+
+/* ---- Turn Gantt (layout mirrors the smart-ark reference panel) ----
+   Fixed label column + shared-axis lane + fixed duration column; the palette
+   assigns one stable colour per span kind, matching the reference mapping
+   (user blue / reasoning purple / model green / tool amber / error red). */
+.ark-timeline {
+  --ark-gantt-user: var(--console-blue);
+  --ark-gantt-assistant: var(--ark-accent);
+  --ark-gantt-reasoning: var(--ark-skill);
+  --ark-gantt-tool: var(--ark-warn);
+  --ark-gantt-approval: var(--ark-warn);
+  --ark-gantt-input: var(--ark-ok);
+  --ark-gantt-compaction: var(--ark-text-faint);
+  --ark-gantt-model: var(--ark-ok);
+  --ark-gantt-error: var(--ark-error);
+  --ark-gantt-notice: var(--ark-text-faint);
+}
+
+.ark-gantt__summary {
+  margin-bottom: 6px;
+  font-size: calc(11px * var(--ark-scale));
+  color: var(--ark-text-dim);
+}
+
+.ark-gantt__ruler {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) 50px;
+  column-gap: 8px;
+  align-items: end;
+  margin-bottom: 2px;
+  font-size: calc(10px * var(--ark-scale));
+  color: var(--ark-text-faint);
+}
+
+.ark-gantt__ruler-scale {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ark-gantt__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ark-gantt__item {
+  border-radius: var(--ark-radius-sm);
+}
+
+.ark-gantt__row {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) 50px;
+  column-gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--ark-radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.ark-gantt__row:hover {
+  background: var(--ark-bg-hover);
+}
+
+.ark-gantt__row:focus-visible {
+  outline: 2px solid var(--ark-accent);
+  outline-offset: 1px;
+}
+
+.ark-gantt__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ark-gantt__chevron {
+  flex: none;
+  color: var(--ark-text-faint);
+  font-size: calc(10px * var(--ark-scale));
+  line-height: 1;
+}
+
+.ark-gantt__chip {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--ark-span-color, var(--ark-text-faint));
+}
+
+.ark-gantt__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(11px * var(--ark-scale));
+  color: var(--ark-text);
+}
+
+.ark-gantt__sub {
+  margin-left: 6px;
+  color: var(--ark-text-dim);
+}
+
+.ark-gantt__lane {
+  position: relative;
+  height: 16px;
+  border-radius: 3px;
+  background: var(--ark-bg-hover);
+  overflow: hidden;
+}
+
+/* Bar position/width are the wire start/duration mapped onto the turn
+   window; colour comes from the kind palette via --ark-span-color. */
+.ark-gantt__bar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: var(--ark-span-left, 0%);
+  width: var(--ark-span-width, 3px);
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--ark-span-color, var(--ark-text-faint));
+}
+
+.ark-gantt__row.is-failed .ark-gantt__bar {
+  background: var(--ark-error);
+}
+
+.ark-gantt__duration {
+  justify-self: end;
+  font-variant-numeric: tabular-nums;
+  color: var(--ark-text-faint);
+  font-size: calc(10px * var(--ark-scale));
+  white-space: nowrap;
+}
+
+/* In-place detail block under the expanded row, indented to the lane column
+   like the reference panel's expandable detail. */
+.ark-gantt__detail {
+  margin: 2px 0 4px 180px;
+  padding: 6px 8px;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius-sm);
+  background: var(--ark-bg-hover);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: calc(11px * var(--ark-scale));
+  color: var(--ark-text-dim);
+}
+
+.ark-gantt__detail-failed {
+  color: var(--ark-error);
+}
+
+.ark-gantt__detail-text {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+  font-size: calc(10px * var(--ark-scale));
+  color: var(--ark-text);
 }

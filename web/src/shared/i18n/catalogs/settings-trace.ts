@@ -79,6 +79,10 @@ export const SETTINGS_TRACE_MESSAGES = {
   ],
   'settings.trace.timeline.loadFailed': ['时间线加载失败', 'Failed to load the timeline'],
   'settings.trace.timeline.title': ['回合时间线', 'Turn timeline'],
+  'settings.trace.gantt.summary': ['总耗时 {total} · {count} 个 span', 'Total {total} · {count} spans'],
+  'settings.trace.gantt.kind': ['类型', 'Type'],
+  'settings.trace.gantt.started': ['开始', 'Started'],
+  'settings.trace.gantt.duration': ['耗时', 'Duration'],
   'settings.trace.timeline.ganttHint': [
     '横条按真实耗时在共享时间轴上展开;无实测时长的文本行显示为刻度点。',
     'Bars scale by real duration on one shared axis; text spans without a measured duration show as ticks.'

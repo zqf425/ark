@@ -77,13 +77,15 @@ describe('TraceTimelinePanel', () => {
 
     expect(timelineMock).toHaveBeenCalledTimes(1)
     expect(timelineMock).toHaveBeenCalledWith(THREAD, TURN, expect.anything())
-    // Top-down in server order: kind labels come from the catalog, the label
-    // field and snippets render next to them, real durations show.
+    // Top-down in server order: kind labels come from the catalog, the
+    // label field renders in the row, real durations show in the duration
+    // column. Snippets live in the expandable detail, not the collapsed row.
     expect(harness.text()).toContain('用户消息')
     expect(harness.text()).toContain('模型调用')
     expect(harness.text()).toContain('deepseek-v4.1')
     expect(harness.text()).toContain('exec')
-    expect(harness.text()).toContain('帮我修复登录')
+    // The reference-style summary names the span count and total.
+    expect(harness.text()).toContain('4 个 span')
     await harness.unmount()
   })
 
@@ -91,16 +93,18 @@ describe('TraceTimelinePanel', () => {
     const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
     await settle()
 
-    const rows = [...harness.host.querySelectorAll('.ark-timeline__row')]
+    const rows = [...harness.host.querySelectorAll('.ark-gantt__row')]
     expect(rows).toHaveLength(4)
-    // The user_message span has no duration_ms: it renders as a tick, and its
-    // timing readout carries no duration words.
+    // The user_message span has no duration_ms: the duration column reads —
+    // and its bar carries no explicit width (CSS renders the 3px tick).
     const userRow = rows.find((row) => row.getAttribute('data-span-kind') === 'user_message')
-    expect(userRow?.querySelector('.ark-timeline__bar')?.className).toContain('is-tick')
-    // The model_call span has one: a proportional bar plus duration words.
+    expect(userRow?.querySelector('.ark-gantt__duration')?.textContent).toContain('—')
+    expect(userRow?.querySelector<HTMLElement>('.ark-gantt__bar')?.style.getPropertyValue('--ark-span-width')).toBe('')
+    // The model_call span has one: the duration column carries the words and
+    // the bar gets an explicit width share.
     const modelRow = rows.find((row) => row.getAttribute('data-span-kind') === 'model_call')
-    expect(modelRow?.querySelector('.ark-timeline__bar')?.className).not.toContain('is-tick')
-    expect(modelRow?.querySelector('.ark-timeline__when')?.textContent).toContain('3')
+    expect(modelRow?.querySelector('.ark-gantt__duration')?.textContent).toContain('3')
+    expect(modelRow?.querySelector<HTMLElement>('.ark-gantt__bar')?.style.getPropertyValue('--ark-span-width')).toMatch(/%$/)
     await harness.unmount()
   })
 
@@ -108,24 +112,18 @@ describe('TraceTimelinePanel', () => {
     const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
     await settle()
 
-    const bars = [...harness.host.querySelectorAll<HTMLElement>('.ark-timeline__bar')]
+    const bars = [...harness.host.querySelectorAll<HTMLElement>('.ark-gantt__bar')]
     expect(bars.length).toBe(4)
+    const lefts: number[] = []
     for (const bar of bars) {
-      const left = bar.style.getPropertyValue('--ark-span-left')
-      expect(left).toMatch(/%$/)
-      // Non-tick bars carry an explicit width; ticks rely on the fixed style.
-      if (!bar.className.includes('is-tick')) {
-        expect(bar.style.getPropertyValue('--ark-span-width')).toMatch(/%$/)
-      }
+      expect(bar.style.getPropertyValue('--ark-span-left')).toMatch(/%$/)
+      const left = Number.parseFloat(bar.style.getPropertyValue('--ark-span-left'))
+      lefts.push(Number.isNaN(left) ? 0 : left)
     }
-    // Ordering invariant: a later-starting span never sits left of an
-    // earlier one on the shared axis.
-    const lefts = bars.map((bar) => Number.parseFloat(bar.style.getPropertyValue('--ark-span-left')))
     // Fixture order is chronological, so each bar starts at or after the
     // previous one on the shared axis.
     for (let i = 1; i < lefts.length; i += 1) {
-      const previous = lefts[i - 1] ?? 0
-      expect(lefts[i] ?? 0).toBeGreaterThanOrEqual(previous)
+      expect(lefts[i] ?? 0).toBeGreaterThanOrEqual(lefts[i - 1] ?? 0)
     }
     await harness.unmount()
   })
@@ -134,10 +132,12 @@ describe('TraceTimelinePanel', () => {
     const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
     await settle()
 
-    const failedRow = harness.host.querySelector('.ark-timeline__row.is-failed')
+    const failedRow = harness.host.querySelector('.ark-gantt__row.is-failed')
     expect(failedRow).not.toBeNull()
     expect(failedRow?.getAttribute('data-span-kind')).toBe('tool_call')
-    expect(failedRow?.textContent).toContain('失败')
+    // The failed mark lives in the expanded detail (reference layout); the
+    // collapsed row's bar turns red via the is-failed CSS hook.
+    expect(failedRow?.getAttribute('aria-expanded')).toBe('false')
     await harness.unmount()
   })
 

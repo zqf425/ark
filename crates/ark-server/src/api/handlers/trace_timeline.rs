@@ -84,9 +84,16 @@ struct TimelineFold {
     /// the same collapse thread detail applies to streamed items.
     items: HashMap<ItemId, ThreadItem>,
     order: Vec<ItemId>,
-    /// Tool calls started in this turn, keyed by call id, so a `tool_call`
-    /// span can begin at `ToolCallStarted` time instead of item creation.
+    /// Tool calls started in this turn, keyed by call id. The real log has
+    /// no `ToolCall` item events — the `ToolCall` item only exists as the
+    /// store's read-side projection (`ark-store/items.rs` applies the raw
+    /// events) — so tool spans must come from the events themselves:
+    /// `ToolCallStarted` supplies the true start instant, `ToolCallFinished`
+    /// the payload. Item-backed tool rows are then deduped against these.
     open_calls: HashMap<String, DateTime<Utc>>,
+    /// One row per `ToolCallFinished` of this turn, keyed by call id; the
+    /// authoritative source of tool spans on real logs.
+    tool_calls: HashMap<String, TraceSpan>,
     /// `provider:model` label the turn's opening user item carries; labels a
     /// `model_call` row when the `usage` event itself carries no name.
     model_label: Option<String>,
@@ -166,6 +173,41 @@ impl TimelineFold {
                 if *turn_id == turn {
                     self.open_calls.insert(call_id.clone(), *timestamp);
                 }
+            }
+            RuntimeEvent::ToolCallFinished {
+                turn_id,
+                timestamp,
+                call_id,
+                tool,
+                ok,
+                duration_ms,
+                output,
+                detail,
+                ..
+            } if *turn_id == turn => {
+                // The start instant is the authoritative `ToolCallStarted`
+                // time; fall back to `end - duration` so a missing start
+                // event still yields a correctly sized bar, and only a log
+                // missing both degrades to a point at the end.
+                let started = self.open_calls.get(call_id).copied().unwrap_or_else(|| {
+                    *timestamp
+                        - chrono::Duration::milliseconds(
+                            i64::try_from(*duration_ms).unwrap_or(i64::MAX),
+                        )
+                });
+                let span = tool_span(
+                    started,
+                    &ToolPayload {
+                        call_id: call_id.clone(),
+                        tool: tool.clone(),
+                        arguments: None,
+                        output: (!output.is_empty()).then(|| output.clone()),
+                        ok: Some(*ok),
+                        duration_ms: Some(*duration_ms),
+                    },
+                    None,
+                );
+                self.tool_calls.insert(call_id.clone(), span);
             }
             RuntimeEvent::CompactionStarted {
                 turn_id, timestamp, ..
@@ -283,6 +325,12 @@ impl TimelineFold {
             if item.is_context_checkpoint() && self.compaction.is_some() {
                 continue;
             }
+            // Tool calls never take the item path: real logs carry no
+            // `ToolCall` item events, so the only legitimate item rows here
+            // are unfinished-call leftovers, handled below from the item map.
+            if item.kind == ItemKind::ToolCall {
+                continue;
+            }
             if let Some(span) = item_span(item, &self.open_calls) {
                 spans.push(span);
             }
@@ -290,6 +338,25 @@ impl TimelineFold {
         if let Some((started, ended)) = self.compaction {
             spans.push(compaction_span(started, ended));
         }
+        // Tool spans come from `ToolCallFinished` events — the only source on
+        // real logs (`ToolCall` items are a read-side store projection of the
+        // same events, which is why the item path above skips them).
+        let mut event_tools: Vec<TraceSpan> = self.tool_calls.values().cloned().collect();
+        // A call the log started but never finished (crash, cancel) has no
+        // event row: keep its item-derived point instead of dropping the
+        // activity entirely.
+        for item in self.items.values() {
+            let Some(payload) = item.tool.as_ref() else {
+                continue;
+            };
+            if self.tool_calls.contains_key(&payload.call_id) {
+                continue;
+            }
+            if let Some(span) = item_span(item, &self.open_calls) {
+                event_tools.push(span);
+            }
+        }
+        spans.append(&mut event_tools);
         spans.append(&mut self.model_calls);
         // Stable sort keeps the log order for rows that share a timestamp.
         spans.sort_by_key(|span| span.started_at);
@@ -530,7 +597,6 @@ mod tests {
         }
     }
 
-    #[expect(dead_code)] // kept for upcoming fixture variants; mirrors wire fields
     #[allow(clippy::too_many_arguments)] // mirrors the wire event's field list
     fn tool_finished(
         seq: u64,
@@ -686,6 +752,79 @@ mod tests {
         let user_span = &timeline.spans[0];
         assert_eq!(user_span.duration_ms, None);
         assert_eq!(user_span.text_snippet.as_deref(), Some("帮我看看"));
+    }
+
+    #[test]
+    fn tool_spans_come_from_events_without_item_events() {
+        // Real-log shape: `ToolCall` items are a read-side store projection,
+        // the event log itself only carries started/finished events. The
+        // timeline must still show the tool call.
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let events = vec![
+            started(1, thread, turn, 0),
+            tool_started(2, thread, turn, 10, "c1", "bash"),
+            tool_finished(3, thread, turn, 40, "c1", "bash", true, 300, "ok"),
+            completed(4, thread, turn, 100),
+        ];
+        let timeline = build_trace_timeline(thread, &events, turn).expect("turn seen");
+        assert_eq!(kinds(&timeline), vec![TraceSpanKind::ToolCall]);
+        let span = &timeline.spans[0];
+        // Start instant is the authoritative `ToolCallStarted` time.
+        assert_eq!(span.started_at, at(10));
+        assert_eq!(span.duration_ms, Some(300));
+        assert_eq!(span.label.as_deref(), Some("bash"));
+    }
+
+    #[test]
+    fn item_backed_tool_rows_do_not_duplicate_event_rows() {
+        // A log that somehow carries both the events and the projected item
+        // must not render the call twice: the event row wins.
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let events = vec![
+            started(1, thread, turn, 0),
+            tool_started(2, thread, turn, 10, "c1", "bash"),
+            tool_finished(3, thread, turn, 40, "c1", "bash", true, 300, "ok"),
+            RuntimeEvent::ItemCompleted {
+                seq: 4,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(40),
+                item: tool_item(turn, 10, "c1", "bash", true),
+            },
+            completed(5, thread, turn, 100),
+        ];
+        let timeline = build_trace_timeline(thread, &events, turn).expect("turn seen");
+        assert_eq!(kinds(&timeline), vec![TraceSpanKind::ToolCall]);
+    }
+
+    #[test]
+    fn an_unfinished_tool_call_survives_as_a_point() {
+        // Started but never finished (crash/cancel): no event row exists, and
+        // the projected item carries no duration (the store only writes one
+        // on finish) — the leftover keeps the activity visible as a point.
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let mut leftover = tool_item(turn, 10, "c1", "bash", true);
+        if let Some(payload) = leftover.tool.as_mut() {
+            payload.duration_ms = None;
+        }
+        let events = vec![
+            started(1, thread, turn, 0),
+            tool_started(2, thread, turn, 10, "c1", "bash"),
+            RuntimeEvent::ItemCompleted {
+                seq: 3,
+                thread_id: thread,
+                turn_id: turn,
+                timestamp: at(40),
+                item: leftover,
+            },
+            completed(4, thread, turn, 100),
+        ];
+        let timeline = build_trace_timeline(thread, &events, turn).expect("turn seen");
+        assert_eq!(kinds(&timeline), vec![TraceSpanKind::ToolCall]);
+        assert_eq!(timeline.spans[0].duration_ms, None);
     }
 
     #[test]

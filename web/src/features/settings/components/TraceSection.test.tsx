@@ -245,7 +245,7 @@ describe('TraceSection', () => {
     await settle()
 
     expect(timelineMock).not.toHaveBeenCalled()
-    expect(harness.host.querySelector('.ark-timeline')).toBeNull()
+    expect(harness.host.querySelector('.ark-gantt__list')).toBeNull()
     await harness.unmount()
   })
 
@@ -266,7 +266,7 @@ describe('TraceSection', () => {
     expect(timelineMock).toHaveBeenCalledTimes(1)
     expect(timelineMock).toHaveBeenCalledWith(THREAD_A, TURN_1, expect.anything())
     expect(turnRow(0).getAttribute('aria-expanded')).toBe('true')
-    expect(harness.host.querySelector('.ark-timeline')).not.toBeNull()
+    expect(harness.host.querySelector('.ark-gantt__list')).not.toBeNull()
     // Inline drill-down: the panel mounts inside the clicked row's own
     // wrapper (`.ark-trace__turnitem`), directly under the row — not at the
     // section bottom. This is the §v2 fix under test.
@@ -283,7 +283,7 @@ describe('TraceSection', () => {
 
     expect(timelineMock).toHaveBeenCalledTimes(1)
     expect(turnRow(0).getAttribute('aria-expanded')).toBe('false')
-    expect(harness.host.querySelector('.ark-timeline')).toBeNull()
+    expect(harness.host.querySelector('.ark-gantt__list')).toBeNull()
     await harness.unmount()
   })
 
@@ -330,7 +330,7 @@ describe('TraceSection', () => {
     await settle()
 
     expect(timelineMock).toHaveBeenCalledWith(THREAD_A, TURN_2, expect.anything())
-    expect(harness.host.querySelector('.ark-timeline')).not.toBeNull()
+    expect(harness.host.querySelector('.ark-gantt__list')).not.toBeNull()
     expect(scrollCalls.length).toBeGreaterThan(0)
     await harness.unmount()
   })

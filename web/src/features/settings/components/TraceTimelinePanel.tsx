@@ -1,14 +1,12 @@
 /**
  * Single-turn timeline panel (requirement trace-analysis.md §v2).
  *
- * The panel fetches only when it is actually shown — mount alone never starts
- * a request, and a re-expand re-requests rather than keeping a second copy of
- * the backend projection. Spans render as a shared-axis Gantt with a top
- * ruler: every span is one bar positioned by its start fraction and sized by
- * its duration share; spans without a measured duration (text rows) render as
- * tick marks so the whole turn still reads as one time domain. Every colour,
- * position and error mark is a projection of the wire payload, never
- * recomputed here.
+ * Layout mirrors the smart-ark turn Gantt the feature was ported from: a
+ * fixed label column (disclosure arrow, kind chip, label), a shared-axis bar
+ * lane, and a fixed duration column. Rows expand in place to a detail block
+ * (type/start/duration/content), exactly like the reference panel. The panel
+ * fetches only when shown; every colour, position and error mark projects the
+ * wire payload — the server stays the only place that folds event data.
  */
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
@@ -28,11 +26,26 @@ export type TraceTimelinePanelProps = {
   turnId: string
 }
 
+/** smart-ark palette: one stable colour per span kind, so a bar is readable
+ * before its label is. Local CSS variables instead of hex in JSX keep the
+ * theme seams (error colour) in one place. */
+const SPAN_COLOR: Record<TraceTimelineSpan['kind'], string> = {
+  user_message: 'var(--ark-gantt-user)',
+  assistant_text: 'var(--ark-gantt-assistant)',
+  reasoning: 'var(--ark-gantt-reasoning)',
+  tool_call: 'var(--ark-gantt-tool)',
+  approval: 'var(--ark-gantt-approval)',
+  user_input: 'var(--ark-gantt-input)',
+  compaction: 'var(--ark-gantt-compaction)',
+  model_call: 'var(--ark-gantt-model)',
+  error: 'var(--ark-gantt-error)',
+  notice: 'var(--ark-gantt-notice)',
+}
+
 /**
  * The shared time domain: first span start → latest known end. A span's end
  * is its start plus the measured duration; text-only spans (no duration)
- * participate through their start only. Pure display arithmetic over the wire
- * payload — the server stays the only place that folds event data.
+ * participate through their start only.
  */
 function timelineWindow(spans: readonly TraceTimelineSpan[]): { start: number; end: number } {
   const starts = spans.map((span) => Date.parse(span.started_at))
@@ -47,67 +60,108 @@ function timelineWindow(spans: readonly TraceTimelineSpan[]): { start: number; e
 }
 
 /**
- * Ruler ticks: 4-5 divisions over the window, labelled in compact units
- * (12.5s / 1m05s style) rather than absolute clocks — the axis is relative to
- * the turn's first span, matching the bars underneath.
+ * Ruler labels: the reference panel shows 0 / ¼ / ½ / ¾ / total as relative
+ * compact durations over the shared axis.
  */
-function rulerTicks(start: number, end: number, locale: ReturnType<typeof useI18n>['locale']): Array<{ at: number; label: string }> {
+function rulerTicks(start: number, end: number, locale: ReturnType<typeof useI18n>['locale']): string[] {
   const span = end - start
-  const steps = 4
-  return Array.from({ length: steps + 1 }, (_, index) => {
-    const at = start + (span * index) / steps
-    const ms = index === steps ? span : (span * index) / steps
-    return {
-      at,
-      label: formatDurationWordsMs(Math.round(ms), locale),
-    }
-  })
+  return [0, 0.25, 0.5, 0.75, 1].map((fraction) =>
+    formatDurationWordsMs(Math.round(span * fraction), locale)
+  )
 }
 
 /**
- * One Gantt row: the kind chip plus a bar positioned on the shared axis, the
- * kind/label text underneath, and the row's own duration in a fixed right
- * column so scanning costs don't live in hover tooltips. Rows with a measured
- * duration get a proportional bar; rows without one (text spans) get a
- * fixed-width tick at their start — visible, but never reading as a fake
+ * One Gantt row in the reference layout: label column (disclosure arrow,
+ * kind chip, label), the bar lane on the shared axis, and the duration
+ * column. A row without a measured duration shows `—` in the duration column
+ * and renders a minimum-width tick in the lane — visible, never a fake
  * duration.
  */
-function SpanRow({ span, window: axis, locale }: { span: TraceTimelineSpan; window: { start: number; end: number }; locale: ReturnType<typeof useI18n>['locale'] }): JSX.Element {
+function SpanRow({
+  span,
+  window: axis,
+  locale,
+  expanded,
+  onToggle
+}: {
+  span: TraceTimelineSpan
+  window: { start: number; end: number }
+  locale: ReturnType<typeof useI18n>['locale']
+  expanded: boolean
+  onToggle: () => void
+}): JSX.Element {
   const { t } = useI18n()
   const failed = span.is_error === true
   const at = Date.parse(span.started_at)
   const leftPct = Math.min(100, Math.max(0, ((at - axis.start) / (axis.end - axis.start)) * 100))
   const hasDuration = span.duration_ms != null
   const widthPct = hasDuration
-    ? Math.max(0.75, ((span.duration_ms ?? 0) / (axis.end - axis.start)) * 100)
+    ? Math.max(0.5, ((span.duration_ms ?? 0) / (axis.end - axis.start)) * 100)
     : null
   const timing = hasDuration
     ? `${formatClock(span.started_at, locale)} · ${formatDurationWordsMs(span.duration_ms ?? 0, locale)}`
     : formatClock(span.started_at, locale)
   return (
-    <li
-      className={`ark-timeline__row${failed ? ' is-failed' : ''}`}
-      data-span-kind={span.kind}
-      title={`${t(`settings.trace.span.kind.${span.kind}`)}${span.label ? ` · ${span.label}` : ''} · ${timing}`}
-    >
-      <span className="ark-timeline__chip" aria-hidden="true" />
-      <span className="ark-timeline__main" aria-hidden="true">
-        <span className="ark-timeline__lane">
+    <li className="ark-gantt__item">
+      <button
+        type="button"
+        className={`ark-gantt__row${failed ? ' is-failed' : ''}`}
+        data-span-kind={span.kind}
+        aria-expanded={expanded}
+        onClick={onToggle}
+        title={`${t(`settings.trace.span.kind.${span.kind}`)}${span.label ? ` · ${span.label}` : ''} · ${timing}`}
+      >
+        <span className="ark-gantt__label">
+          <span className="ark-gantt__chevron" aria-hidden="true">
+            {expanded ? '▾' : '▸'}
+          </span>
           <span
-            className={`ark-timeline__bar${hasDuration ? '' : ' is-tick'}`}
-            style={{ '--ark-span-left': `${leftPct}%`, '--ark-span-width': widthPct != null ? `${widthPct}%` : undefined } as CSSProperties}
+            className="ark-gantt__chip"
+            aria-hidden="true"
+            style={{ '--ark-span-color': SPAN_COLOR[span.kind] } as CSSProperties}
+          />
+          <span className="ark-gantt__name">
+            {t(`settings.trace.span.kind.${span.kind}`)}
+            {span.label ? <span className="ark-gantt__sub">{span.label}</span> : null}
+          </span>
+        </span>
+        <span className="ark-gantt__lane" aria-hidden="true">
+          <span
+            className={`ark-gantt__bar${failed ? ' is-failed' : ''}`}
+            style={{
+              '--ark-span-left': `${leftPct}%`,
+              '--ark-span-width': widthPct != null ? `${widthPct}%` : undefined,
+              '--ark-span-color': SPAN_COLOR[span.kind]
+            } as CSSProperties}
           />
         </span>
-        <span className="ark-timeline__meta">
-          <span className="ark-timeline__kind">{t(`settings.trace.span.kind.${span.kind}`)}</span>
-          {span.label ? <span className="ark-timeline__label">{span.label}</span> : null}
-          {failed ? <span className="ark-timeline__failed">{t('settings.trace.span.failed')}</span> : null}
-          {span.text_snippet ? <span className="ark-timeline__snippet">{span.text_snippet}</span> : null}
+        <span className="ark-gantt__duration">
+          {hasDuration ? formatDurationWordsMs(span.duration_ms ?? 0, locale) : '—'}
         </span>
-      </span>
-      <span className="ark-timeline__when">
-        {hasDuration ? formatDurationWordsMs(span.duration_ms ?? 0, locale) : '—'}
-      </span>
+      </button>
+      {expanded ? (
+        <div className="ark-gantt__detail">
+          <span>
+            {t('settings.trace.gantt.kind')}:{' '}
+            <b>{t(`settings.trace.span.kind.${span.kind}`)}</b>
+          </span>
+          <span>
+            {t('settings.trace.gantt.started')}: <b>{formatClock(span.started_at, locale)}</b>
+          </span>
+          {hasDuration ? (
+            <span>
+              {t('settings.trace.gantt.duration')}:{' '}
+              <b>{formatDurationWordsMs(span.duration_ms ?? 0, locale)}</b>
+            </span>
+          ) : null}
+          {failed ? <span className="ark-gantt__detail-failed">{t('settings.trace.span.failed')}</span> : null}
+          {span.text_snippet ? (
+            <div className="ark-gantt__detail-text">
+              {span.text_snippet}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </li>
   )
 }
@@ -122,12 +176,14 @@ export function TraceTimelinePanel({ threadId, turnId }: TraceTimelinePanelProps
   const [timeline, setTimeline] = useState<TraceTimeline | null>(null)
   const [status, setStatus] = useState<LoadStatus>('loading')
   const [error, setError] = useState<string | null>(null)
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     const controller = new AbortController()
     setStatus('loading')
     setError(null)
     setTimeline(null)
+    setExpandedKeys(new Set())
     fetchTraceTimeline(threadId, turnId, controller.signal)
       .then((response) => {
         if (!mounted.current || controller.signal.aborted) return
@@ -174,23 +230,46 @@ export function TraceTimelinePanel({ threadId, turnId }: TraceTimelinePanelProps
 
   const axis = timelineWindow(timeline.spans)
   const ticks = rulerTicks(axis.start, axis.end, locale)
+  const toggle = (key: string): void => {
+    setExpandedKeys((previous) => {
+      const next = new Set(previous)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
   return (
     <div className="ark-timeline">
-      <div className="ark-timeline__ruler" aria-hidden="true">
-        <span className="ark-timeline__ruler-corner" />
-        <div className="ark-timeline__ruler-lane">
-          {ticks.map((tick) => (
-            <span key={tick.at} className="ark-timeline__ruler-tick" style={{ '--ark-tick-at': `${((tick.at - axis.start) / (axis.end - axis.start)) * 100}%` } as CSSProperties}>
-              {tick.label}
-            </span>
+      <div className="ark-gantt__summary">
+        {t('settings.trace.gantt.summary', {
+          count: timeline.spans.length,
+          total: formatDurationWordsMs(axis.end - axis.start, locale)
+        })}
+      </div>
+      <div className="ark-gantt__ruler" aria-hidden="true">
+        <span className="ark-gantt__ruler-label" />
+        <div className="ark-gantt__ruler-scale">
+          {ticks.map((label, index) => (
+            <span key={`${label}-${index}`}>{label}</span>
           ))}
         </div>
-        <span className="ark-timeline__ruler-corner" />
+        <span className="ark-gantt__ruler-duration" />
       </div>
-      <ul className="ark-timeline__list">
-        {timeline.spans.map((span, index) => (
-          <SpanRow key={`${index}-${span.item_id ?? span.started_at}`} span={span} window={axis} locale={locale} />
-        ))}
+      <ul className="ark-gantt__list">
+        {timeline.spans.map((span, index) => {
+          const key = `${index}-${span.item_id ?? span.started_at}`
+          return (
+            <SpanRow
+              key={key}
+              span={span}
+              window={axis}
+              locale={locale}
+              expanded={expandedKeys.has(key)}
+              onToggle={() => toggle(key)}
+            />
+          )
+        })}
       </ul>
       <p className="ark-settings__hint">{t('settings.trace.timeline.ganttHint')}</p>
     </div>
