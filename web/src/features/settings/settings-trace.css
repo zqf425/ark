@@ -719,6 +719,11 @@
   color: var(--ark-text-faint);
 }
 
+.ark-trace__token-share-note {
+  color: var(--ark-text-faint);
+  font-size: calc(10px * var(--ark-scale));
+}
+
 .ark-trace__token-unreported {
   font-size: calc(10px * var(--ark-scale));
   color: var(--ark-text-faint);

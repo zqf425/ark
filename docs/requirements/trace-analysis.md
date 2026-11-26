@@ -141,7 +141,15 @@ v1 只给了聚合数字与 Top 清单,无法回答"这个回合的 2 分钟花�
 - 互斥口径复用 smart-ark `buildTokenSegments`:`cached` 是 `prompt` 的子集,
   三段为输入未命中(`prompt - cached`)/缓存命中(`cached`)/输出(`completion`),
   和为 `total`;缓存字段全缺时只画输入/输出两段并显示「供应商未上报缓存统计」,
-  不把缺失值当成 `cached = 0`。命中率与「约」标记只读后端已有值。
+  不把缺失值当成 `cached = 0`。
+- 命中率与会话头部（`SessionStatsBar`）统一为前端口径 `hit / (hit + miss)`:
+  唯一宿主在 `features/settings/api/trace-token-segments.ts` 的纯函数
+  `traceCacheHitRate`,经 `trace-api.ts` re-export;两处缓存计数齐全且分母
+  >0 才显示,缺失 miss 不推算、不伪造。后端 `cache_hit_rate` 为 `None` 不
+  影响显示;`cache_hit_rate_approximate` 仍只沿用后端标记。命中率文案的
+  tooltip 以 i18n 说明该口径。
+- 图例三段百分比的本质是"占总 token",在概览图例区统一显示一次小字标注
+  (中英 i18n),不再让"缓存命中 42.8%"与命中率 97% 并列产生歧义。
 - 分段唯一宿主在 `features/settings/api/trace-token-segments.ts`,由
   `trace-api.ts` re-export:`TraceSection` 概览与单回合 `TraceTimelinePanel`
   详情都经 api 层导入同一函数,禁止组件间复制或跨 feature 导入组件内部函数。
@@ -160,7 +168,8 @@ v1 只给了聚合数字与 Top 清单,无法回答"这个回合的 2 分钟花�
 - 展开详情时,仅 `model_call` 行渲染「Token 用量」与「缓存指标」两个区块:
   输入/输出/合计 token 用 `Intl.NumberFormat(locale)` 千分位;缓存字段只显示
   provider 实际给出的项,命中率用百分比格式(一位小数),近似值按标记加
-  「约」。三项缓存字段全缺时显示「供应商未上报缓存统计」;未展开与非模型
+  「约」,计算口径与会话概览共用 `traceCacheHitRate` 纯函数(与 `SessionStatsBar`
+  一致),tooltip 说明口径。三项缓存字段全缺时显示「供应商未上报缓存统计」;未展开与非模型
   行均不渲染这两个区块。
 - **当前实现**:Rust 侧 `TraceSpanUsage` 已登记 ts_export 根并生成
   `web/src/generated/TraceSpanUsage.ts`,`TraceSpan.usage` 已出现在生成类型;

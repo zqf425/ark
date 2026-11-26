@@ -8,7 +8,7 @@
  */
 import { useI18n } from '../../../shared/i18n'
 import type { Usage } from '../../../shared/contracts'
-import { traceTokenCacheReported, traceTokenSegments, type TraceTokenSegment } from '../api/trace-api'
+import { traceCacheHitRate, traceTokenCacheReported, traceTokenSegments, type TraceTokenSegment } from '../api/trace-api'
 
 type Locale = ReturnType<typeof useI18n>['locale']
 
@@ -54,7 +54,9 @@ export function SessionTokenOverview({ usage, locale }: { usage: Usage | undefin
   // legend uses the same denominator so no share is silently renormalized.
   const total = Math.max(0, usage?.total_tokens ?? 0)
   const cacheReported = traceTokenCacheReported(usage)
-  const rate = usage?.cache_hit_rate
+  // The header's convention: hit/(hit+miss), independent of the sampled wire
+  // rate. Approximate is still the backend's label for a derived miss count.
+  const rate = traceCacheHitRate(usage)
   const percentFormat = new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 1 })
   const percent = (value: number): string => percentFormat.format(value / Math.max(1, total))
 
@@ -65,8 +67,8 @@ export function SessionTokenOverview({ usage, locale }: { usage: Usage | undefin
         <span>
           {t('settings.trace.gantt.tokenTotal')}: <b>{formatCount(total, locale)}</b>
         </span>
-        {cacheReported && rate != null ? (
-          <span>
+        {rate != null ? (
+          <span title={t('settings.trace.gantt.cacheRateHint')}>
             {t('settings.trace.gantt.cacheRate')}:{' '}
             <b>
               {usage?.cache_hit_rate_approximate === true ? `${t('settings.trace.gantt.cacheRateApprox')} ` : ''}
@@ -95,6 +97,7 @@ export function SessionTokenOverview({ usage, locale }: { usage: Usage | undefin
         {segments.map((segment) => (
           <LegendItem key={segment.key} segment={segment} total={total} locale={locale} />
         ))}
+        <span className="ark-trace__token-share-note">{t('settings.trace.token.shareOfTotal')}</span>
       </div>
       {!cacheReported ? (
         <span className="ark-trace__token-unreported">{t('settings.trace.gantt.cacheUnreported')}</span>

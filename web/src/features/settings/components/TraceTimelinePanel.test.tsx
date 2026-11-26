@@ -230,7 +230,7 @@ describe('TraceTimelinePanel', () => {
     await harness.unmount()
   })
 
-  it('marks an approximate cache rate without recalculating it', async () => {
+  it('marks an approximate cache rate with the localized tag', async () => {
     timelineMock.mockResolvedValue(timeline({
       spans: [{
         kind: 'model_call',
@@ -241,6 +241,7 @@ describe('TraceTimelinePanel', () => {
           completion_tokens: 200,
           total_tokens: 1_200,
           cache_hit_tokens: 900,
+          cache_miss_tokens: 100,
           cache_hit_rate: 0.42,
           cache_hit_rate_approximate: true
         }
@@ -252,9 +253,9 @@ describe('TraceTimelinePanel', () => {
     await act(async () => { modelRow.click() })
     await settle()
     const detail = modelRow.parentElement!.querySelector('.ark-gantt__detail')!
-    expect(detail.textContent).toContain('命中率: 约 42%')
+    expect(detail.textContent).toContain('命中率: 约 90%')
     expect(detail.textContent).toContain('命中 token: 900')
-    expect(detail.textContent).not.toContain('未命中 token')
+    expect(detail.textContent).toContain('未命中 token: 100')
     await harness.unmount()
   })
 

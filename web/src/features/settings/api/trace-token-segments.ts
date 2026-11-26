@@ -17,6 +17,21 @@ export type TraceTokenSegment = {
   value: number
 }
 
+/**
+ * Front-end cache hit rate, in the same units as the session header:
+ * `hit / (hit + miss)`. A missing miss counter makes the rate unknown — it is
+ * never reconstructed from `prompt_tokens`, which also counts non-cacheable
+ * inputs. The wire `cache_hit_rate` is deliberately ignored here: a sampled
+ * aggregate can omit it even when both counters are present.
+ * `cache_hit_rate_approximate` (from the wire) marks a derived miss counter.
+ */
+export function traceCacheHitRate(usage: Usage | undefined): number | null {
+  const hit = usage?.cache_hit_tokens
+  const miss = usage?.cache_miss_tokens
+  if (hit == null || miss == null || hit + miss <= 0) return null
+  return hit / (hit + miss)
+}
+
 /** Cache fields are provider optional; all three absent means "not reported". */
 export function traceTokenCacheReported(usage: Usage | undefined): boolean {
   return usage?.cache_hit_tokens != null || usage?.cache_miss_tokens != null || usage?.cache_hit_rate != null

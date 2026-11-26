@@ -23,13 +23,14 @@ import type {
   TurnStat
 } from '../../../generated'
 import {
+  traceCacheHitRate,
   traceTokenCacheReported,
   traceTokenSegments,
   type TraceTokenSegment
 } from './trace-token-segments'
 
 export type { TraceTokenSegment }
-export { traceTokenCacheReported, traceTokenSegments }
+export { traceCacheHitRate, traceTokenCacheReported, traceTokenSegments }
 
 export type {
   ToolStat,

@@ -19,6 +19,7 @@ import { useMounted } from '../../../shared/api/use-mounted'
 import { formatClock } from '../../../shared/format'
 import {
   fetchTraceTimeline,
+  traceCacheHitRate,
   traceTokenSegments,
   type TraceSpanDetail,
   type TraceSpanDetailKind,
@@ -155,15 +156,18 @@ function TokenMetrics({ usage, locale }: { usage: TraceSpanUsage; locale: Return
 }
 
 /**
- * Cache summary: the hit rate already comes from the provider (or its
- * documented derivation) — the renderer only formats it. All fields absent
- * means "not reported", never a synthesized zero.
+ * Cache summary: the hit rate follows the same hit/(hit+miss) convention as
+ * the session header, hosted in the api layer. A missing miss counter leaves
+ * the rate hidden; all fields absent means "not reported", never a synthesized
+ * zero.
  */
 function CacheMetrics({ usage, locale }: { usage: TraceSpanUsage; locale: ReturnType<typeof useI18n>['locale'] }): JSX.Element {
   const { t } = useI18n()
   const hasHit = usage.cache_hit_tokens != null
   const hasMiss = usage.cache_miss_tokens != null
-  const hasRate = usage.cache_hit_rate != null
+  const rate = traceCacheHitRate(usage)
+  const wireRate = usage.cache_hit_rate
+  const hasRate = rate != null || wireRate != null
   if (!hasHit && !hasMiss && !hasRate) {
     return (
       <DetailSection title={t('settings.trace.gantt.cacheTitle')}>
@@ -176,12 +180,12 @@ function CacheMetrics({ usage, locale }: { usage: TraceSpanUsage; locale: Return
       <div className="ark-gantt__detail-metrics">
         {hasHit ? <span>{t('settings.trace.gantt.cacheHit')}: <b>{formatCount(usage.cache_hit_tokens!, locale)}</b></span> : null}
         {hasMiss ? <span>{t('settings.trace.gantt.cacheMiss')}: <b>{formatCount(usage.cache_miss_tokens!, locale)}</b></span> : null}
-        {hasRate ? (
-          <span>
+        {hasRate && rate != null ? (
+          <span title={t('settings.trace.gantt.cacheRateHint')}>
             {t('settings.trace.gantt.cacheRate')}:{' '}
             <b>
               {usage.cache_hit_rate_approximate === true ? `${t('settings.trace.gantt.cacheRateApprox')} ` : ''}
-              {new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 1 }).format(usage.cache_hit_rate!)}
+              {new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 1 }).format(rate ?? 0)}
             </b>
           </span>
         ) : null}

@@ -11,6 +11,7 @@ import type { Usage } from '../../../shared/contracts'
 import {
   analysisThreadTitle,
   buildAnalysisPrompt,
+  traceCacheHitRate,
   traceTokenCacheReported,
   traceTokenSegments,
   traceTokenTotals,
@@ -117,6 +118,23 @@ describe('traceTokenTotals', () => {
   it('falls back to the sum and to zeros for a missing usage', () => {
     expect(traceTokenTotals(usage({ total_tokens: undefined })).total_tokens).toBe(1_500)
     expect(traceTokenTotals(undefined)).toEqual({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
+  })
+})
+
+describe('traceCacheHitRate', () => {
+  it('uses hit/(hit+miss) and ignores the wire rate', () => {
+    expect(traceCacheHitRate(usage({
+      cache_hit_tokens: 28_924_864,
+      cache_miss_tokens: 881_149,
+      cache_hit_rate: 0.42
+    }))).toBeCloseTo(28_924_864 / (28_924_864 + 881_149))
+  })
+
+  it('reports an unknown rate when a counter is missing or the pair is empty', () => {
+    expect(traceCacheHitRate(usage({ cache_hit_tokens: 300 }))).toBeNull()
+    expect(traceCacheHitRate(usage({ cache_miss_tokens: 300 }))).toBeNull()
+    expect(traceCacheHitRate(usage({ cache_hit_tokens: 0, cache_miss_tokens: 0 }))).toBeNull()
+    expect(traceCacheHitRate(undefined)).toBeNull()
   })
 })
 

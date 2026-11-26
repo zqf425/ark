@@ -198,6 +198,8 @@ describe('TraceSection', () => {
     expect(panel.textContent).toContain('输入(未命中缓存): 700')
     expect(panel.textContent).toContain('输出 token: 500')
     expect(panel.textContent).toContain('命中率: 30%')
+    expect(panel.textContent).toContain('百分比为占总 token')
+    expect(panel.querySelector('[title*="命中 token"]')).not.toBeNull()
     expect(panel.textContent).not.toContain('供应商未上报缓存统计')
     const widths = [...panel.querySelectorAll<HTMLElement>('.ark-trace__token-segment')]
       .map((segment) => Number.parseFloat(segment.style.width))
@@ -213,6 +215,61 @@ describe('TraceSection', () => {
       .toBeLessThan(children.findIndex((node) => node.classList.contains('ark-trace__token-overview')))
     expect(children.findIndex((node) => node.classList.contains('ark-trace__token-overview')))
       .toBeLessThan(children.findIndex((node) => node.classList.contains('ark-trace__charts')))
+    await harness.unmount()
+  })
+
+  it('shows the frontend hit rate and a total-token share note for the pinned sample', async () => {
+    statsMock.mockResolvedValue(stats({
+      usage: {
+        prompt_tokens: 29_806_013,
+        completion_tokens: 38_509_851,
+        total_tokens: 67_552_420,
+        cache_hit_tokens: 28_924_864,
+        cache_miss_tokens: 881_149
+      }
+    }))
+    const harness = await mountWithProviders(<TraceSection />)
+    await settle()
+    await pickFirstThread(harness.host)
+
+    const panel = harness.host.querySelector('.ark-trace__token-overview')!
+    expect(panel.textContent).toContain('命中率: 97%')
+    const legend = [...panel.querySelectorAll('.ark-trace__token-legend-item')].map((node) => node.textContent?.trim())
+    expect(legend).toContain('缓存命中: 28,924,86442.8%')
+    expect(panel.querySelector('.ark-trace__token-share-note')?.textContent).toBe('百分比为占总 token')
+    await harness.unmount()
+  })
+
+  it('keeps the frontend rate when the backend aggregate omitted it', async () => {
+    statsMock.mockResolvedValue(stats({
+      usage: {
+        prompt_tokens: 1_000,
+        completion_tokens: 500,
+        total_tokens: 1_500,
+        cache_hit_tokens: 300,
+        cache_miss_tokens: 700
+      }
+    }))
+    const harness = await mountWithProviders(<TraceSection />)
+    await settle()
+    await pickFirstThread(harness.host)
+
+    const panel = harness.host.querySelector('.ark-trace__token-overview')!
+    expect(panel.textContent).toContain('命中率: 30%')
+    await harness.unmount()
+  })
+
+  it('omits the hit rate rather than faking it when miss is missing', async () => {
+    statsMock.mockResolvedValue(stats({
+      usage: { prompt_tokens: 1_000, completion_tokens: 500, total_tokens: 1_500, cache_hit_tokens: 300 }
+    }))
+    const harness = await mountWithProviders(<TraceSection />)
+    await settle()
+    await pickFirstThread(harness.host)
+
+    const panel = harness.host.querySelector('.ark-trace__token-overview')!
+    expect(panel.textContent).toContain('缓存命中: 300')
+    expect(panel.textContent).not.toContain('命中率')
     await harness.unmount()
   })
 
@@ -241,6 +298,7 @@ describe('TraceSection', () => {
         completion_tokens: 200,
         total_tokens: 1_200,
         cache_hit_tokens: 900,
+        cache_miss_tokens: 100,
         cache_hit_rate: 0.42,
         cache_hit_rate_approximate: true
       }
@@ -250,7 +308,7 @@ describe('TraceSection', () => {
     await pickFirstThread(harness.host)
 
     const panel = harness.host.querySelector('.ark-trace__token-overview')!
-    expect(panel.textContent).toContain('命中率: 约 42%')
+    expect(panel.textContent).toContain('命中率: 约 90%')
     expect(panel.textContent).not.toContain('供应商未上报缓存统计')
     await harness.unmount()
   })
