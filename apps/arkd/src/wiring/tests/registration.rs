@@ -1,6 +1,65 @@
 use super::*;
 
 #[test]
+fn merge_child_mcp_tools_exposes_mcp_tools_to_the_child_registry() {
+    let workspace = tempfile::tempdir().expect("temp dir is creatable");
+    let skills = Arc::new(ark_skills::SkillRuntime::fixed(
+        ark_skills::SkillsConfig::default(),
+        workspace.path().to_path_buf(),
+    ));
+    let http: Arc<dyn ark_ports::HttpCapability> = Arc::new(InertHttp);
+    let child_tools =
+        build_child_tools(Arc::clone(&skills), Arc::clone(&http)).expect("child tools build");
+    assert!(
+        !child_tools.names().iter().any(|name| name.contains('.')),
+        "a fresh child registry has no qualified mcp tools"
+    );
+
+    tools::merge_child_mcp_tools(&child_tools, vec![Arc::new(StubMcpTool)])
+        .expect("child mcp merge");
+    assert!(
+        child_tools
+            .names()
+            .contains(&"playwright.browser_navigate".to_string()),
+        "the child registry must see the merged mcp group"
+    );
+
+    // Re-merging the whole group is the reconnect path: it must replace, not
+    // conflict, and it must not evict the child's builtins.
+    tools::merge_child_mcp_tools(&child_tools, vec![Arc::new(StubMcpTool)])
+        .expect("re-merge replaces the group");
+    assert!(child_tools.names().contains(&"web_fetch".to_string()));
+    assert!(child_tools.names().contains(&"read".to_string()));
+    // The delegation guard is structural: the mcp group must never bring a
+    // child a way to spawn grandchildren.
+    assert!(!child_tools.names().contains(&"delegate_task".to_string()));
+}
+
+/// Minimal qualified tool stub standing in for an external MCP adapter.
+#[derive(Default)]
+struct StubMcpTool;
+
+#[async_trait::async_trait]
+impl ark_ports::Tool for StubMcpTool {
+    fn name(&self) -> &'static str {
+        "playwright.browser_navigate"
+    }
+
+    fn schema(&self) -> &'static serde_json::Value {
+        static SCHEMA: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+        SCHEMA.get_or_init(|| serde_json::json!({"type": "object", "properties": {}}))
+    }
+
+    async fn execute(
+        &self,
+        _ctx: &ark_ports::ToolContext,
+        _args: ark_ports::ToolArgs,
+    ) -> ark_common::Result<ark_ports::ToolOutput> {
+        Err(ark_common::ArkError::internal("not used by this test"))
+    }
+}
+
+#[test]
 fn request_user_input_is_registered_for_both_agent_tool_sets() {
     let workspace = tempfile::tempdir().expect("temp dir is creatable");
     let skills = Arc::new(ark_skills::SkillRuntime::fixed(

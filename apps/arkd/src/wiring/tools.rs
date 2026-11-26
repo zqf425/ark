@@ -45,3 +45,24 @@ pub(super) fn build_child_tools(
     registry.register(Arc::new(LoadSkillTool::new(skills)))?;
     Ok(registry)
 }
+
+/// Merge the external-MCP and plugin tools into the child registry.
+///
+/// A delegated research task runs entirely inside the child, so a child whose
+/// `web_fetch` fails has no way to fall back to a browser tool — the fallback
+/// lives in the same MCP group the parent sees. Delegated work runs under the
+/// parent's autonomy and the same egress governance, so exposing the group does
+/// not widen what a child may *do*; it only stops the child from being the one
+/// agent that cannot do it. Callers must keep this **after**
+/// `build_child_tools` and before the first child turn: the merge is one
+/// `replace_group`, so an MCP reconnect cannot evict plugin tools here either.
+///
+/// `delegate_task` stays absent: the group never contains it (children cannot
+/// spawn grandchildren), and a qualified `mcp` group name cannot collide with a
+/// builtin name anyway (`replace_group` still refuses one, by design).
+pub(super) fn merge_child_mcp_tools(
+    child_tools: &ToolRegistry,
+    mcp_tools: Vec<Arc<dyn Tool>>,
+) -> Result<()> {
+    child_tools.replace_group("mcp", mcp_tools)
+}

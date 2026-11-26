@@ -27,8 +27,8 @@ use ark_obs::UsageRecorder;
 #[cfg(test)]
 use ark_ports::ModelRole;
 use ark_ports::{
-    BaseServices, EventSink, ModelClient, ModelMessage, SandboxPolicy, SessionStore, ToolOutput,
-    ToolRegistryPort,
+    BaseServices, EventSink, ModelClient, ModelMessage, SandboxPolicy, SessionStore, Tool,
+    ToolOutput, ToolRegistryPort,
 };
 use ark_store::{AttachmentStore, FileSessionStore, StoreConfig, DEFAULT_MAX_ATTACHMENT_BYTES};
 use ark_tool::{ApprovalPolicy, Autonomy, BuiltinSandboxPolicy, RegistryToolRunner, ToolRegistry};
@@ -67,6 +67,15 @@ mod tests;
 /// audit found 99/99 tool rounds carrying a single call, all serialized at
 /// 2-4s of model latency each, with the batch planner idling. Changing this
 /// prompt is a one-time full prompt-cache miss; the commit message must say so.
+///
+/// The MCP and delegation-wait sentences exist because models enumerate their
+/// tool set from code they read, not from the injected schemas: a session
+/// audit of a web-research turn found the model listing its tools as
+/// "bash, delegate, list, read, ... web_fetch, write" — never the connected
+/// `playwright.*` browser tools — and then burning 36 child + 6 parent 404s
+/// on guessed URLs, plus sleeping in `bash` for minutes waiting on child runs
+/// it could have just let notify. Naming the escape hatches here is cheaper
+/// than one more guessed URL.
 pub const SYSTEM_PROMPT: &str = "\
 You are ark, a coding agent running as a standalone desktop tool.
 Work in small, verifiable steps. Prefer reading the repository over guessing.
@@ -76,6 +85,13 @@ exploration and update it as soon as a step completes or the direction changes.
 When several tool calls are independent, issue them together in one turn instead \
 of one per turn: read-only tools (read/ls/find/grep/web_fetch) and shells run \
 concurrently, which cuts both wall-clock time and per-round overhead.
+Beyond the builtins, tools qualified as `<server>.<tool>` come from connected \
+MCP servers (e.g. `playwright.*` browser tools for script-rendered or bot-gated \
+pages). When web_fetch fails with 404/SSRF or a bot wall, re-derive the URL from \
+a real page or use a browser tool; never retry the identical URL.
+After `delegate_task` returns a queued child run id, stop and wait for the \
+completion notice: polling with bash_output/bash_kill or sleeping in bash only \
+burns tokens and trips the storm breaker.
 Respond in the user's language. Unless the user writes in another language, \
 write user-visible content (answers, explanations) and all reasoning/thinking \
 text in Simplified Chinese.";
@@ -260,14 +276,13 @@ fn assemble_turn_pipeline(
     let interactive = Arc::new(ark_server::InteractiveGates::new());
     let gate_broker: Arc<dyn GateBroker> = interactive.clone();
 
-    let mcp_adapter = Arc::new(McpServerAdapter::new(
-        Arc::clone(&platform.mcp),
-        Arc::clone(&agent.tools),
-        {
+    let mcp_adapter = Arc::new(
+        McpServerAdapter::new(Arc::clone(&platform.mcp), Arc::clone(&agent.tools), {
             let plugin_mcp = Arc::clone(plugin_mcp);
             Arc::new(move || crate::plugin_host::plugin_tools(&plugin_mcp))
-        },
-    ));
+        })
+        .with_child_tools(Arc::clone(&agent.child_tools)),
+    );
     // The provision enable flow registers its declared external MCP server
     // through the same adapter the GUI edits (requirements/plugin-provisioning.md).
     plugins
@@ -455,6 +470,9 @@ fn select_model(
 struct AgentSurface {
     delegation: Arc<ark_delegation::DelegationRuntime>,
     tools: Arc<ToolRegistry>,
+    /// The child registry, kept reachable so the MCP group can be merged into
+    /// it after the external servers connect (see `build_tool_runner`).
+    child_tools: Arc<ToolRegistry>,
     completion_notifications: tokio::sync::broadcast::Receiver<ThreadId>,
 }
 
@@ -526,6 +544,7 @@ async fn assemble_agent_surface(
     Ok(AgentSurface {
         delegation,
         tools,
+        child_tools,
         completion_notifications,
     })
 }
@@ -548,7 +567,13 @@ async fn build_tool_runner(
     // one family silently shadow the other.
     let mut mcp_tools = platform.mcp.connect_all().await;
     mcp_tools.extend(plugins.tools());
-    agent.tools.replace_group("mcp", mcp_tools)?;
+    agent.tools.replace_group("mcp", mcp_tools.clone())?;
+    // The child registry rides the same group: a delegated research task runs
+    // entirely inside the child, so a child whose `web_fetch` fails must still
+    // see the browser-style fallback tools the parent has (see
+    // `merge_child_mcp_tools`). `clone()` shares the same adapter `Arc`s; the
+    // group list itself is per-registry state.
+    tools::merge_child_mcp_tools(&agent.child_tools, mcp_tools)?;
     Ok(Arc::new(RegistryToolRunner::new(
         Arc::clone(&agent.tools),
         Arc::clone(policy),

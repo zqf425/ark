@@ -60,6 +60,11 @@ hook 包装的工具执行与 `ReactorSpec` 构造都住在这里。理由是结
 不会漂移；除该文件外，`wiring` 仍不得包含业务规则。静态前缀里的 `SYSTEM_PROMPT` 是版本化资产：
 指引模型对长任务先 `todo_write` 建计划、完成或改向时更新（只提工具名，不把 checkpoint 的结构化
 行前缀当模型契约）；修改它意味着一次性的 prompt-cache 全量 miss，提交信息必须显式声明该代价。
+2026-11-26 追加两句（同一次 miss）：其一告知模型存在 `<server>.<tool>` 形态的 MCP 工具（如
+playwright 浏览器类），并规定 web_fetch 404/SSRF/反爬失败时重新推导 URL 或改用浏览器工具、不得
+原样重试——实测模型按读到的源码目录枚举工具集，从不读注入的 schema，浏览器工具因此从未被想起；
+其二规定后台派发后等待完成通知，不得用 bash_output 轮询 child id 或在 bash 里 sleep——实测一次
+回合主线程连发 sleep 90/240/300 等待子代理，被 storm breaker 抑制后仍继续轮询已被逐出的 child id。
 
 ## 子代理装配
 
@@ -67,6 +72,9 @@ child executor 在此复用同一个 `ark-agent` `Reactor`，并桥接 cancel/st
 它不能创建第二套 agent framework，也不能让模型指定任意 workspace。`ConfigSubagentPolicy` 把
 `subagents`（Hot）实时转成 `SubagentPolicy`，同一快照既驱动 delegation runtime 的预算，也经
 `delegation_tools(runner, Some(policy))` 驱动 `delegate_task` 的 `default_background` 派发默认。
+子注册表在装配时并入父表同一 `mcp` 工具组（见上文"启动时组合根连接所有启用的外部 MCP server"）：
+`merge_child_mcp_tools`（`wiring/tools.rs`）是合并的唯一宿主，`McpServerAdapter` 的热更新同步也指向
+同一注册表；`delegate_task` 仍不进入子表，最大深度保持 1。
 
 父回合开始前由组合根读取 `SessionStore` 的父事件，调用 `ark-agent` 的纯 inbox 投影并作为动态 system
 source 注入 reactor。父回合成功后再追加 completion acknowledgement；写入失败记录告警并保留下一回合
@@ -172,7 +180,13 @@ egress 授权（该构造器对插件清单路径不可达），并把同一能�
 
 启动时组合根连接所有启用的外部 MCP server，并把成功发现的 `<server_id>.<tool>` 原子发布到父工具表；单个
 连接失败只反映到 MCP server 状态，不中止 arkd。MCP server 的 upsert/delete 在请求内重新发现并替换该动态
-分组，因此下一父回合读取的是最新 schema，而不需要重启。组合根还注册 `load_skill`：它读取 `SkillRuntime`
+分组，因此下一父回合读取的是最新 schema，而不需要重启。**子工具表并入同一 `mcp` 组**（2026-11-26）：
+`build_tool_runner` 在父 `replace_group` 之后把同一组合并进子注册表，`McpServerAdapter` 持有子注册表并在
+每次 `synchronize_tools` 时同步替换——被委派的调研任务整个运行在子代理里，若子代理只有 `web_fetch`，则
+web_fetch 失败后没有任何浏览器类兜底（实测一个调研回合 3 个子代理 42 次猜测 URL 失败，而浏览器工具就在
+父表里）；子表与父表共用同一沙箱与出口治理，并入该组不改变子代理"能做什么"，只消除"子代理是唯一看不见
+兜底工具的 agent"这一不对称。`delegate_task` 仍只注册在父表：`replace_group` 按组名保护，合并不会把
+delegate 类工具带进子表。组合根还注册 `load_skill`：它读取 `SkillRuntime`
 的已扫描正文快照，避免 `ark-tool` 反向依赖 skills 实现。
 `request_user_input` 属于内置工具集，随 `ark_tool::builtins()` 在父/子两个注册表中可用；
 其执行由 `ark-agent` 的用户输入 gate 拦截，组合根不为它写任何特例。
