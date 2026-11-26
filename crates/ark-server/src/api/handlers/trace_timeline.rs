@@ -185,16 +185,27 @@ impl TimelineFold {
                 timestamp, message, ..
             } => self.observe_error(*timestamp, message, turn),
             // One usage event = one completed model round; the agent loop
-            // measured its wall clock, which the span reports as an
-            // approximation until real LLM span events exist.
+            // measured its wall clock. The usage timestamp is the round's
+            // END: the span starts at `end - duration` so model rounds tile
+            // the timeline instead of collapsing to points at their end
+            // instants (the "gantt has holes" defect). When the duration is
+            // missing (pre-field logs), the span stays a point at the end —
+            // no invented start.
             RuntimeEvent::Usage {
                 turn_id,
                 timestamp,
                 usage,
                 ..
             } if *turn_id == turn => {
+                let started = match usage.duration_ms {
+                    Some(ms) => {
+                        *timestamp
+                            - chrono::Duration::milliseconds(i64::try_from(ms).unwrap_or(i64::MAX))
+                    }
+                    None => *timestamp,
+                };
                 self.model_calls.push(model_call_span(
-                    *timestamp,
+                    started,
                     usage.duration_ms,
                     self.model_label.clone(),
                 ));
@@ -619,6 +630,7 @@ mod tests {
     }
 
     #[test]
+
     fn a_normal_turn_sorts_all_kinds_by_start_time() {
         let thread = ThreadId::new();
         let turn = TurnId::new();
@@ -636,7 +648,10 @@ mod tests {
                 timestamp: at(10),
                 item: user,
             },
-            usage_at(3, thread, turn, 20, Some(1_200)),
+            usage_at(3, thread, turn, 20, Some(5)),
+            // Model call: ends at 20ms, lasts 5ms → starts at 15ms, after
+            // the user message at 10ms and before the tool at 30ms.
+            // the user message at 10s and before the tool at 30s.
             tool_started(4, thread, turn, 30, "c1", "read"),
             RuntimeEvent::ItemCompleted {
                 seq: 5,
@@ -656,6 +671,9 @@ mod tests {
                 TraceSpanKind::ToolCall,
             ]
         );
+        // The model span starts at `end - duration`, not at the end instant.
+        let model = &timeline.spans[1];
+        assert_eq!(model.started_at, at(15));
         // The tool span starts at `ToolCallStarted` time, not item creation.
         let tool = &timeline.spans[2];
         assert_eq!(tool.started_at, at(30));
@@ -663,7 +681,7 @@ mod tests {
         assert_eq!(tool.label.as_deref(), Some("read"));
         assert!(!tool.is_error);
         let model = &timeline.spans[1];
-        assert_eq!(model.duration_ms, Some(1_200));
+        assert_eq!(model.duration_ms, Some(5));
         assert_eq!(model.label.as_deref(), Some("openai:gpt-5"));
         let user_span = &timeline.spans[0];
         assert_eq!(user_span.duration_ms, None);
@@ -757,16 +775,23 @@ mod tests {
         let turn = TurnId::new();
         let events = vec![
             started(1, thread, turn, 0),
-            usage_at(2, thread, turn, 20, None),
-            usage_at(3, thread, turn, 90, Some(800)),
-            completed(4, thread, turn, 100),
+            // Measured round: ends at 90ms, lasts 80ms → starts at 10ms.
+            usage_at(2, thread, turn, 90, Some(80)),
+            // Unmeasured round: starts (and stays) at its end instant —
+            // never a invented start or a fake zero duration.
+            usage_at(3, thread, turn, 200, None),
+            completed(4, thread, turn, 300),
         ];
         let timeline = build_trace_timeline(thread, &events, turn).expect("turn seen");
         assert_eq!(timeline.spans.len(), 2);
         assert_eq!(timeline.spans[0].kind, TraceSpanKind::ModelCall);
-        // An unmeasured sample keeps the duration unset, never a fake zero.
-        assert_eq!(timeline.spans[0].duration_ms, None);
-        assert_eq!(timeline.spans[1].duration_ms, Some(800));
+        assert_eq!(timeline.spans[0].duration_ms, Some(80));
+        assert_eq!(timeline.spans[1].duration_ms, None);
+        // The usage timestamp is the round's END: the measured span starts at
+        // `end - duration` (90-80=10ms), so consecutive rounds tile the axis
+        // instead of collapsing to points (the "gantt has holes" defect).
+        assert_eq!(timeline.spans[0].started_at, at(10));
+        assert_eq!(timeline.spans[1].started_at, at(200));
     }
 
     #[test]

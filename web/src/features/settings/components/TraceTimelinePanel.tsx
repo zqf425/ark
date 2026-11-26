@@ -3,11 +3,12 @@
  *
  * The panel fetches only when it is actually shown — mount alone never starts
  * a request, and a re-expand re-requests rather than keeping a second copy of
- * the backend projection. Spans render as a shared-axis Gantt: every span is
- * one bar positioned by its start fraction and sized by its duration share;
- * spans without a measured duration (text rows) render as tick marks so the
- * whole turn still reads as one time domain. Every colour, position and error
- * mark is a projection of the wire payload, never recomputed here.
+ * the backend projection. Spans render as a shared-axis Gantt with a top
+ * ruler: every span is one bar positioned by its start fraction and sized by
+ * its duration share; spans without a measured duration (text rows) render as
+ * tick marks so the whole turn still reads as one time domain. Every colour,
+ * position and error mark is a projection of the wire payload, never
+ * recomputed here.
  */
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
@@ -46,11 +47,30 @@ function timelineWindow(spans: readonly TraceTimelineSpan[]): { start: number; e
 }
 
 /**
- * One Gantt row: the kind chip plus a bar positioned on the shared axis. Rows
- * with a measured duration get a proportional bar; rows without one (text
- * spans) get a fixed-width tick at their start — visible, but never reading
- * as a fake duration. The tooltip carries kind + label + exact timing, so the
- * compressed bar never hides the numbers.
+ * Ruler ticks: 4-5 divisions over the window, labelled in compact units
+ * (12.5s / 1m05s style) rather than absolute clocks — the axis is relative to
+ * the turn's first span, matching the bars underneath.
+ */
+function rulerTicks(start: number, end: number, locale: ReturnType<typeof useI18n>['locale']): Array<{ at: number; label: string }> {
+  const span = end - start
+  const steps = 4
+  return Array.from({ length: steps + 1 }, (_, index) => {
+    const at = start + (span * index) / steps
+    const ms = index === steps ? span : (span * index) / steps
+    return {
+      at,
+      label: formatDurationWordsMs(Math.round(ms), locale),
+    }
+  })
+}
+
+/**
+ * One Gantt row: the kind chip plus a bar positioned on the shared axis, the
+ * kind/label text underneath, and the row's own duration in a fixed right
+ * column so scanning costs don't live in hover tooltips. Rows with a measured
+ * duration get a proportional bar; rows without one (text spans) get a
+ * fixed-width tick at their start — visible, but never reading as a fake
+ * duration.
  */
 function SpanRow({ span, window: axis, locale }: { span: TraceTimelineSpan; window: { start: number; end: number }; locale: ReturnType<typeof useI18n>['locale'] }): JSX.Element {
   const { t } = useI18n()
@@ -71,17 +91,23 @@ function SpanRow({ span, window: axis, locale }: { span: TraceTimelineSpan; wind
       title={`${t(`settings.trace.span.kind.${span.kind}`)}${span.label ? ` · ${span.label}` : ''} · ${timing}`}
     >
       <span className="ark-timeline__chip" aria-hidden="true" />
-      <span className="ark-timeline__lane" aria-hidden="true">
-        <span
-          className={`ark-timeline__bar${hasDuration ? '' : ' is-tick'}`}
-          style={{ '--ark-span-left': `${leftPct}%`, '--ark-span-width': widthPct != null ? `${widthPct}%` : undefined } as CSSProperties}
-        />
+      <span className="ark-timeline__main" aria-hidden="true">
+        <span className="ark-timeline__lane">
+          <span
+            className={`ark-timeline__bar${hasDuration ? '' : ' is-tick'}`}
+            style={{ '--ark-span-left': `${leftPct}%`, '--ark-span-width': widthPct != null ? `${widthPct}%` : undefined } as CSSProperties}
+          />
+        </span>
+        <span className="ark-timeline__meta">
+          <span className="ark-timeline__kind">{t(`settings.trace.span.kind.${span.kind}`)}</span>
+          {span.label ? <span className="ark-timeline__label">{span.label}</span> : null}
+          {failed ? <span className="ark-timeline__failed">{t('settings.trace.span.failed')}</span> : null}
+          {span.text_snippet ? <span className="ark-timeline__snippet">{span.text_snippet}</span> : null}
+        </span>
       </span>
-      <span className="ark-timeline__kind">{t(`settings.trace.span.kind.${span.kind}`)}</span>
-      {span.label ? <span className="ark-timeline__label">{span.label}</span> : null}
-      {failed ? <span className="ark-timeline__failed">{t('settings.trace.span.failed')}</span> : null}
-      {span.text_snippet ? <span className="ark-timeline__snippet">{span.text_snippet}</span> : null}
-      <span className="ark-timeline__when">{timing}</span>
+      <span className="ark-timeline__when">
+        {hasDuration ? formatDurationWordsMs(span.duration_ms ?? 0, locale) : '—'}
+      </span>
     </li>
   )
 }
@@ -146,17 +172,27 @@ export function TraceTimelinePanel({ threadId, turnId }: TraceTimelinePanelProps
     )
   }
 
+  const axis = timelineWindow(timeline.spans)
+  const ticks = rulerTicks(axis.start, axis.end, locale)
   return (
     <div className="ark-timeline">
-      <p className="ark-settings__hint">{t('settings.trace.timeline.ganttHint')}</p>
+      <div className="ark-timeline__ruler" aria-hidden="true">
+        <span className="ark-timeline__ruler-corner" />
+        <div className="ark-timeline__ruler-lane">
+          {ticks.map((tick) => (
+            <span key={tick.at} className="ark-timeline__ruler-tick" style={{ '--ark-tick-at': `${((tick.at - axis.start) / (axis.end - axis.start)) * 100}%` } as CSSProperties}>
+              {tick.label}
+            </span>
+          ))}
+        </div>
+        <span className="ark-timeline__ruler-corner" />
+      </div>
       <ul className="ark-timeline__list">
-        {(() => {
-          const axis = timelineWindow(timeline.spans)
-          return timeline.spans.map((span, index) => (
-            <SpanRow key={`${index}-${span.item_id ?? span.started_at}`} span={span} window={axis} locale={locale} />
-          ))
-        })()}
+        {timeline.spans.map((span, index) => (
+          <SpanRow key={`${index}-${span.item_id ?? span.started_at}`} span={span} window={axis} locale={locale} />
+        ))}
       </ul>
+      <p className="ark-settings__hint">{t('settings.trace.timeline.ganttHint')}</p>
     </div>
   )
 }

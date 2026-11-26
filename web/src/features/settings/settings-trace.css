@@ -215,6 +215,41 @@
   background: var(--ark-bg-raised);
 }
 
+/* Top ruler: compact relative labels over the shared axis, aligned with
+   the lane column (chip corner + duration corner on the sides). */
+.ark-timeline__ruler {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) 64px;
+  column-gap: 8px;
+  align-items: end;
+  margin-bottom: 4px;
+  font-size: calc(10px * var(--ark-scale));
+  color: var(--ark-text-faint);
+}
+
+.ark-timeline__ruler-lane {
+  position: relative;
+  height: 14px;
+}
+
+.ark-timeline__ruler-tick {
+  position: absolute;
+  left: var(--ark-tick-at, 0%);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* First and last ticks read from their edge, not centered, so they hug the
+   axis ends instead of overflowing. */
+.ark-timeline__ruler-tick:first-child {
+  transform: none;
+}
+
+.ark-timeline__ruler-tick:last-child {
+  transform: translateX(-100%);
+}
+
 .ark-timeline__list {
   margin: 0;
   padding: 0;
@@ -226,12 +261,10 @@
 
 .ark-timeline__row {
   display: grid;
-  grid-template-columns: 9px minmax(0, 1fr) auto;
+  grid-template-columns: 9px minmax(0, 1fr) 64px;
   grid-template-areas:
-    'chip lane when'
-    'chip meta meta';
+    'chip main when';
   column-gap: 8px;
-  row-gap: 1px;
   align-items: center;
   min-width: 0;
   font-size: calc(12px * var(--ark-scale));
@@ -245,13 +278,27 @@
   background: var(--ark-timeline-kind, var(--ark-text-faint));
 }
 
+.ark-timeline__main {
+  grid-area: main;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .ark-timeline__lane {
-  grid-area: lane;
   position: relative;
   height: 10px;
   border-radius: 3px;
   background: var(--ark-bg-hover);
   overflow: hidden;
+}
+
+.ark-timeline__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
 
 /* Shared-axis Gantt bar: left/width are the server-reported start/duration
@@ -282,8 +329,6 @@
 }
 
 .ark-timeline__kind {
-  grid-area: meta;
-  justify-self: start;
   font-weight: 600;
   color: var(--ark-text);
 }
@@ -329,8 +374,6 @@
 }
 
 .ark-timeline__label {
-  grid-area: meta;
-  justify-self: start;
   flex: none;
   font-family: var(--ark-mono);
   font-size: calc(11.5px * var(--ark-scale));
@@ -342,8 +385,6 @@
 }
 
 .ark-timeline__failed {
-  grid-area: meta;
-  justify-self: start;
   flex: none;
   color: var(--ark-error);
   font-weight: 600;
@@ -354,8 +395,6 @@
 }
 
 .ark-timeline__snippet {
-  grid-area: meta;
-  justify-self: start;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -366,9 +405,11 @@
 
 .ark-timeline__when {
   grid-area: when;
+  justify-self: end;
   font-variant-numeric: tabular-nums;
   color: var(--ark-text-faint);
   font-size: calc(11px * var(--ark-scale));
+  white-space: nowrap;
 }
 
 
