@@ -26,6 +26,8 @@ export type TraceChartsProps = {
   expandedTurnId: string | null
   /** Expand (or toggle away from) one turn's timeline. */
   onToggleTurn: (turnId: string) => void
+  /** Inline timeline renderer; called only for the expanded turn. */
+  renderTimeline: (turnId: string) => ReactNode
 }
 
 /** One horizontal bar: name, proportionally filled track, count on the right. */
@@ -83,11 +85,15 @@ function ToolBars({ tools }: { tools: readonly ToolStat[] }): JSX.Element | null
 function TurnBars({
   stats,
   expandedTurnId,
-  onToggleTurn
+  onToggleTurn,
+  renderTimeline
 }: {
   stats: TraceStatsResponse
   expandedTurnId: string | null
   onToggleTurn: (turnId: string) => void
+  /** Inline expansion: the panel renders under the clicked row, not at the
+   * section bottom — the reader never scrolls away from the row they clicked. */
+  renderTimeline: (turnId: string) => ReactNode
 }): JSX.Element | null {
   const { t, locale } = useI18n()
   const turns = stats.turn_stats
@@ -103,30 +109,37 @@ function TurnBars({
         const ratio = Math.max(activeMs / max, activeMs > 0 ? 0.03 : 0.015)
         const expanded = expandedTurnId === turn.turn_id
         return (
-          <button
-            key={turn.turn_id}
-            type="button"
-            className={`ark-trace__turnrow${expanded ? ' is-expanded' : ''}`}
-            aria-expanded={expanded}
-            onClick={() => onToggleTurn(turn.turn_id)}
-          >
-            <span className="ark-trace__turnrow-index">{number(index + 1)}</span>
-            <span
-              className={`ark-trace__turnrow-gauge${turn.failed_tool_calls > 0 ? ' is-fail' : ''}`}
-              style={{ '--ark-trace-turn-ratio': `${Math.round(ratio * 100)}%` } as CSSProperties}
-            />
-            <span className="ark-trace__turnrow-time">
-              {turn.active_ms != null ? formatDurationWordsMs(turn.active_ms, locale) : '—'}
-            </span>
-            <span className="ark-trace__turnrow-meta">
-              {t('settings.trace.turnHint', {
-                index: index + 1,
-                duration: turn.active_ms != null ? formatDurationWordsMs(turn.active_ms, locale) : '—',
-                rounds: number(turn.model_rounds),
-                calls: number(turn.tool_calls)
-              })}
-            </span>
-          </button>
+          <div key={turn.turn_id} className="ark-trace__turnitem">
+            <button
+              type="button"
+              className={`ark-trace__turnrow${expanded ? ' is-expanded' : ''}`}
+              aria-expanded={expanded}
+              aria-controls={`ark-trace-timeline-${turn.turn_id}`}
+              onClick={() => onToggleTurn(turn.turn_id)}
+            >
+              <span className="ark-trace__turnrow-index">{number(index + 1)}</span>
+              <span
+                className={`ark-trace__turnrow-gauge${turn.failed_tool_calls > 0 ? ' is-fail' : ''}`}
+                style={{ '--ark-trace-turn-ratio': `${Math.round(ratio * 100)}%` } as CSSProperties}
+              />
+              <span className="ark-trace__turnrow-time">
+                {turn.active_ms != null ? formatDurationWordsMs(turn.active_ms, locale) : '—'}
+              </span>
+              <span className="ark-trace__turnrow-meta">
+                {t('settings.trace.turnHint', {
+                  index: index + 1,
+                  duration: turn.active_ms != null ? formatDurationWordsMs(turn.active_ms, locale) : '—',
+                  rounds: number(turn.model_rounds),
+                  calls: number(turn.tool_calls)
+                })}
+              </span>
+            </button>
+            {expanded ? (
+              <div id={`ark-trace-timeline-${turn.turn_id}`} className="ark-trace__turnpanel">
+                {renderTimeline(turn.turn_id)}
+              </div>
+            ) : null}
+          </div>
         )
       })}
       <p className="ark-settings__hint">
@@ -309,7 +322,7 @@ function ChartBlock({ titleKey, children }: { titleKey: MessageKey; children: Re
  * tables. Empty datasets degrade to hint lines — an empty section never
  * renders an empty grid.
  */
-export function TraceCharts({ stats, expandedTurnId, onToggleTurn }: TraceChartsProps): JSX.Element {
+export function TraceCharts({ stats, expandedTurnId, onToggleTurn, renderTimeline }: TraceChartsProps): JSX.Element {
   const { t } = useI18n()
   return (
     <div className="ark-trace__charts">
@@ -318,7 +331,7 @@ export function TraceCharts({ stats, expandedTurnId, onToggleTurn }: TraceCharts
         <ToolTable tools={stats.tool_stats} />
       </ChartBlock>
       <ChartBlock titleKey="settings.trace.chart.turns">
-        <TurnBars stats={stats} expandedTurnId={expandedTurnId} onToggleTurn={onToggleTurn} />
+        <TurnBars stats={stats} expandedTurnId={expandedTurnId} onToggleTurn={onToggleTurn} renderTimeline={renderTimeline} />
         <p className="ark-settings__hint">{t('settings.trace.timeline.hint')}</p>
       </ChartBlock>
       <ChartBlock titleKey="settings.trace.chart.slow">

@@ -267,7 +267,12 @@ describe('TraceSection', () => {
     expect(timelineMock).toHaveBeenCalledWith(THREAD_A, TURN_1, expect.anything())
     expect(turnRow(0).getAttribute('aria-expanded')).toBe('true')
     expect(harness.host.querySelector('.ark-timeline')).not.toBeNull()
-    // The jump scrolls the chart area into view (stubbed above).
+    // Inline drill-down: the panel mounts inside the clicked row's own
+    // wrapper (`.ark-trace__turnitem`), directly under the row — not at the
+    // section bottom. This is the §v2 fix under test.
+    const item = turnRow(0).closest('.ark-trace__turnitem')
+    expect(item?.querySelector('.ark-timeline')).not.toBeNull()
+    // The jump scrolls the expanded panel into view (stubbed above).
     expect(scrollCalls.length).toBeGreaterThan(0)
 
     // The second click on the same row collapses it again (no fetch refire).

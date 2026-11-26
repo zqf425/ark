@@ -9,6 +9,7 @@
  * stats have loaded.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Button, EmptyState, useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import type { ThreadSummary } from '../../../shared/contracts'
@@ -110,8 +111,9 @@ export function TraceSection(): JSX.Element {
   const [statsError, setStatsError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
   // §v2 drill-down: at most one turn's timeline is expanded at a time; the
-  // same click collapses it again. The ref anchors the scroll so table-row
-  // jumps land on the chart area without DOM-query selector strings.
+  // same click collapses it again. The ref is set by the inline panel wrapper
+  // itself, so a table-row jump scrolls to the expanded panel — right under
+  // the clicked turn — without DOM-query selector strings.
   const [expandedTurnId, setExpandedTurnId] = useState<string | null>(null)
   const chartsRef = useRef<HTMLDivElement | null>(null)
 
@@ -189,10 +191,29 @@ export function TraceSection(): JSX.Element {
     setExpandedTurnId((current) => (current === turnId ? null : turnId))
   }, [])
 
-  // Scroll after React commits the expansion render: keyed on the expanded id,
-  // so a collapse (null) or a switch to another turn both re-anchor the chart
-  // area. An effect keeps this deterministic — no rAF timing, and it fires in
-  // tests as soon as `act` flushes.
+  // Inline panel factory passed down to the charts: keyed by turn id, so a
+  // re-expand remounts and re-fetches instead of keeping a second projection.
+  const renderTimeline = useCallback(
+    (turnId: string): ReactNode =>
+      selectedId ? (
+        // The wrapper mounts with the expansion itself (loading state
+        // included), so the scroll effect below always finds its anchor —
+        // the panel's inner list only exists once data arrived.
+        <div
+          ref={(node) => {
+            chartsRef.current = node
+          }}
+        >
+          <TraceTimelinePanel threadId={selectedId} turnId={turnId} key={turnId} />
+        </div>
+      ) : null,
+    [selectedId]
+  )
+
+  // Scroll after React commits the expansion render: keyed on the expanded
+  // id, so a collapse (null) skips it and a switch to another turn anchors
+  // the viewport on the freshly expanded panel — under the clicked row, not
+  // at the section bottom.
   useEffect(() => {
     if (!expandedTurnId) return
     chartsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -247,14 +268,7 @@ export function TraceSection(): JSX.Element {
       {statsLoaded && stats ? (
         <>
           <MetricRow stats={stats} locale={locale} />
-          {/* Scroll anchor for the §v2 table-row jumps: a real element ref,
-              no `getElementById` selector strings. */}
-          <div ref={chartsRef}>
-            <TraceCharts stats={stats} expandedTurnId={expandedTurnId} onToggleTurn={toggleTurn} />
-          </div>
-          {expandedTurnId && selectedId ? (
-            <TraceTimelinePanel threadId={selectedId} turnId={expandedTurnId} key={expandedTurnId} />
-          ) : null}
+          <TraceCharts stats={stats} expandedTurnId={expandedTurnId} onToggleTurn={toggleTurn} renderTimeline={renderTimeline} />
         </>
       ) : null}
 

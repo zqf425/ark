@@ -79,6 +79,10 @@ export const SETTINGS_TRACE_MESSAGES = {
   ],
   'settings.trace.timeline.loadFailed': ['时间线加载失败', 'Failed to load the timeline'],
   'settings.trace.timeline.title': ['回合时间线', 'Turn timeline'],
+  'settings.trace.timeline.ganttHint': [
+    '横条按真实耗时在共享时间轴上展开;无实测时长的文本行显示为刻度点。',
+    'Bars scale by real duration on one shared axis; text spans without a measured duration show as ticks.'
+  ],
   'settings.trace.timeline.hint': [
     '点击回合条形可展开或收起该回合的时间线。',
     'Click a turn bar to expand or collapse its timeline.'

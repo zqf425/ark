@@ -225,25 +225,65 @@
 }
 
 .ark-timeline__row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  grid-template-areas:
+    'chip lane when'
+    'chip meta meta';
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: center;
   min-width: 0;
   font-size: calc(12px * var(--ark-scale));
 }
 
 .ark-timeline__chip {
-  flex: none;
+  grid-area: chip;
   width: 9px;
   height: 9px;
   border-radius: 3px;
   background: var(--ark-timeline-kind, var(--ark-text-faint));
-  /* Keep the dot on the text line without a nested flex baseline dance. */
-  align-self: center;
+}
+
+.ark-timeline__lane {
+  grid-area: lane;
+  position: relative;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--ark-bg-hover);
+  overflow: hidden;
+}
+
+/* Shared-axis Gantt bar: left/width are the server-reported start/duration
+   mapped to the turn's time window (§v2); the CSS custom properties come from
+   SpanRow, the projection stays in one place. */
+.ark-timeline__bar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: var(--ark-span-left, 0%);
+  width: var(--ark-span-width, auto);
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--ark-timeline-kind, var(--ark-text-faint));
+}
+
+.ark-timeline__row.is-failed .ark-timeline__bar {
+  background: var(--ark-error);
+}
+
+/* Zero-length spans (text rows without a measured duration) render as a
+   fixed tick at their start: visible on the axis, never reading as a fake
+   duration. */
+.ark-timeline__bar.is-tick {
+  width: 3px;
+  min-width: 3px;
+  border-radius: 1px;
 }
 
 .ark-timeline__kind {
-  flex: none;
+  grid-area: meta;
+  justify-self: start;
   font-weight: 600;
   color: var(--ark-text);
 }
@@ -289,6 +329,8 @@
 }
 
 .ark-timeline__label {
+  grid-area: meta;
+  justify-self: start;
   flex: none;
   font-family: var(--ark-mono);
   font-size: calc(11.5px * var(--ark-scale));
@@ -300,6 +342,8 @@
 }
 
 .ark-timeline__failed {
+  grid-area: meta;
+  justify-self: start;
   flex: none;
   color: var(--ark-error);
   font-weight: 600;
@@ -310,6 +354,8 @@
 }
 
 .ark-timeline__snippet {
+  grid-area: meta;
+  justify-self: start;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -319,23 +365,13 @@
 }
 
 .ark-timeline__when {
-  flex: none;
-  margin-left: auto;
+  grid-area: when;
   font-variant-numeric: tabular-nums;
   color: var(--ark-text-faint);
   font-size: calc(11px * var(--ark-scale));
 }
 
-.ark-timeline__duration {
-  flex: none;
-  font-variant-numeric: tabular-nums;
-  color: var(--ark-text);
-  font-size: calc(11.5px * var(--ark-scale));
-}
 
-.ark-timeline__row.is-failed .ark-timeline__duration {
-  color: var(--ark-error);
-}
 
 /* ---------- tables ---------- */
 
@@ -410,4 +446,21 @@
   flex-wrap: wrap;
   padding-top: 12px;
   border-top: 1px solid var(--ark-border-muted);
+}
+
+/* Inline expansion wrapper: the panel sits directly under its turn row
+   (§v2 inline drill-down), indented so the row→panel nesting reads at a
+   glance without scrolling to a section-bottom pane. */
+.ark-trace__turnitem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ark-trace__turnpanel {
+  margin-left: 24px;
+  padding: 8px 10px;
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius-sm);
+  background: var(--ark-bg-hover);
 }

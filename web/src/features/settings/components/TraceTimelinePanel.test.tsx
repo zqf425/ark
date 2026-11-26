@@ -93,12 +93,40 @@ describe('TraceTimelinePanel', () => {
 
     const rows = [...harness.host.querySelectorAll('.ark-timeline__row')]
     expect(rows).toHaveLength(4)
-    // The user_message span has no duration_ms: no duration readout at all.
+    // The user_message span has no duration_ms: it renders as a tick, and its
+    // timing readout carries no duration words.
     const userRow = rows.find((row) => row.getAttribute('data-span-kind') === 'user_message')
-    expect(userRow?.querySelector('.ark-timeline__duration')).toBeNull()
-    // The model_call span does have one, formatted with the shared clock words.
+    expect(userRow?.querySelector('.ark-timeline__bar')?.className).toContain('is-tick')
+    // The model_call span has one: a proportional bar plus duration words.
     const modelRow = rows.find((row) => row.getAttribute('data-span-kind') === 'model_call')
-    expect(modelRow?.querySelector('.ark-timeline__duration')?.textContent).toContain('3')
+    expect(modelRow?.querySelector('.ark-timeline__bar')?.className).not.toContain('is-tick')
+    expect(modelRow?.querySelector('.ark-timeline__when')?.textContent).toContain('3')
+    await harness.unmount()
+  })
+
+  it('positions bars on the shared axis by start and duration share', async () => {
+    const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
+    await settle()
+
+    const bars = [...harness.host.querySelectorAll<HTMLElement>('.ark-timeline__bar')]
+    expect(bars.length).toBe(4)
+    for (const bar of bars) {
+      const left = bar.style.getPropertyValue('--ark-span-left')
+      expect(left).toMatch(/%$/)
+      // Non-tick bars carry an explicit width; ticks rely on the fixed style.
+      if (!bar.className.includes('is-tick')) {
+        expect(bar.style.getPropertyValue('--ark-span-width')).toMatch(/%$/)
+      }
+    }
+    // Ordering invariant: a later-starting span never sits left of an
+    // earlier one on the shared axis.
+    const lefts = bars.map((bar) => Number.parseFloat(bar.style.getPropertyValue('--ark-span-left')))
+    // Fixture order is chronological, so each bar starts at or after the
+    // previous one on the shared axis.
+    for (let i = 1; i < lefts.length; i += 1) {
+      const previous = lefts[i - 1] ?? 0
+      expect(lefts[i] ?? 0).toBeGreaterThanOrEqual(previous)
+    }
     await harness.unmount()
   })
 
