@@ -41,6 +41,15 @@ gated 在 `Notice` kind 上）。取消原因词表与自治权词表不在本 c
 该 id 已关联到**本线程**，本阶段只记录本回合引用了哪些附件，不向模型传字节。`TurnStarted` 的
 `attachment_ids` 同样带 serde default，使旧日志可读。
 
+链路分析 wire 由 `trace_stats.rs` 与 `trace_timeline.rs` 提供。时间线 span 的
+`details: Option<Vec<TraceSpanDetail>>` 只挂在 `model_call` 行上:流式
+`reasoning` / `assistant_message` item 是模型调用期间的子事件,不独立占时间轴,
+以 `kind`(`reasoning` / `assistant_text`)、200 字 `text_snippet` 和 `started_at`
+呈现。归属由服务端按包含 `created_at` 的最窄模型调用窗口 `[end-duration, end]`
+决定;窗口外或旧日志无 `duration_ms` 的片段在本投影中丢弃(契约注释已声明),
+全文仍以 thread detail 为真源。新类型 `TraceSpanDetail` / `TraceSpanDetailKind`
+已登记 ts 生成根与 barrel。
+
 `ToolCallStarted/Finished`、`UserInputRequested/Resolved` 与 `TurnFailed` 携带可选
 `item_id`，由 Rust 生产者通过 `ark_common::keyed_item_id` 生成；live 渲染层直接消费该 ID，
 不再实现或镜像哈希算法。字段带 serde default 且空值省略，旧日志缺少时由存储投影按原 namespace

@@ -173,6 +173,12 @@
 - `POST /v1/workspace/pick` 在 `spawn_blocking` 中调用 `FolderDialogService::pick_folder`（原生对话框是
   模态 UI，请求取消不关闭已弹出的对话框）；端口未装配时 `runtime_unavailable`/503，返回
   `FolderPickResponse`，`path` 省略即用户取消。见 [workspace-switch 需求](../requirements/workspace-switch-and-git-diff.md)。
+- `GET /v1/threads/{id}/trace-timeline` 的折叠中,`reasoning` /
+  `assistant_message` item 不再产出独立 span:它们按 item id 折叠后作为文本片段
+  挂到含其 `created_at` 的最窄模型调用窗口 `[usage.timestamp-duration, usage.timestamp]`
+  的 `model_call.details`(升序,同类多段保留);窗口外或无 `duration_ms` 的旧日志
+  片段在投影中丢弃。投影逻辑在 `api/handlers/trace_timeline.rs`,单测在同目录
+  `trace_timeline/tests.rs`。
 - `GET /v1/threads/{id}/usage` 与 `GET /v1/debug/llm-rounds` 都只从权威 `usage` 事件投影（每轮模型
   调用恰好一条），不维护第二套用量真源。`usage.duration_ms` 优先采用 agent 循环实测的模型调用耗时
   （不含工具执行），并作为轮次耗时的唯一 wire 载体。线程 usage 聚合直接对这些样本做严格折叠，不为

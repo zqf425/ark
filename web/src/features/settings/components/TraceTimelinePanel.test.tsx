@@ -6,7 +6,8 @@
  * mount fetch *is* the click-time fetch — TraceSection's test pins that no
  * panel exists before the click), spans render top-down with kind labels,
  * a 404 renders the empty state instead of an error, failed spans carry the
- * failure mark, and a text span without `duration_ms` shows no duration.
+ * failure mark, and reasoning/assistant text only appears inside an expanded
+ * `model_call` row as ordered detail fragments (never as its own Gantt row).
  */
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -86,6 +87,87 @@ describe('TraceTimelinePanel', () => {
     expect(harness.text()).toContain('exec')
     // The reference-style summary names the span count and total.
     expect(harness.text()).toContain('4 个 span')
+    await harness.unmount()
+  })
+
+  it('renders model-call details in server order after the meta line when expanded', async () => {
+    const details = [
+      { kind: 'reasoning' as const, started_at: '2026-11-02T00:00:06Z', text_snippet: '先检查登录链路' },
+      { kind: 'assistant_text' as const, started_at: '2026-11-02T00:00:07Z', text_snippet: '我已经定位到问题' },
+      { kind: 'reasoning' as const, started_at: '2026-11-02T00:00:08Z', text_snippet: '再确认修复方案' }
+    ]
+    timelineMock.mockResolvedValue(timeline({
+      spans: [{
+        kind: 'model_call',
+        started_at: '2026-11-02T00:00:05Z',
+        duration_ms: 3_200,
+        details
+      }]
+    }))
+    const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
+    await settle()
+
+    // No independent reasoning/assistant_text Gantt rows exist.
+    expect([...harness.host.querySelectorAll('.ark-gantt__row')].map((row) => row.getAttribute('data-span-kind'))).toEqual(['model_call'])
+    const modelRow = harness.host.querySelector<HTMLElement>('.ark-gantt__row[data-span-kind="model_call"]')!
+    expect(modelRow.parentElement?.querySelector('.ark-gantt__detail-section')).toBeNull()
+
+    await act(async () => {
+      modelRow.click()
+    })
+    await settle()
+
+    const detail = modelRow.parentElement!.querySelector('.ark-gantt__detail')!
+    expect(detail.textContent).toContain('类型')
+    expect(detail.textContent).toContain('开始')
+    expect(detail.textContent).toContain('耗时')
+    expect(detail.textContent).toContain('思考与回复')
+    const rows = [...detail.querySelectorAll('.ark-gantt__detail-row')]
+    expect(rows).toHaveLength(3)
+    expect(rows.map((row) => row.querySelector('.ark-gantt__detail-text')?.textContent)).toEqual(details.map((detailItem) => detailItem.text_snippet))
+    expect(rows.map((row) => row.querySelector('.ark-gantt__detail-meta')?.textContent)).toEqual([
+      expect.stringContaining('思考'),
+      expect.stringContaining('助手回复'),
+      expect.stringContaining('思考')
+    ])
+    await harness.unmount()
+  })
+
+  it('hides the details section when a model call has no details', async () => {
+    timelineMock.mockResolvedValue(timeline({
+      spans: [{ kind: 'model_call', started_at: '2026-11-02T00:00:05Z', duration_ms: 3_200 }]
+    }))
+    const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
+    await settle()
+
+    const modelRow = harness.host.querySelector<HTMLElement>('.ark-gantt__row[data-span-kind="model_call"]')!
+    await act(async () => {
+      modelRow.click()
+    })
+    await settle()
+
+    expect(modelRow.parentElement?.querySelector('.ark-gantt__detail')).not.toBeNull()
+    expect(modelRow.parentElement?.querySelector('.ark-gantt__detail-section')).toBeNull()
+    expect(harness.text()).not.toContain('思考与回复')
+    await harness.unmount()
+  })
+
+  it('shows the localized empty hint for an expanded model call with an empty details array', async () => {
+    timelineMock.mockResolvedValue(timeline({
+      spans: [{ kind: 'model_call', started_at: '2026-11-02T00:00:05Z', duration_ms: 3_200, details: [] }]
+    }))
+    const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
+    await settle()
+
+    const modelRow = harness.host.querySelector<HTMLElement>('.ark-gantt__row[data-span-kind="model_call"]')!
+    await act(async () => {
+      modelRow.click()
+    })
+    await settle()
+
+    const section = modelRow.parentElement?.querySelector('.ark-gantt__detail-section')
+    expect(section?.textContent).toContain('本次模型调用没有留下思考或回复。')
+    expect(section?.querySelectorAll('.ark-gantt__detail-row')).toHaveLength(0)
     await harness.unmount()
   })
 

@@ -48,12 +48,13 @@ use crate::{
     TerminalEntriesResponse, TerminalEntry, ThreadDetail, ThreadExport, ThreadItem,
     ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSkillsResponse,
     ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest, ToolStat,
-    TraceErrorEntry, TraceRuntimeError, TraceSlowCall, TraceSpan, TraceSpanKind,
-    TraceStatsResponse, TraceTimeline, TuningSettings, TurnRequest, TurnStat, TurnSummary,
-    TurnUsage, UiCatalog, UpdateImChannelRequest, UpdateMemoryRequest, UpdateScheduleRequest,
-    UpdateThreadRequest, UsageResponse, WorkspaceChange, WorkspaceChangesResponse,
-    WorkspaceDescriptor, WorkspaceDiff, WorkspaceDiffFile, WorkspaceFilePreview, WorkspaceStatus,
-    WorkspaceValidateResponse, WorkspaceView,
+    TraceErrorEntry, TraceRuntimeError, TraceSlowCall, TraceSpan, TraceSpanDetail,
+    TraceSpanDetailKind, TraceSpanKind, TraceStatsResponse, TraceTimeline, TuningSettings,
+    TurnRequest, TurnStat, TurnSummary, TurnUsage, UiCatalog, UpdateImChannelRequest,
+    UpdateMemoryRequest, UpdateScheduleRequest, UpdateThreadRequest, UsageResponse,
+    WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
+    WorkspaceDiffFile, WorkspaceFilePreview, WorkspaceStatus, WorkspaceValidateResponse,
+    WorkspaceView,
 };
 use ark_common::{
     ArkErrorCode, ArkErrorPayload, AttachmentId, ChildId, ItemId, ThreadId, TurnId, Usage,
@@ -130,6 +131,8 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     TraceRuntimeError::export_all_to(dir)?;
     TraceTimeline::export_all_to(dir)?;
     TraceSpan::export_all_to(dir)?;
+    TraceSpanDetail::export_all_to(dir)?;
+    TraceSpanDetailKind::export_all_to(dir)?;
     TraceSpanKind::export_all_to(dir)?;
     SessionResumeResponse::export_all_to(dir)?;
     ReviewRequest::export_all_to(dir)?;
@@ -301,6 +304,8 @@ const ROOT_NAMES: &[&str] = &[
     "TraceRuntimeError",
     "TraceTimeline",
     "TraceSpan",
+    "TraceSpanDetail",
+    "TraceSpanDetailKind",
     "TraceSpanKind",
     "SessionResumeResponse",
     "ReviewRequest",

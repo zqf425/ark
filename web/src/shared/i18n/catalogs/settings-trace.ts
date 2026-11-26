@@ -83,6 +83,8 @@ export const SETTINGS_TRACE_MESSAGES = {
   'settings.trace.gantt.kind': ['类型', 'Type'],
   'settings.trace.gantt.started': ['开始', 'Started'],
   'settings.trace.gantt.duration': ['耗时', 'Duration'],
+  'settings.trace.gantt.detailsTitle': ['思考与回复', 'Reasoning & replies'],
+  'settings.trace.gantt.detailsEmpty': ['本次模型调用没有留下思考或回复。', 'No reasoning or reply was recorded for this model call.'],
   'settings.trace.timeline.ganttHint': [
     '横条按真实耗时在共享时间轴上展开;无实测时长的文本行显示为刻度点。',
     'Bars scale by real duration on one shared axis; text spans without a measured duration show as ticks.'

@@ -4,9 +4,9 @@
  * Layout mirrors the smart-ark turn Gantt the feature was ported from: a
  * fixed label column (disclosure arrow, kind chip, label), a shared-axis bar
  * lane, and a fixed duration column. Rows expand in place to a detail block
- * (type/start/duration/content), exactly like the reference panel. The panel
- * fetches only when shown; every colour, position and error mark projects the
- * wire payload — the server stays the only place that folds event data.
+ * (type/start/duration, plus nested reasoning/assistant text on model calls).
+ * The panel fetches only when shown; every colour, position and error mark
+ * projects the wire payload — the server stays the only place that folds data.
  */
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
@@ -17,7 +17,13 @@ import { describeError } from '../../../shared/api/error-describe'
 import { translateNow } from '../../../shared/i18n/current'
 import { useMounted } from '../../../shared/api/use-mounted'
 import { formatClock } from '../../../shared/format'
-import { fetchTraceTimeline, type TraceTimeline, type TraceTimelineSpan } from '../api/trace-api'
+import {
+  fetchTraceTimeline,
+  type TraceSpanDetail,
+  type TraceSpanDetailKind,
+  type TraceTimeline,
+  type TraceTimelineSpan
+} from '../api/trace-api'
 import { Skeleton } from './SectionShell'
 import { formatDurationWordsMs } from './trace-format'
 
@@ -67,6 +73,79 @@ function rulerTicks(start: number, end: number, locale: ReturnType<typeof useI18
   const span = end - start
   return [0, 0.25, 0.5, 0.75, 1].map((fraction) =>
     formatDurationWordsMs(Math.round(span * fraction), locale)
+  )
+}
+
+/** Detail kind -> localized catalog key. The wire keeps the snake_case value;
+ * translation stays in the catalog so both languages share one vocabulary. */
+const DETAIL_KIND_KEY: Record<TraceSpanDetailKind, `settings.trace.span.kind.${TraceSpanDetailKind}`> = {
+  reasoning: 'settings.trace.span.kind.reasoning',
+  assistant_text: 'settings.trace.span.kind.assistant_text'
+}
+
+/**
+ * One expanded detail fragment: localized kind, its own start time, then the
+ * bounded snippet as monospace pre-wrapped text (multi-line body stays intact).
+ * Order is the server's: reasoning/assistant text interleave by `started_at`.
+ */
+function DetailRow({ detail, locale }: { detail: TraceSpanDetail; locale: ReturnType<typeof useI18n>['locale'] }): JSX.Element {
+  const { t } = useI18n()
+  return (
+    <li className="ark-gantt__detail-row">
+      <span className="ark-gantt__detail-meta">
+        <b>{t(DETAIL_KIND_KEY[detail.kind])}</b>
+        <time dateTime={detail.started_at}>{formatClock(detail.started_at, locale)}</time>
+      </span>
+      <pre className="ark-gantt__detail-text">{detail.text_snippet}</pre>
+    </li>
+  )
+}
+
+/**
+ * The expanded body of one span. On a model call the streamed text fragments
+ * follow the meta line, separated by a hairline; other spans keep the plain
+ * type/start/duration block. Details are never rendered as independent rows —
+ * the server only nests them where a model call actually produced text.
+ */
+function SpanDetails({ span, locale, failed }: {
+  span: TraceTimelineSpan
+  locale: ReturnType<typeof useI18n>['locale']
+  failed: boolean
+}): JSX.Element {
+  const { t } = useI18n()
+  const hasDuration = span.duration_ms != null
+  const details = span.details
+  return (
+    <div className="ark-gantt__detail">
+      <span>
+        {t('settings.trace.gantt.kind')}:{' '}
+        <b>{t(`settings.trace.span.kind.${span.kind}`)}</b>
+      </span>
+      <span>
+        {t('settings.trace.gantt.started')}: <b>{formatClock(span.started_at, locale)}</b>
+      </span>
+      {hasDuration ? (
+        <span>
+          {t('settings.trace.gantt.duration')}:{' '}
+          <b>{formatDurationWordsMs(span.duration_ms ?? 0, locale)}</b>
+        </span>
+      ) : null}
+      {failed ? <span className="ark-gantt__detail-failed">{t('settings.trace.span.failed')}</span> : null}
+      {details ? (
+        <div className="ark-gantt__detail-section">
+          <span className="ark-gantt__detail-title">{t('settings.trace.gantt.detailsTitle')}</span>
+          {details.length > 0 ? (
+            <ul className="ark-gantt__detail-rows">
+              {details.map((detail, index) => (
+                <DetailRow key={`${detail.kind}-${detail.started_at}-${index}`} detail={detail} locale={locale} />
+              ))}
+            </ul>
+          ) : (
+            <span className="ark-gantt__detail-empty">{t('settings.trace.gantt.detailsEmpty')}</span>
+          )}
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -139,29 +218,7 @@ function SpanRow({
           {hasDuration ? formatDurationWordsMs(span.duration_ms ?? 0, locale) : '—'}
         </span>
       </button>
-      {expanded ? (
-        <div className="ark-gantt__detail">
-          <span>
-            {t('settings.trace.gantt.kind')}:{' '}
-            <b>{t(`settings.trace.span.kind.${span.kind}`)}</b>
-          </span>
-          <span>
-            {t('settings.trace.gantt.started')}: <b>{formatClock(span.started_at, locale)}</b>
-          </span>
-          {hasDuration ? (
-            <span>
-              {t('settings.trace.gantt.duration')}:{' '}
-              <b>{formatDurationWordsMs(span.duration_ms ?? 0, locale)}</b>
-            </span>
-          ) : null}
-          {failed ? <span className="ark-gantt__detail-failed">{t('settings.trace.span.failed')}</span> : null}
-          {span.text_snippet ? (
-            <div className="ark-gantt__detail-text">
-              {span.text_snippet}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+      {expanded ? <SpanDetails span={span} locale={locale} failed={failed} /> : null}
     </li>
   )
 }

@@ -526,3 +526,57 @@
   font-size: calc(10px * var(--ark-scale));
   color: var(--ark-text);
 }
+
+/* Streamed reasoning/assistant fragments nested on a model-call row. The
+   hairline separates them from the type/start/duration meta line above; the
+   ordered list keeps the server's `started_at` order. */
+.ark-gantt__detail-section {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--ark-border-muted);
+}
+
+.ark-gantt__detail-title {
+  font-size: calc(10px * var(--ark-scale));
+  color: var(--ark-text-faint);
+}
+
+.ark-gantt__detail-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ark-gantt__detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ark-gantt__detail-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: calc(10px * var(--ark-scale));
+  color: var(--ark-text-dim);
+}
+
+.ark-gantt__detail-meta time {
+  font-variant-numeric: tabular-nums;
+}
+
+.ark-gantt__detail-text {
+  margin: 0;
+}
+
+.ark-gantt__detail-empty {
+  font-size: calc(10px * var(--ark-scale));
+  color: var(--ark-text-faint);
+}

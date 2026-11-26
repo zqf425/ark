@@ -14,6 +14,8 @@ import type {
   TraceRuntimeError,
   TraceSlowCall,
   TraceSpan as TraceTimelineSpan,
+  TraceSpanDetail,
+  TraceSpanDetailKind,
   TraceSpanKind as TraceTimelineSpanKind,
   TraceStatsResponse,
   TraceTimeline,
@@ -27,6 +29,8 @@ export type {
   TraceSlowCall,
   TraceStatsResponse,
   TraceTimeline,
+  TraceSpanDetail,
+  TraceSpanDetailKind,
   TraceTimelineSpan,
   TraceTimelineSpanKind,
   TurnStat

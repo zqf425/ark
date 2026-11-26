@@ -2,15 +2,25 @@
 //! (requirements/trace-analysis.md §v2).
 //!
 //! Like `trace_stats`, everything here is a pure projection of one thread's
-//! authoritative event log — no second copy of any tool or usage state. The
+//! authoritative event log -- no second copy of any tool or usage state. The
 //! fold itself lives in `ark-server` (`handlers/trace_timeline.rs`); this
 //! crate only fixes the shapes.
 //!
 //! Timing honesty: exact LLM spans are still gated on `LlmSpanStart`/
 //! `LlmSpanEnd` (planned, no producer), so a `model_call` span approximates
 //! the round with the wall clock the agent loop recorded on its `usage`
-//! event. Text items carry only a creation timestamp, so their
-//! `duration_ms` stays unset instead of being inferred from the next row.
+//! event. Text items carry only a creation timestamp: reasoning and assistant
+//! messages are streamed *during* a model call, so they are not independent
+//! timeline rows. They ride on the `model_call` span as `TraceSpanDetail`
+//! entries instead, keeping the Gantt axis free of zero-duration text rows.
+//!
+//! Attachment rule: a text detail belongs to the model-call window
+//! `[usage.timestamp - duration_ms, usage.timestamp]` that contains its
+//! `created_at`, choosing the narrowest (shortest-duration) window when
+//! windows overlap. Text outside every window is dropped -- notably on older
+//! logs where `usage.duration_ms` is absent and no window can be reconstructed.
+//! Dropped text stays available in the authoritative thread detail; only this
+//! read-side projection loses it.
 
 use ark_common::{ItemId, ThreadId, TurnId};
 use chrono::{DateTime, Utc};
@@ -44,6 +54,35 @@ pub enum TraceSpanKind {
     Notice,
 }
 
+/// Text produced while a model call was streaming.
+///
+/// A `reasoning` or `assistant_message` item is a child event of the model
+/// round, not an activity that occupies the timeline on its own: real logs
+/// stamp it inside the round's `[end - duration, end]` window. Such items are
+/// therefore never emitted as independent `TraceSpan` rows; they are attached
+/// to the containing `model_call` row in ascending `started_at` order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceSpanDetailKind {
+    Reasoning,
+    AssistantText,
+}
+
+/// One streamed text fragment nested in its owning `model_call` span.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct TraceSpanDetail {
+    /// Which stream produced the text; `assistant_text` is the wire name of
+    /// the runtime's `assistant_message` item.
+    pub kind: TraceSpanDetailKind,
+    /// Bounded summary of the item text, using the same character-boundary
+    /// cap as timeline rows. The full body stays on thread detail.
+    pub text_snippet: String,
+    /// Item creation timestamp, which real logs place inside the owning model
+    /// call's measured window.
+    pub started_at: DateTime<Utc>,
+}
+
 /// One span of a turn's timeline.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
@@ -68,7 +107,7 @@ pub struct TraceSpan {
     pub label: Option<String>,
     /// Bounded text summary of at most `TRACE_TIMELINE_SNIPPET_MAX_CHARS`
     /// characters, cut on character boundaries so multi-byte text stays
-    /// intact. Event bodies never ride the timeline — the full text stays on
+    /// intact. Event bodies never ride the timeline -- the full text stays on
     /// thread detail.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_snippet: Option<String>,
@@ -82,6 +121,14 @@ pub struct TraceSpan {
     /// the id the events already carry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item_id: Option<ItemId>,
+    /// Streamed reasoning / assistant text nested under this span, present on
+    /// `model_call` rows only. Each fragment falls in this row's measured
+    /// window and is ordered by `started_at` ascending; `None` means no
+    /// text could be attributed (or this is not a model call). Text outside
+    /// every model window -- including logs without `duration_ms` -- is dropped
+    /// from this projection, not shown as its own row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<Vec<TraceSpanDetail>>,
 }
 
 /// `GET /v1/threads/{id}/trace-timeline?turn_id=…`.

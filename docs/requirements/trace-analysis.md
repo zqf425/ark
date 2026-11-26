@@ -114,6 +114,13 @@ v1 只给了聚合数字与 Top 清单,无法回答"这个回合的 2 分钟花�
   `model_call` 用 usage 事件墙钟近似——契约注释如实声明。
 - 事件正文不进时间线(原文太长),文本只留 200 字摘要;要看全文走
   既有 thread detail。
+- `reasoning` / `assistant_message` item 的 `created_at` 落在模型调用
+  `[end-duration, end]` 窗口内,是模型调用期间流式产出的子事件,不是独立
+  占用时间的活动:它们不再产出独立甘特行,而是作为 `details`(`kind` +
+  `text_snippet` + `started_at`)挂到所属 `model_call` 行,同类多段全部保留、
+  按 `started_at` 升序。归属规则:选包含该 `created_at` 且时长最短的模型调用
+  窗口(区间两端闭合);找不到窗口的片段(旧日志无 `duration_ms`)直接丢弃,
+  全文仍可从 thread detail 读取。契约注释同步说明该丢失路径。
 
 ### web 交互
 

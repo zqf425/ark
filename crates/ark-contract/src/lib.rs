@@ -88,5 +88,6 @@ pub use trace_stats::{
     TRACE_SLOW_CALLS_LIMIT,
 };
 pub use trace_timeline::{
-    TraceSpan, TraceSpanKind, TraceTimeline, TRACE_TIMELINE_SNIPPET_MAX_CHARS,
+    TraceSpan, TraceSpanDetail, TraceSpanDetailKind, TraceSpanKind, TraceTimeline,
+    TRACE_TIMELINE_SNIPPET_MAX_CHARS,
 };
