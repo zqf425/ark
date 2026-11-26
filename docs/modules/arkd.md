@@ -183,10 +183,10 @@ egress 授权（该构造器对插件清单路径不可达），并把同一能�
 分组，因此下一父回合读取的是最新 schema，而不需要重启。**子工具表并入同一 `mcp` 组**（2026-11-26）：
 `build_tool_runner` 在父 `replace_group` 之后把同一组合并进子注册表，`McpServerAdapter` 持有子注册表并在
 每次 `synchronize_tools` 时同步替换——被委派的调研任务整个运行在子代理里，若子代理只有 `web_fetch`，则
-web_fetch 失败后没有任何浏览器类兜底（实测一个调研回合 3 个子代理 42 次猜测 URL 失败，而浏览器工具就在
-父表里）；子表与父表共用同一沙箱与出口治理，并入该组不改变子代理"能做什么"，只消除"子代理是唯一看不见
-兜底工具的 agent"这一不对称。`delegate_task` 仍只注册在父表：`replace_group` 按组名保护，合并不会把
-delegate 类工具带进子表。组合根还注册 `load_skill`：它读取 `SkillRuntime`
+web_fetch 失败后没有任何浏览器类兜底（实测一个调研回合 3 个子代理 36 次 + 主线程 6 次猜测 URL 失败，而
+浏览器工具就在父表里）；子表与父表共用同一沙箱与出口治理，并入该组不改变子代理"能做什么"，只消除"子代理
+是唯一看不见兜底工具的 agent"这一不对称。`delegate_task` 仍只注册在父表：`replace_group` 按组名保护，合并
+不会把 delegate 类工具带进子表。组合根还注册 `load_skill`：它读取 `SkillRuntime`
 的已扫描正文快照，避免 `ark-tool` 反向依赖 skills 实现。
 `request_user_input` 属于内置工具集，随 `ark_tool::builtins()` 在父/子两个注册表中可用；
 其执行由 `ark-agent` 的用户输入 gate 拦截，组合根不为它写任何特例。

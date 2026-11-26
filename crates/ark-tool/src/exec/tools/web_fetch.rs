@@ -665,6 +665,13 @@ mod tests {
             .unwrap();
         assert!(!out.ok, "{}", out.content);
         assert!(out.content.contains("SSRF"), "{}", out.content);
+        // Every failure branch carries the recovery guidance, not just 404s:
+        // a refusal must also point at re-deriving the target or a browser.
+        assert!(
+            out.content.contains("re-derive"),
+            "SSRF refusal must carry recovery guidance, got: {}",
+            out.content
+        );
         assert_eq!(
             scripted.urls().len(),
             1,
@@ -687,6 +694,11 @@ mod tests {
             .unwrap();
         assert!(!out.ok, "{}", out.content);
         assert!(out.content.contains("redirects"), "{}", out.content);
+        assert!(
+            out.content.contains("re-derive"),
+            "the redirect-budget error must carry recovery guidance, got: {}",
+            out.content
+        );
     }
 
     #[tokio::test]

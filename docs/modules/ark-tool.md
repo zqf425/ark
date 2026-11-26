@@ -60,7 +60,7 @@
   共享 `HttpPolicy`。父与子工具集都注册它；输出与 bash 同规按 64 KiB 截断，HTML 经内置
   无依赖文本提取，非 2xx/二进制/失败都以结构化工具输出返回，不使回合失败。失败文本（非 2xx、
   SSRF、重定向预算）附恢复引导：重新推导 URL 或改用浏览器类 MCP 工具，不原样重试——实测 42 次
-  猜错 URL 的 404/SSRF 中零次尝试重新发现，裸状态码被模型读成网络故障。
+  （子代理 36 + 主线程 6）猜错 URL 的 404/SSRF 中零次尝试重新发现，裸状态码被模型读成网络故障。
 - `web_fetch` **自己走 3xx 跳转**：向出口请求时始终带 `follow_redirects: Some(false)`，然后逐跳
   重新解析主机并重做 SSRF 校验（预算 5 跳，与 `HttpPolicy::max_redirects` 对齐）。出口自身的
   跳转只校验 scheme 与 allowlist，而本工具的 egress 身份是 `allow_all()`，交给它跟随会让

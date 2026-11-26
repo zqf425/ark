@@ -222,7 +222,7 @@ pub struct McpServerAdapter {
     plugin_tools: Arc<dyn Fn() -> Vec<Arc<dyn Tool>> + Send + Sync>,
     /// The child registry, when the runtime has one. Kept in sync with the
     /// parent group so a delegated task still sees the merged MCP tools after
-    /// a config-driven re-discovery; `None` in tests and headless builds.
+    /// a config-driven re-discovery; `None` in unit tests.
     child_tools: Option<Arc<ToolRegistry>>,
 }
 
@@ -250,6 +250,16 @@ impl McpServerAdapter {
         self
     }
 
+    /// Re-discover and republish the merged group into both registries.
+    ///
+    /// The two `replace_group` calls are not one transaction: between them the
+    /// parent table can be new while the child table is still old. That window
+    /// is harmless today because the child's stale set is exactly the
+    /// pre-change state, and the second call can only fail when the group-name
+    /// protection is broken (mcp tools are always dot-qualified, builtins never
+    /// are) — in which case failing loudly is the right outcome. If a future
+    /// change ever allows builtin-qualified names into the group, revisit this
+    /// ordering before trusting it.
     async fn synchronize_tools(&self) -> Result<()> {
         let mut connected = self.inner.connect_all().await;
         connected.extend((self.plugin_tools)());
