@@ -27,7 +27,10 @@
   watermark。它不新增 wire 类型，也不写入 store：既不能声称 writer 尚未发放的序号，也不能让重连的
   `since_seq` 跳过事件。backlog 非空时不发送该帧，因为首个回放事件已经产生字节，且该帧会与回放末条
   重复同一个 `seq`。因此正文是否产生首字节不再由 keep-alive 间隔决定。
-- 连接有界；慢客户端断开后从最后 `seq` 重连，绝不阻塞线程 writer。
+- 连接有界；慢客户端断开后从最后 `seq` 重连，绝不阻塞线程 writer。SSE 在订阅前检查
+  shutdown，pump 在 backlog send、live recv、idle timeout 与 channel send 等所有等待点优先响应
+  shutdown；Ctrl-C 经 `request_shutdown(SHUTDOWN_CANCEL_REASON)` 通知同一收敛流程，真实 listener
+  集成测试覆盖在线 SSE 在桌面宿主 12 秒强杀预算内返回并 drain。
 - `GET /v1/threads/{id}/turns/{turn_id}` 必须校验 `TurnSummary.thread_id` 与路径 `{id}` 一致，
   不一致按 404 处理（与 steer、child-run 单路由的归属校验一致）；turn id 不是跨线程可读的全局句柄。
 - steer 与回合起点共用同一 `TurnRequest` 信封与同一附件授权裁决：`enqueue_steering` 前先
@@ -72,11 +75,12 @@
   注册临界区内再次核对；期间任何新回合都会使旧恢复以 `conflict` 失效，不能越过用户的新输入继续执行。失败回合已授权的附件 id
   随恢复作业保留，并在注册前重新经过 `authorize_turn_attachments`，不能凭旧授权直接复用。
   尝试号写入 `turn_started.auto_recovery`，恢复回合先写一条 Notice 说明自动重试原因。恢复是**续跑**
-  而非新请求：失败回合已把用户消息落盘并在重放历史末尾出现，`arkd` 组合根据此不再重复 `push_user_message`
-  （见 [arkd](arkd.md)），因此一个用户请求在会话流里只有一条用户气泡，恢复只追加 Notice 与 Error 行。
-  连续模型失败达
-  `RECOVERY_MODEL_FAILURE_STREAK_LIMIT`（与 continuation 熔断同值）即暂停该线程恢复，任何用户回合或
-  非模型终态重置计数；日志不可读时 fail-closed。工具/策略失败与预算耗尽的失败保持终态，仍由用户决定
+  而非新请求：失败回合已把用户消息落盘并在重放历史中出现，`arkd` 组合从尾部找最近 User，文本相同
+  且其后没有 Assistant 完成回复时不再重复 `push_user_message`（Tool 行不阻止抑制，见 [arkd](arkd.md)），
+  因此一个用户请求在会话流里只有一条用户气泡，恢复只追加 Notice 与 Error 行。连续模型失败达
+  `RECOVERY_MODEL_FAILURE_STREAK_LIMIT`（与 continuation 熔断同值）即暂停该线程恢复；恢复/自动续跑的
+  Started/Failed 交替不清零，只有新用户生命周期或非模型终态重置计数；日志不可读时 fail-closed。
+  工具/策略失败与预算耗尽的失败保持终态，仍由用户决定
   是否重发——恢复只覆盖"请求是好的、通道是坏的"这一种形态。
 - 路径、HTTP 方法、字段名和兼容别名均是对外契约；变更前必须检查 `ark-contract`、`web` 与集成方。
 - `GET /v1/threads` 支持分页与筛选：`limit` 显式给出时 clamp 到 `[1, THREAD_PAGE_MAX_LIMIT]`，
@@ -180,6 +184,11 @@
   片段在投影中丢弃。投影逻辑在 `api/handlers/trace_timeline.rs`,单测在同目录
   `trace_timeline/tests.rs`。`model_call` 行还把该条 `usage` 事件快照成
   `TraceSpanUsage`,逐字段拷贝 token/缓存/费用,不在读侧聚合,也不伪造 provider 未上报的字段。
+  工具调用按 occurrence 保留:每个 call id 用 FIFO 队列配对 Started/Finished, Finished 的
+  `item_id` 优先、回退 Started 的 `item_id`;item-backed 行只按真实 item id 去重。旧日志无 item id
+  时仍用 store 的确定性 `tool_call:{call_id}` 键兼容去重,新日志重复 call id 不得合并。
+  每次 CompactionStarted 开一个窗口,Completed 关闭最早未完成窗口;无 open 时 Completed 记为点。
+  checkpoint item 仅在 `created_at` 落入匹配窗口时去重,未匹配仍输出。
 - `GET /v1/threads/{id}/usage` 与 `GET /v1/debug/llm-rounds` 都只从权威 `usage` 事件投影（每轮模型
   调用恰好一条），不维护第二套用量真源。`usage.duration_ms` 优先采用 agent 循环实测的模型调用耗时
   （不含工具执行），并作为轮次耗时的唯一 wire 载体。线程 usage 聚合直接对这些样本做严格折叠，不为
@@ -195,13 +204,17 @@
   回合之间的间隙只在线程总计里计入 harness 主动插入的部分——`auto_continuation`/`auto_recovery`
   标记的 `turn_started` 把上一回合终态到本次开始的重试退避计入新回合的 span；用户发起新消息前的
   空闲不算（那是用户思考，不是会话在工作）。工具执行、HTTP 层重试、恢复退避、子任务运行全部计入。
-  光标只前进不倒退（时钟偏斜只会停摆不会回拨）。无 usage 样本的回合（首轮前即失败）也产出
+  光标只前进不倒退（时钟偏斜只会停摆不会回拨）。运行中回合的最新事件 horizon 包含 `Usage` 与
+  `ToolCallStarted/ToolCallFinished`，因此末尾工具执行也计入活跃时长；这些工具事件只延伸 horizon，
+  不单独 bank 区间，已闭合回合仍以 terminal 为终点。无 usage 样本的回合（首轮前即失败）也产出
   `TurnUsage` 行，其 token 字段为零——行存在的意义是携带 active 时长。
 - **会话内每个回合的耗时读 `GET /v1/threads/{id}/usage` 的 `turn_usage`，不读 llm-rounds**：该聚合
   路由整份日志重放，逐回合折叠（`TurnUsage`，含 `turn_id`/`samples`/扁平化 `usage`/`active_ms`/
   `gate_suspensions`），且与线程总计
   用同一次折叠，因此 token、费用等可加字段按构造一致。`duration_ms` 采用 `Usage::merge` 的严格聚合：
   只有全部实际 usage 样本都有耗时才求和，任一样本缺失则该回合及线程聚合均为 `None`，不会显示部分和。
+  缓存计数同样遵循 `Usage::merge` 的严格折叠：任一实际折叠输入缺少 hit 或 miss，聚合的两个缓存计数
+  与命中率均为 `None`。
   llm-rounds 是有界诊断分页，长会话会把整个
   回合挤出单页，用它求和曾让回合头部把真实几分钟显示成几秒（渲染层缺陷已随本次改动消除）。
   llm-rounds 以 `limit`（缺省 `LLM_ROUNDS_DEFAULT_LIMIT`，clamp 到 `LLM_ROUNDS_MAX_LIMIT`）与
@@ -209,6 +222,10 @@
   prompt、API key、header 或用户敏感正文。
   错误归属依赖回合终态事件闭合：末轮之后、终态之前的 `Error` 事件在 `TurnCompleted/Failed/Aborted`
   到达时归入末轮；仍在运行的回合不产出这部分归属，属预期语义而非丢数据。
+- `GET /v1/threads/{id}/trace-stats` 的会话总时长只以生命周期锚点计算：首个 `TurnStarted` 到当前
+  turn 的 terminal；terminal 后的非 turn 事件不延长终点，只有最后仍运行的 turn 延到最新事件，
+  单个 start 无后续事件时为 0。失败工具的 `Error` 窗口从 failed `ToolCallFinished` 起到下一个任意
+  `ToolCallFinished` 或 turn terminal；成功 finish 与 terminal 都清空 sink，不把窗口外 Error 挂到旧行。
 - `POST /v1/sessions/{id}/resume-thread` 把 session id 兼容为 thread id（本运行时只有线程一个持久
   会话对象）：返回与 `GET /v1/threads/{id}` 完全一致的 `ThreadDetail`；未知 id 结构化 404，坏 id 400，
   绝不隐式创建会话。
@@ -254,8 +271,11 @@
   `Misfire` 记一条 `skipped` 并推进 `next_run_at`,不补跑;`Due` 按 `next_run_at` 升序串行执行。
   同一任务上一次运行还没结束(`InFlightGuard` 未释放)时,本次到期记 `skipped`
   (`previous run was still in flight`)并推进,绝不排队。
-- `begin` 经 `threads::create_thread` 建线程、`set_thread_runtime` 写入任务覆盖(`autonomy`
-  缺省为 `unattended`,因此无人值守的回合不会停在 gate 上),然后写 `running` 标记。
+- `begin` 在建线程前捕获 prompt/workspace/provider/model/autonomy 的不可变执行快照,runtime
+  与后续 prompt 都使用该快照。`set_thread_runtime` 或 `running` marker 失败时补偿删除新建线程;
+  marker 更新闭包只比较这些执行字段(不比较 `updated_at`/`last_run` 或整个任务),若 PATCH 已交错
+  改变执行字段则放弃本次、清理 orphan thread,下一 tick 使用新快照。misfire 仍使孤儿数量有界,
+  但失败路径不再主动遗留孤儿。
 - `drive` 用 `start_turn` 启动真实回合,拿到与 HTTP 路由完全相同的文本上限、单回合冲突、
   workspace 租约与附件校验;终态经轮询 `state.turns.get(turn_id)` 取得(注册表没有完成通知,
   轮询不会像丢失唤醒那样漏掉终态),成功时摘要取该线程最后一条非空 assistant 文本。
@@ -347,7 +367,9 @@ generation，客户端必须丢弃 generation 已变的旧响应。
 ## 验证
 
 - `cargo test -p ark-server diagnostics::tests` 覆盖 usage 折叠、LLM round 诊断和 `ActiveClock` 的
-  completed/failed/aborted 终态、gate 排除与时钟偏移路径。
+  completed/failed/aborted 终态、gate 排除、末尾工具 horizon 与时钟偏移路径；
+  `trace_stats::tests` 与 `trace_timeline::tests` 覆盖生命周期时间锚点、错误窗口、compaction 配对、
+  重复 call id 与 item 导航兼容。
 - `cargo test -p ark-server shutdown` 覆盖停机取消与迟到 completion wakeup 抑制；真实 listener 的
   优雅停机还需验证 202 响应后进程在 drain 预算内退出。
 - core 验证在 workspace check 后执行 `cargo clippy --workspace --all-targets -- -D warnings`；

@@ -69,6 +69,12 @@ impl ToolCallRequest {
 
     /// The resource this call touches, used by the parallel-safety policy.
     pub fn resource(&self) -> Option<&str> {
+        // Every session call shares one cwd state machine even though each
+        // command owns a process. A fixed resource serialises those calls;
+        // plain bash deliberately keeps no resource and remains parallel.
+        if self.tool == "bash_session" {
+            return Some("shell_session");
+        }
         for key in ["path", "file_path", "filePath", "target"] {
             if let Some(value) = self.arguments.get(key).and_then(|v| v.as_str()) {
                 return Some(value);
@@ -203,6 +209,18 @@ mod tests {
         assert_eq!(call.resource(), Some("x.rs"));
         let none = ToolCallRequest::new("c2", "list", serde_json::json!({}));
         assert_eq!(none.resource(), None);
+    }
+
+    #[test]
+    fn session_calls_share_a_resource_but_plain_bash_does_not() {
+        let session = ToolCallRequest::new(
+            "s1",
+            "bash_session",
+            serde_json::json!({ "command": "cd src" }),
+        );
+        let bash = ToolCallRequest::new("b1", "bash", serde_json::json!({ "command": "pwd" }));
+        assert_eq!(session.resource(), Some("shell_session"));
+        assert_eq!(bash.resource(), None);
     }
 
     #[test]

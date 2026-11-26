@@ -19,7 +19,7 @@
  * Rendering `null` when the draft has nothing recognizable keeps an ordinary
  * draft at zero cost — no extra DOM, no layout shift.
  */
-import { memo } from 'react'
+import { forwardRef, memo } from 'react'
 import type { SkillSummary } from '../../../shared/contracts'
 import { splitSkillMentions, type MentionToken } from './skill-mention'
 
@@ -32,22 +32,24 @@ function MirrorMention({ value, typing }: { value: string; typing: boolean }): J
   return <span className={typing ? 'ark-mention ark-mention--typing' : 'ark-mention'}>{value}</span>
 }
 
-export const DraftHighlight = memo(function DraftHighlight({
-  text,
-  skills,
-  token
-}: {
+type DraftHighlightProps = {
   text: string
   skills: SkillSummary[] | null
   /** The in-progress token under the caret, if the slash palette is open. */
   token: MentionToken | null
-}): JSX.Element | null {
+}
+
+export const DraftHighlight = memo(forwardRef<HTMLDivElement, DraftHighlightProps>(function DraftHighlight({
+  text,
+  skills,
+  token
+}, ref): JSX.Element | null {
   if (!text) return null
   const segments = skills && skills.length > 0 ? splitSkillMentions(text, skills) : [{ kind: 'text' as const, value: text }]
   let segmentStart = 0
 
   return (
-    <div className="ark-composer__editor-font ark-composer__highlight" aria-hidden="true">
+    <div ref={ref} className="ark-composer__editor-font ark-composer__highlight" aria-hidden="true">
       {segments.map((segment, index) => {
         const start = segmentStart
         const end = start + segment.value.length
@@ -80,4 +82,4 @@ export const DraftHighlight = memo(function DraftHighlight({
       {'\u200b'}
     </div>
   )
-})
+}))

@@ -76,6 +76,32 @@ enum DueState {
     Misfire,
 }
 
+/// Immutable inputs for one run. Runtime persistence and prompt submission both
+/// use this snapshot so a concurrent PATCH cannot produce a mixed execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExecutionSnapshot {
+    prompt: String,
+    workspace: Option<String>,
+    provider_id: Option<String>,
+    model: Option<String>,
+    autonomy: String,
+}
+
+impl ExecutionSnapshot {
+    fn from_task(task: &ScheduledTask) -> Self {
+        Self {
+            prompt: task.prompt.clone(),
+            workspace: task.workspace.clone(),
+            provider_id: task.provider_id.clone(),
+            model: task.model.clone(),
+            autonomy: task
+                .autonomy
+                .clone()
+                .unwrap_or_else(|| DEFAULT_SCHEDULE_AUTONOMY.to_string()),
+        }
+    }
+}
+
 /// Classify one task against `now`.
 ///
 /// `is_due` alone cannot tell "two seconds late" from "two days late", and the
@@ -319,9 +345,11 @@ impl SchedulerService {
                 continue;
             };
             match self.begin(state, task).await {
-                Ok((task, thread_id, started_at)) => {
+                Ok((task, thread_id, started_at, snapshot)) => {
                     started += 1;
-                    let _ = self.drive(state, task, thread_id, started_at).await;
+                    let _ = self
+                        .drive(state, task, thread_id, started_at, snapshot)
+                        .await;
                 }
                 Err(err) => {
                     tracing::warn!(error = %err.message, "cannot start a scheduled run");
@@ -363,7 +391,7 @@ impl SchedulerService {
                 format!("scheduled task `{id}` is already running"),
             ));
         };
-        let (task, thread_id, started_at) = match self.begin(state, task).await {
+        let (task, thread_id, started_at, snapshot) = match self.begin(state, task).await {
             Ok(started) => started,
             // `guard` drops on this path, releasing the slot a failed start
             // never got to use.
@@ -373,7 +401,9 @@ impl SchedulerService {
         let state = state.clone();
         tokio::spawn(async move {
             let _guard = guard;
-            let _ = service.drive(&state, task, thread_id, started_at).await;
+            let _ = service
+                .drive(&state, task, thread_id, started_at, snapshot)
+                .await;
         });
         self.store.get(id)
     }
@@ -388,48 +418,63 @@ impl SchedulerService {
         &self,
         state: &AppState,
         task: ScheduledTask,
-    ) -> Result<(ScheduledTask, ThreadId, DateTime<Utc>)> {
+    ) -> Result<(ScheduledTask, ThreadId, DateTime<Utc>, ExecutionSnapshot)> {
+        let snapshot = ExecutionSnapshot::from_task(&task);
         let thread = crate::service::threads::create_thread(state, &task.title, None).await?;
-        // A scheduled run is unattended by default: `unattended` is what makes
-        // the sandbox policy stop asking a human who is not there. The task's
-        // own override wins when it names one.
-        let autonomy = task
-            .autonomy
-            .clone()
-            .unwrap_or_else(|| DEFAULT_SCHEDULE_AUTONOMY.to_string());
-        state
-            .store
-            .set_thread_runtime(
-                thread.thread_id,
-                ThreadRuntimeSettings {
-                    workspace: task.workspace.clone(),
-                    provider_id: task.provider_id.clone(),
-                    model: task.model.clone(),
-                    autonomy: Some(autonomy),
-                    reasoning_effort: None,
-                },
-            )
-            .await?;
-        // The in-flight marker lives in `last_run` only. The bounded history is
-        // a log of outcomes, so writing `running` into it would leave one stale
-        // line behind for every completed run - two entries where the document
-        // promises one run.
-        // The terminal record reuses this instant, so `last_run` keeps the real
-        // start of the run instead of a zero-length interval.
-        let started_at = Utc::now();
-        let id = task.id.clone();
-        let running = ScheduledRunRecord {
-            status: RunStatus::Running,
-            message: String::new(),
-            thread_id: Some(thread.thread_id),
-            started_at,
-            finished_at: None,
-        };
-        let task = self.store.update(&id, &mut |current| {
-            current.last_run = Some(running.clone());
-            Ok(())
-        })?;
-        Ok((task, thread.thread_id, started_at))
+        let result = async {
+            state
+                .store
+                .set_thread_runtime(
+                    thread.thread_id,
+                    ThreadRuntimeSettings {
+                        workspace: snapshot.workspace.clone(),
+                        provider_id: snapshot.provider_id.clone(),
+                        model: snapshot.model.clone(),
+                        autonomy: Some(snapshot.autonomy.clone()),
+                        reasoning_effort: None,
+                    },
+                )
+                .await?;
+            let started_at = Utc::now();
+            let running = ScheduledRunRecord {
+                status: RunStatus::Running,
+                message: String::new(),
+                thread_id: Some(thread.thread_id),
+                started_at,
+                finished_at: None,
+            };
+            // Only execution inputs decide ownership. Title/cadence/history and
+            // timestamps may legitimately change while this marker is written.
+            let stored = self.store.update(&task.id, &mut |current| {
+                if ExecutionSnapshot::from_task(current) != snapshot {
+                    return Err(ArkError::new(
+                        ArkErrorCode::Conflict,
+                        "scheduled task changed before its run started",
+                    ));
+                }
+                current.last_run = Some(running.clone());
+                Ok(())
+            })?;
+            Ok((stored, thread.thread_id, started_at, snapshot))
+        }
+        .await;
+        match result {
+            Ok(started) => Ok(started),
+            Err(error) => {
+                Self::cleanup_orphan_thread(state, thread.thread_id).await;
+                Err(error)
+            }
+        }
+    }
+
+    async fn cleanup_orphan_thread(state: &AppState, thread_id: ThreadId) {
+        if let Err(error) = state.store.delete_thread(thread_id).await {
+            tracing::warn!(
+                thread = %thread_id,
+                error = %error.message,
+                "cannot remove thread from a failed scheduled start"
+            );
+        }
     }
 
     /// Start the turn and write its terminal state back onto the task.
@@ -443,12 +488,13 @@ impl SchedulerService {
         task: ScheduledTask,
         thread_id: ThreadId,
         started_at: DateTime<Utc>,
+        snapshot: ExecutionSnapshot,
     ) -> ScheduledTask {
         let outcome = match crate::service::start_turn_as(
             state,
             thread_id,
-            crate::TurnSource::Scheduled(task.prompt.clone()),
-            task.prompt.clone(),
+            crate::TurnSource::Scheduled(snapshot.prompt.clone()),
+            snapshot.prompt.clone(),
             Vec::new(),
         )
         .await

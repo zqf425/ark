@@ -11,6 +11,7 @@ import { Button } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import type { EndpointFormat, ProviderTestResponse, ProviderView } from '../../../shared/contracts'
 import { Notice } from './SectionShell'
+import { useMenuFocus } from '../../../shared/ui/focus'
 
 export type TestState = { key: string; result?: ProviderTestResponse; error?: string }
 
@@ -74,11 +75,13 @@ function MoreMenu({ disabled, isDefault, onMakeDefault, onRemove }: {
   disabled: boolean
   isDefault: boolean
   onMakeDefault: () => void
-  onRemove: () => void
+  onRemove: (trigger: HTMLButtonElement | null) => void
 }): JSX.Element {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menu = useMenuFocus(open, () => setOpen(false), triggerRef)
   useEffect(() => {
     if (!open) return
     const close = (event: MouseEvent): void => {
@@ -90,13 +93,13 @@ function MoreMenu({ disabled, isDefault, onMakeDefault, onRemove }: {
   const pick = (action: () => void) => (): void => { setOpen(false); action() }
   return (
     <div className="ark-provider-menu" ref={ref}>
-      <Button size="sm" disabled={disabled} aria-label={t('settings.providers.moreActions')} aria-expanded={open} onClick={() => setOpen((v) => !v)}>⋯</Button>
+      <Button ref={triggerRef} size="sm" disabled={disabled} aria-label={t('settings.providers.moreActions')} aria-expanded={open} onClick={() => setOpen((v) => !v)}>⋯</Button>
       {open ? (
-        <div className="ark-provider-menu__pop" role="menu">
+        <div ref={menu.ref} onKeyDown={menu.onKeyDown} className="ark-provider-menu__pop" role="menu">
           <button type="button" role="menuitem" disabled={isDefault} onClick={pick(onMakeDefault)}>
             {isDefault ? t('settings.providers.alreadyDefault') : t('settings.providers.makeDefault')}
           </button>
-          <button type="button" role="menuitem" className="is-danger" onClick={pick(onRemove)}>{t('common.delete')}…</button>
+          <button type="button" role="menuitem" className="is-danger" onClick={() => { setOpen(false); onRemove(triggerRef.current) }}>{t('common.delete')}…</button>
         </div>
       ) : null}
     </div>
@@ -163,7 +166,7 @@ export type ProviderDetailProps = {
   onEdit: () => void
   onTest: () => void
   onMakeDefault: () => void
-  onRemove: () => void
+  onRemove: (trigger: HTMLButtonElement | null) => void
 }
 
 export function ProviderDetail({ provider, busy, isDefault, testState, onEdit, onTest, onMakeDefault, onRemove }: ProviderDetailProps): JSX.Element {

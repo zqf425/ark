@@ -65,12 +65,9 @@ struct TurnAccum {
     failed_tool_calls: u64,
     usage: Usage,
     usage_samples: u64,
-    /// Errors awaiting a failed call to claim them, log order. `Error`
-    /// carries no turn id, so attribution follows the open turn — the same
-    /// rule the llm-rounds projection applies. Claiming happens once the
-    /// turn settles (`flush_turn_errors`), so a failed row needs no window
-    /// bookkeeping beyond its own finish time.
-    pending_errors: Vec<(DateTime<Utc>, TraceRuntimeError)>,
+    /// Failed row currently owning turn-less runtime errors. Every finished
+    /// tool call clears it; only a failed finish opens a new window.
+    error_sink: Option<usize>,
     failed_rows: Vec<TraceErrorEntry>,
 }
 
@@ -184,7 +181,7 @@ impl TraceFold {
             failed_tool_calls: 0,
             usage: Usage::default(),
             usage_samples: 0,
-            pending_errors: Vec::new(),
+            error_sink: None,
             failed_rows: Vec::new(),
         });
     }
@@ -219,6 +216,9 @@ impl TraceFold {
             .remove(&(turn_id, call_id.to_string()))
             .unwrap_or_default();
         if let Some(acc) = self.per_turn.get_mut(&turn_id) {
+            // A finish closes the previous failure's error window even when
+            // this call succeeds; a later Error must not attach backwards.
+            acc.error_sink = None;
             acc.tool_calls += 1;
             if !ok {
                 acc.failed_tool_calls += 1;
@@ -236,6 +236,7 @@ impl TraceFold {
                         .or_else(|| (!output.is_empty()).then(|| output.to_string())),
                     errors: Vec::new(),
                 });
+                acc.error_sink = Some(acc.failed_rows.len() - 1);
             }
         }
         self.finished.push(ToolObservation {
@@ -250,7 +251,9 @@ impl TraceFold {
         });
     }
 
-    /// Park a runtime error on the open turn; claiming happens at turn end.
+    /// Append a runtime error only to the failed call whose finish window is
+    /// still open. Errors before the first failure or after a successful finish
+    /// have no failed row to own them.
     fn observe_error(
         &mut self,
         seq: u64,
@@ -258,25 +261,29 @@ impl TraceFold {
         code: ark_common::ArkErrorCode,
         message: &str,
     ) {
-        if let Some(turn_id) = self.current_turn {
-            if let Some(acc) = self.per_turn.get_mut(&turn_id) {
-                acc.pending_errors.push((
-                    timestamp,
-                    TraceRuntimeError {
-                        seq,
-                        timestamp,
-                        code,
-                        message: message.to_string(),
-                    },
-                ));
-            }
+        let Some(turn_id) = self.current_turn else {
+            return;
+        };
+        let Some(acc) = self.per_turn.get_mut(&turn_id) else {
+            return;
+        };
+        let Some(sink) = acc.error_sink else {
+            return;
+        };
+        if let Some(row) = acc.failed_rows.get_mut(sink) {
+            row.errors.push(TraceRuntimeError {
+                seq,
+                timestamp,
+                code,
+                message: message.to_string(),
+            });
         }
     }
 
     fn observe_turn_ended(&mut self, turn_id: TurnId, ended_at: DateTime<Utc>) {
         if let Some(acc) = self.per_turn.get_mut(&turn_id) {
             acc.ended_at = Some(ended_at);
-            flush_turn_errors(acc);
+            acc.error_sink = None;
         }
         if self.current_turn == Some(turn_id) {
             self.current_turn = None;
@@ -334,47 +341,43 @@ impl TraceFold {
     }
 }
 
-/// Wall-clock span of the thread: first to last event timestamp.
+/// Wall-clock span anchored by turn lifecycle events.
 ///
-/// `None` for an empty log; a single event reports zero.
+/// The first `TurnStarted` opens the thread span and the current turn's
+/// terminal closes it. Non-turn events never move a settled endpoint; only a
+/// final still-running turn extends to the newest event in the log.
 fn thread_span(events: &[RuntimeEvent]) -> Option<u64> {
-    let first = events.first()?.timestamp();
-    let last = events.last()?.timestamp();
-    Some((last - first).num_milliseconds().max(0) as u64)
-}
-
-/// Attach the errors a turn still holds to its failed rows.
-///
-/// Errors recorded after the final failed call still belong to it, because
-/// they happened while the runtime worked on that turn (same rationale as the
-/// llm-rounds flush). A row claims every error from its own finish backwards
-/// to the previous failed call's finish, so consecutive failures split the
-/// turn's error stream without overlap. An error older than the first failed
-/// row is dropped: it predates every failed call of the turn.
-fn flush_turn_errors(acc: &mut TurnAccum) {
-    if acc.failed_rows.is_empty() {
-        acc.pending_errors.clear();
-        return;
-    }
-    let window_start = acc.failed_rows[0].timestamp;
-    for (at, error) in acc.pending_errors.drain(..) {
-        if at < window_start {
-            continue;
-        }
-        // Newest row whose finish is not before the error: the row working
-        // when the error was recorded.
-        if let Some(row) = acc
-            .failed_rows
-            .iter_mut()
-            .rev()
-            .find(|row| row.timestamp <= at)
-        {
-            row.errors.push(error);
+    let mut first = None;
+    let mut last = None;
+    let mut open_turn = None;
+    for event in events {
+        match event {
+            RuntimeEvent::TurnStarted {
+                turn_id, timestamp, ..
+            } => {
+                first.get_or_insert(*timestamp);
+                last = Some(*timestamp);
+                open_turn = Some(*turn_id);
+            }
+            RuntimeEvent::TurnCompleted {
+                turn_id, timestamp, ..
+            }
+            | RuntimeEvent::TurnFailed {
+                turn_id, timestamp, ..
+            }
+            | RuntimeEvent::TurnAborted {
+                turn_id, timestamp, ..
+            } if open_turn == Some(*turn_id) => {
+                last = Some(*timestamp);
+                open_turn = None;
+            }
+            _ => {}
         }
     }
-    for row in &mut acc.failed_rows {
-        row.errors.sort_by_key(|error| error.seq);
+    if open_turn.is_some() {
+        last = events.last().map(RuntimeEvent::timestamp);
     }
+    Some((last? - first?).num_milliseconds().max(0) as u64)
 }
 
 /// Fold the finished calls into per-tool rows ordered by call count.
@@ -769,6 +772,23 @@ mod tests {
     }
 
     #[test]
+    fn successful_finish_closes_the_previous_error_window() {
+        let thread = ThreadId::new();
+        let turn = TurnId::new();
+        let events = vec![
+            started(1, thread, turn, 0),
+            tool_finished(2, thread, turn, 100, "c1", "bash", false, 50, "boom"),
+            tool_finished(3, thread, turn, 200, "c2", "bash", true, 50, "ok"),
+            error_at(4, thread, 250, "must not attach backwards"),
+            completed(5, thread, turn, 300),
+        ];
+        let response = aggregate_trace_stats(thread, &events);
+        assert_eq!(response.errors.len(), 1);
+        assert_eq!(response.errors[0].call_id, "c1");
+        assert!(response.errors[0].errors.is_empty());
+    }
+
+    #[test]
     fn errors_without_a_failed_call_are_dropped() {
         let thread = ThreadId::new();
         let turn = TurnId::new();
@@ -867,5 +887,41 @@ mod tests {
         assert_eq!(response.turn_stats[0].ended_at, None);
         assert_eq!(response.turn_stats[0].active_ms, 500);
         assert_eq!(response.total_duration_ms, Some(500));
+    }
+
+    #[test]
+    fn thread_span_uses_lifecycle_anchors_and_ignores_settled_trailing_events() {
+        let thread = ThreadId::new();
+        let first = TurnId::new();
+        let second = TurnId::new();
+        let events = vec![
+            error_at(1, thread, -100, "before lifecycle"),
+            started(2, thread, first, 100),
+            usage_at(3, thread, first, 200, 10),
+            completed(4, thread, first, 500),
+            started(5, thread, second, 1_000),
+            completed(6, thread, second, 1_500),
+            error_at(7, thread, 9_000, "after terminal"),
+        ];
+        let response = aggregate_trace_stats(thread, &events);
+        assert_eq!(response.total_duration_ms, Some(1_400));
+    }
+
+    #[test]
+    fn thread_span_extends_only_a_final_running_turn_to_the_latest_event() {
+        let thread = ThreadId::new();
+        let first = TurnId::new();
+        let second = TurnId::new();
+        let events = vec![
+            started(1, thread, first, 0),
+            completed(2, thread, first, 500),
+            started(3, thread, second, 1_000),
+            usage_at(4, thread, second, 1_400, 10),
+        ];
+        assert_eq!(
+            aggregate_trace_stats(thread, &events).total_duration_ms,
+            Some(1_400)
+        );
+        assert_eq!(thread_span(&[started(1, thread, first, 250)]), Some(0));
     }
 }

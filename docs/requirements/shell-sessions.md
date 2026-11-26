@@ -26,25 +26,23 @@
 - **会话进程**:不启动长驻 shell。每次命令仍独立 spawn，但由 manager 记录 cwd 演化。
   前台与后台统一执行 POSIX 命令：Unix 用 `/bin/sh -c`，Windows 从 `PATH` 内 Git for Windows
   的 `cmd/git.exe` 定位同安装目录的 `bin/bash.exe` 后以 `-c` 执行。不得直接调用
-  `C:\Windows\System32\bash.exe`，它是 WSL 启动器而非 Git Bash；会话只记录
-  `cwd`（随调用内的 `cd` 推进）。
+  `C:\Windows\System32\bash.exe`，它是 WSL 启动器而非 Git Bash；会话只记录 `cwd`。
 - **后台任务**:模型用 `bash_session` 且 `run_in_background: true` 时,命令脱离当前调用,
-  在会话 cwd 下独立 spawn(进程组隔离复用 `ark_common::process`),输出写入容量受限的
-  共享缓冲(64 KiB,超限从头丢弃并记录 dropped 标记);立即返回 `task_id`。
-- 前台命令仍走原 `bash` 工具语义(等待 + 超时),但 cwd 从会话状态出发、命令里的 `cd`
-  更新会话状态——这是「持久 cwd」的最小实现,不引入 shell 协议解析。
+  在 prepare 得到的 cwd 下独立 spawn(进程组隔离复用 `ark_common::process`),输出写入容量受限的
+  共享缓冲(64 KiB,超限从头丢弃并记录 dropped 标记);spawn/register 成功后提交 cwd 并立即返回 `task_id`。
+- 前台命令复用 `bash` 的等待、超时与进程树语义。cwd 推进分为 prepare/commit：prepare 返回
+  spawn cwd、实际执行 command 与可选 commit target；前台命令成功后才提交，失败命令不推进会话状态。
 
 ### 2. 折衷的显式记录:环境不跨进程持久
 
 真持久 shell(PTY/长驻进程 + stdin 协议)在 Windows 上没有可靠的可移植方案,而且 shell
 状态解析(区分命令边界、捕获 `cd`/`export` 的效果)复杂度远超收益。因此:
 
-- `cd` 生效:manager 对命令做**行级前缀解析**,识别 `cd <dir>`/`cd -`/`pushd` 并推进会话
-  cwd(工具实现内唯一宿主,单测覆盖)。目标带引号时先剥一层引号;含未展开 `$` 变量的目标
-  **不推进也不记录**(变量由 shell 运行时展开,按字面记录会产出永不存在的路径并污染整个
-  会话);该次命令仍由 shell 自行执行 `cd`,仅会话 cwd 落后,后续可显式再 `cd`。推进后的
-  路径必须已存在且是目录才提交,否则回落当前 cwd;记住的 cwd 失效时回落工作区并修复会话
-  状态。
+- `cd` 生效:manager 只识别首行整行纯 `cd <dir>`/`pushd <dir>`（工具实现内唯一宿主,单测覆盖）。
+  引号必须包住完整 token（可含空格）；`cd "a"b`、额外 token、`cd src && pwd`、`cd src; pwd` 等复合形式
+  **不追踪也不剥离**。含未展开 `$` 变量的目标不推进也不记录。单行纯 cd 保留原命令，从旧 cwd
+  执行一次并保留 pushd 输出；首行纯 cd 后还有命令时，从目标 cwd 执行剥离首行后的余下命令，
+  避免二次 cd。目标必须已存在且为目录；remembered cwd 失效时回落工作区并修复会话状态。
 - `export` **不**跨调用保持(如实记录在工具描述里,模型不会误依赖);
 - 后台任务以会话 cwd 为 initial cwd,各自独立进程组。
 
@@ -68,7 +66,8 @@ bash_kill   { task_id: string, required }   # 杀进程组,幂等
 - 后台任务注册表是 **16 个硬上限**：满额时先淘汰最旧已完成任务；若 16 个任务都仍在运行，
   新建后台任务返回结构化错误，不插入第 17 个。运行中任务不被淘汰。
 - 终止复用进程组语义:先组信号,再兜底 direct kill;已退出的任务 `bash_kill` 返回 ok 幂等。
-- 路径解析:cwd 推进经既有 `workspace_path`(containment 不变,逃逸仍是错误)。
+- 路径解析:prepare 与 commit 都对目标 canonicalize，并用 canonical workspace root 验证真实路径
+  containment；symlink/junction 逃逸不产生可剥离命令或提交目标。后台注册失败不提交 cwd。
 - 输出读取是**增量**，offset 是从任务启动起累计写入流的绝对逻辑字节位置，不是当前环形缓冲下标。
   缓冲维护 `base_offset`；丢弃旧前缀后以保留区间与绝对 reader offset 求交，因此后续追加仍可读取。
   同一 task 重复读不重复返回；每次读取仍受 64 KiB cap 与 UTF-8 字符边界截断。
@@ -82,7 +81,8 @@ bash_kill   { task_id: string, required }   # 杀进程组,幂等
 ## 验收
 
 - `shell_session` 单测:`cd` 推进(含 `cd -`、`pushd`、相对/绝对路径、带引号目标、`$` 变量
-  目标不推进、逃逸拒绝、失效 cwd 回落)、
+  目标不推进、逃逸拒绝、失效 cwd 回落)、单行 cd 不双重执行、多行首行 cd 只执行余下命令、
+  前台失败不提交、引号拼接/复合命令不追踪、symlink 逃逸不提交、后台注册后提交且不双重 cd、
   后台任务 id 返回、增量输出不重复、64 KiB 丢弃标记、kill 幂等、未知 id 结构化错误、
   绝对 offset 在环形覆盖后仍推进、任务满额且全在运行时拒绝第 17 个、满额时淘汰已完成任务。
 - `bash_output`/`bash_kill` schema 与 `TOOL_METAS` 一致性(assert catalogue sorted)。

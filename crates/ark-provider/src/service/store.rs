@@ -27,7 +27,8 @@ use tracing::warn;
 
 use crate::config::providers_path;
 use crate::domain::{
-    normalize_entry, validate_base_url, validate_endpoint_format, ProvidersDocument as Document,
+    context_window_for_model, normalize_entry, resolve_from_document, validate_base_url,
+    validate_endpoint_format, ProvidersDocument as Document,
 };
 use crate::service::entry_config::config_from_entry;
 use crate::service::persist::{load_document, write_document, DocumentLoad};
@@ -255,29 +256,11 @@ impl ProviderStore {
     /// inventory row recorded for that model.
     pub fn resolve(&self, id: Option<&str>) -> Option<ProviderConfig> {
         let document = self.lock();
-        let is_default = id
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .is_none();
-        let target = match id.map(str::trim).filter(|value| !value.is_empty()) {
-            Some(explicit) => document.get(explicit),
-            None => document
-                .effective_default()
-                .and_then(|default| document.get(default)),
-        }?;
+        let (target, pinned) = resolve_from_document(&document, id)?;
         let mut config = config_from_entry(target)?;
-        if is_default {
-            if let Some(model) = document.effective_default_model() {
-                if model != config.model {
-                    config.model = model.clone();
-                    config.context_window_tokens = target
-                        .models
-                        .iter()
-                        .flatten()
-                        .find(|item| item.id == model)
-                        .and_then(|item| item.context_window_tokens);
-                }
-            }
+        if let Some(model) = pinned {
+            config.model = model.clone();
+            config.context_window_tokens = context_window_for_model(target, &model);
         }
         Some(config)
     }
@@ -348,75 +331,28 @@ impl ProviderStore {
         id: Option<&str>,
         model: Option<String>,
     ) -> Result<ProviderConfig> {
+        let document = self.lock();
         let trimmed = id.map(str::trim).filter(|value| !value.is_empty());
-        let mut config = self.resolve(id).ok_or_else(|| {
-            if trimmed.is_none() {
-                // No default provider configured (or the default entry cannot
-                // produce a config: disabled, key missing). Child runs use
-                // the NotFound code to fall through to the parent's model.
-                ArkError::not_found(format!(
-                    "no usable default provider is configured{}",
-                    trimmed
-                        .map(|id| format!(" (requested `{id}` is unavailable too)"))
-                        .unwrap_or_default()
-                ))
-            } else {
-                ArkError::validation(format!("provider is unavailable: {trimmed:?}"))
-            }
-        })?;
+        let (target, pinned) = resolve_from_document(&document, id)
+            .ok_or_else(|| unavailable_provider_error(trimmed))?;
+        let mut config =
+            config_from_entry(target).ok_or_else(|| unavailable_provider_error(trimmed))?;
+        if let Some(model) = pinned {
+            config.model = model.clone();
+            config.context_window_tokens = context_window_for_model(target, &model);
+        }
         let Some(model) = model
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
         else {
             return Ok(config);
         };
-        let document = self.lock();
-        let target = match trimmed {
-            Some(explicit) => document.get(explicit),
-            None => document
-                .effective_default()
-                .and_then(|default| document.get(default)),
-        };
-        if let Some(entry) = target {
-            // Served models: the entry's stored `model` plus any inventory
-            // row. `entry.model` participates even when the default-model pin
-            // already replaced `config.model` with a different id — the pin
-            // changes what the *default request* sends, not what the entry
-            // can serve (review R2). `Some(vec![])` and `None` are both
-            // "no directory": a hand-filled provider never imported a
-            // catalog, and the settings UI persists `[]` on every save
-            // (review R1) — checking only a non-empty inventory keeps those
-            // overrides permissive.
-            let has_directory = entry.models.as_ref().is_some_and(|rows| !rows.is_empty());
-            if has_directory {
-                let served = entry.models.as_deref().expect("has_directory implies rows");
-                let known =
-                    model == entry.model.trim() || served.iter().any(|item| item.id == model);
-                if !known {
-                    let mut listed: Vec<&str> = Vec::with_capacity(served.len() + 1);
-                    listed.push(entry.model.trim());
-                    listed.extend(served.iter().map(|item| item.id.as_str()));
-                    return Err(ArkError::validation(format!(
-                        "provider `{}` does not serve model `{}`; served models: {}",
-                        entry.id,
-                        model,
-                        listed.join(", ")
-                    )));
-                }
-            }
-        }
+        validate_served_model(target, &model)?;
         if model == config.model {
             return Ok(config);
         }
+        config.context_window_tokens = context_window_for_model(target, &model);
         config.model = model;
-        config.context_window_tokens = target.and_then(|entry| {
-            entry
-                .models
-                .iter()
-                .flatten()
-                .find(|item| item.id == config.model)
-                .and_then(|item| item.context_window_tokens)
-        });
         Ok(config)
     }
 
@@ -567,6 +503,38 @@ impl ProviderStore {
         };
         Ok(list)
     }
+}
+
+fn unavailable_provider_error(id: Option<&str>) -> ArkError {
+    match id {
+        Some(id) => ArkError::validation(format!("provider is unavailable: {id:?}")),
+        // Child runs use NotFound to fall through to the parent's model.
+        None => ArkError::not_found("no usable default provider is configured"),
+    }
+}
+
+fn validate_served_model(entry: &ProviderEntry, model: &str) -> Result<()> {
+    let Some(served) = entry.models.as_deref() else {
+        return Ok(());
+    };
+    if served.is_empty()
+        || model == entry.model.trim()
+        || served.iter().any(|item| item.id == model)
+    {
+        return Ok(());
+    }
+    let stored = entry.model.trim();
+    let mut listed = vec![stored];
+    for item in served {
+        if !listed.contains(&item.id.as_str()) {
+            listed.push(&item.id);
+        }
+    }
+    let listed = listed.join(", ");
+    Err(ArkError::validation(format!(
+        "provider `{}` does not serve model `{model}`; served models: {listed}",
+        entry.id
+    )))
 }
 
 /// Build a catalog-only config from a draft, preserving write-only values from

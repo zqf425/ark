@@ -82,6 +82,29 @@ describe('ThreadRow kebab menu placement', () => {
     Element.prototype.getBoundingClientRect = realRect
   })
 
+  it('moves focus with menu keys, closes on Tab, and restores the kebab on Escape', async () => {
+    installViewport(1024, 700)
+    harness = await mountWithProviders(<ThreadListPanel />)
+    const trigger = harness.host.querySelector<HTMLButtonElement>('.ark-threadrow__kebab')!
+    await act(async () => { trigger.click() })
+    const items = [...document.querySelectorAll<HTMLButtonElement>('.ark-threadrow__menu [role="menuitem"]')]
+    expect(document.activeElement).toBe(items[0])
+    await act(async () => { items[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })) })
+    expect(document.activeElement).toBe(items[items.length - 1])
+    await act(async () => { items.at(-1)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+    expect(document.activeElement).toBe(items[0])
+    await act(async () => { items[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })) })
+    expect(document.activeElement).toBe(items.at(-1))
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    await act(async () => { items.at(-1)!.dispatchEvent(tab) })
+    expect(tab.defaultPrevented).toBe(false)
+    expect(document.querySelector('.ark-threadrow__menu')).toBeNull()
+    await act(async () => { trigger.click() })
+    await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(document.querySelector('.ark-threadrow__menu')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+  })
+
   it('flips the bottom row menu above the kebab so the delete item stays reachable', async () => {
     installViewport(1024, 700)
     harness = await mountWithProviders(<ThreadListPanel />)

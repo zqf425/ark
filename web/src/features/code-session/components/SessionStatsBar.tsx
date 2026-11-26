@@ -19,7 +19,7 @@ import { useI18n } from '../../../shared/i18n'
 import { formatTokens, formatUsd } from '../../../shared/format'
 import { getThreadUsage } from '../api/threads-api'
 import { useCodeSessionStore } from '../state/store'
-import { liveActiveMs } from './session-stats'
+import { gatePendingSince, liveActiveMs } from './session-stats'
 import { useClockTick } from './use-clock-tick'
 import { useDurationFormat } from '../hooks/use-duration-words'
 
@@ -93,14 +93,7 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
   // The gate's `requested_at` is the freeze instant: the clock may run up to
   // it, never past it. Earliest pending gate wins (one gate at a time by
   // construction, but the earliest is the safe bound).
-  const gatePendingSince = useCodeSessionStore((s) => {
-    if (activeTurnId == null) return null
-    const stamps = [
-      ...Object.values(s.approvals).filter((a) => a.turn_id === activeTurnId && a.status === 'pending').map((a) => Date.parse(a.requested_at)),
-      ...Object.values(s.userInputs).filter((u) => u.turn_id === activeTurnId && u.status === 'pending').map((u) => Date.parse(u.requested_at))
-    ].filter((ms) => Number.isFinite(ms))
-    return stamps.length > 0 ? Math.min(...stamps) : null
-  })
+  const gateFreezeAt = useCodeSessionStore((s) => (activeTurnId == null ? null : gatePendingSince(activeTurnId, s)))
   const turnLastEventAt = useCodeSessionStore((s) => (activeTurnId ? s.turnLastEventAt[activeTurnId] ?? null : null))
   const nowMs = useClockTick(activeTurnId != null)
   // Total active span, derived from the store's per-turn rows (the seed's
@@ -113,7 +106,7 @@ export function SessionStatsBar({ threadId }: { threadId: string | null }): JSX.
   const allRounds = useCodeSessionStore((s) => s.rounds)
   const hasPerTurnRows = allRounds.length > 0
   const liveMs =
-    activeTurnId != null ? liveActiveMs(allRounds, activeTurnId, nowMs, turnLastEventAt, gatePendingSince) : null
+    activeTurnId != null ? liveActiveMs(allRounds, activeTurnId, nowMs, turnLastEventAt, gateFreezeAt) : null
   const seedMs = usage?.activeMs ?? null
   const totalMs = (() => {
     if (hasPerTurnRows) {

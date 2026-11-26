@@ -24,7 +24,8 @@ smart-ark 的 ark 模式在「系统管理 → 链路分析」提供会话级统
 - 契约类型加在 `ark-contract`(`TraceStatsResponse` / `TurnStat` / `ToolStat` 等),
   ts-rs 生成 TS,跑 `cargo test -p ark-contract --lib ts_export` + `git diff --exit-code web/src/generated`。
 - 统计维度(全部可从现有事件推导,无需新埋点):
-  - 会话级:回合数、总时长(首 turn_started 末 turn 终止时间差)、模型调用次数
+  - 会话级:回合数、总时长(首个 `turn_started` 到最后 turn 终止时间差;终态后忽略非 turn
+    尾随事件,最后 turn 仍运行才延到最新事件;单 start 无后续为 0)、模型调用次数
     (usage 事件计数)、token 用量(usage 折叠)、工具调用总数/失败数
     (tool_call_finished 的 ok=false)、活跃会话天数。
   - 逐回合:每 turn 的 active_ms(复用 TurnUsage 折叠语义)、模型轮数、
@@ -32,7 +33,9 @@ smart-ark 的 ark 模式在「系统管理 → 链路分析」提供会话级统
   - 工具分布:按 tool 名聚合调用次数/失败次数/平均耗时。
   - 慢调用 Top N:按 duration_ms 排序的 tool_call_finished(截断到 N=10,
     附 call_id/tool/参数摘要/耗时)。
-  - 错误清单:ok=false 的调用 + 同窗口 RuntimeEvent::Error,各带时间戳。
+  - 错误清单:ok=false 的调用 + 同窗口 RuntimeEvent::Error,各带时间戳。窗口从 failed
+    `ToolCallFinished` 开始,到下一个任意 `ToolCallFinished` 或 turn terminal 结束;
+    成功 finish 会关闭旧失败窗口,窗口外 Error 不回溯挂到旧行。
 - LlmSpanStart/LlmSpanEnd 保持 PLANNED 不动;usage 事件已带每模型轮的
   prompt/completion/cache 计数,统计语义够首版使用。契约注释注明这一取舍。
 
@@ -52,6 +55,10 @@ smart-ark 的 ark 模式在「系统管理 → 链路分析」提供会话级统
     工具调用分布(横向条形)、逐回合耗时(条形)、错误/慢调用清单(表格)。
     图表用内联 SVG + 现有 ds-* 设计变量,**不引入图表库**(与 AGENTS.md
     最小依赖一致;smart-ark 用 recharts,ark 侧手工 SVG 足够且无新依赖)。
+  - 当前实现的统计读取竞态防护(2026-11-26):选择与「重新统计」共用 request generation 和
+    AbortController;切换、重新统计或卸载使旧请求失效,成功与失败落地前同时校验 mounted、
+    generation 与 requested/selected thread id。A 的迟到响应不得覆盖已经显示的 B,即使 transport
+    忽略 abort 也不例外。
   - 底部「启动 AI 分析」按钮:仅当已加载统计后可用。点击创建分析会话
     (POST /v1/threads,标题 `AI分析-<原线程标题>`),发送一条受控 prompt,
     把本页统计摘要嵌入 prompt 正文,由模型自行调用 workspace 工具读取原线程
@@ -78,11 +85,13 @@ smart-ark 的 ark 模式在「系统管理 → 链路分析」提供会话级统
 ## 验收
 
 - 单测(Rust):`aggregate_trace_stats` 纯函数覆盖——零事件线程、正常混合、
-  失败工具、慢调用排序截断、Error 事件关联。
+  失败工具、慢调用排序截断、Error 事件关联、failed→success→Error 不挂旧行、跨 turn 与
+  terminal 后尾随事件的时间锚点;`Usage::merge` 覆盖部分缓存计数;`ActiveClock` 覆盖末尾
+  工具事件且 gate 测试保持 700ms;时间线覆盖多次 compaction、重复 call id、item id 导航与旧日志兼容。
 - 契约测试:`cargo test -p ark-contract --lib ts_export` 生成新 TS 类型,
   `git diff --exit-code web/src/generated` 通过(生成后提交)。
 - web 单测:TraceSection 默认态不发分析请求(按钮未点时零 createThread 调用);
-  线程选择器加载;图表对空数据渲染空态。
+  线程选择器加载;图表对空数据渲染空态;A 重新统计晚于 B 完成时不覆盖 B,且旧请求被 abort。
 - check-hard-rules 通过(≤1000 行、api 层规则)。
 - i18n:catalog-completeness 测试通过(中英齐全)。
 - 手动验证:`cargo run -p arkd -- serve` + web dev,选一个有工具调用的线程
@@ -115,6 +124,11 @@ v1 只给了聚合数字与 Top 清单,无法回答"这个回合的 2 分钟花�
   `Usage` 事件生成 `model_call` span;`RuntimeEvent::Error` 生成
   error span。LLM 精确计时仍受 `LlmSpanStart/End` 未实现限制,
   `model_call` 用 usage 事件墙钟近似——契约注释如实声明。
+- 工具 span 按 finish occurrence 保留,重复 call id 不覆盖:Started 按 call id 入 FIFO,
+  Finished 出队并优先采用 finish 的 item_id、回退 start 的 item_id。item-backed 行只按真实
+  item id 去重;旧日志无 item id 时保留 `tool_call:{call_id}` 确定性键兼容。
+- 多次 compaction 的 Started 各自开窗,Completed 关闭最早未完成窗口;无 open 的 Completed
+  输出点 span。checkpoint item 仅在 created_at 落入匹配窗口时去重,未匹配仍输出。
 - 事件正文不进时间线(原文太长),文本只留 200 字摘要;要看全文走
   既有 thread detail。
 - `reasoning` / `assistant_message` item 的 `created_at` 落在模型调用
@@ -124,6 +138,13 @@ v1 只给了聚合数字与 Top 清单,无法回答"这个回合的 2 分钟花�
   按 `started_at` 升序。归属规则:选包含该 `created_at` 且时长最短的模型调用
   窗口(区间两端闭合);找不到窗口的片段(旧日志无 `duration_ms`)直接丢弃,
   全文仍可从 thread detail 读取。契约注释同步说明该丢失路径。
+
+### 后续优化：文本归属复杂度（待决，非实测结论）
+
+当前实现保留最窄窗口语义：设模型窗口数为 W、文本片段数为 D，`attach_text_details` 会对每个
+窗口扫描全部片段，并在归属判断中再次扫描窗口，确认存在 O(W²D) 的结构风险。这里只记录代码结构
+推导，未做性能剖析，不声称已实测瓶颈；后续若长回合数据表明需要优化，再评估区间索引或扫描线，
+且必须保持现有边界闭合、最窄窗口与稳定排序语义。
 
 ### web 交互
 
@@ -143,6 +164,8 @@ v1 只给了聚合数字与 Top 清单,无法回答"这个回合的 2 分钟花�
   (`max(0, prompt - hit - miss)`)/缓存查询未命中(`miss`)/缓存命中(`hit`)/输出
   (`completion`),和为 `total`。缓存字段全缺时只画非缓存输入/输出两段并显示
   「供应商未上报缓存统计」;只有 `hit` 时省略 miss 段;不把缺失值当成 0 上报。
+  会话级 `Usage::merge` 的任一实际输入缺 hit 或 miss 时,后端聚合的两个缓存计数与命中率
+  都为 `None`,前端不显示部分和。
 - 命中率与会话头部（`SessionStatsBar`）统一为前端口径 `hit / (hit + miss)`:
   唯一宿主在 `features/settings/api/trace-token-segments.ts` 的纯函数
   `traceCacheHitRate`,经 `trace-api.ts` re-export;两处缓存计数齐全且分母

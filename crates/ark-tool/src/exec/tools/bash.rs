@@ -167,15 +167,47 @@ impl Tool for BashTool {
 
 async fn run(ctx: &ToolContext, raw: ToolArgs) -> ark_common::Result<ToolOutput> {
     let parsed: args::BashArgs = args::parse("bash", &raw)?;
-    if parsed.command.trim().is_empty() {
-        return Ok(ToolOutput::err("bash requires a non-empty command"));
+    if let Some(error) = empty_command_error(&parsed.command) {
+        return Ok(error);
     }
     let cwd = workspace_path(ctx, parsed.cwd.as_deref().or(Some(".")))?;
-    ensure_cwd(&cwd)?;
+    execute_parsed(ctx, parsed, &cwd).await
+}
+
+/// Execute a command from a cwd already resolved by a stateful caller.
+///
+/// `bash_session` uses this after its prepare phase so the same process-tree,
+/// decoding and timeout semantics remain owned by `bash`; only the session
+/// manager decides when a successful command may advance its remembered cwd.
+pub(super) async fn execute_in_cwd(
+    ctx: &ToolContext,
+    raw: ToolArgs,
+    cwd: &std::path::Path,
+) -> ark_common::Result<ToolOutput> {
+    let parsed: args::BashArgs = args::parse("bash", &raw)?;
+    if let Some(error) = empty_command_error(&parsed.command) {
+        return Ok(error);
+    }
+    execute_parsed(ctx, parsed, cwd).await
+}
+
+fn empty_command_error(command: &str) -> Option<ToolOutput> {
+    command
+        .trim()
+        .is_empty()
+        .then(|| ToolOutput::err("bash requires a non-empty command"))
+}
+
+async fn execute_parsed(
+    ctx: &ToolContext,
+    parsed: args::BashArgs,
+    cwd: &std::path::Path,
+) -> ark_common::Result<ToolOutput> {
+    ensure_cwd(cwd)?;
     let timeout = clamp_timeout(parsed.timeout_ms, &DEFAULT_LIMITS);
     let mut command = shell(&parsed.command)?;
     command
-        .current_dir(&cwd)
+        .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

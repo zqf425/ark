@@ -62,7 +62,7 @@
   border-radius: 4px;
   background: var(--ark-bg-inset);
   color: var(--ark-text);
-  font: 11px var(--ark-mono);
+  font: calc(11px * var(--ark-scale)) var(--ark-mono);
   padding: 5px 6px;
 }
 

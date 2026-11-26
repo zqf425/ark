@@ -12,7 +12,7 @@
  * of adding a provider. Deleting always passes a confirmation dialog because
  * removing the default provider strands every default-following session.
  */
-import { useState } from 'react'
+import { useRef, useState, type RefObject } from 'react'
 import { Button, EmptyState, useToast } from '../../../shared/ui'
 import { useI18n } from '../../../shared/i18n'
 import type {
@@ -27,6 +27,7 @@ import { ProviderForm } from './ProviderForm'
 import { ProviderAvatar, ProviderDetail, type TestState } from './ProviderDetail'
 import { draftFromView, emptyDraft, type ProviderDraft } from './ProviderDraft'
 import { LoadError, SettingsSection, Skeleton } from './SectionShell'
+import { useDialogFocus } from '../../../shared/ui/focus'
 
 function ProviderNavItem({ provider, active, isDefault, isActive, onSelect }: {
   provider: ProviderView
@@ -57,22 +58,23 @@ function ProviderNavItem({ provider, active, isDefault, isActive, onSelect }: {
   )
 }
 
-function DeleteDialog({ provider, isDefault, busy, onCancel, onConfirm }: {
+function DeleteDialog({ provider, isDefault, busy, onCancel, onConfirm, triggerRef }: {
   provider: ProviderView
   isDefault: boolean
   busy: boolean
   onCancel: () => void
   onConfirm: () => void
+  triggerRef: RefObject<HTMLButtonElement | null>
 }): JSX.Element {
   const { t } = useI18n()
+  const dialog = useDialogFocus(true, onCancel, triggerRef)
   return (
-    <div className="ark-importdialog" role="dialog" aria-modal="true" aria-label={t('settings.providers.deleteTitle', { id: provider.id })}
-      onKeyDown={(event) => { if (event.key === 'Escape') onCancel() }}>
+    <div ref={dialog.ref} tabIndex={-1} onKeyDown={dialog.onKeyDown} className="ark-importdialog" role="dialog" aria-modal="true" aria-label={t('settings.providers.deleteTitle', { id: provider.id })}>
       <div className="ark-importdialog__panel ark-provider-confirm">
         <h4>{t('settings.providers.deleteTitle', { id: provider.label ?? provider.id })}</h4>
         <p>{isDefault ? t('settings.providers.deleteBodyDefault') : t('settings.providers.deleteBody')}</p>
         <div className="ark-provider-confirm__acts">
-          <Button variant="ghost" size="sm" disabled={busy} onClick={onCancel}>{t('common.cancel')}</Button>
+          <Button data-autofocus variant="ghost" size="sm" disabled={busy} onClick={onCancel}>{t('common.cancel')}</Button>
           <Button variant="danger" size="sm" disabled={busy} onClick={onConfirm}>{t('common.delete')}</Button>
         </div>
       </div>
@@ -90,10 +92,18 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
   const [testState, setTestState] = useState<TestState | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const editRequestSeq = useRef(0)
+  const selectedIdRef = useRef<string | null>(null)
+  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const select = (id: string | null): void => {
+    selectedIdRef.current = id
+    setSelectedId(id)
+  }
   const selected = api.providers.find((row) => row.id === selectedId) ?? api.providers[0] ?? null
   const isDefaultRow = (row: ProviderView): boolean => api.defaultProviderId === row.id || row.is_default
 
   const close = (): void => {
+    editRequestSeq.current += 1
     setDraft(null)
     setEditing(false)
   }
@@ -101,7 +111,7 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
   const submit = async (entry: ProviderEntry): Promise<void> => {
     const outcome = await api.upsert({ ...entry, make_default: false })
     if (outcome.ok) {
-      setSelectedId(entry.id)
+      select(entry.id)
       toast.push('success', t('settings.providers.saved', { id: entry.id }))
       close()
       return
@@ -110,14 +120,17 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
   }
 
   const openEdit = async (view: ProviderView): Promise<void> => {
-    setSelectedId(view.id)
+    const request = ++editRequestSeq.current
+    select(view.id)
     const outcome = await api.get(view.id)
+    if (request !== editRequestSeq.current || view.id !== selectedIdRef.current) return
     if (!outcome.ok) {
       toast.push('error', t('settings.providers.loadFailed'), describeOutcome(outcome))
       return
     }
+    if (outcome.value.id !== view.id) return
     setEditing(true)
-    setDraft(draftFromView(view, outcome.value.api_key ?? ''))
+    setDraft(draftFromView(outcome.value))
   }
 
   const runTest = async (request: { provider_id?: string; entry?: ProviderEntry }, key: string): Promise<void> => {
@@ -153,11 +166,12 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
 
   const remove = async (): Promise<void> => {
     if (!selected) return
+    editRequestSeq.current += 1
     const outcome = await api.remove(selected.id)
     setConfirmDelete(false)
     if (outcome.ok) {
       toast.push('success', t('settings.providers.deleted', { id: selected.id }))
-      setSelectedId(null)
+      select(null)
       close()
     } else toast.push('error', t('settings.providers.deleteFailed'), describeOutcome(outcome))
   }
@@ -188,7 +202,7 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
         onEdit={() => void openEdit(selected)}
         onTest={() => void runTest({ provider_id: selected.id }, `test:${selected.id}`)}
         onMakeDefault={() => void setDefault()}
-        onRemove={() => setConfirmDelete(true)}
+        onRemove={(trigger) => { deleteTriggerRef.current = trigger; editRequestSeq.current += 1; setConfirmDelete(true) }}
       />
     )
   }
@@ -207,7 +221,7 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
               active={!draft && selected?.id === provider.id}
               isDefault={isDefaultRow(provider)}
               isActive={api.activeProviderId === provider.id}
-              onSelect={() => { setSelectedId(provider.id); close() }}
+              onSelect={() => { select(provider.id); close() }}
             />
           ))}
         </div>
@@ -222,7 +236,7 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
       desc={t('settings.providers.desc')}
       actions={
         draft ? null : (
-          <Button variant="primary" size="sm" disabled={api.busy !== null} onClick={() => { setEditing(false); setDraft(emptyDraft()) }}>
+          <Button variant="primary" size="sm" disabled={api.busy !== null} onClick={() => { close(); setEditing(false); setDraft(emptyDraft()) }}>
             {t('settings.providers.add')}
           </Button>
         )
@@ -241,6 +255,7 @@ export function ProvidersSection({ providers: api }: ProvidersSectionProps): JSX
           busy={api.busy !== null}
           onCancel={() => setConfirmDelete(false)}
           onConfirm={() => void remove()}
+          triggerRef={deleteTriggerRef}
         />
       ) : null}
     </SettingsSection>

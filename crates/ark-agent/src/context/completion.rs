@@ -38,6 +38,7 @@ pub fn auto_delivery_attempts(events: &[RuntimeEvent]) -> HashMap<String, usize>
             // fresh input) can deliver again without stale poisoning.
             RuntimeEvent::TurnStarted {
                 auto_continuation: false,
+                auto_recovery: 0,
                 ..
             } => {
                 for count in attempts.values_mut() {
@@ -47,12 +48,9 @@ pub fn auto_delivery_attempts(events: &[RuntimeEvent]) -> HashMap<String, usize>
             RuntimeEvent::ChildCompleted {
                 notification_id, ..
             } => {
-                // Hydrate can replay the same record; keep the smaller count
-                // so replay cannot inflate the accounting.
-                attempts
-                    .entry(notification_id.clone())
-                    .and_modify(|seen| *seen = 0)
-                    .or_insert(0);
+                // Hydrate can replay the same record; keep the existing count
+                // so replay cannot reset or inflate the accounting.
+                attempts.entry(notification_id.clone()).or_insert(0);
             }
             RuntimeEvent::ChildCompletionAcknowledged {
                 notification_id, ..
@@ -72,9 +70,10 @@ pub fn auto_delivery_attempts(events: &[RuntimeEvent]) -> HashMap<String, usize>
 pub const RECOVERY_MODEL_FAILURE_STREAK_LIMIT: usize = 2;
 
 /// Counts trailing turns that failed on the model request itself, derived
-/// from the durable interaction log. Any other terminal event (user turn,
-/// completion, abort, or a non-model failure such as a tool or policy error)
-/// breaks the streak, because the provider outage is over.
+/// from the durable interaction log. A new user lifecycle, or any other
+/// terminal event (completion, abort, or a non-model failure such as a tool or
+/// policy error) breaks the streak, because the provider outage is over.
+/// Started/failed alternation within automatic work does not break it.
 ///
 /// Unlike [`consecutive_auto_model_request_failures`], this counts every
 /// model-request termination regardless of turn origin, so the recovery
@@ -89,9 +88,14 @@ pub fn consecutive_model_request_failures(events: &[RuntimeEvent]) -> usize {
                 ..
             } => streak += 1,
             RuntimeEvent::TurnFailed { .. }
-            | RuntimeEvent::TurnStarted { .. }
+            | RuntimeEvent::TurnStarted {
+                auto_continuation: false,
+                auto_recovery: 0,
+                ..
+            }
             | RuntimeEvent::TurnCompleted { .. }
             | RuntimeEvent::TurnAborted { .. } => streak = 0,
+            RuntimeEvent::TurnStarted { .. } => {}
             _ => {}
         }
     }
@@ -99,9 +103,10 @@ pub fn consecutive_model_request_failures(events: &[RuntimeEvent]) -> usize {
 }
 
 /// Counts trailing continuations that failed on the model request itself,
-/// derived from the durable interaction log. Any other terminal event (user
-/// turn, completion, abort, or a non-model failure such as a tool or policy
-/// error) breaks the streak, because the provider outage is over.
+/// derived from the durable interaction log. A new user lifecycle, or any
+/// other terminal event (completion, abort, or a non-model failure such as a
+/// tool or policy error) breaks the streak. Automatic starts and recoveries do
+/// not: their started/failed alternation is one continuing outage.
 pub fn consecutive_auto_model_request_failures(events: &[RuntimeEvent]) -> usize {
     let mut streak = 0usize;
     for event in events {
@@ -116,10 +121,12 @@ pub fn consecutive_auto_model_request_failures(events: &[RuntimeEvent]) -> usize
             }
             | RuntimeEvent::TurnStarted {
                 auto_continuation: false,
+                auto_recovery: 0,
                 ..
             }
             | RuntimeEvent::TurnCompleted { .. }
             | RuntimeEvent::TurnAborted { .. } => streak = 0,
+            RuntimeEvent::TurnStarted { .. } => {}
             _ => {}
         }
     }
@@ -262,16 +269,40 @@ mod delivery_bound_tests {
         }
     }
 
-    fn auto_started() -> RuntimeEvent {
+    fn started(auto_continuation: bool, auto_recovery: u32) -> RuntimeEvent {
         RuntimeEvent::TurnStarted {
             seq: 0,
             thread_id: ark_common::ThreadId::new(),
             turn_id: TurnId::new(),
             timestamp: Utc::now(),
-            auto_continuation: true,
-            auto_recovery: 0,
+            auto_continuation,
+            auto_recovery,
             attachment_ids: Vec::new(),
             attachment_outcomes: Vec::new(),
+        }
+    }
+
+    fn auto_started() -> RuntimeEvent {
+        started(true, 0)
+    }
+
+    fn recovery_started() -> RuntimeEvent {
+        started(false, 1)
+    }
+
+    fn user_started() -> RuntimeEvent {
+        started(false, 0)
+    }
+
+    fn failed(model_request_failed: bool) -> RuntimeEvent {
+        RuntimeEvent::TurnFailed {
+            seq: 0,
+            thread_id: ark_common::ThreadId::new(),
+            turn_id: TurnId::new(),
+            item_id: None,
+            timestamp: Utc::now(),
+            message: "x".into(),
+            model_request_failed,
         }
     }
 
@@ -289,21 +320,27 @@ mod delivery_bound_tests {
     }
 
     #[test]
-    fn user_turn_resets_the_counting() {
+    fn duplicate_completions_and_recoveries_do_not_reset_the_delivery_bound() {
         let events = vec![
             completed("n1"),
             auto_started(),
-            RuntimeEvent::TurnStarted {
-                seq: 0,
-                thread_id: ark_common::ThreadId::new(),
-                turn_id: TurnId::new(),
-                timestamp: Utc::now(),
-                auto_continuation: false,
-                auto_recovery: 0,
-                attachment_ids: Vec::new(),
-                attachment_outcomes: Vec::new(),
-            },
+            auto_started(),
+            completed("n1"),
+            recovery_started(),
         ];
+        assert_eq!(*auto_delivery_attempts(&events).get("n1").unwrap(), 2);
+        assert!(CompletionInbox::from_events_for_auto_continuation(&events)
+            .notification_ids()
+            .is_empty());
+        assert_eq!(
+            CompletionInbox::from_events(&events).notification_ids(),
+            ["n1"]
+        );
+    }
+
+    #[test]
+    fn user_turn_resets_the_counting() {
+        let events = vec![completed("n1"), auto_started(), user_started()];
         assert_eq!(*auto_delivery_attempts(&events).get("n1").unwrap(), 0);
         assert_eq!(
             CompletionInbox::from_events_for_auto_continuation(&events).notification_ids(),
@@ -313,46 +350,34 @@ mod delivery_bound_tests {
 
     #[test]
     fn model_failure_streak_counts_and_resets() {
-        let failed = |model: bool| RuntimeEvent::TurnFailed {
-            seq: 0,
-            thread_id: ark_common::ThreadId::new(),
-            turn_id: TurnId::new(),
-            item_id: None,
-            timestamp: Utc::now(),
-            message: "x".into(),
-            model_request_failed: model,
-        };
-        let events = vec![auto_started(), failed(true), auto_started(), failed(true)];
+        let events = vec![
+            auto_started(),
+            failed(true),
+            recovery_started(),
+            failed(true),
+        ];
         assert_eq!(consecutive_auto_model_request_failures(&events), 2);
+        assert_eq!(consecutive_model_request_failures(&events), 2);
         let events = vec![auto_started(), failed(true), failed(false), failed(true)];
         assert_eq!(consecutive_auto_model_request_failures(&events), 1);
+        let events = vec![
+            failed(true),
+            recovery_started(),
+            user_started(),
+            failed(true),
+        ];
+        assert_eq!(consecutive_auto_model_request_failures(&events), 1);
+        assert_eq!(consecutive_model_request_failures(&events), 1);
     }
 
     #[test]
     fn recovery_streak_counts_every_model_failure_and_resets_on_any_progress() {
-        let failed = |model: bool| RuntimeEvent::TurnFailed {
-            seq: 0,
-            thread_id: ark_common::ThreadId::new(),
-            turn_id: TurnId::new(),
-            item_id: None,
-            timestamp: Utc::now(),
-            message: "x".into(),
-            model_request_failed: model,
-        };
-        let any_turn = || RuntimeEvent::TurnStarted {
-            seq: 0,
-            thread_id: ark_common::ThreadId::new(),
-            turn_id: TurnId::new(),
-            timestamp: Utc::now(),
-            auto_continuation: false,
-            auto_recovery: 0,
-            attachment_ids: Vec::new(),
-            attachment_outcomes: Vec::new(),
-        };
         // Consecutive model failures across origins (user turn + recoveries)
         // accumulate: a gateway outage kills both alike.
-        let events = vec![any_turn(), failed(true), failed(true), failed(true)];
+        let events = vec![user_started(), failed(true), failed(true), failed(true)];
         assert_eq!(consecutive_model_request_failures(&events), 3);
+        let alternating = vec![failed(true), recovery_started(), failed(true)];
+        assert_eq!(consecutive_model_request_failures(&alternating), 2);
         // Any non-model terminal event resets the streak: the outage is over.
         let events = vec![failed(true), failed(true), failed(false), failed(true)];
         assert_eq!(consecutive_model_request_failures(&events), 1);

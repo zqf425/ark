@@ -44,8 +44,10 @@
 
 并批规则（`ParallelPolicy::plan`）保持原有的资源判定：两个调用能并批，当且仅当
 双方都非 `Exclusive` 且 `resource`（`path`/`file_path`/`filePath`/`target`）不相同。
-`bash` 没有资源参数，因此它只与"无冲突"这一侧成立——这正是它必须显式声明
-`Isolated` 才可并批的原因：没有声明就没有并批资格。
+`bash_session` 虽每次独占进程，但共享 manager 的 cwd 状态，因此 `ToolCallRequest::resource()`
+为它返回固定 key `shell_session`，同批调用按批顺序串行，避免 cwd 交错；普通 `bash` 没有资源参数，
+仍可彼此并批。`bash` 只与“无冲突”这一侧成立——这正是它必须显式声明 `Isolated` 才可并批的原因：
+没有声明就没有并批资格。
 
 内置声明：`read`、`ls`、`find`、`grep`、`web_fetch`、`bash_output` 为 `ReadOnly`；
 `bash`、`bash_session`、`bash_kill`、`delegate_task` 为 `Isolated`；`write`、`edit`、
@@ -68,7 +70,8 @@
 ## 验收
 
 - `ParallelPolicy` 单测：3 条 `bash` 同批；bash 与 read 混排同批；同路径 read 串行；
-  `write` 独占；插件工具可经表声明为 `Isolated`；表内缺失的名字仍独占。
+  `write` 独占；两条 `bash_session` 的 cwd 变更不交错且普通 bash 不被连带串行；插件工具可经表声明为
+  `Isolated`；表内缺失的名字仍独占。
 - `ark-tool` 回归：3 条 `sleep 1` 的 `bash` 在 `join_all` 下总耗时显著低于串行的 3 秒。
 - 全仓 `cargo test --workspace --exclude ark-desktop`、`cargo clippy --workspace
   --exclude ark-desktop --all-targets -- -D warnings` 通过。

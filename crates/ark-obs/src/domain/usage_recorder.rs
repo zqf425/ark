@@ -107,8 +107,8 @@ mod tests {
 
         recorder.record(&Usage::new(10, 5).with_cache(Some(90), Some(10)));
         let usage = recorder.usage();
-        assert_eq!(usage.cache_hit_tokens, Some(90));
-        assert_eq!(usage.cache_miss_tokens, Some(10));
+        assert_eq!(usage.cache_hit_tokens, None);
+        assert_eq!(usage.cache_miss_tokens, None);
         assert_eq!(usage.cache_hit_rate, None);
     }
 

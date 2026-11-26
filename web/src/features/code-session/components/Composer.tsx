@@ -261,6 +261,7 @@ export function Composer({
   const setCommandError = useCodeSessionStore((s) => s.setCommandError)
   const { send, steer, interrupt, canInterrupt } = useTurn(threadId)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const highlightRef = useRef<HTMLDivElement | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
 
   // Per-thread queued drafts: filled by 「排队」 during a live turn, flushed in
@@ -331,18 +332,25 @@ export function Composer({
   // Store-backed textarea: writes keep the per-thread draft in sync, and the
   // height follows the stored content so a restored long draft is not clamped
   // to one row.
+  const syncHighlightScroll = (node: HTMLTextAreaElement): void => {
+    if (!highlightRef.current) return
+    highlightRef.current.scrollTop = node.scrollTop
+    highlightRef.current.scrollLeft = node.scrollLeft
+  }
+
   const resize = (node: HTMLTextAreaElement): void => {
     node.style.height = 'auto'
     node.style.height = `${Math.min(node.scrollHeight, MAX_ROWS * 22)}px`
+    syncHighlightScroll(node)
   }
 
-  // A restored multi-line draft (thread switch remount) must size its rows on
-  // mount; resize() reads scrollHeight, so this runs after the DOM settles.
-  // Typing already resizes through onChange, so only the (re)mount matters.
+  // Restored/external draft changes and resize can clamp or restore scroll.
+  // Run after the mirror commits so both layers keep the same viewport.
   useLayoutEffect(() => {
     const node = inputRef.current
-    if (node && draftText) resize(node)
-  }, [threadId])
+    if (!node) return
+    resize(node)
+  }, [threadId, draftText])
 
   // Only one queue head may be in flight. The id guard makes a late completion
   // harmless if the user removed that head or appended an identical message.
@@ -700,7 +708,7 @@ export function Composer({
               the mirror recognizing complete mentions and the in-progress token.
               The textarea's own text stays opaque; this layer is only visible
               behind it, so selection/IME/copy behavior is untouched. */}
-          <DraftHighlight text={draftText} skills={skills} token={token} />
+          <DraftHighlight ref={highlightRef} text={draftText} skills={skills} token={token} />
           <textarea
           ref={inputRef}
           className="ark-composer__input"
@@ -710,6 +718,7 @@ export function Composer({
           aria-label={live ? t('canvas.composer.steerAria') : t('canvas.composer.sendAria')}
           disabled={inputDisabled}
           onPaste={onPaste}
+          onScroll={(event) => syncHighlightScroll(event.currentTarget)}
           onChange={(event) => {
             const node = event.currentTarget
             resize(node)

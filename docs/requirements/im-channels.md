@@ -102,7 +102,8 @@ ImSettings { enabled: false }# config.im,ReloadClass::Hot,总开关只门控连�
 落盘,offset 用十进制串),GET 不回传,客户端不可写。inbox 记录携带消息、批次最终
 `next_cursor` 与 `queued` 状态,直到处理终态才删除。存储为每个持久化批次分配内部
 `cursor_version`,只有不旧于该渠道已应用版本的提交才推进 cursor,防止旧 supervisor 或
-旧 inbox 的延迟提交把游标回退;版本随 `im.json` 重启恢复,不进入 wire。
+旧 inbox 的延迟提交把游标回退;版本随 `im.json` 重启恢复,不进入 wire。渠道 PATCH 的
+`replace_channel` 在同一写锁内只替换 channel 字段并保留当前 cursor，stale 读改写也不能回退。
 
 - 渠道数上限 `MAX_IM_CHANNELS = 20`(常量居 ark-contract,与 schedules 常量同宿主);
   容量校验 `ensure_channel_capacity` 居 `ark-im`(同 `ark-schedule::ensure_capacity`
@@ -138,8 +139,10 @@ ImSettings { enabled: false }# config.im,ReloadClass::Hot,总开关只门控连�
 
 1. **批量原子落盘**:适配器归一化一批平台消息后,由 `InboundSender` 经
    `ImStore::persist_inbound_batch` 在**一次原子 rewrite** 中全部追加为
-   `queued=false` 的 inbox 记录;任一校验或写入失败不得部分可见,也不推进平台 cursor。
-   空批次才直接 `advance_channel_cursor`。
+   `queued=false` 的 inbox 记录;同步 store 调用经 `spawn_blocking` 执行,不阻塞 async executor,
+   但仍按整批持久化、逐条 admission ack 的原顺序收敛;JoinError 映射为带渠道上下文的
+   `RuntimeUnavailable`/`StoreFailure`。任一校验或写入失败不得部分可见,也不推进平台 cursor。
+   空批次才直接 `advance_channel_cursor`(同样经 `spawn_blocking`)。
 2. **过滤、命令与去重**:bot 自身消息、白名单外会话(空白名单按安全默认拒绝并提示;
    非空白名单外静默丢弃)、群聊未 @(`require_mention` 生效时)、weixin 非 owner sender、
    空文本一律终端丢弃;`/new` 与未知命令处理完后也终端丢弃。live 消息按每渠道有界
@@ -267,7 +270,8 @@ ImSettings { enabled: false }# config.im,ReloadClass::Hot,总开关只门控连�
   live 队列满删除而 durable replay 队列满保留并等待容量后继续处理、409 有界重试、超时保留分支,
   渠道 CRUD/上限/verify 路由,`turn_source_texts` 对 `TurnSource::Im` 的用户消息映射;
   ark-store 覆盖批量原子落盘、原子 rewrite 失败不暴露半提交、queued+cursor 同写、
-  乱序提交与重启后 cursor 不回退、ack/discard 与重开恢复。
+  stale replace 不回退 cursor 且返回完整记录、乱序提交与重启后 cursor 不回退、ack/discard 与
+  重开恢复；ark-im 覆盖大 inbox 持久化期间 async executor 仍响应及 JoinError 上下文映射。
 - 契约:`cargo test -p ark-contract --lib ts_export` 后 `web/src/generated` 零 diff。
 - 质量:`cargo fmt --check`、`cargo check`、`cargo clippy -D warnings`(受影响包),
   `cargo test --workspace --exclude ark-desktop`;`dependency_direction.rs` 含 ark-im 新行。

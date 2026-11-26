@@ -40,6 +40,7 @@ function ThreadRow({
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(thread.title)
   const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null)
+  const menuTriggerRef = useRef<HTMLButtonElement>(null)
 
   const submitRename = async (): Promise<void> => {
     const next = title.trim()
@@ -64,6 +65,7 @@ function ThreadRow({
         </button>
         <button
           type="button"
+          ref={menuTriggerRef}
           data-menu-trigger
           className="ark-threadrow__kebab"
           aria-label={t('thread.row.menu')}
@@ -104,6 +106,7 @@ function ThreadRow({
           onRestore={onRestore}
           onDelete={onDelete}
           onClose={() => setMenuAnchor(null)}
+          triggerRef={menuTriggerRef}
         />
       ) : null}
     </div>

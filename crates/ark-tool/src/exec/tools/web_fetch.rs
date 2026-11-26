@@ -59,7 +59,7 @@ impl Tool for WebFetchTool {
         // model can fix its arguments and try again (design ark-tool.md:29).
         let parsed: args::WebFetchArgs = match args::parse("web_fetch", &raw) {
             Ok(parsed) => parsed,
-            Err(err) => return Ok(ToolOutput::err(err.message)),
+            Err(err) => return Ok(fetch_failure(err.message)),
         };
         Ok(self.fetch(parsed.url.trim()).await)
     }
@@ -80,7 +80,7 @@ impl WebFetchTool {
     async fn fetch(&self, raw_url: &str) -> ToolOutput {
         let mut url = match Url::parse(raw_url) {
             Ok(url) => url,
-            Err(err) => return ToolOutput::err(format!("invalid url: {err}")),
+            Err(err) => return fetch_failure(format!("invalid url: {err}")),
         };
         let mut hops = 0_u8;
         loop {
@@ -90,9 +90,7 @@ impl WebFetchTool {
                 // re-derive hint applies (the guessed name may be wrong), and
                 // naming the browser escape hatch keeps one consistent
                 // recovery contract for every fetch failure.
-                return ToolOutput::err(format!(
-                    "target refused by the SSRF guard: {reason}; {FAILURE_GUIDANCE}"
-                ));
+                return fetch_failure(format!("target refused by the SSRF guard: {reason}"));
             }
             let response = self
                 .http
@@ -108,16 +106,15 @@ impl WebFetchTool {
                 .await;
             let response = match response {
                 Ok(response) => response,
-                Err(err) => return ToolOutput::err(err.message),
+                Err(err) => return fetch_failure(err.message),
             };
             let Some(target) = redirect_target(&url, &response) else {
                 return render(response.status, &response.headers, &response.body);
             };
             hops += 1;
             if hops > MAX_REDIRECTS {
-                return ToolOutput::err(format!(
-                    "stopped after {MAX_REDIRECTS} redirects; the last target was `{target}`; \
-                     {FAILURE_GUIDANCE}"
+                return fetch_failure(format!(
+                    "stopped after {MAX_REDIRECTS} redirects; the last target was `{target}`"
                 ));
             }
             url = target;
@@ -171,12 +168,21 @@ a real page (site home, docs index, sitemap, search results) instead of retrying
 script-rendered or bot-gated, navigate to it with a browser tool (e.g. playwright.* MCP tools) \
 instead of web_fetch.";
 
+/// Single user-visible failure exit. Every refusal is recoverable by the model,
+/// including argument, URL, transport and content-type failures.
+fn fetch_failure(message: impl Into<String>) -> ToolOutput {
+    let message = message.into();
+    if message.contains(FAILURE_GUIDANCE) {
+        ToolOutput::err(message)
+    } else {
+        ToolOutput::err(format!("{message}; {FAILURE_GUIDANCE}"))
+    }
+}
+
 /// Render one completed response as model-visible output.
 fn render(status: u16, headers: &ark_ports::HeaderMap, body: &str) -> ToolOutput {
     if !(200..300).contains(&status) {
-        return ToolOutput::err(format!(
-            "request returned status {status}; {FAILURE_GUIDANCE}"
-        ));
+        return fetch_failure(format!("request returned status {status}"));
     }
     let content_type = headers
         .get("content-type")
@@ -190,7 +196,7 @@ fn render(status: u16, headers: &ark_ports::HeaderMap, body: &str) -> ToolOutput
     } else if content_type.starts_with("text/") || content_type.starts_with("application/json") {
         body.to_string()
     } else {
-        return ToolOutput::err(format!(
+        return fetch_failure(format!(
             "unsupported content type `{content_type}`; only text and JSON bodies are fetched"
         ));
     };
@@ -532,6 +538,18 @@ mod tests {
             .unwrap()
     }
 
+    fn assert_failure_guidance(out: &ToolOutput) {
+        assert!(!out.ok, "{}", out.content);
+        assert!(out.content.contains("re-derive"), "{}", out.content);
+        assert!(out.content.contains("browser tool"), "{}", out.content);
+        assert_eq!(
+            out.content.matches(FAILURE_GUIDANCE).count(),
+            1,
+            "{}",
+            out.content
+        );
+    }
+
     #[tokio::test]
     async fn malformed_arguments_are_a_tool_error_not_a_turn_failure() {
         let tool = tool("<html></html>", "text/html");
@@ -541,8 +559,22 @@ mod tests {
             serde_json::json!({"url": "not a url"}),
         ] {
             let out = tool.execute(&ctx(), ToolArgs(raw)).await.unwrap();
-            assert!(!out.ok, "a bad argument must be a structured tool failure");
+            assert_failure_guidance(&out);
         }
+    }
+
+    #[tokio::test]
+    async fn transport_and_egress_errors_carry_recovery_guidance() {
+        let tool = WebFetchTool::new(Arc::new(ScriptedHttp::new(Vec::new())));
+        let out = tool
+            .execute(
+                &ctx(),
+                ToolArgs(serde_json::json!({"url": "https://1.1.1.1/x"})),
+            )
+            .await
+            .unwrap();
+        assert!(out.content.contains("scripted http ran out"));
+        assert_failure_guidance(&out);
     }
 
     #[tokio::test]
@@ -665,13 +697,7 @@ mod tests {
             .unwrap();
         assert!(!out.ok, "{}", out.content);
         assert!(out.content.contains("SSRF"), "{}", out.content);
-        // Every failure branch carries the recovery guidance, not just 404s:
-        // a refusal must also point at re-deriving the target or a browser.
-        assert!(
-            out.content.contains("re-derive"),
-            "SSRF refusal must carry recovery guidance, got: {}",
-            out.content
-        );
+        assert_failure_guidance(&out);
         assert_eq!(
             scripted.urls().len(),
             1,
@@ -694,11 +720,7 @@ mod tests {
             .unwrap();
         assert!(!out.ok, "{}", out.content);
         assert!(out.content.contains("redirects"), "{}", out.content);
-        assert!(
-            out.content.contains("re-derive"),
-            "the redirect-budget error must carry recovery guidance, got: {}",
-            out.content
-        );
+        assert_failure_guidance(&out);
     }
 
     #[tokio::test]
@@ -713,6 +735,7 @@ mod tests {
             .unwrap();
         assert!(!out.ok, "{}", out.content);
         assert!(out.content.contains("302"), "{}", out.content);
+        assert_failure_guidance(&out);
     }
 
     #[tokio::test]
@@ -730,6 +753,7 @@ mod tests {
             let out = fetch(url).await;
             assert!(!out.ok, "{url} must be refused");
             assert!(out.content.contains("SSRF"), "got {}", out.content);
+            assert_failure_guidance(&out);
         }
     }
 
@@ -749,18 +773,7 @@ mod tests {
             .unwrap();
         assert!(!out.ok);
         assert!(out.content.contains("404"));
-        // The failure must teach the escape hatches, not just report: a bare
-        // status reads like an outage and the model retries the same URL.
-        assert!(
-            out.content.contains("re-derive"),
-            "failure must carry re-derive guidance, got: {}",
-            out.content
-        );
-        assert!(
-            out.content.contains("browser tool"),
-            "failure must name the browser escape hatch, got: {}",
-            out.content
-        );
+        assert_failure_guidance(&out);
     }
 
     #[tokio::test]
@@ -794,6 +807,7 @@ mod tests {
             .unwrap();
         assert!(!out.ok);
         assert!(out.content.contains("image/png"));
+        assert_failure_guidance(&out);
     }
 
     #[test]

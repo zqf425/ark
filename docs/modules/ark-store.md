@@ -126,7 +126,8 @@ inbox: [ImInboxEntry], next_cursor_version, applied_cursor_versions }`：渠道�
 inbox 状态转换全部在锁内一次快照 rewrite 中完成:`persist_inbound_batch` 先验证整批
 渠道存在,再一次性追加所有 `queued=false` 记录,任一校验或写入失败都不改变内存状态;
 `queue_inbound` 同时写入 `queued=true` 与 cursor 并保留记录;`ack_inbound` 删除已完成
-记录;`discard_inbound` 删除终端记录并推进 cursor。每个持久化批次由存储分配单调
+记录;`discard_inbound` 删除终端记录并推进 cursor。`replace_channel` 在同一 writer 锁内
+只替换 `channel`，始终保留锁内当前 `cursor` 并返回完整记录， stale PATCH 不能回退已推进游标。每个持久化批次由存储分配单调
 `cursor_version`，只有不旧于该渠道已应用版本的提交才允许推进 cursor；版本随文档重启
 恢复，因此旧 supervisor 的延迟提交或旧 inbox 重放不会把游标移回较早批次。平台 cursor
 本身可能是不透明字符串，比较依赖持久化顺序而非字符串大小。写成功后才替换内存快照,

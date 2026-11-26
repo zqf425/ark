@@ -24,8 +24,7 @@ pub const PANIC_SLOT: usize = usize::MAX;
 ///
 /// The slot rides the channel so the consumer can place history rows in the
 /// model's submission order regardless of completion order (requirements §1);
-/// the request itself rides along so the consumer can settle by `call_id`
-/// without a second lookup.
+/// the slot also identifies durable-open bookkeeping when provider call ids repeat.
 pub struct SettledCall {
     pub slot: usize,
     pub call: ToolCallRequest,
@@ -43,6 +42,15 @@ pub struct SettledCall {
 pub struct SettlementStream {
     receiver: tokio::sync::mpsc::Receiver<SettledCall>,
     forwarder: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for SettlementStream {
+    fn drop(&mut self) {
+        // The stream owns the forwarder. A journal append error can return
+        // before the batch drains; detaching that task would leave tool
+        // futures (and their child processes) alive with no consumer.
+        self.forwarder.abort();
+    }
 }
 
 impl SettlementStream {
@@ -95,9 +103,9 @@ pub fn run_calls_streaming(
                 let output = tools.execute(&call).await;
                 let duration_ms = start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
                 let execution = execution_of(&call, output, duration_ms);
-                // A missing consumer must not kill the forwarder: it keeps
-                // driving the remaining calls to completion so their drops
-                // (and any kill_on_drop cleanup) happen predictably.
+                // While the stream is alive, a failed send must not panic the
+                // forwarder. Dropping the stream aborts the task via its Drop
+                // guard, so an early journal error cannot detach live tools.
                 let _ = sender
                     .send(SettledCall {
                         slot,
@@ -137,7 +145,6 @@ pub async fn run_calls(
 mod tests {
     use super::*;
     use ark_ports::ToolOutput;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn call(id: &str, tool: &str) -> ToolCallRequest {
         ToolCallRequest::new(id, tool, serde_json::json!({ "path": "a" }))
@@ -255,28 +262,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_missing_consumer_does_not_kill_the_forwarder() {
-        struct Counting(Arc<AtomicUsize>);
-        #[async_trait::async_trait]
-        impl ToolRunner for Counting {
-            async fn execute(&self, _call: &ToolCallRequest) -> ark_common::Result<ToolOutput> {
-                self.0.fetch_add(1, Ordering::SeqCst);
-                Ok(ToolOutput::ok("ran"))
+    async fn dropping_the_stream_aborts_a_hanging_tool_future() {
+        struct DropSignal(Arc<tokio::sync::Notify>);
+        impl Drop for DropSignal {
+            fn drop(&mut self) {
+                self.0.notify_one();
             }
         }
-        // Drop the receiver immediately: every `send` fails, but the forwarder
-        // must still drive every call to completion (§1 send-failure rule).
-        {
-            let counter = Arc::new(AtomicUsize::new(0));
-            let _stream = run_calls_streaming(
-                Arc::new(Counting(Arc::clone(&counter))),
-                vec![call("a", "read"), call("b", "read")],
-            );
-            // Drop without draining; the stream (and receiver) die here.
+        struct Hanging {
+            started: Arc<tokio::sync::Notify>,
+            dropped: Arc<tokio::sync::Notify>,
         }
-        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-        // No assertion on the counter: the invariant is "no panic/no hang",
-        // observed by the test completing.
+        #[async_trait::async_trait]
+        impl ToolRunner for Hanging {
+            async fn execute(&self, _call: &ToolCallRequest) -> ark_common::Result<ToolOutput> {
+                self.started.notify_one();
+                let _signal = DropSignal(Arc::clone(&self.dropped));
+                std::future::pending::<ark_common::Result<ToolOutput>>().await
+            }
+        }
+        let started = Arc::new(tokio::sync::Notify::new());
+        let dropped = Arc::new(tokio::sync::Notify::new());
+        let stream = run_calls_streaming(
+            Arc::new(Hanging {
+                started: Arc::clone(&started),
+                dropped: Arc::clone(&dropped),
+            }),
+            vec![call("hanging", "read")],
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(1), started.notified())
+            .await
+            .expect("tool starts");
+        drop(stream);
+        tokio::time::timeout(std::time::Duration::from_secs(1), dropped.notified())
+            .await
+            .expect("stream drop must abort the forwarder and drop the tool future");
     }
 
     #[tokio::test]

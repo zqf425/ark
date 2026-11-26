@@ -273,6 +273,27 @@ mod tests {
     }
 
     #[test]
+    fn session_cwd_changes_are_serialised_without_serialising_plain_bash() {
+        let calls = vec![
+            call(
+                "s1",
+                "bash_session",
+                serde_json::json!({ "command": "cd src" }),
+            ),
+            call(
+                "s2",
+                "bash_session",
+                serde_json::json!({ "command": "pwd" }),
+            ),
+            bash("b1", "pwd"),
+        ];
+        let batches = ParallelPolicy::default().plan(&calls);
+        assert_eq!(sizes(&batches), vec![1, 2]);
+        assert_eq!(ids(&batches[0]), ["s1"]);
+        assert_eq!(ids(&batches[1]), ["s2", "b1"]);
+    }
+
+    #[test]
     fn shell_and_reads_share_one_batch() {
         let calls = vec![read("a", "x.rs"), bash("b", "sleep 3"), read("c", "y.rs")];
         let batches = ParallelPolicy::default().plan(&calls);

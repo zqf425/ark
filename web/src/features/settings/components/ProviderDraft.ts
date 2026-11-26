@@ -51,12 +51,13 @@ export function emptyDraft(): ProviderDraft {
   }
 }
 
-/** Seed the edit form. The list view is redacted, so the stored key is passed
- *  in separately from the explicit `GET /v1/runtime/providers/{id}` read. */
-export function draftFromView(view: ProviderView, apiKey = ''): ProviderDraft {
+/** Seed from the explicit full edit read. The union keeps the redacted-list
+ *  caller compatible, while ProviderEntry preserves every advanced field. */
+export function draftFromView(view: ProviderView | ProviderEntry, apiKey = ''): ProviderDraft {
   const format = (ENDPOINT_FORMATS as readonly string[]).includes(view.endpoint_format)
     ? (view.endpoint_format as EndpointFormat)
     : 'openai_chat'
+  const full = 'headers' in view ? view : null
   return {
     id: view.id,
     // The label input is gone, but an already-saved label must round-trip so
@@ -65,11 +66,11 @@ export function draftFromView(view: ProviderView, apiKey = ''): ProviderDraft {
     base_url: view.base_url,
     endpoint_format: format,
     model: view.model,
-    api_key: apiKey,
+    api_key: full?.api_key ?? apiKey,
     enabled: view.enabled,
-    headers_text: '',
-    max_tokens: '',
-    temperature: '',
+    headers_text: full ? JSON.stringify(full.headers ?? {}, null, 2) : '',
+    max_tokens: full?.max_tokens != null ? String(full.max_tokens) : '',
+    temperature: full?.temperature != null ? String(full.temperature) : '',
     context_window_tokens: String(view.context_window_tokens ?? PROVIDER_DEFAULT_CONTEXT_WINDOW),
     supports_vision: view.supports_vision ?? null,
     models: view.models ?? []

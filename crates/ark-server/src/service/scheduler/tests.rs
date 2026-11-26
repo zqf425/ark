@@ -1,4 +1,6 @@
 use super::*;
+#[path = "begin_tests.rs"]
+mod begin_tests;
 use ark_contract::{ScheduleKind, TaskSchedule};
 use chrono::TimeZone;
 
@@ -106,10 +108,11 @@ fn settling_a_task_that_is_not_running_is_a_no_op() {
 use std::sync::Mutex as StdMutex;
 
 use ark_config::{ConfigStore, RuntimeConfig};
-use ark_contract::{ItemStatus, ScheduleSettings, ThreadItem};
+use ark_contract::{ItemStatus, ScheduleSettings, ThreadItem, ThreadRuntimeSettings};
 use ark_obs::UsageRecorder;
 use ark_ports::{SessionStore, ToolRegistryPort};
 use ark_store::{FileSessionStore, ScheduleFileStore, StoreConfig};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Notify;
 
 struct EmptyTools;
@@ -173,6 +176,211 @@ impl crate::TurnRunner for RecordingRunner {
             .append_event(job.thread_id, events.turn_completed())
             .await?;
         Ok(crate::TurnEnd::Completed)
+    }
+}
+
+struct RuntimeFaultStore {
+    inner: Arc<FileSessionStore>,
+    fail_runtime: bool,
+    created: StdMutex<Vec<ark_common::ThreadId>>,
+    deleted: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl SessionStore for RuntimeFaultStore {
+    async fn create_thread(&self, title: &str) -> ark_common::Result<ark_ports::ThreadMeta> {
+        let thread = self.inner.create_thread(title).await?;
+        self.created.lock().unwrap().push(thread.thread_id);
+        Ok(thread)
+    }
+
+    async fn get_thread(
+        &self,
+        id: ark_common::ThreadId,
+    ) -> ark_common::Result<ark_ports::ThreadMeta> {
+        self.inner.get_thread(id).await
+    }
+
+    async fn set_thread_runtime(
+        &self,
+        id: ark_common::ThreadId,
+        runtime: ThreadRuntimeSettings,
+    ) -> ark_common::Result<ark_ports::ThreadMeta> {
+        if self.fail_runtime {
+            return Err(ArkError::new(
+                ArkErrorCode::StoreFailure,
+                "injected runtime write failure",
+            ));
+        }
+        self.inner.set_thread_runtime(id, runtime).await
+    }
+
+    async fn delete_thread(&self, id: ark_common::ThreadId) -> ark_common::Result<()> {
+        self.deleted.fetch_add(1, Ordering::SeqCst);
+        self.inner.delete_thread(id).await
+    }
+
+    async fn append_event(
+        &self,
+        id: ark_common::ThreadId,
+        event: ark_contract::RuntimeEvent,
+    ) -> ark_common::Result<ark_contract::RuntimeEvent> {
+        self.inner.append_event(id, event).await
+    }
+
+    async fn highest_seq(&self, id: ark_common::ThreadId) -> ark_common::Result<u64> {
+        self.inner.highest_seq(id).await
+    }
+
+    async fn list_threads(&self) -> ark_common::Result<Vec<ark_ports::ThreadMeta>> {
+        unimplemented!()
+    }
+    async fn rename_thread(
+        &self,
+        _id: ark_common::ThreadId,
+        _title: &str,
+    ) -> ark_common::Result<ark_ports::ThreadMeta> {
+        unimplemented!()
+    }
+    async fn set_archived(
+        &self,
+        _id: ark_common::ThreadId,
+        _archived: bool,
+    ) -> ark_common::Result<ark_ports::ThreadMeta> {
+        unimplemented!()
+    }
+    async fn replay_events(
+        &self,
+        _id: ark_common::ThreadId,
+        _since: u64,
+    ) -> ark_common::Result<Vec<ark_contract::RuntimeEvent>> {
+        unimplemented!()
+    }
+    async fn replay_child_completion_events(
+        &self,
+        _id: ark_common::ThreadId,
+    ) -> ark_common::Result<Vec<ark_contract::RuntimeEvent>> {
+        unimplemented!()
+    }
+    async fn replay_interaction_events(
+        &self,
+        _id: ark_common::ThreadId,
+    ) -> ark_common::Result<Vec<ark_contract::RuntimeEvent>> {
+        unimplemented!()
+    }
+    async fn replay_attachment_events(
+        &self,
+        _id: ark_common::ThreadId,
+    ) -> ark_common::Result<Vec<ark_contract::RuntimeEvent>> {
+        unimplemented!()
+    }
+    async fn read_items(&self, _id: ark_common::ThreadId) -> ark_common::Result<Vec<ThreadItem>> {
+        unimplemented!()
+    }
+    async fn subscribe(
+        &self,
+        _id: ark_common::ThreadId,
+        _since: u64,
+    ) -> ark_common::Result<ark_ports::SubscribeTicket> {
+        unimplemented!()
+    }
+    async fn fork_thread(
+        &self,
+        _id: ark_common::ThreadId,
+        _upto: u64,
+    ) -> ark_common::Result<ark_ports::ThreadMeta> {
+        unimplemented!()
+    }
+    async fn rewind_thread(
+        &self,
+        _id: ark_common::ThreadId,
+        _from: u64,
+        _turn: Option<ark_common::TurnId>,
+    ) -> ark_common::Result<ark_contract::RewindResponse> {
+        unimplemented!()
+    }
+    async fn rewind_record(
+        &self,
+        _id: ark_common::ThreadId,
+        _from: Option<u64>,
+        _turn: Option<ark_common::TurnId>,
+    ) -> ark_common::Result<Option<ark_contract::RewindResponse>> {
+        unimplemented!()
+    }
+    async fn create_child_run(
+        &self,
+        _parent: ark_common::ThreadId,
+        _child: ark_common::ChildId,
+        _label: &str,
+    ) -> ark_common::Result<()> {
+        unimplemented!()
+    }
+    async fn append_child_run(&self, _record: ark_ports::ChildRunRecord) -> ark_common::Result<()> {
+        unimplemented!()
+    }
+    async fn list_child_runs(
+        &self,
+        _parent: ark_common::ThreadId,
+    ) -> ark_common::Result<Vec<ark_ports::ChildRunRecord>> {
+        unimplemented!()
+    }
+    async fn delete_child_run(
+        &self,
+        _parent: ark_common::ThreadId,
+        _child: ark_common::ChildId,
+    ) -> ark_common::Result<bool> {
+        unimplemented!()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ScheduleFault {
+    None,
+    MarkerFailure,
+    PatchBeforeMarker,
+}
+
+struct FaultyScheduleStore {
+    inner: ScheduleFileStore,
+    fault: ScheduleFault,
+}
+
+impl ScheduleStore for FaultyScheduleStore {
+    fn list(&self) -> ark_common::Result<Vec<ScheduledTask>> {
+        self.inner.list()
+    }
+
+    fn get(&self, id: &str) -> ark_common::Result<ScheduledTask> {
+        self.inner.get(id)
+    }
+
+    fn update(
+        &self,
+        id: &str,
+        mutate: &mut dyn FnMut(&mut ScheduledTask) -> ark_common::Result<()>,
+    ) -> ark_common::Result<ScheduledTask> {
+        if matches!(self.fault, ScheduleFault::MarkerFailure) {
+            return Err(ArkError::new(
+                ArkErrorCode::StoreFailure,
+                "injected running marker failure",
+            ));
+        }
+        if matches!(self.fault, ScheduleFault::PatchBeforeMarker) {
+            let mut patched = self.inner.get(id)?;
+            patched.prompt = "patched prompt".into();
+            self.inner.replace(patched)?;
+        }
+        self.inner.update(id, mutate)
+    }
+
+    fn insert(&self, _task: ScheduledTask) -> ark_common::Result<ScheduledTask> {
+        unimplemented!()
+    }
+    fn replace(&self, _task: ScheduledTask) -> ark_common::Result<ScheduledTask> {
+        unimplemented!()
+    }
+    fn delete(&self, _id: &str) -> ark_common::Result<()> {
+        unimplemented!()
     }
 }
 

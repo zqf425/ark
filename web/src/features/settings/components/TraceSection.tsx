@@ -117,6 +117,46 @@ export function TraceSection(): JSX.Element {
   // the clicked turn — without DOM-query selector strings.
   const [expandedTurnId, setExpandedTurnId] = useState<string | null>(null)
   const chartsRef = useRef<HTMLDivElement | null>(null)
+  const selectedIdRef = useRef<string | null>(null)
+  const statsGenerationRef = useRef(0)
+  const statsRequestRef = useRef<AbortController | null>(null)
+
+  // Selection and reload share one owner: switching or unmounting invalidates
+  // the previous response even when the transport ignores AbortController.
+  useEffect(() => () => {
+    statsGenerationRef.current += 1
+    statsRequestRef.current?.abort()
+    selectedIdRef.current = null
+  }, [])
+
+  const requestStats = useCallback((requestedId: string): void => {
+    statsRequestRef.current?.abort()
+    const controller = new AbortController()
+    const generation = ++statsGenerationRef.current
+    statsRequestRef.current = controller
+    setStatsStatus('loading')
+    setStatsError(null)
+    void fetchTraceStats(requestedId, controller.signal)
+      .then((response) => {
+        if (!mounted.current || controller.signal.aborted || generation !== statsGenerationRef.current) return
+        if (requestedId !== selectedIdRef.current) return
+        setStats(response)
+        setStatsStatus('ready')
+      })
+      .catch((reason: unknown) => {
+        if (!mounted.current || controller.signal.aborted || generation !== statsGenerationRef.current) return
+        if (requestedId !== selectedIdRef.current) return
+        setStats(null)
+        setStatsError(describeError(reason, translateNow))
+        setStatsStatus('error')
+      })
+  }, [mounted])
+
+  const selectThread = (threadId: string): void => {
+    selectedIdRef.current = threadId
+    setSelectedId(threadId)
+    requestStats(threadId)
+  }
 
   // One list load per mount; the picker never re-fetches on selection.
   useEffect(() => {
@@ -136,46 +176,10 @@ export function TraceSection(): JSX.Element {
     return () => controller.abort()
   }, [mounted])
 
-  // Stats follow the selection; a stale response is dropped by the mounted
-  // guard plus the selection check (last selection wins).
-  useEffect(() => {
-    if (!selectedId) return
-    const controller = new AbortController()
-    setStatsStatus('loading')
-    setStatsError(null)
-    fetchTraceStats(selectedId, controller.signal)
-      .then((response) => {
-        if (!mounted.current) return
-        setStats(response)
-        setStatsStatus('ready')
-      })
-      .catch((reason: unknown) => {
-        if (!mounted.current || controller.signal.aborted) return
-        setStats(null)
-        setStatsError(describeError(reason, translateNow))
-        setStatsStatus('error')
-      })
-    return () => controller.abort()
-  }, [selectedId, mounted])
-
   const reload = useCallback((): void => {
     if (!selectedId) return
-    // Re-running the projection is the same fetch the selection effect runs;
-    // a fresh key re-enters it without a second code path.
-    setStatsStatus('loading')
-    fetchTraceStats(selectedId)
-      .then((response) => {
-        if (!mounted.current) return
-        setStats(response)
-        setStatsError(null)
-        setStatsStatus('ready')
-      })
-      .catch((reason: unknown) => {
-        if (!mounted.current) return
-        setStatsError(describeError(reason, translateNow))
-        setStatsStatus('error')
-      })
-  }, [mounted, selectedId])
+    requestStats(selectedId)
+  }, [requestStats, selectedId])
 
   const selectedThread = useMemo(
     () => threads.find((thread) => thread.thread_id === selectedId) ?? null,
@@ -255,7 +259,7 @@ export function TraceSection(): JSX.Element {
         <Notice tone="error" title={t('settings.trace.loadFailed')} />
       ) : null}
       {threadsStatus === 'ready' || threads.length > 0 ? (
-        <ThreadPicker threads={threads} selectedId={selectedId} onSelect={setSelectedId} loading={pickerLoading} />
+        <ThreadPicker threads={threads} selectedId={selectedId} onSelect={selectThread} loading={pickerLoading} />
       ) : null}
 
       {!selectedId ? (

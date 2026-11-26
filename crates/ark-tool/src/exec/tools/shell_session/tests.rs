@@ -27,113 +27,161 @@ mod manager_tests {
     }
 
     #[test]
-    fn cd_advances_the_session_cwd() {
+    fn cd_advances_only_after_commit() {
         let manager = ShellSessionManager::new();
         let ws = fixture("cd-advance");
         std::fs::create_dir_all(ws.join("src")).unwrap();
-        let next = manager.resolve_cwd(&ws, "cd src");
-        assert_eq!(next, ws.join("src"));
-        assert_eq!(manager.cwd(&ws), ws.join("src"));
-        // The next call starts from the advanced cwd.
-        let again = manager.resolve_cwd(&ws, "echo hi");
-        assert_eq!(again, ws.join("src"));
+        let target = std::fs::canonicalize(ws.join("src")).unwrap();
+        let prepared = manager.prepare(&ws, "cd src");
+        assert_eq!(prepared.cwd, ws, "a pure cd runs once from the old cwd");
+        assert_eq!(prepared.command, "cd src");
+        assert_eq!(prepared.commit_target.as_deref(), Some(target.as_path()));
+        assert_eq!(
+            manager.cwd(&ws),
+            ws,
+            "prepare must not mutate session state"
+        );
+        manager.commit(&ws, prepared.commit_target.as_deref());
+        assert_eq!(manager.cwd(&ws), target);
+        let again = manager.prepare(&ws, "echo hi");
+        assert_eq!(again.cwd, target);
+        assert_eq!(again.commit_target, None);
     }
 
     #[test]
     fn absolute_cd_outside_the_workspace_is_ignored() {
         let manager = ShellSessionManager::new();
         let ws = fixture("cd-escape");
-        let next = manager.resolve_cwd(&ws, "cd /etc");
-        assert_eq!(next, ws, "an escape attempt must not move the session");
+        let prepared = manager.prepare(&ws, "cd /etc");
+        assert_eq!(
+            prepared.cwd, ws,
+            "an escape attempt must not move the session"
+        );
+        assert_eq!(prepared.commit_target, None);
     }
 
     #[test]
     fn cd_dash_and_bare_cd_keep_the_cwd() {
         let manager = ShellSessionManager::new();
         let ws = fixture("cd-dash");
-        let next = manager.resolve_cwd(&ws, "cd -");
-        assert_eq!(next, ws);
-        let next = manager.resolve_cwd(&ws, "cd");
-        assert_eq!(next, ws);
+        for command in ["cd -", "cd"] {
+            let prepared = manager.prepare(&ws, command);
+            assert_eq!(prepared.cwd, ws);
+            assert_eq!(prepared.commit_target, None);
+        }
     }
 
     #[test]
-    fn non_leading_cd_keeps_the_cwd() {
+    fn non_leading_and_compound_cd_keep_the_original_script() {
         let manager = ShellSessionManager::new();
         let ws = fixture("cd-nonleading");
-        let next = manager.resolve_cwd(&ws, "echo hi && cd src");
-        assert_eq!(next, ws);
+        for command in [
+            "echo hi && cd src",
+            "cd src && pwd",
+            "cd src; pwd",
+            "cd src;",
+        ] {
+            let prepared = manager.prepare(&ws, command);
+            assert_eq!(prepared.cwd, ws);
+            assert_eq!(prepared.command, command);
+            assert_eq!(prepared.commit_target, None);
+        }
     }
 
     #[test]
-    fn quoted_cd_target_is_unquoted() {
-        // The observed os error 123 cascade: `cd "path"` recorded the quote
-        // characters into the session cwd and every later call died on a
-        // path no shell could produce.
+    fn quoted_cd_target_is_unquoted_without_concatenation() {
         let manager = ShellSessionManager::new();
         let ws = fixture("cd-quoted");
         std::fs::create_dir_all(ws.join("src")).unwrap();
-        let next = manager.resolve_cwd(&ws, "cd \"src\"");
-        assert_eq!(next, ws.join("src"));
-        assert_eq!(manager.cwd(&ws), ws.join("src"));
+        let target = std::fs::canonicalize(ws.join("src")).unwrap();
+        let prepared = manager.prepare(&ws, "cd \"src\"");
+        assert_eq!(prepared.commit_target.as_deref(), Some(target.as_path()));
+        std::fs::create_dir_all(ws.join("with space")).unwrap();
+        let spaced = manager.prepare(&ws, "cd \"with space\"");
+        assert_eq!(
+            spaced.commit_target.as_deref(),
+            Some(
+                std::fs::canonicalize(ws.join("with space"))
+                    .unwrap()
+                    .as_path()
+            )
+        );
+        for command in ["cd \"src\"other", "cd \"src\" other"] {
+            let concatenated = manager.prepare(&ws, command);
+            assert_eq!(concatenated.command, command);
+            assert_eq!(concatenated.commit_target, None);
+        }
     }
 
     #[test]
     fn variable_cd_target_is_not_recorded() {
-        // The shell expands `$USERPROFILE` when the command runs; the parser
-        // cannot, so recording the raw `$...` spelling would poison the
-        // session cwd exactly like the quote case.
         let manager = ShellSessionManager::new();
         let ws = fixture("cd-var");
-        let next = manager.resolve_cwd(&ws, "cd \"$USERPROFILE/AppData\"");
-        assert_eq!(next, ws, "an unexpanded variable must not move the session");
+        let prepared = manager.prepare(&ws, "cd \"$USERPROFILE/AppData\"");
+        assert_eq!(
+            prepared.cwd, ws,
+            "an unexpanded variable must not move the session"
+        );
+        assert_eq!(prepared.commit_target, None);
         assert_eq!(manager.cwd(&ws), ws, "the session state must stay clean");
-        // A later plain command still runs from the untouched cwd.
-        assert_eq!(manager.resolve_cwd(&ws, "echo hi"), ws);
     }
 
     #[test]
     fn an_unusable_cd_target_falls_back_to_the_current_cwd() {
-        // The third observed defect shape: a target that is a plain file or
-        // missing entirely used to be committed as the session cwd, and every
-        // later call then died before its command ran.
         let manager = ShellSessionManager::new();
         let ws = fixture("cd-unusable");
-        std::fs::create_dir_all(ws.join("src")).unwrap();
         std::fs::write(ws.join("file.txt"), b"x").unwrap();
-        let next = manager.resolve_cwd(&ws, "cd file.txt");
-        assert_eq!(next, ws, "a file is not a directory to cd into");
-        assert_eq!(manager.cwd(&ws), ws);
-        let next = manager.resolve_cwd(&ws, "cd nosuchdir");
-        assert_eq!(next, ws, "a missing directory must not be committed");
-        assert_eq!(manager.cwd(&ws), ws);
+        for command in ["cd file.txt", "cd nosuchdir"] {
+            let prepared = manager.prepare(&ws, command);
+            assert_eq!(prepared.cwd, ws);
+            assert_eq!(prepared.commit_target, None);
+            assert_eq!(manager.cwd(&ws), ws);
+        }
     }
 
     #[test]
     fn quoted_edge_targets_stay_safe() {
-        // Deliberately not a shell tokenizer; every divergence must end in
-        // "session cwd stays put", never in a committed wrong path.
         let ws = fixture("cd-edges");
         std::fs::create_dir_all(ws.join("a")).unwrap();
-        // Unterminated quote: no target, no advance.
         let manager = ShellSessionManager::new();
-        assert_eq!(manager.resolve_cwd(&ws, "cd 'a"), ws);
-        // Empty quoted target: no advance.
+        for command in ["cd 'a", "cd \"\"", "cd-x a", "cd \"a\"b"] {
+            let prepared = manager.prepare(&ws, command);
+            assert_eq!(prepared.cwd, ws, "{command}");
+            assert_eq!(prepared.commit_target, None, "{command}");
+        }
+        let prepared = manager.prepare(&ws, "\n  cd a");
+        assert_eq!(
+            prepared.commit_target,
+            Some(std::fs::canonicalize(ws.join("a")).unwrap())
+        );
+    }
+
+    #[test]
+    fn multiline_leading_cd_runs_only_the_remainder_from_the_target() {
         let manager = ShellSessionManager::new();
-        assert_eq!(manager.resolve_cwd(&ws, "cd \"\""), ws);
-        // Verb lookalike `cd-x`: not a cd.
+        let ws = fixture("cd-multiline");
+        std::fs::create_dir_all(ws.join("src")).unwrap();
+        let target = std::fs::canonicalize(ws.join("src")).unwrap();
+        let prepared = manager.prepare(&ws, "\ncd src\npwd\nprintf done");
+        assert_eq!(prepared.cwd, target);
+        assert_eq!(prepared.command, "pwd\nprintf done");
+        assert_eq!(prepared.commit_target.as_deref(), Some(target.as_path()));
+        assert_eq!(manager.cwd(&ws), ws);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_cd_target_cannot_escape_the_workspace() {
         let manager = ShellSessionManager::new();
-        assert_eq!(manager.resolve_cwd(&ws, "cd-x a"), ws);
-        // A leading blank line before the cd still counts as leading.
-        let manager = ShellSessionManager::new();
-        let next = manager.resolve_cwd(&ws, "\n  cd a");
-        assert_eq!(next, ws.join("a"));
-        // Quote concatenation `cd "a"b`: the parser reads `a`, so the session
-        // records `a` instead of the raw `a"b`; the shell's own cwd (`ab`)
-        // diverges, which is the accepted under-approximation.
-        let manager = ShellSessionManager::new();
-        assert_eq!(manager.resolve_cwd(&ws, "cd \"a\"b"), ws.join("a"));
-        assert_eq!(manager.cwd(&ws), ws.join("a"));
+        let ws = fixture("cd-symlink");
+        let outside = fixture("cd-symlink-outside");
+        std::os::unix::fs::symlink(&outside, ws.join("link")).unwrap();
+        let prepared = manager.prepare(&ws, "cd link\npwd");
+        assert_eq!(prepared.cwd, ws);
+        assert_eq!(prepared.command, "cd link\npwd");
+        assert_eq!(prepared.commit_target, None);
+        manager.commit(&ws, prepared.commit_target.as_deref());
+        assert_eq!(manager.cwd(&ws), ws);
     }
 
     #[test]
@@ -141,11 +189,13 @@ mod manager_tests {
         let manager = ShellSessionManager::new();
         let ws = fixture("cd-dot");
         std::fs::create_dir_all(ws.join("src")).unwrap();
-        assert_eq!(manager.resolve_cwd(&ws, "cd src"), ws.join("src"));
-        // `cd .` compares equal after normalization: no `src/.` is committed,
-        // so repeated calls cannot grow `src/././.`.
-        assert_eq!(manager.resolve_cwd(&ws, "cd ."), ws.join("src"));
-        assert_eq!(manager.cwd(&ws), ws.join("src"));
+        let target = std::fs::canonicalize(ws.join("src")).unwrap();
+        let first = manager.prepare(&ws, "cd src");
+        manager.commit(&ws, first.commit_target.as_deref());
+        let dot = manager.prepare(&ws, "cd .");
+        assert_eq!(dot.cwd, target);
+        manager.commit(&ws, dot.commit_target.as_deref());
+        assert_eq!(manager.cwd(&ws), target);
     }
 
     #[test]
@@ -153,12 +203,11 @@ mod manager_tests {
         let manager = ShellSessionManager::new();
         let ws = fixture("cd-stale");
         std::fs::create_dir_all(ws.join("gone")).unwrap();
-        assert_eq!(manager.resolve_cwd(&ws, "cd gone"), ws.join("gone"));
+        let first = manager.prepare(&ws, "cd gone");
+        manager.commit(&ws, first.commit_target.as_deref());
         std::fs::remove_dir_all(ws.join("gone")).unwrap();
-        // The remembered cwd has vanished; the call must run from the
-        // workspace instead of failing before spawn, and the session state
-        // is repaired rather than keeping the dead path.
-        assert_eq!(manager.resolve_cwd(&ws, "echo hi"), ws);
+        let prepared = manager.prepare(&ws, "echo hi");
+        assert_eq!(prepared.cwd, ws);
         assert_eq!(manager.cwd(&ws), ws);
     }
 
@@ -167,8 +216,12 @@ mod manager_tests {
         let manager = ShellSessionManager::new();
         let ws = fixture("pushd");
         std::fs::create_dir_all(ws.join("lib")).unwrap();
-        let next = manager.resolve_cwd(&ws, "pushd lib");
-        assert_eq!(next, ws.join("lib"));
+        let prepared = manager.prepare(&ws, "pushd lib");
+        assert_eq!(prepared.command, "pushd lib");
+        assert_eq!(
+            prepared.commit_target,
+            Some(std::fs::canonicalize(ws.join("lib")).unwrap())
+        );
     }
 
     #[test]
@@ -369,26 +422,152 @@ mod tool_tests {
     async fn foreground_command_runs_and_advances_cwd() {
         let dir = fixture("fg");
         std::fs::create_dir_all(dir.join("src")).unwrap();
+        let target = std::fs::canonicalize(dir.join("src")).unwrap();
         let session = Arc::new(ShellSessionManager::new());
         let tool = BashSessionTool::new(Arc::clone(&session));
-        // Advance via a leading cd, then read the session cwd back.
-        let _ = tool
+        // A pure cd must execute once from the old cwd, not once from the
+        // already-advanced target (which used to fail when `src/src` was absent).
+        let changed = tool
             .execute(
                 &ctx(&dir),
                 ToolArgs(serde_json::json!({"command": "cd src"})),
             )
             .await
             .unwrap();
-        assert_eq!(session.cwd(&dir), dir.join("src"));
-        // The second call starts from the advanced cwd; a bare command keeps it.
-        let _ = tool
+        assert!(changed.ok, "{}", changed.content);
+        assert_eq!(session.cwd(&dir), target);
+        let plain = tool
             .execute(
                 &ctx(&dir),
                 ToolArgs(serde_json::json!({"command": "echo hi"})),
             )
             .await
             .unwrap();
-        assert_eq!(session.cwd(&dir), dir.join("src"));
+        assert!(plain.ok, "{}", plain.content);
+        assert_eq!(session.cwd(&dir), target);
+    }
+
+    #[tokio::test]
+    async fn multiline_cd_runs_the_remainder_once_and_commits_on_success() {
+        let dir = fixture("fg-multiline");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let target = std::fs::canonicalize(dir.join("src")).unwrap();
+        let session = Arc::new(ShellSessionManager::new());
+        let tool = BashSessionTool::new(Arc::clone(&session));
+        let out = tool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({"command": "cd src\npwd"})),
+            )
+            .await
+            .unwrap();
+        assert!(out.ok, "{}", out.content);
+        assert!(out.content.contains(target.to_string_lossy().as_ref()));
+        assert!(!out.content.contains("[stderr]"), "{}", out.content);
+        assert_eq!(session.cwd(&dir), target);
+    }
+
+    #[tokio::test]
+    async fn failed_foreground_commands_do_not_advance_cwd() {
+        let dir = fixture("fg-failed");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let session = Arc::new(ShellSessionManager::new());
+        let tool = BashSessionTool::new(Arc::clone(&session));
+        for command in ["cd src\nfalse", "cd missing"] {
+            let out = tool
+                .execute(
+                    &ctx(&dir),
+                    ToolArgs(serde_json::json!({"command": command})),
+                )
+                .await
+                .unwrap();
+            assert!(!out.ok, "{command}");
+            assert_eq!(session.cwd(&dir), dir, "{command}");
+        }
+    }
+
+    #[tokio::test]
+    async fn pure_pushd_keeps_its_output_and_compound_cd_is_not_tracked() {
+        let dir = fixture("fg-pushd");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let target = std::fs::canonicalize(dir.join("src")).unwrap();
+        let session = Arc::new(ShellSessionManager::new());
+        let tool = BashSessionTool::new(Arc::clone(&session));
+        let pushed = tool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({"command": "pushd src"})),
+            )
+            .await
+            .unwrap();
+        assert!(pushed.ok, "{}", pushed.content);
+        assert!(pushed.content.contains("src"), "{}", pushed.content);
+        assert_eq!(session.cwd(&dir), target);
+
+        let fresh = Arc::new(ShellSessionManager::new());
+        let tool = BashSessionTool::new(Arc::clone(&fresh));
+        for command in ["cd src && pwd", "cd src; pwd"] {
+            let out = tool
+                .execute(
+                    &ctx(&dir),
+                    ToolArgs(serde_json::json!({"command": command})),
+                )
+                .await
+                .unwrap();
+            assert!(out.ok, "{}", out.content);
+            assert_eq!(fresh.cwd(&dir), dir, "{command}");
+        }
+    }
+
+    #[tokio::test]
+    async fn background_leading_cd_commits_after_registration_without_double_cd() {
+        let dir = fixture("bg-cd");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let target = std::fs::canonicalize(dir.join("src")).unwrap();
+        let session = Arc::new(ShellSessionManager::new());
+        let tool = BashSessionTool::new(Arc::clone(&session));
+        let output_tool = BashOutputTool::new(Arc::clone(&session));
+        let started = tool
+            .execute(
+                &ctx(&dir),
+                ToolArgs(serde_json::json!({
+                    "command": "cd src\npwd",
+                    "run_in_background": true
+                })),
+            )
+            .await
+            .unwrap();
+        assert!(started.ok, "{}", started.content);
+        assert_eq!(session.cwd(&dir), target);
+        let task_id = started
+            .content
+            .lines()
+            .find_map(|line| line.strip_prefix("background task started: "))
+            .expect("task id line")
+            .trim()
+            .to_string();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut seen = String::new();
+        loop {
+            let snapshot = output_tool
+                .execute(
+                    &ctx(&dir),
+                    ToolArgs(serde_json::json!({"task_id": task_id})),
+                )
+                .await
+                .unwrap();
+            seen.push_str(&snapshot.content);
+            if seen.contains("task finished") {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "never finished: {seen}"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(seen.contains(target.to_string_lossy().as_ref()), "{seen}");
+        assert!(!seen.contains("can't cd"), "{seen}");
     }
 
     #[tokio::test]

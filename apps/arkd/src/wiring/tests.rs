@@ -900,6 +900,17 @@ fn recovery_skips_the_user_text_the_history_already_ends_with() {
         without_duplicate_recovery_text(&source, &history, Some(source_text_for(&source))),
         None
     );
+    let mut tool_tail = history.clone();
+    tool_tail.push(ModelMessage {
+        role: ModelRole::Tool,
+        content: "tool failed".into(),
+        ..ModelMessage::system("")
+    });
+    assert_eq!(
+        without_duplicate_recovery_text(&source, &tool_tail, Some(source_text_for(&source))),
+        None,
+        "a trailing tool row does not complete the user request"
+    );
 }
 
 /// An attachment preview rides the message content but not the item text, so
@@ -919,9 +930,7 @@ fn recovery_treats_a_preview_suffixed_trailing_row_as_the_same_request() {
     );
 }
 
-/// The suppression is narrow: a request the model already answered is a new
-/// repetition when the user sends it again, and a recovery whose row was cut
-/// (rewind/fork) must still persist the text or the retry would answer nothing.
+/// Suppression stays narrow: completed or missing requests still persist.
 #[test]
 fn recovery_still_persists_text_the_history_does_not_hold() {
     let source = TurnSource::AutoRecovery {
@@ -935,6 +944,16 @@ fn recovery_still_persists_text_the_history_does_not_hold() {
     ];
     assert_eq!(
         without_duplicate_recovery_text(&source, &answered, Some("same words".into())),
+        Some("same words".into())
+    );
+
+    let newer_request = vec![
+        ModelMessage::user("same words"),
+        ModelMessage::assistant("an answer"),
+        ModelMessage::user("a different request"),
+    ];
+    assert_eq!(
+        without_duplicate_recovery_text(&source, &newer_request, Some("same words".into())),
         Some("same words".into())
     );
 

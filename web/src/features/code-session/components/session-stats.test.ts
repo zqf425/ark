@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { RoundTiming } from '../state/types'
-import { formatDurationWords, liveActiveMs, turnActiveMs, turnDurationMs } from './session-stats'
+import type { ItemsSnapshot, RoundTiming } from '../state/types'
+import { formatDurationWords, gatePendingSince, liveActiveMs, turnActiveMs, turnDurationMs } from './session-stats'
 
 function round(turnId: string, durationMs: number, activeMs: number | null = null): RoundTiming {
   return { turnId, durationMs, activeMs }
@@ -12,6 +12,13 @@ const ZH_UNITS = {
   minutes: (count: number) => `${count}分`,
   seconds: (count: number) => `${count}秒`
 }
+
+type GateClockState = Pick<ItemsSnapshot, 'approvals' | 'userInputs' | 'pendingGateCounts' | 'turnLastEventAt'>
+
+const iso = (ms: number): string => new Date(ms).toISOString()
+const approval = (id: string, turnId: string, requestedAt: number, status: 'pending' | 'approved' | 'rejected') => ({
+  approval_id: id, turn_id: turnId, tool: 'bash', summary: 'x', requested_at: iso(requestedAt), status
+})
 
 describe('session stats formatting', () => {
   it('sums one turn’s measured rounds and ignores other turns', () => {
@@ -52,6 +59,50 @@ describe('session stats formatting', () => {
     // A turn without a reported active span is unknown, not zero.
     expect(turnActiveMs(rounds, 't2')).toBeNull()
     expect(turnActiveMs(rounds, 't3')).toBeNull()
+  })
+
+  it('freezes at the earliest pending gate, never a durably resolved one', () => {
+    const state: GateClockState = {
+      pendingGateCounts: { t1: 1 },
+      approvals: {
+        a: approval('a', 't1', 50_000, 'approved'),
+        b: approval('b', 't1', 102_000, 'pending'),
+        other: approval('other', 't2', 1_000, 'pending')
+      },
+      userInputs: {},
+      turnLastEventAt: { t1: 100_000 }
+    }
+    expect(gatePendingSince('t1', state)).toBe(102_000)
+    expect(liveActiveMs([round('t1', 0, 60_000)], 't1', 305_000, 100_000, gatePendingSince('t1', state))).toBe(62_000)
+  })
+
+  it('conservatively freezes at lastEventAt while a local resolution awaits durable SSE', () => {
+    const state: GateClockState = {
+      pendingGateCounts: { t1: 1 },
+      approvals: { a: approval('a', 't1', 101_000, 'approved') },
+      userInputs: {
+        u: { request_id: 'u', turn_id: 't1', prompt: 'x', requested_at: iso(102_000), status: 'answered', answer: 'yes' }
+      },
+      turnLastEventAt: { t1: 100_000 }
+    }
+    expect(gatePendingSince('t1', state)).toBe(100_000)
+    expect(liveActiveMs([round('t1', 0, 60_000)], 't1', 305_000, 100_000, gatePendingSince('t1', state))).toBe(60_000)
+    state.approvals = {}
+    expect(gatePendingSince('t1', state)).toBe(100_000)
+    state.turnLastEventAt = {}
+    expect(gatePendingSince('t1', state)).toBeNull()
+  })
+
+  it('skips gate-history scans when the turn has no unresolved count', () => {
+    const state = {
+      pendingGateCounts: {},
+      approvals: new Proxy({}, { ownKeys: () => { throw new Error('gate history scanned') } }),
+      userInputs: new Proxy({}, { ownKeys: () => { throw new Error('gate history scanned') } }),
+      turnLastEventAt: { t1: 100_000 }
+    } as GateClockState
+    expect(gatePendingSince('t1', state)).toBeNull()
+    state.pendingGateCounts.t1 = 0
+    expect(gatePendingSince('t1', state)).toBeNull()
   })
 
   it('ticks a mid-turn view even before the server has reported active_ms', () => {

@@ -50,7 +50,7 @@ impl AppHandle {
                     _ = shutdown.recv() => {}
                     _ = tokio::signal::ctrl_c() => {}
                 }
-                shutdown_state.begin_shutdown();
+                shutdown_state.request_shutdown(crate::state::SHUTDOWN_CANCEL_REASON);
             })
             .await;
         drain(state).await?;
@@ -149,6 +149,62 @@ mod tests {
             job.cancel.cancelled().await;
             Ok(crate::TurnEnd::Completed)
         }
+    }
+
+    #[tokio::test]
+    async fn serve_drains_an_online_sse_connection_within_the_desktop_budget() {
+        use futures::StreamExt;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let sessions =
+            Arc::new(FileSessionStore::open(StoreConfig::new(dir.path())).expect("session store"));
+        let state = AppState::new(
+            sessions.clone() as Arc<dyn SessionStore>,
+            Arc::new(EmptyTools),
+            Arc::new(ConfigStore::new(RuntimeConfig::default())),
+            Arc::new(UsageRecorder::new()),
+            Arc::new(CancelRunner),
+            dir.path().to_path_buf(),
+            "test",
+        );
+        let thread = state.store.create_thread("online").await.expect("thread");
+        let handle = bind(state.clone(), 0).await.expect("bind");
+        let address = handle.addr();
+        let server = tokio::spawn(handle.serve());
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!(
+                "http://{address}/v1/threads/{}/events",
+                thread.thread_id
+            ))
+            .send()
+            .await
+            .expect("open sse");
+        assert!(response.status().is_success());
+        let mut stream = response.bytes_stream();
+        let first = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("sse opens promptly")
+            .expect("sse stays online")
+            .expect("sse frame bytes");
+
+        let status = client
+            .post(format!("http://{address}/v1/shutdown"))
+            .send()
+            .await
+            .expect("request shutdown")
+            .status();
+        assert_eq!(status, axum::http::StatusCode::ACCEPTED);
+        tokio::time::timeout(Duration::from_secs(3), server)
+            .await
+            .expect("serve must return before the desktop 12s kill deadline")
+            .unwrap()
+            .expect("serve drains successfully");
+        assert!(!first.is_empty(), "the connection was genuinely online");
+        assert!(state.is_shutting_down());
+        assert_eq!(state.turns.active(), 0);
+        assert_eq!(state.active_children(), 0);
+        drop(stream);
     }
 
     #[tokio::test]

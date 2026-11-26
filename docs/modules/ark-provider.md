@@ -14,7 +14,9 @@ API key 在 upsert 路径是写入输入，读取分两个出口：列表/能力
 
 生产组合根以 `<root>/config` 构造 store，实际文档为 `<root>/config/providers.json`；provider crate 只使用
 调用方传入的目录，不自行推导全局根。持久化与内存快照更新由同一个 store 串行完成，确保下一次 resolve
-立即读取一致配置。
+立即读取一致配置。`resolve` 与 `resolve_for_model` 在同一个 document guard 内完成条目选择、默认模型 pin、
+served-model 校验、context window 查找与 config 组装；纯选择 helper 是 `domain::validate::resolve_from_document`。
+不得先释放锁再重新读取目标条目，否则并发换表可能把旧凭据与新模型的窗口/能力拼成一份配置。
 
 默认条目是管理面的一部分：`upsert(entry, make_default)` 可在写入时设默认（禁用条目不可设默认）、
 `set_default` 要求目标存在且启用、删除默认条目即清空默认；`default_provider_id` 持久化在
@@ -53,7 +55,7 @@ unknown 元数据。线程覆盖模型时经 `resolve_for_model` / `resolve_visi
 
 `served-model` 校验：条目带**非空清单**时，`resolve_for_model` 拒绝既不等于条目默认 `model`、也不在
 清单里的覆盖模型（默认供应商 pin 了 `default_model` 时，条目默认 `model` 仍可服务——pin 只改默认请求发什么，
-不改条目能服务什么；清单在归一化时会剥掉与 `model` 相同的项，所以它不在清单里），错误文本列出全部可服务模型（默认 + 清单），使「model 与 provider_id 配错对」
+不改条目能服务什么；清单在归一化时会剥掉与 `model` 相同的项，所以它不在清单里），错误文本列出全部可服务模型（默认 + 清单，默认模型只列一次），使「model 与 provider_id 配错对」
 在派发前失败并可被模型自我纠正，而不是在 provider 网关上 404。条目**无清单或空清单**（从未导入目录；设置页保存手填供应商时总是写 `models: []`）时
 保持放行——store 无法区分「目录不可知」与「模型不存在」，强校验会破坏从未导入目录的合法覆盖；
 要获得校验，先在设置页导入该供应商的目录。该 served-model 校验只作用于 `resolve_for_model`；

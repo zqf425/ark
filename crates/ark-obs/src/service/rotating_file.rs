@@ -31,16 +31,28 @@ impl RotatingFile {
         OpenOptions::new().create(true).append(true).open(path)
     }
 
+    fn ensure_active(&mut self) -> io::Result<()> {
+        if self.file.is_none() {
+            let file = Self::open_active(&self.path)?;
+            // Another process may have appended while no handle was open.
+            self.size = file.metadata()?.len();
+            self.file = Some(file);
+        }
+        Ok(())
+    }
+
     fn rotate(&mut self) -> io::Result<()> {
+        self.ensure_active()?;
         self.flush()?;
         let rotated = self.rotated_path();
-        let previous = self.file.take();
-        drop(previous);
+        self.file.take();
         if let Err(error) = fs::rename(&self.path, &rotated) {
-            self.file = Some(Self::open_active(&self.path)?);
+            // Preserve the rename error; a later write retries the reopen.
+            let _ = self.ensure_active();
             return Err(error);
         }
 
+        self.file = None;
         self.file = Some(Self::open_active(&self.path)?);
         self.size = 0;
         Ok(())
@@ -71,6 +83,7 @@ impl RotatingFile {
 
 impl Write for RotatingFile {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.ensure_active()?;
         if self.size >= self.max_bytes {
             self.rotate()?;
         }
@@ -164,6 +177,25 @@ mod tests {
             fs::read(&rotated[0]).expect("read rotated log"),
             b"12345678"
         );
+    }
+
+    #[test]
+    fn write_reopens_a_missing_handle_and_resets_size_from_disk() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("arkd.log");
+        fs::write(&path, b"existing").expect("seed log");
+        let mut writer = RotatingFile::open(&path, 64).expect("open log");
+        writer.file = None;
+        writer.size = u64::MAX;
+
+        writer
+            .write_all(b"-next")
+            .expect("write reopens active log");
+        writer.flush().expect("flush reopened log");
+
+        assert_eq!(fs::read(&path).expect("read active log"), b"existing-next");
+        assert_eq!(writer.size, b"existing-next".len() as u64);
+        assert!(rotated_logs(directory.path()).is_empty());
     }
 
     #[test]

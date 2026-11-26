@@ -60,8 +60,8 @@ pub async fn create(
 
 /// `PATCH /v1/im/channels/{id}` — merge an update onto a stored channel.
 ///
-/// The stored cursor travels with the record untouched: it is server
-/// bookkeeping and no client may read or write it.
+/// The store retains its current cursor under the write lock: it is server
+/// bookkeeping, no client may write it, and a stale PATCH cannot roll it back.
 pub async fn update(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -73,7 +73,7 @@ pub async fn update(
     let channel = apply_update(&record.channel, request)?;
     let stored = service.store().replace_channel(ImChannelRecord {
         channel,
-        cursor: record.cursor,
+        cursor: None,
     })?;
     service.request_sync();
     Ok(Json(stored.channel.to_view()))

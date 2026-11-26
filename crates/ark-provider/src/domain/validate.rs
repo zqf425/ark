@@ -9,6 +9,40 @@ use ark_contract::{ProviderEntry, ProviderModelInventoryItem};
 use ark_llm::EndpointFormat;
 
 use crate::config::ID_MAX_LEN;
+use crate::domain::ProvidersDocument;
+
+/// Select one entry and its effective default-model pin from one document.
+///
+/// The caller assembles the config while still holding the document lock, so a
+/// concurrent swap cannot mix credentials and model metadata from two revisions.
+pub(crate) fn resolve_from_document<'a>(
+    document: &'a ProvidersDocument,
+    id: Option<&str>,
+) -> Option<(&'a ProviderEntry, Option<String>)> {
+    let explicit = id.map(str::trim).filter(|value| !value.is_empty());
+    let entry = match explicit {
+        Some(id) => document.get(id)?,
+        None => document.get(document.effective_default()?)?,
+    };
+    let pinned = explicit
+        .is_none()
+        .then(|| document.effective_default_model())
+        .flatten();
+    Some((entry, pinned))
+}
+
+/// Metadata belongs to the effective model id, never to the previous request.
+pub(crate) fn context_window_for_model(entry: &ProviderEntry, model: &str) -> Option<u64> {
+    if model == entry.model.trim() {
+        return entry.context_window_tokens;
+    }
+    entry
+        .models
+        .iter()
+        .flatten()
+        .find(|item| item.id == model)
+        .and_then(|item| item.context_window_tokens)
+}
 
 /// Validate and normalize the id: non-empty and `^[A-Za-z0-9._-]{1,64}$`.
 pub fn validate_id(raw: &str) -> Result<String> {

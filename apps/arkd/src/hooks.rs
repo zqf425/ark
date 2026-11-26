@@ -621,7 +621,7 @@ mod tests {
         }
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         let grandchild = loop {
-            if let Ok(pid) = std::fs::read_to_string(&pid_file)
+            if let Some(pid) = std::fs::read_to_string(&pid_file)
                 .ok()
                 .and_then(|text| text.trim().parse::<u32>().ok())
             {

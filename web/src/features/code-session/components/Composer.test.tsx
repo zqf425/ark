@@ -154,6 +154,22 @@ describe('Composer per-thread draft persistence', () => {
     expect(input(harness.host).value).toBe('给 A 会话的草稿')
   })
 
+  it('mirrors textarea scrolling and resynchronizes after the draft changes', async () => {
+    harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
+    const node = input(harness.host)
+    await type(node, 'first draft')
+    const mirror = harness.host.querySelector<HTMLDivElement>('.ark-composer__highlight')!
+    node.scrollTop = 42
+    node.scrollLeft = 17
+    await act(async () => { node.dispatchEvent(new Event('scroll', { bubbles: true })) })
+    expect(mirror.scrollTop).toBe(42)
+    expect(mirror.scrollLeft).toBe(17)
+    node.scrollTop = 63
+    await type(node, 'a longer replacement draft')
+    expect(mirror.scrollTop).toBe(63)
+    expect(mirror.getAttribute('aria-hidden')).toBe('true')
+  })
+
   it('clears the thread draft after a successful send', async () => {
     harness = await mountWithProviders(<Composer threadId={THREAD_A} />)
     const node = input(harness.host)

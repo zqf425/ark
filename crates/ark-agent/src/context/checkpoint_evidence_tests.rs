@@ -46,6 +46,26 @@ fn overlong_single_line_user_request_keeps_both_ends() {
 }
 
 #[test]
+fn overlong_failure_lines_keep_both_ends_and_still_collapse_on_absorption() {
+    let failure = format!(
+        "Error: BEGIN-{} END-{}",
+        "a".repeat(2_000),
+        "Z".repeat(2_000)
+    );
+    let first = ContextCheckpoint::from_texts([failure.as_str(), failure.as_str()]).render();
+    assert!(first.contains("BEGIN-"), "{first}");
+    assert!(first.contains("ZZZZ"), "{first}");
+    assert!(first.contains("[... truncated ...]"), "{first}");
+    assert!(first.contains("(repeated x2)"), "{first}");
+
+    let second = ContextCheckpoint::from_messages(&[ModelMessage::system(first)]).render();
+    assert!(second.contains("BEGIN-"), "{second}");
+    assert!(second.contains("ZZZZ"), "{second}");
+    assert_eq!(second.matches("Error: BEGIN-").count(), 1, "{second}");
+    assert_eq!(second.matches("(repeated x2)").count(), 1, "{second}");
+}
+
+#[test]
 fn tool_evidence_survives_checkpoint_absorption() {
     let first = ContextCheckpoint::from_messages(&[ModelMessage::assistant_with_tool_calls(
         "",

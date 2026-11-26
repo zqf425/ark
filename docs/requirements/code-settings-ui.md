@@ -55,9 +55,11 @@
 ### A.1 Provider 无损编辑
 
 provider 列表读取仍为脱敏 `ProviderView`；用户点编辑后，设置页单独调用
-`GET /v1/runtime/providers/{id}` 回读完整条目并回填已存 API key。headers 等高级字段也由完整编辑条目
-播种。`upsert` 对空 API key、headers、`max_tokens`、`temperature` 仍保留旧值，作为非设置客户端和竞态
-下的无损兜底；用户可填写新值覆盖。完整读取端点受 protected router 的 bearer/loopback 本地授权边界
+`GET /v1/runtime/providers/{id}` 回读完整条目并回填已存 API key。headers、`max_tokens`、`temperature`
+也由完整编辑条目播种。编辑读取以单调 seq 与所选 provider id 双重保护，关闭、切换、新建或删除均
+使旧读取失效，迟到成功与错误都不得覆盖当前界面。`upsert` 对空 API key、headers、`max_tokens`、
+`temperature` 仍保留旧值，作为非设置客户端和竞态下的无损兜底；用户可填写新值覆盖。完整读取端点受
+protected router 的 bearer/loopback 本地授权边界
 保护，不得用于列表、诊断、toast 或日志。MCP secret 仍不回读。删除 secret 的独立 patch 为后续能力。
 
 ### A.2 SSE 与 wire 修复
@@ -180,9 +182,11 @@ Code 将已加载会话分为最近/归档两个本地范围，并提供大小�
 阶段 F 已将 Code 和设置改为面向任务执行的信息结构，并补上已加载线程的本地搜索/归档切换与设置分类导航。
 
 会话输入框增强（验收扩展）：运行时覆盖停靠输入框（工作空间/供应商/模型/推理强度/权限）；活跃回合内
-「追加」走既有 steer 路由、「排队」为本地队列并在回合结束按序自动发送；附件走 `/v1/attachments` 上传
-并随回合启动提交 id；技能指定为 `/id` 显式提及（复用激活语义，不新增 wire 字段）。推理强度按
-[ark-llm](../modules/ark-llm.md) 的协议映射生效，线程存储与恢复包含 `runtime.reasoning_effort`。
+「追加」走既有 steer 路由、「排队」为本地队列并在回合结束按序自动发送；仅 `ApiError` 408/425/429/5xx
+在 500ms 后自动重试，其余 4xx（含 409）及非 `ApiError` 传输异常保留消息但不自动重发，避免响应丢失
+导致重复投递；附件走 `/v1/attachments` 上传并随回合启动提交 id；技能指定为 `/id` 显式提及（复用激活
+语义，不新增 wire 字段）。推理强度按 [ark-llm](../modules/ark-llm.md) 的协议映射生效，线程存储与恢复
+包含 `runtime.reasoning_effort`。
 在后续界面复核中，Code 已收敛为会话优先的 ARK Console 三列工作台；右侧检查器可收起但保持挂载，
 两侧宽度可调。这是一层渲染和本地布局状态的变更，未修改 `ark-agent`、HTTP/SSE 契约、插件总线或
 运行时语义。

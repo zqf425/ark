@@ -42,7 +42,10 @@ const T2 = '00000000-0000-0000-0000-000000000002'
 
 describe('SessionStatsBar total duration format', () => {
   afterEach(() => {
-    useCodeSessionStore.setState({ rounds: [], usage: null, usageTurns: null, turnLastEventAt: {} })
+    useCodeSessionStore.setState({
+      rounds: [], usage: null, usageTurns: null, turnLastEventAt: {},
+      approvals: {}, userInputs: {}, pendingGateCounts: {}, activeTurnId: null
+    })
     vi.mocked(getThreadUsage).mockClear()
     document.body.innerHTML = ''
   })
@@ -132,6 +135,7 @@ describe('SessionStatsBar total duration format', () => {
     // A pending approval freezes the live extension at its requested_at: the
     // printed clock stays 41分15秒 even as wall time passes.
     useCodeSessionStore.setState({
+      pendingGateCounts: { [T3]: 1 },
       approvals: {
         a1: {
           approval_id: 'a1',

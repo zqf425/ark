@@ -1,6 +1,6 @@
 # 工具并发执行 v2：流式结算与取消保留（parallel-tools-v2）
 
-状态：已批准计划（第一轮检视结论已吸收：修订点见各节标注）。
+状态：已落地（第一阶段修复已吸收：精确槽位记账、流所有者取消、持久化失败补偿）。
 前置：[parallel-tools.md](parallel-tools.md)（v1 批划分已落地，本设计是其执行层迭代）。
 
 ## 背景与问题
@@ -18,9 +18,8 @@ dispatch::run_calls`：批划分已由工具自述的 `ToolConcurrency` 驱动�
    失败行。批内一个 50ms 的 `read` 和一个 10 分钟的 `bash` 同批，用户在第 5
    秒取消时 read 的真实结果（可能已消耗带宽与 IO）被替换为占位错误，模型
    上下文与磁盘都失去这份证据。
-3. **输出顺序的隐含耦合**：`run_batch_events` 结果循环里 `open.remove(0)` 假设
-   `run_calls` 的输出顺序与 `batch` 输入顺序一致（当前 `join_all` 恰好保证）。
-   一旦执行器层改为乱序完成（v2 的目标方向），该假设会静默错配 call 与事件。
+3. **输出顺序的隐含耦合**：v1 的结果归位假设执行输出顺序与 `batch` 输入顺序一致，
+   无法表达流式乱序完成，也不能安全地区分畸形 provider 重复的 call_id。
 
 Qoder 的 STE（流式工具执行器）对同样问题的解法是：逐调用完成即结算、取消时
 保留已完成结果、批间保持提交顺序。本设计把它移植到 ark 的状态机与事件模型上，
@@ -36,8 +35,8 @@ Qoder 的 STE（流式工具执行器）对同样问题的解法是：逐调用�
   内容落盘（Finished 事件 + 历史行），仅未到达的调用写合成取消行；回合以
   interrupted 语义收敛。保留结果**不经 `ToolsSettled` 上报**（见"数据与
   兼容"）：它经事件与历史行落盘后，由下一回合的 seed 重放进入模型上下文。
-- 目标三（顺序解耦）：结算循环不得假设输出顺序与输入顺序一致，按 `call_id`
-  配对，输入顺序决定历史行顺序。
+- 目标三（顺序解耦）：结算循环不得假设输出顺序与输入顺序一致，按转发器标记的
+  输入槽位配对，输入顺序决定历史行顺序；重复 call_id 不得共享记账身份。
 - 非目标：不改批划分规则（`ParallelPolicy` 不动）；不做跨批调度与乱序交付
   （批间顺序、回合历史按模型给定顺序落盘的语义不变）；不做单调用级取消
   传播（整批取消仍是现状语义）；不改 `max_parallel_tool_calls` 分块。
@@ -55,21 +54,19 @@ Qoder 的 STE（流式工具执行器）对同样问题的解法是：逐调用�
 - 通道容量 = `batch.len()`（调用数上界已知）：不存在反压，已完成的
   `send` 永不挂起，转发任务的 `join_all` 轮询不会因通道满而卡住同批
   未完成调用。
-- `run_batch_events` 消费端循环 `recv`，收到一条立即写该调用的
-  `ToolCallFinished` 事件（含配对 item_id），**成功 append 后**才把该
-  call 从 open 映射移除——journal 中途失败时补偿路径仍能覆盖它；仍在
-  通道里未消费的结果同样视为 open。
+- `run_batch_events` 消费端循环 `recv`，收到一条立即写该槽位调用的
+  `ToolCallFinished` 事件（含配对 item_id），**成功 append 后**才清除该槽位的
+  open 标记——journal 中途失败时补偿路径仍能覆盖它；仍在通道里未消费的结果
+  同样视为 open。槽位身份与 call_id 无关，重复 call_id 各自闭环。
 - `ToolCallFinished` 的落盘顺序变为完成顺序（乱序）。store 侧无改动：
   投影按 keyed item_id（`tool_call:{call_id}`）upsert 折叠，与 Finished
   之间的落盘顺序无关（见 [ark-store](../modules/ark-store.md) 的 keyed
-  item_id 设计；前置依赖仅"每调用 Started 先于其 Finished"，该约束由
-  整批 Started 先行落盘保证）。
-- **历史行批末一次落盘**：消费者把乱序完成的结果按 `call_id` 归位到
-  `batch` 输入序的槽位（消耗式匹配：每个 call_id 占用其首个未占槽），
-  整批结束时（正常完成或取消收尾）按槽位顺序统一 `append_tool_history`。
-  同回合重复 call_id 属畸形输入（gate 路径实测发生过，AG-05）：消耗式
-  匹配保证每份结果各占一槽、历史行数与 v1 一致（两行都落），但第二份
-  与槽位的对应关系不作保证——不为此引入多重映射。
+  item_id 设计；前置依赖仅"每调用 Started 先于其 Finished"：非取消路径的所有
+  Started 落盘后才启动工具，Started append 失败即不执行任何工具）。
+- **历史行批末一次落盘**：消费者把乱序完成的结果按转发器标记的输入槽位
+  归位，整批结束时（正常完成或取消收尾）按槽位顺序统一 `append_tool_history`。
+  同回合重复 call_id 属畸形输入（gate 路径实测发生过，AG-05）：每份结果仍精确
+  占用各自槽位，历史行数、call_id 与参数对应关系均不丢失。
 
 ### 2. 取消保留（abort + drain，无定时窗口）
 
@@ -87,12 +84,12 @@ Qoder 的 STE（流式工具执行器）对同样问题的解法是：逐调用�
    不肯退出的 bash 必须被终止）。
 3. **drain 通道存量**：abort 后转发任务的 sender 全部 drop，通道关闭，
    `recv` 返回 `None` 时 drain 自然结束。取消瞬间**已推入通道**的结果
-   按 `call_id` 归位、按真实内容结算（Finished 事件 + 槽位）；
+   按输入槽位归位、按真实内容结算（Finished 事件 + 槽位）；
    "已完成但尚未推入"的结果随 future drop 丢失，写合成取消行——该
    损耗窗口是 push 与 abort 之间的纳秒级间隙，可接受，语义上定义为
    **以通道为界**：到达通道的结果算数，未到达的作废（有意取舍：保留
    结果与取消行不做标记区分，审计可由事件时间序推断）。
-4. **drain 后收敛**：open 映射为空（整批恰好都已完成）时按正常完成
+4. **drain 后收敛**：open 槽位全部清除（整批恰好都已完成）时按正常完成
    收敛，不写 interrupt（select! 双就绪竞态下取消分支被随机选中时，
    此探测让行为可预期；drive 循环随后仍观察 cancel token 终止回合）。
    否则对剩余 open 调用逐个写合成取消行（文案沿用
@@ -110,18 +107,22 @@ Qoder 的 STE（流式工具执行器）对同样问题的解法是：逐调用�
    panic 时通道存量的归属与取消一致（§2.3 的通道边界同样适用）：已推入
    通道的结果按真实内容保留结算，未推入的（含 panic 调用自身的 future，
    被 join_all 树 drop）写合成失败行。
-6. **send 失败静默忽略**：消费者消失（理论路径）时 `send` 返回 Err，
-   转发任务忽略之并继续驱动剩余调用至自然结束，避免 panics。
+6. **流所有权与异常返回**：`SettlementStream` 的 `Drop` 必须 abort 转发任务。
+   消费者因 journal append 失败提前返回时，丢弃流即 drop 全部 in-flight future，
+   不得让工具与子进程脱离消费者继续运行。流存活期间 send 失败静默忽略，
+   避免理论消费者消失路径 panic。
 
-### 3. 配对与补偿（open 映射重写）
+### 3. 精确槽位配对与补偿
 
-`open: Vec<&ToolCallRequest>` 改为 `BTreeMap<call_id, &ToolCallRequest>`
-（BTreeMap 而非 HashMap：补偿路径按剩余键迭代写 Finished，定序迭代
-保证补偿落盘顺序确定，既有回归测试对补偿顺序的断言不 flake）。
-结算按 `call_id` 移除，不再依赖顺序。
+open 记账使用 `Vec<bool>`，长度等于 `batch.len()`；`open[slot] == true` 仅表示
+该输入槽位的 Started 已持久化、Finished 尚未持久化。`SettledCall` 携带
+转发器创建时的槽位，结算先写 Finished，成功后才清除对应标记。call_id 只用于
+事件与 provider 历史展示，不承担 open 身份；重复 call_id 因此不会相互覆盖。
 
-- `close_open_tool_calls`（journal 失败补偿）：按 map 剩余键工作，
-  语义不变，顺序由 BTreeMap 定序保证。
+- `close_open_tool_calls_batch`（journal 失败补偿）：只补偿 open 为 true 的槽位，
+  按输入顺序写 Finished，避免为 Started 未持久化的调用制造孤立 Finished。
+  Started 部分落盘失败时只闭环已 durable 的调用；结果 append 失败时闭环所有
+  durable Started。writer 仍故障时保留原始错误，best-effort 补偿不掩盖根因。
 - `converge_pending_calls_on_cancel`（gate 取消兜底，AG-03）：**不改**。
   它按 `self.pending_calls` 与历史 tool 行的差集工作，不持有 open 列表，
   v2 不需要也不应触碰它。
@@ -131,7 +132,8 @@ Qoder 的 STE（流式工具执行器）对同样问题的解法是：逐调用�
 - `ParallelPolicy`、`ConcurrencyTable`、`max_parallel_tool_calls` 分块：
   v1 语义原样保留。
 - 批间顺序：reactor 仍逐批 `await`，批 N 不开始于批 N-1 全部结算完成前。
-- `ToolCallStarted` 仍整批先行落盘（v1 已确立的审计与投影约束）。
+- 非取消快路径的 `ToolCallStarted` 仍整批先行落盘（v1 已确立的审计与投影约束）；
+  该阶段失败时按 durable 槽位补偿，且不启动工具。
 - 合成结果（storm、gate 拒绝）路径不动。
 - 取消文案 `cancelled before the call completed` 仅用于真未完成（未到达
   通道）的调用；保留结果按正常完成形态落盘（真实 duration、无 detail）。
@@ -158,8 +160,13 @@ Qoder 的 STE（流式工具执行器）对同样问题的解法是：逐调用�
 可挂起（永不完成）、可观测完成事件，供乱序/取消用例使用。
 
 - 单测（`dispatch`）：快调用先于慢调用落 `ToolCallFinished`（延迟桩
-  验证事件顺序）；输出乱序时按 `call_id` 配对正确、历史行仍按输入
-  槽位序；同 call_id 重复时两行历史都落（消耗式槽位）。
+  验证事件顺序）；输出乱序时按输入槽位配对正确、历史行仍按输入槽位序；
+  同 call_id 重复时两行历史与 durable open 记账均精确对应。
+- 单测（`dispatch` 流所有权）：未完成工具已启动时 drop stream，工具 future
+  必须被 abort/drop；正常 join 与显式 abort 后仍可 drain 已到达结果。
+- 单测（`tool_batch` 持久化失败）：Started append 的第 2 次失败只补偿 c1，
+  不执行任何工具，也不为 c2/c3 写孤立 Finished；第 3 次（首个结果 append）
+  失败时该批 c1/c2 两个 durable Started 都补偿。
 - 单测（`tool_batch` 取消路径）：取消时已到达通道的调用保留真实内容、
   未到达的写合成取消行；整批恰好完成时取消不产生 interrupt；spawn 前
   已取消时不执行任何工具；转发任务 panic 时剩余调用合成失败且 detail
@@ -177,4 +184,4 @@ Qoder 的 STE（流式工具执行器）对同样问题的解法是：逐调用�
 - 全仓：`cargo test --workspace --exclude ark-desktop`、`cargo clippy
   --workspace --exclude ark-desktop --all-targets -- -D warnings` 通过。
 - 文档：ark-agent 模块设计的关键约束同步本语义（流式结算、取消保留、
-  按 call_id 配对、保留结果经 seed 重放到达模型）。
+  按输入槽位配对、durable open 记账、流 Drop abort、保留结果经 seed 重放到达模型）。

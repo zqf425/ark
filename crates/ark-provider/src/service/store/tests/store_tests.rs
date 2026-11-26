@@ -3,6 +3,7 @@
 //! of `store.rs`'s `tests` module via `#[path]`; the suite imports exactly
 //! what it needs, so the two `use` lists stay explicit.
 
+use crate::domain::ProvidersDocument;
 use crate::service::store::ProviderStore;
 use ark_contract::{
     ProviderEntry, ProviderModelCatalogRequest, ProviderModelInventoryItem, ProviderTestRequest,
@@ -536,6 +537,7 @@ fn resolve_for_model_accepts_the_stored_model_under_a_pinned_default() {
     let dir = temp_dir("resolve-for-model-pin");
     let store = store(&dir);
     let mut entry = entry("p", Some("sk-1234567890abcdef"));
+    entry.context_window_tokens = Some(128_000);
     entry.models = Some(vec![ProviderModelInventoryItem {
         id: "b-model".into(),
         context_window_tokens: Some(1_000_000),
@@ -550,10 +552,12 @@ fn resolve_for_model_accepts_the_stored_model_under_a_pinned_default() {
         "b-model"
     );
     // Overriding back to the entry's stored model A is accepted (A is served
-    // even though the inventory normalized the A row away).
-    assert!(store
+    // even though the inventory normalized the A row away), and its window
+    // comes from the entry rather than the pinned model B.
+    let restored = store
         .resolve_for_model(None, Some("deepseek-chat".to_string()))
-        .is_ok());
+        .unwrap();
+    assert_eq!(restored.context_window_tokens, Some(128_000));
     // A genuine miss still fails, and the diagnostic does not claim A is
     // unserved.
     let error = store
@@ -561,6 +565,100 @@ fn resolve_for_model_accepts_the_stored_model_under_a_pinned_default() {
         .unwrap_err();
     assert!(error.message.contains("never-served"), "{}", error.message);
     assert!(error.message.contains("deepseek-chat"), "{}", error.message);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn served_model_diagnostic_lists_the_stored_model_only_once() {
+    let dir = temp_dir("resolve-for-model-dedup");
+    let store = store(&dir);
+    let mut malformed = entry("p", Some("sk-1234567890abcdef"));
+    malformed.models = Some(vec![
+        ProviderModelInventoryItem {
+            id: "deepseek-chat".into(),
+            context_window_tokens: Some(1),
+            supports_vision: None,
+        },
+        ProviderModelInventoryItem {
+            id: "big".into(),
+            context_window_tokens: Some(1_000_000),
+            supports_vision: None,
+        },
+    ]);
+    // Exercise an older/hand-edited document that normalize_entry would repair.
+    *store.inner.lock().unwrap() = ProvidersDocument {
+        providers: vec![malformed],
+        ..ProvidersDocument::default()
+    };
+    let error = store
+        .resolve_for_model(Some("p"), Some("missing".into()))
+        .unwrap_err();
+    assert_eq!(error.message.matches("deepseek-chat").count(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn concurrent_resolution_never_mixes_credentials_and_model_metadata() {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    let dir = temp_dir("resolve-for-model-snapshot");
+    let store = Arc::new(store(&dir));
+    let revision = |key: &str, window: u64| {
+        let mut entry = entry("p", Some(key));
+        entry.models = Some(vec![ProviderModelInventoryItem {
+            id: "big".into(),
+            context_window_tokens: Some(window),
+            supports_vision: None,
+        }]);
+        ProvidersDocument {
+            providers: vec![entry],
+            default_provider_id: Some("p".into()),
+            default_model: None,
+        }
+    };
+    let first = revision("key-a", 111_111);
+    let second = revision("key-b", 222_222);
+    *store.inner.lock().unwrap() = first.clone();
+    let barrier = Arc::new(Barrier::new(5));
+    let mut workers = Vec::new();
+    for _ in 0..4 {
+        let store = Arc::clone(&store);
+        let barrier = Arc::clone(&barrier);
+        workers.push(thread::spawn(move || {
+            barrier.wait();
+            for _ in 0..2_000 {
+                let config = store
+                    .resolve_for_model(Some("p"), Some("big".into()))
+                    .unwrap();
+                let snapshot = match (config.api_key.as_str(), config.context_window_tokens) {
+                    ("key-a", Some(111_111)) => 0,
+                    ("key-b", Some(222_222)) => 1,
+                    pair => panic!("mixed provider snapshots: {pair:?}"),
+                };
+                assert!(snapshot < 2);
+            }
+        }));
+    }
+    let writer = {
+        let store = Arc::clone(&store);
+        let barrier = Arc::clone(&barrier);
+        thread::spawn(move || {
+            barrier.wait();
+            for index in 0..4_000 {
+                *store.inner.lock().unwrap() = if index % 2 == 0 {
+                    second.clone()
+                } else {
+                    first.clone()
+                };
+                thread::yield_now();
+            }
+        })
+    };
+    for worker in workers {
+        worker.join().unwrap();
+    }
+    writer.join().unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 }
 

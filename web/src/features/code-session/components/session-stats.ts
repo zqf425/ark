@@ -5,7 +5,31 @@
  * from renderer timestamps; this module only folds the reported spans and
  * renders a numeric clock so no user-facing prose is hardcoded here.
  */
-import type { RoundTiming } from '../state/types'
+import type { ItemsSnapshot, RoundTiming } from '../state/types'
+
+type GateClockState = Pick<ItemsSnapshot, 'approvals' | 'userInputs' | 'pendingGateCounts' | 'turnLastEventAt'>
+
+/**
+ * Freeze horizon for one turn. The reducer's O(1) count guards the history
+ * scan; most transcript rows therefore never touch gate records. A local
+ * resolution keeps the count until durable SSE confirms it, so the absence of
+ * a pending-status row freezes at the last event instead of extending to now.
+ */
+export function gatePendingSince(turnId: string, state: GateClockState): number | null {
+  if ((state.pendingGateCounts[turnId] ?? 0) <= 0) return null
+  let earliest = Number.POSITIVE_INFINITY
+  for (const approval of Object.values(state.approvals)) {
+    if (approval.turn_id !== turnId || approval.status !== 'pending') continue
+    const requestedAt = Date.parse(approval.requested_at)
+    if (Number.isFinite(requestedAt)) earliest = Math.min(earliest, requestedAt)
+  }
+  for (const input of Object.values(state.userInputs)) {
+    if (input.turn_id !== turnId || input.status !== 'pending') continue
+    const requestedAt = Date.parse(input.requested_at)
+    if (Number.isFinite(requestedAt)) earliest = Math.min(earliest, requestedAt)
+  }
+  return Number.isFinite(earliest) ? earliest : state.turnLastEventAt[turnId] ?? null
+}
 
 /**
  * Localized unit words for `formatDurationWords`. Each one takes the count and

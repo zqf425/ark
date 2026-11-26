@@ -21,8 +21,9 @@ use std::sync::{Arc, Mutex};
 
 use ark_ports::{SandboxDecision, Tool, ToolArgs, ToolConcurrency, ToolContext, ToolOutput};
 
-use super::bash::{default_shell_env, BashTool};
+use super::bash::default_shell_env;
 use crate::domain::args::{self, ShellTaskId};
+use crate::domain::paths;
 use crate::exec::common::decode_shell_output;
 use crate::policy::truncate::{cap_bytes, DEFAULT_LIMITS};
 
@@ -112,6 +113,14 @@ struct SessionState {
     tasks: Vec<Arc<ShellTask>>,
 }
 
+/// A command split into the cwd to spawn in, the script to execute, and the
+/// session cwd that may be committed only after the caller's success boundary.
+pub(crate) struct PreparedSessionCommand {
+    cwd: PathBuf,
+    command: String,
+    commit_target: Option<PathBuf>,
+}
+
 impl ShellSessionManager {
     pub fn new() -> Self {
         Self::default()
@@ -126,37 +135,67 @@ impl ShellSessionManager {
             .unwrap_or_else(|| workspace.to_path_buf())
     }
 
-    /// Fold one command's directory changes into the session state.
+    /// Resolve a command without advancing session state.
     ///
-    /// Returns the cwd the command should run in and the (possibly advanced)
-    /// session cwd. Only line-level `cd`/`pushd` prefixes are recognized; the
-    /// parse is intentionally crude because the fallback is safe: an
-    /// unrecognized form leaves the cwd unchanged, never wrong. The advanced
-    /// path must exist and be enterable **before** it is committed: once a
-    /// session cwd points at a non-directory string, every later call of the
-    /// session fails before its command runs (the observed os error 123
-    /// cascade), so an unusable target falls back to the current cwd.
-    pub fn resolve_cwd(&self, workspace: &Path, command: &str) -> PathBuf {
-        // The base is the *effective* cwd: a remembered path that has stopped
-        // being enterable must not poison this call the way it poisoned the
-        // whole session before (spawn refused, message named no fallback).
+    /// A single-line pure `cd`/`pushd` keeps its original script so it changes
+    /// directory exactly once and `pushd` retains its output. When later lines
+    /// follow, the first line is replaced by the target cwd and only the
+    /// remaining script runs. Compound first lines are never stripped.
+    pub(crate) fn prepare(&self, workspace: &Path, command: &str) -> PreparedSessionCommand {
         let current = self.effective_cwd(workspace);
-        let next = advance_cwd(workspace, &current, command);
-        if next == current {
-            return current;
+        let Some(leading) = leading_cd(command) else {
+            return self.unprepared(current, command);
+        };
+        let Some(target) = resolve_cd_target(workspace, &current, leading.target) else {
+            return self.unprepared(current, command);
+        };
+        if leading.rest.trim().is_empty() {
+            return PreparedSessionCommand {
+                cwd: current,
+                command: command.to_string(),
+                commit_target: Some(target),
+            };
         }
-        let usable = std::fs::metadata(&next)
+        PreparedSessionCommand {
+            cwd: target.clone(),
+            command: leading.rest.to_string(),
+            commit_target: Some(target),
+        }
+    }
+
+    fn unprepared(&self, cwd: PathBuf, command: &str) -> PreparedSessionCommand {
+        PreparedSessionCommand {
+            cwd,
+            command: command.to_string(),
+            commit_target: None,
+        }
+    }
+
+    /// Commit a prepared target after foreground success, or after a background
+    /// task was successfully spawned and registered. Re-canonicalizing here
+    /// closes the prepare/commit symlink-swap window.
+    pub(crate) fn commit(&self, workspace: &Path, target: Option<&Path>) {
+        let Some(target) = target else {
+            return;
+        };
+        let Ok(real_root) = std::fs::canonicalize(workspace) else {
+            return;
+        };
+        let Ok(resolved) = paths::resolve(&real_root, &target.to_string_lossy()) else {
+            return;
+        };
+        let Ok(real_target) = std::fs::canonicalize(resolved) else {
+            return;
+        };
+        if !std::fs::metadata(&real_target)
             .map(|meta| meta.is_dir())
-            .unwrap_or(false);
-        if !usable {
-            return current;
+            .unwrap_or(false)
+        {
+            return;
         }
         if let Ok(mut state) = self.inner.lock() {
-            // Committing over a stale remembered value is deliberate: the
-            // fallback above already proved that value unusable in that case.
-            state.cwd = Some(next.clone());
+            state.cwd = Some(real_target);
         }
-        next
     }
 
     /// The cwd a call actually runs in: the remembered session cwd, falling
@@ -360,88 +399,74 @@ pub struct TaskSnapshot {
     pub exit_code: Option<i32>,
 }
 
-/// The `cd`/`pushd` target of a command's first non-blank line, with one
-/// layer of shell quotes removed.
-///
-/// Quoted targets are the observed real-world form (`cd "$USERPROFILE/x"`,
-/// `cd "/d/code/repo"`): `split_whitespace` alone would hand the raw quotes
-/// to the path joiner, and the recorded session cwd then contains literal
-/// quote characters. Every following call of the session then dies on
-/// Windows os error 123 before the command even runs -- three calls in one
-/// day's sessions failed exactly there. This is deliberately *not* a shell
-/// tokenizer: only one leading quote pair is stripped, no quote concatenation
-/// (`cd "a"b` yields `a`, not `ab`) and no escape handling. Those inputs are
-/// rare, and a divergence is safe -- the caller verifies the path before
-/// committing, so at worst the session cwd advances to a prefix the shell
-/// itself did not enter, and the model can re-`cd` explicitly.
-fn cd_target(command: &str) -> Option<&str> {
-    let first_line = command.lines().find(|line| !line.trim().is_empty())?;
-    let trimmed = first_line.trim_start();
-    let verb = trimmed.split_whitespace().next()?;
-    if verb != "cd" && verb != "pushd" {
-        return None;
-    }
-    let after_verb = trimmed[verb.len()..].trim_start();
-    let &quote = after_verb.as_bytes().first()?;
-    if quote == b'"' || quote == b'\'' {
-        let inner = &after_verb[1..];
-        let end = inner.find(quote as char)?;
-        return Some(&inner[..end]);
-    }
-    after_verb.split_whitespace().next()
+struct LeadingCd<'a> {
+    target: &'a str,
+    rest: &'a str,
 }
 
-/// Advance `current` by one command's directory changes.
-///
-/// Recognized forms (one per command, first non-blank line): `cd -` is a
-/// no-op here (the previous directory is not tracked), `cd`/`pushd` with a
-/// single relative/absolute argument, quoted or bare. Everything else,
-/// including commands that merely *contain* a `cd` after `&&` in a
-/// non-leading position, keeps the cwd unchanged; the model can always chain
-/// `cd dir && cmd` explicitly in the next call. Escapes are resolved by the
-/// caller's path containment, so this function only normalizes.
-///
-/// A target that still contains `$` after unquoting is not tracked: the
-/// *shell* expands it when the command runs, but this parser cannot know the
-/// value, and recording the raw spelling once poisoned a whole session (the
-/// recorded path never exists, so every later call died on Windows os error
-/// 123). Not tracking is the safe divergence: the command still runs with the
-/// shell-expanded `cd`, only the session cwd lags, and the model can re-`cd`
-/// explicitly. The same asymmetry covers single-quoted `$` (which bash would
-/// keep literal) and Windows names that legally contain `$` -- an
-/// under-approximation of what the shell would do, never an over-claim.
-fn advance_cwd(workspace: &Path, current: &Path, command: &str) -> PathBuf {
-    let Some(target) = cd_target(command) else {
-        return current.to_path_buf();
-    };
-    if target == "-" || target.is_empty() {
-        return current.to_path_buf();
+/// Recognize only a whole first line containing `cd target` or `pushd target`.
+/// A quoted target must consume the complete token; quote concatenation,
+/// escapes, extra tokens and compound shell operators deliberately fall back
+/// to the original script with no cwd commit.
+fn leading_cd(command: &str) -> Option<LeadingCd<'_>> {
+    let mut offset = 0;
+    for line in command.split_inclusive('\n') {
+        offset += line.len();
+        let line = line.trim_end_matches(['\n', '\r']);
+        if line.trim().is_empty() {
+            continue;
+        }
+        let target = pure_cd_target(line)?;
+        return Some(LeadingCd {
+            target,
+            rest: &command[offset..],
+        });
     }
-    if target.contains('$') {
-        return current.to_path_buf();
+    None
+}
+
+fn pure_cd_target(line: &str) -> Option<&str> {
+    let line = line.trim();
+    let mut words = line.splitn(2, char::is_whitespace);
+    match words.next()? {
+        "cd" | "pushd" => {}
+        _ => return None,
     }
+    let rest = words.next()?.trim();
+    if rest.starts_with(['"', '\'']) {
+        let quote = rest.as_bytes()[0];
+        let inner = &rest[1..];
+        let end = inner.find(quote as char)?;
+        return inner[end + 1..].trim().is_empty().then_some(&inner[..end]);
+    }
+    let mut tokens = rest.split_whitespace();
+    let token = tokens.next()?;
+    if tokens.next().is_some() {
+        return None;
+    }
+    (!token.contains(['\'', '"', ';', '&', '|', '<', '>', '(', ')'])).then_some(token)
+}
+
+/// Resolve and canonicalize a candidate before it can be spawned from or
+/// committed. Session cwd containment applies even to unrestricted tool calls.
+fn resolve_cd_target(workspace: &Path, current: &Path, target: &str) -> Option<PathBuf> {
+    if target.is_empty() || target == "-" || target.contains('$') {
+        return None;
+    }
+    let real_root = std::fs::canonicalize(workspace).ok()?;
+    let base = std::fs::canonicalize(current).unwrap_or_else(|_| current.to_path_buf());
     let candidate = Path::new(target);
     let joined = if candidate.is_absolute() {
         candidate.to_path_buf()
     } else {
-        current.join(candidate)
+        base.join(candidate)
     };
-    // Lexical containment: the real spawn resolves symlinks and re-checks the
-    // boundary, so this is a fast-path filter for obvious escapes only.
-    let Ok(lexical) = joined.strip_prefix(workspace) else {
-        return current.to_path_buf();
-    };
-    if lexical.components().any(|c| c.as_os_str() == "..") {
-        return current.to_path_buf();
-    }
-    // Drop `.` segments before the caller compares and commits: `cd .` joins
-    // to `current/.`, which compares unequal to `current` and would otherwise
-    // accumulate one segment per call.
-    let normalized = PathBuf::from(ark_common::path::normalize(&joined.to_string_lossy()));
-    if normalized == current {
-        return current.to_path_buf();
-    }
-    normalized
+    let resolved = paths::resolve(&real_root, &joined.to_string_lossy()).ok()?;
+    let canonical = std::fs::canonicalize(resolved).ok()?;
+    std::fs::metadata(&canonical)
+        .map(|meta| meta.is_dir())
+        .unwrap_or(false)
+        .then_some(canonical)
 }
 
 /// Sandbox baseline for the session tools: identical to `bash`.
@@ -487,15 +512,20 @@ impl BashSessionTool {
         if parsed.run_in_background {
             return self.spawn_background(ctx, &parsed);
         }
-        // Foreground: the plain `bash` semantics (wait + timeout), but the cwd
-        // comes from the session and a leading `cd` advances it.
-        let cwd = self.session.resolve_cwd(&ctx.workspace, &parsed.command);
+        // Foreground success is the commit boundary. A failed cd or a failed
+        // remainder must leave the remembered cwd unchanged.
+        let prepared = self.session.prepare(&ctx.workspace, &parsed.command);
         let effective = ToolArgs(serde_json::json!({
-            "command": parsed.command,
+            "command": prepared.command,
             "timeout_ms": parsed.timeout_ms,
-            "cwd": cwd,
+            "cwd": prepared.cwd,
         }));
-        BashTool.execute(ctx, effective).await
+        let output = super::bash::execute_in_cwd(ctx, effective, &prepared.cwd).await?;
+        if output.ok {
+            self.session
+                .commit(&ctx.workspace, prepared.commit_target.as_deref());
+        }
+        Ok(output)
     }
 
     /// Detach one command: spawn, register, return the task id immediately.
@@ -508,11 +538,11 @@ impl BashSessionTool {
         ctx: &ToolContext,
         parsed: &crate::domain::args::BashSessionArgs,
     ) -> ark_common::Result<ToolOutput> {
-        let cwd = self.session.resolve_cwd(&ctx.workspace, &parsed.command);
-        super::bash::ensure_cwd(&cwd)?;
-        let mut command = std_shell(&parsed.command)?;
+        let prepared = self.session.prepare(&ctx.workspace, &parsed.command);
+        super::bash::ensure_cwd(&prepared.cwd)?;
+        let mut command = std_shell(&prepared.command)?;
         command
-            .current_dir(&cwd)
+            .current_dir(&prepared.cwd)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -541,17 +571,20 @@ impl BashSessionTool {
         spawn_output_collector(stdout, Arc::clone(&output));
         spawn_output_collector(stderr, Arc::clone(&output));
         let id = self.session.register_task(
-            cwd.clone(),
+            prepared.cwd.clone(),
             Arc::clone(&shared_child),
             tree,
             Arc::clone(&output),
         )?;
         // Registration owns the process before the only waiter starts. If the
-        // registry rejected it, register_task already killed and reaped it.
+        // registry rejected it, register_task already killed and reaped it and
+        // the session cwd must not advance.
+        self.session
+            .commit(&ctx.workspace, prepared.commit_target.as_deref());
         spawn_reaper(shared_child, output);
         Ok(ToolOutput::ok(format!(
             "background task started: {id}\ncwd: {}\npoll output with bash_output; terminate with bash_kill",
-            cwd.display()
+            prepared.cwd.display()
         )))
     }
 }

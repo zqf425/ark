@@ -201,6 +201,41 @@ fn running_turn_extends_to_the_newest_event() {
 }
 
 #[test]
+fn running_turn_horizon_includes_trailing_tool_events() {
+    let thread = ThreadId::new();
+    let turn = TurnId::new();
+    let events = vec![
+        started(1, thread, turn, 0, 0),
+        RuntimeEvent::ToolCallStarted {
+            seq: 2,
+            thread_id: thread,
+            turn_id: turn,
+            item_id: None,
+            timestamp: at(100),
+            call_id: "c1".into(),
+            tool: "bash".into(),
+            arguments: serde_json::json!({}),
+        },
+        RuntimeEvent::ToolCallFinished {
+            seq: 3,
+            thread_id: thread,
+            turn_id: turn,
+            item_id: None,
+            timestamp: at(900),
+            call_id: "c1".into(),
+            tool: "bash".into(),
+            ok: true,
+            duration_ms: 800,
+            output: String::new(),
+            detail: None,
+        },
+    ];
+    let response = aggregate_thread_usage(thread, &events);
+    assert_eq!(response.turn_usage[0].active_ms, Some(900));
+    assert_eq!(response.active_ms, Some(900));
+}
+
+#[test]
 fn idle_gap_before_a_user_turn_is_not_counted() {
     let thread = ThreadId::new();
     let turn_a = TurnId::new();
@@ -397,7 +432,8 @@ fn thread_usage_aggregates_cache_counters_across_turns() {
     assert_eq!(response.samples, 2);
     assert_eq!(response.usage.prompt_tokens, 150);
     assert_eq!(response.usage.completion_tokens, 30);
-    assert_eq!(response.usage.cache_hit_tokens, Some(80));
+    assert_eq!(response.usage.cache_hit_tokens, None);
+    assert_eq!(response.usage.cache_miss_tokens, None);
     assert_eq!(response.usage.cache_hit_rate, None);
     assert_eq!(response.turn_usage.len(), 2);
     assert_eq!(response.turn_usage[0].turn_id, turn_a);

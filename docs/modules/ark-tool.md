@@ -25,7 +25,8 @@
   声明（`ark_ports::ToolConcurrency`），注册表在建表时缓存并在回合开始时向 agent 提供快照：
   `read`/`ls`/`find`/`grep`/`web_fetch`/`bash_output` 声明 `ReadOnly`；`bash`/`bash_session`/`bash_kill`/
   `delegate_task` 声明 `Isolated`（每次调用独占进程或独立回合，彼此无法破坏对方内存）；
-  `write`/`edit` 与任何未声明工具为 `Exclusive`，逐调用独占一批。同资源的只读调用仍按资源串行。
+  `write`/`edit` 与任何未声明工具为 `Exclusive`，逐调用独占一批。同资源的只读调用仍按资源串行；
+  `bash_session` 在 agent 侧固定映射到 `shell_session` 资源，以串行保护共享 cwd，普通 `bash` 不互斥。
   声明只影响**能否并批**，不放宽沙箱权限——两个轴相互独立。所有输出走统一 UTF-8 安全截断。
 - `edit` 的锚点匹配前把文件内容与 `old_string` 都归一到 LF，写入时再按文件原有行尾恢复
   （文件是 CRLF 就写回 CRLF，是 LF 就保持 LF）。模型按 `\n` 组织锚点，而 Windows 检出
@@ -58,9 +59,10 @@
   `HttpCapability`，以 `ark.builtin.web` 身份走治理出口，自身不持有 HTTP client；SSRF 防线
   （拒绝解析到 loopback/私有/链路本地地址的目标）在工具层，HTTPS-only、超时与大小上限来自
   共享 `HttpPolicy`。父与子工具集都注册它；输出与 bash 同规按 64 KiB 截断，HTML 经内置
-  无依赖文本提取，非 2xx/二进制/失败都以结构化工具输出返回，不使回合失败。失败文本（非 2xx、
-  SSRF、重定向预算）附恢复引导：重新推导 URL 或改用浏览器类 MCP 工具，不原样重试——实测 42 次
-  （子代理 36 + 主线程 6）猜错 URL 的 404/SSRF 中零次尝试重新发现，裸状态码被模型读成网络故障。
+  无依赖文本提取，非 2xx/二进制/失败都以结构化工具输出返回，不使回合失败。所有用户可见失败
+  （参数解析、invalid URL、HTTP/egress/network、SSRF、重定向预算、非 2xx、unsupported content/binary）
+  统一经 `fetch_failure` 格式化并默认附恢复引导：重新推导 URL 或改用浏览器类 MCP 工具，不原样重试——
+  实测 42 次（子代理 36 + 主线程 6）猜错 URL 的 404/SSRF 中零次尝试重新发现，裸状态码被模型读成网络故障。
 - `web_fetch` **自己走 3xx 跳转**：向出口请求时始终带 `follow_redirects: Some(false)`，然后逐跳
   重新解析主机并重做 SSRF 校验（预算 5 跳，与 `HttpPolicy::max_redirects` 对齐）。出口自身的
   跳转只校验 scheme 与 allowlist，而本工具的 egress 身份是 `allow_all()`，交给它跟随会让
@@ -90,13 +92,13 @@
   `disarm`：pid 可能被复用，不能再发组信号。输出收集与超时语义不变（仍是
   `timeout(wait_with_output)`，超时返回带 `timeout` detail 的结构化错误）。
 - 持久 shell 会话（[需求设计](../requirements/shell-sessions.md)）由
-  `exec/tools/shell_session.rs` 承载：`bash_session`（前台复用 `bash` 语义、leading `cd`
-  推进会话 cwd。cwd 推进规则：目标带引号时剥一层引号再解析（仅剥一层，不做引号拼接或
-  转义等价）；含未展开 `$` 变量的目标不推进也不记录——按字面记录曾把引号和 `$USERPROFILE`
-  拼进会话 cwd，此后整个会话的每次调用都在 spawn 前死于 os error 123，实测一天 3 次；
-  该次命令仍由 shell 自行执行 `cd`，仅会话 cwd 落后，后续可显式再 `cd`；推进后的路径必须
-  已存在且是目录才提交，否则回落当前 cwd；记住的 cwd 失效（目录被删）时回落工作区并修复
-  会话状态，不让整个调用在 spawn 前硬失败。`run_in_background` 以 std Command 派生独立
+  `exec/tools/shell_session.rs` 承载：`bash_session`（前台复用 `bash` 语义）。cwd 更新采用
+  prepare/commit：只识别首行整行纯 `cd target`/`pushd target`，引号必须包住完整 token，禁止
+  `cd "a"b`、额外 token 与 `&&`/`;` 复合形式；含未展开 `$` 的目标不追踪。单行纯 cd 保留原命令，
+  从旧 cwd 执行一次并保留 pushd 输出；首行纯 cd 后还有命令时，从目标 cwd 执行剥离首行后的余下命令。
+  prepare 不提交状态，前台命令成功后才 commit；后台在 spawn/register 成功后 commit。prepare 与
+  commit 都 canonicalize 并用工作区真实路径 containment 拒绝 symlink/junction 逃逸，目标必须已存在
+  且为目录。记住的 cwd 失效时回落工作区并修复会话状态。`run_in_background` 以 std Command 派生独立
   进程组并立即返回 task_id）、
   `bash_output`（按绝对逻辑字节 offset 增量返回输出与 running/finished 状态；环形缓冲丢弃前缀后仍以
   `base_offset + retained_len` 推进，不能把 offset 当当前 `VecDeque` 下标；跨读取的 UTF-8/GB18030
@@ -179,7 +181,9 @@ pattern 拒绝（含交替 `|` 场景）、`literal: true` 时含元字符的 pa
 
 `bash` 另有：工作目录不存在时错误必须含该路径（不再只是裸 OS 267）、CP936 字节经
 `decode_shell_output` 解码为原文且不含替换字符；输出截断另有四字节 UTF-8/GB18030 边界与
-保留前缀编码 rank 回归。
+保留前缀编码 rank 回归。持久 shell 另有 prepare/commit 回归：单行 cd 不双重切换、多行首行
+cd 只执行余下命令、失败前台命令不提交、引号拼接与复合命令不追踪、symlink 逃逸不提交、
+pushd 输出保留、后台注册后提交且不双重 cd。
 
 `web_fetch` 另有跳转回归（假出口，无网络）：301 后跟随并再次请求新 URL、302 指向私有地址时第二跳
 被拒且从未发起请求、超过 5 跳预算返回结构化错误、3xx 缺 `Location` 时渲染该状态码。

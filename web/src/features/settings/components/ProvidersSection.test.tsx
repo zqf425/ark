@@ -8,7 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
-import type { ProviderListResponse, ProviderView } from '../../../shared/contracts'
+import type { ProviderEntry, ProviderListResponse, ProviderView } from '../../../shared/contracts'
 import { installBrowserStubs, mountWithProviders, settle, type ReactHarness } from '../../../shared/testing/react-harness'
 import { deleteProvider, setDefaultProvider, upsertProvider } from '../api/providers-api'
 import { ProvidersSection } from './ProvidersSection'
@@ -27,6 +27,12 @@ vi.mock('../api/providers-api', () => ({
 const upsertMock = vi.mocked(upsertProvider)
 const setDefaultMock = vi.mocked(setDefaultProvider)
 const deleteMock = vi.mocked(deleteProvider)
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((ok) => { resolve = ok })
+  return { promise, resolve }
+}
 
 function view(overrides: Partial<ProviderView> = {}): ProviderView {
   return {
@@ -90,6 +96,48 @@ describe('ProvidersSection default-provider semantics', () => {
     if (harness) await harness.unmount()
     harness = null
     vi.restoreAllMocks()
+  })
+
+  it('drops an edit read after the selected provider changes', async () => {
+    const pending = deferred<{ ok: true; value: ProviderEntry }>()
+    const api = providersApi({
+      providers: [view(), view({ id: 'beta', is_default: false })],
+      get: vi.fn(() => pending.promise)
+    })
+    harness = await mountWithProviders(<ProvidersSection providers={api} />)
+    await act(async () => {
+      [...harness!.host.querySelectorAll('button')].find((button) => button.textContent === '编辑')!.click()
+    })
+    await act(async () => {
+      [...harness!.host.querySelectorAll<HTMLButtonElement>('.ark-provider-nav')].find((button) => button.textContent?.includes('beta'))!.click()
+    })
+    await act(async () => {
+      pending.resolve({ ok: true, value: { ...view(), id: 'alpha', headers: {} } })
+    })
+    await settle()
+    expect(harness.host.querySelector('#provider-id')).toBeNull()
+    expect(harness.host.querySelector('.ark-provider-detail__title')?.textContent).toContain('beta')
+  })
+
+  it('seeds advanced edit fields from the full provider entry', async () => {
+    harness = await mountWithProviders(<ProvidersSection providers={providersApi({
+      get: vi.fn(async () => ({
+        ok: true as const,
+        value: {
+          ...view(), headers: { 'X-Test': 'yes' }, max_tokens: 4096, temperature: 0.25
+        }
+      }))
+    })} />)
+    await act(async () => {
+      [...harness!.host.querySelectorAll('button')].find((button) => button.textContent === '编辑')!.click()
+    })
+    await settle()
+    await act(async () => {
+      [...harness!.host.querySelectorAll('button')].find((button) => button.textContent?.includes('展开高级选项'))!.click()
+    })
+    expect(harness.host.querySelector<HTMLTextAreaElement>('#provider-headers')?.value).toContain('X-Test')
+    expect(harness.host.querySelector<HTMLInputElement>('#provider-max-tokens')?.value).toBe('4096')
+    expect(harness.host.querySelector<HTMLInputElement>('#provider-temperature')?.value).toBe('0.25')
   })
 
   it('adding a provider saves it with make_default=false, never switching the global default', async () => {
@@ -171,6 +219,64 @@ describe('ProvidersSection default-provider semantics', () => {
     await settle()
 
     expect(setDefaultMock).toHaveBeenCalledWith('alpha', undefined)
+  })
+
+  it('skips disabled menu items, supports keyboard activation, and restores focus on Escape', async () => {
+    setDefaultMock.mockResolvedValue(listResponse([view({ is_default: false }), view({ id: 'beta', is_default: true })]))
+    harness = await mountWithProviders(<ProvidersSection providers={providersApi({
+      providers: [view({ is_default: false }), view({ id: 'beta', is_default: true })], defaultProviderId: 'beta'
+    })} />)
+    const trigger = harness.host.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!
+    await act(async () => { trigger.click() })
+    const items = [...harness.host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+    expect(document.activeElement).toBe(items[0])
+    await act(async () => { items[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })) })
+    expect(setDefaultMock).toHaveBeenCalledWith('alpha', undefined)
+  })
+
+  it('cycles the menu with arrows, activates with Enter, and traps focus in the delete dialog', async () => {
+    harness = await mountWithProviders(<ProvidersSection providers={providersApi()} />)
+    const trigger = harness.host.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!
+    await act(async () => { trigger.click() })
+    const menuItems = [...harness.host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+    expect(menuItems[0]?.disabled).toBe(true)
+    expect(document.activeElement).toBe(menuItems[1])
+    await act(async () => { menuItems[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+    expect(document.activeElement).toBe(menuItems[1])
+    await act(async () => { menuItems[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })) })
+    expect(document.activeElement).toBe(menuItems[1])
+    const documentEscape = vi.fn()
+    document.addEventListener('keydown', documentEscape)
+    try {
+      await act(async () => { menuItems[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    } finally {
+      document.removeEventListener('keydown', documentEscape)
+    }
+    expect(documentEscape).not.toHaveBeenCalled()
+    expect(harness.host.querySelector('[role="menu"]')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+
+    await act(async () => { trigger.click() })
+    const deleteItem = harness.host.querySelector<HTMLButtonElement>('[role="menuitem"].is-danger')!
+    await act(async () => { deleteItem.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+    const dialog = harness.host.querySelector<HTMLDivElement>('[role="dialog"]')!
+    const cancel = dialog.querySelector<HTMLButtonElement>('button')!
+    const confirm = dialog.querySelectorAll<HTMLButtonElement>('button')[1]!
+    expect(document.activeElement).toBe(cancel)
+    await act(async () => { cancel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })) })
+    expect(document.activeElement).toBe(confirm)
+    await act(async () => { confirm.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })) })
+    expect(document.activeElement).toBe(cancel)
+    await act(async () => { cancel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true })) })
+    expect(document.activeElement).toBe(confirm)
+    await act(async () => { confirm.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(harness.host.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+
+    await act(async () => { trigger.click() })
+    expect(harness.host.querySelector('[role="menu"]')).not.toBeNull()
+    await act(async () => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })) })
+    expect(harness.host.querySelector('[role="menu"]')).toBeNull()
   })
 
   it('deleting goes through a confirmation dialog before calling the api', async () => {

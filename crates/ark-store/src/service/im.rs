@@ -199,11 +199,16 @@ impl ImStore for ImFileStore {
             .iter()
             .position(|existing| existing.channel.id == record.channel.id)
             .ok_or_else(|| Self::missing(&record.channel.id))?;
+        // The cursor belongs to the store. A PATCH may have read an older
+        // record before an admission advanced it; replacing the whole stale
+        // record would make the transport poll already-admitted messages again.
+        let mut stored = record;
+        stored.cursor = state.channels[index].cursor.clone();
         let mut next = Self::snapshot(&state);
-        next.channels[index] = record.clone();
+        next.channels[index] = stored.clone();
         self.persist(&next)?;
         *state = next;
-        Ok(record)
+        Ok(stored)
     }
 
     fn delete_channel(&self, id: &ImChannelId) -> Result<()> {
@@ -479,15 +484,32 @@ mod tests {
     }
 
     #[test]
-    fn replace_persists_the_cursor() {
-        let (_dir, store) = store();
+    fn stale_replace_preserves_the_advanced_cursor_and_returns_the_full_record() {
+        let (dir, store) = store();
+        let channel_id = ImChannelId("im_1".into());
         store.insert_channel(record("im_1", "tg")).unwrap();
-        let mut stored = store.get_channel(&ImChannelId("im_1".into())).unwrap();
-        stored.cursor = Some("4200".into());
-        store.replace_channel(stored).unwrap();
+        let stale = store.get_channel(&channel_id).unwrap();
+        let id = store
+            .persist_inbound(inbound("im_1", "4200"), Some("4201".into()))
+            .unwrap();
+        store.queue_inbound(&id, Some("4201".into())).unwrap();
+        let mut patch = stale.clone();
+        patch.channel.title = "renamed".into();
 
-        let reloaded = store.get_channel(&ImChannelId("im_1".into())).unwrap();
-        assert_eq!(reloaded.cursor.as_deref(), Some("4200"));
+        let stored = store.replace_channel(patch).unwrap();
+
+        assert_eq!(stored.channel.title, "renamed");
+        assert_eq!(stored.cursor.as_deref(), Some("4201"));
+        assert_eq!(
+            store.get_channel(&channel_id).unwrap().cursor.as_deref(),
+            Some("4201")
+        );
+        drop(store);
+        let reopened = ImFileStore::open(dir.path()).unwrap();
+        assert_eq!(
+            reopened.get_channel(&channel_id).unwrap().cursor.as_deref(),
+            Some("4201")
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@
  * The only button in the app. Pages must not roll their own (design §7.10.2:
  * "页面不得自带主题/弹窗/Toast 实现").
  */
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'primary' | 'default' | 'ghost' | 'danger'
@@ -11,16 +11,16 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   children?: ReactNode
 }
 
-export function Button({
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button({
   variant = 'default',
   size = 'md',
   block = false,
   className,
   type = 'button',
   ...rest
-}: ButtonProps): JSX.Element {
+}, ref): JSX.Element {
   const classes = ['ark-btn', `ark-btn--${variant}`, `ark-btn--${size}`]
   if (block) classes.push('ark-btn--block')
   if (className) classes.push(className)
-  return <button type={type} className={classes.join(' ')} {...rest} />
-}
+  return <button ref={ref} type={type} className={classes.join(' ')} {...rest} />
+})

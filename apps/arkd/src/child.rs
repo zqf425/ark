@@ -75,18 +75,27 @@ struct ChildTurnSettings {
 }
 
 /// A different provider owns its own default model: only inherit a parent
-/// model when the child retains the parent's provider selection.
-fn child_model_override<'a>(
-    requested: Option<&'a str>,
-    provider_switched: bool,
-    parent_model: Option<&'a str>,
-) -> Option<&'a str> {
-    let requested = requested.filter(|value| !value.trim().is_empty());
-    if provider_switched {
+/// model when the child retains the parent's effective provider selection.
+fn child_model_override(
+    requested: Option<&str>,
+    requested_provider: Option<&str>,
+    parent_provider: Option<&str>,
+    parent_model: Option<&str>,
+) -> Option<String> {
+    fn normalized(value: &str) -> Option<&str> {
+        (!value.trim().is_empty()).then(|| value.trim())
+    }
+
+    let requested = requested.and_then(normalized);
+    let requested_provider = requested_provider.and_then(normalized);
+    let parent_provider = parent_provider.and_then(normalized);
+    let provider_switched = requested_provider.is_some() && requested_provider != parent_provider;
+    let model = if provider_switched {
         requested
     } else {
-        child_setting(requested, parent_model)
-    }
+        requested.or_else(|| parent_model.and_then(normalized))
+    };
+    model.map(str::to_string)
 }
 
 /// Resolve the child's autonomy: an explicit override may narrow but never
@@ -246,19 +255,28 @@ impl ChildTurnExecutorImpl {
         let requested_provider = ctx
             .provider_id
             .as_deref()
-            .filter(|value| !value.trim().is_empty());
-        let provider_id = child_setting(
-            requested_provider.map(ToString::to_string),
-            parent_runtime.provider_id.clone(),
-        );
-        // A different provider owns its own default model: only inherit a
-        // parent model when the child retains the parent's provider selection.
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let inherited_provider = parent_runtime
+            .provider_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let parent_provider = inherited_provider.clone().or_else(|| {
+            let provider = self.parent_model.provider_id().trim();
+            (!provider.is_empty()).then(|| provider.to_string())
+        });
+        let provider_id = child_setting(requested_provider.clone(), inherited_provider);
+        // Compare normalized effective ids: naming the same provider explicitly
+        // is not a switch and must retain an unspecified parent model.
         let model_override = child_model_override(
             ctx.model.as_deref(),
-            requested_provider.is_some(),
+            requested_provider.as_deref(),
+            parent_provider.as_deref(),
             parent_runtime.model.as_deref(),
-        )
-        .map(ToString::to_string);
+        );
         let parent_autonomy = crate::wiring::autonomy_from_override_or_default(
             parent_runtime.autonomy.as_deref(),
             snapshot,
@@ -332,7 +350,7 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             model,
             tools,
             writer,
-            gates: Arc::new(ark_agent::AllowAllGates),
+            gates: Arc::new(ark_agent::DenyAllGates),
             sandbox,
             events,
             cancel: (*cancel).clone(),
@@ -362,7 +380,12 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
         // machine, so the report cannot invent tokens.
         let progress = reactor.machine().progress();
         let (usage, tool_invocations) = self
-            .observed_counts(thread_id, progress.tokens_used, progress.tool_calls)
+            .observed_counts(
+                thread_id,
+                turn_id,
+                progress.tokens_used,
+                progress.tool_calls,
+            )
             .await;
 
         // The parent reads this run's last assistant message; a run that never
@@ -387,6 +410,7 @@ impl ChildTurnExecutorImpl {
     async fn observed_counts(
         &self,
         thread_id: ThreadId,
+        turn_id: TurnId,
         fallback_tokens: u64,
         fallback_tools: u32,
     ) -> (Usage, u64) {
@@ -400,11 +424,17 @@ impl ChildTurnExecutorImpl {
         let mut saw_usage = false;
         for event in &events {
             match event {
-                RuntimeEvent::Usage { usage: sample, .. } => {
+                RuntimeEvent::Usage {
+                    turn_id: observed,
+                    usage: sample,
+                    ..
+                } if *observed == turn_id => {
                     usage.merge(sample);
                     saw_usage = true;
                 }
-                RuntimeEvent::ToolCallStarted { .. } => tools += 1,
+                RuntimeEvent::ToolCallStarted {
+                    turn_id: observed, ..
+                } if *observed == turn_id => tools += 1,
                 _ => {}
             }
         }
@@ -477,6 +507,12 @@ mod tests {
     use ark_ports::SubagentPolicySource;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    fn usage(total_tokens: u64) -> Usage {
+        let mut value = Usage::default();
+        value.total_tokens = total_tokens;
+        value
+    }
+
     struct FirstAnswerThenPendingModel(AtomicUsize);
 
     #[async_trait::async_trait]
@@ -497,6 +533,7 @@ mod tests {
             if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
                 Ok(ark_ports::ModelResponse {
                     text: "previous answer".to_string(),
+                    usage: usage(77),
                     ..ark_ports::ModelResponse::default()
                 })
             } else {
@@ -534,6 +571,129 @@ mod tests {
         )
     }
 
+    struct UnknownToolThenAnswerModel(AtomicUsize);
+
+    #[async_trait::async_trait]
+    impl ModelClient for UnknownToolThenAnswerModel {
+        fn provider_id(&self) -> &str {
+            "test"
+        }
+
+        fn model(&self) -> &str {
+            "test"
+        }
+
+        async fn stream(
+            &self,
+            _request: ark_ports::ModelRequest,
+            _sink: tokio::sync::mpsc::Sender<ark_ports::ModelChunk>,
+        ) -> Result<ark_ports::ModelResponse> {
+            match self.0.fetch_add(1, Ordering::SeqCst) {
+                0 => Ok(ark_ports::ModelResponse {
+                    tool_calls: vec![(
+                        "unknown-1".into(),
+                        "mcp__unknown".into(),
+                        serde_json::json!({}),
+                    )],
+                    usage: usage(11),
+                    ..ark_ports::ModelResponse::default()
+                }),
+                1 => Ok(ark_ports::ModelResponse {
+                    text: "handled denial".into(),
+                    usage: usage(13),
+                    ..ark_ports::ModelResponse::default()
+                }),
+                _ => std::future::pending().await,
+            }
+        }
+    }
+
+    fn child_context(
+        parent: ark_common::ThreadId,
+        child: ChildId,
+        prompt: &str,
+    ) -> ChildTurnContext {
+        ChildTurnContext {
+            child_id: child,
+            parent_thread_id: parent,
+            parent_turn_id: TurnId::new(),
+            prompt: prompt.to_string(),
+            workspace: None,
+            model: None,
+            provider_id: None,
+            autonomy: None,
+            cancel: Arc::new(ark_ports::CancelToken::new()),
+            steer: Arc::new(ark_ports::SteerQueue::new()),
+        }
+    }
+
+    #[tokio::test]
+    async fn child_unknown_tool_is_denied_without_blocking_or_leaking_prior_counts() {
+        use ark_ports::SessionStore;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            ark_store::FileSessionStore::open(ark_store::StoreConfig::new(dir.path())).unwrap(),
+        );
+        let mut parent = store.create_thread("parent").await.unwrap();
+        parent.runtime.autonomy = Some("strict".into());
+        store
+            .set_thread_runtime(parent.thread_id, parent.runtime)
+            .await
+            .unwrap();
+        let child = ChildId::new();
+        store
+            .create_child_run(parent.thread_id, child, "child")
+            .await
+            .unwrap();
+        let executor = executor_with_model(
+            Arc::clone(&store),
+            dir.path(),
+            Arc::new(UnknownToolThenAnswerModel(AtomicUsize::new(0))),
+        );
+        let ctx = child_context(parent.thread_id, child, "try an unknown tool");
+        let first = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            executor.run_child_turn(ctx.clone()),
+        )
+        .await
+        .expect("an unknown tool must not park on approval")
+        .unwrap();
+        assert_eq!(first.status, ChildTurnStatus::Completed);
+        assert_eq!(first.summary, "handled denial");
+        assert_eq!(first.tool_invocations, 1);
+        assert_eq!(first.usage.total_tokens, 24);
+
+        let thread_id = ark_common::ThreadId::from_uuid(child.as_uuid());
+        let events = store.replay_events(thread_id, 0).await.unwrap();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            RuntimeEvent::ApprovalRequested { tool, .. } if tool == "mcp__unknown"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            RuntimeEvent::ApprovalResolved {
+                approved: false,
+                ..
+            }
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            RuntimeEvent::ToolCallFinished { tool, ok: false, .. } if tool == "mcp__unknown"
+        )));
+
+        let cancel = Arc::new(ark_ports::CancelToken::new());
+        cancel.cancel();
+        let resumed = ChildTurnContext {
+            prompt: "resume".into(),
+            cancel,
+            ..ctx
+        };
+        let report = executor.run_child_turn(resumed).await.unwrap();
+        assert_eq!(report.usage.total_tokens, 0);
+        assert_eq!(report.tool_invocations, 0);
+    }
+
     #[tokio::test]
     async fn resumed_child_abort_does_not_reuse_the_previous_turn_summary() {
         use ark_ports::SessionStore;
@@ -553,22 +713,12 @@ mod tests {
             dir.path(),
             Arc::new(FirstAnswerThenPendingModel(AtomicUsize::new(0))),
         );
-        let ctx = ChildTurnContext {
-            child_id: child,
-            parent_thread_id: parent,
-            parent_turn_id: TurnId::new(),
-            prompt: "initial task".to_string(),
-            workspace: None,
-            model: None,
-            provider_id: None,
-            autonomy: None,
-            cancel: Arc::new(ark_ports::CancelToken::new()),
-            steer: Arc::new(ark_ports::SteerQueue::new()),
-        };
+        let ctx = child_context(parent, child, "initial task");
 
         let first = executor.run_child_turn(ctx.clone()).await.unwrap();
         assert_eq!(first.status, ChildTurnStatus::Completed);
         assert_eq!(first.summary, "previous answer");
+        assert_eq!(first.usage.total_tokens, 77);
 
         let cancel = Arc::new(ark_ports::CancelToken::new());
         cancel.cancel();
@@ -581,6 +731,14 @@ mod tests {
         let report = executor.run_child_turn(resumed).await.unwrap();
 
         assert!(matches!(report.status, ChildTurnStatus::Aborted { .. }));
+        assert_eq!(
+            report.usage.total_tokens, 0,
+            "resume must not replay prior usage"
+        );
+        assert_eq!(
+            report.tool_invocations, 0,
+            "resume must not replay prior tools"
+        );
         assert!(
             report.summary.is_empty(),
             "an aborted resume must not report the previous turn's answer: {}",
@@ -604,6 +762,35 @@ mod tests {
                 Some("workspace_write".to_string()),
             ),
             Some("workspace_write".to_string())
+        );
+    }
+
+    #[test]
+    fn child_model_override_compares_normalized_effective_provider_ids() {
+        assert_eq!(
+            child_model_override(None, Some(" p "), Some("p"), Some(" parent-model ")),
+            Some("parent-model".into())
+        );
+        assert_eq!(
+            child_model_override(None, Some("q"), Some("p"), Some("parent-model")),
+            None
+        );
+        assert_eq!(
+            child_model_override(
+                Some(" child-model "),
+                Some("q"),
+                Some("p"),
+                Some("parent-model")
+            ),
+            Some("child-model".into())
+        );
+        assert_eq!(
+            child_model_override(Some("  "), Some("p"), Some(" p "), Some("parent-model")),
+            Some("parent-model".into())
+        );
+        assert_eq!(
+            child_model_override(None, Some(" "), None, Some(" parent-model ")),
+            Some("parent-model".into())
         );
     }
 

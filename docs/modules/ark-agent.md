@@ -21,8 +21,8 @@ gate broker 面（`exec/gate.rs`）包括 `AllowAllGates`、`DenyAllGates` 与 `
 无人值守处置为 `deny`（默认）时不注册 gate、立即以结构化原因拒绝，`allow` 时透传内层；
 组合根在每个父回合入口选择 broker：`serve` 的显式 User 回合直接使用 `InteractiveGates`；headless、
 Scheduled、IM、`AutoContinuation`、`AutoRecovery` 以 `AllowAllGates` 为内层、按该回合当前配置快照
-构造 `AutoDenyGates`；child 保持
-`AllowAllGates`。因此规则表与 `on_unattended` 的改动都从下一回合 Hot 生效。
+构造 `AutoDenyGates`；child 使用 `DenyAllGates`，审批立即拒绝且不注册 gate。因此规则表与
+`on_unattended` 的改动都从下一回合 Hot 生效。
 `prepare_user_input` 恒透传（用户输入不是审批面）。规则拒绝（`SandboxDecision::Deny`）
 的调用在 reactor 的 `approval_asks` 阶段就不产生审批 ask——拒绝已是终态，开 gate 等于允许
 HTTP 侧批准一条策略表明确拒绝的调用。
@@ -36,13 +36,14 @@ HTTP 侧批准一条策略表明确拒绝的调用。
   tool result。助手轮次的工具调用使用 `ModelMessage::tool_calls` 结构化字段进入历史，不再渲染进正文文本。
 - 预算、工具风暴、并发安全和历史裁剪属于独立 policy/context 模块，不得回流为巨型 reactor。设置/配置层的默认回合预算为最多 1000 步、累计 token 不限（`0`）和最多 1000 次工具调用；组合根将 `max_tokens=0` 转换为 agent 内部的 `u64::MAX`，以避免直接使用 `TurnLimits::default()` 时将首轮判定为耗尽。
 - 工具风暴按工具名与规范化参数组成的签名计数；跨轮已执行次数与同一 `DispatchPlan` 内先前出现次数共同计入上限。被抑制调用必须以合成结果配对 `ToolCallStarted`/`ToolCallFinished`，并写入 `ToolStormSuppressed` 事件。重复计数默认覆盖整个回合（`tuning.tool_storm_window_size = 0`）；配置正数窗口时，只统计最近 N 个模型轮次内实际执行过的调用。计数键是 storm key：bash 调用先剥掉命令开头的 `sleep N;` 等待前缀再归一化空白（`ToolCallRequest::storm_key`），其他工具用字节级签名——否则改一个 sleep 时长就能绕过熔断（实测 `sleep 300;git push` → `sleep 590;git push` 循环 60 分钟）。被抑制调用的参数必须写入事件（合成结果携带原始 `arguments`），事后审计要能还原重复的是什么。
-- 回合在模型请求失败（`model_request_failed = true`）终结时，由 ark-server 的恢复调度器自动重试同一请求：退避计划 5s/10s/20s（`recovery::RECOVERY_DELAYS`），尝试次数写进 `turn_started.auto_recovery`；连续模型失败达到 `RECOVERY_MODEL_FAILURE_STREAK_LIMIT` 时暂停该线程的自动恢复，任何用户回合或非模型终态重置计数。恢复回合在会话流写一条 Notice item 说明自动重试原因；它不为已在历史末尾的同一条用户请求再写 `UserMessage`（由 `arkd` 组合根去重，见 [arkd](arkd.md)），因此模型上下文与用户气泡都不会随重试次数增长。工具/策略类失败与耗尽尝试预算后的失败保持终态，仍需用户介入。
+- 回合在模型请求失败（`model_request_failed = true`）终结时，由 ark-server 的恢复调度器自动重试同一请求：退避计划 5s/10s/20s（`recovery::RECOVERY_DELAYS`），尝试次数写进 `turn_started.auto_recovery`；连续模型失败达到 `RECOVERY_MODEL_FAILURE_STREAK_LIMIT` 时暂停该线程的自动恢复。恢复与自动续跑的 Started/Failed 交替属于同一生命周期，不清零失败 streak；只有新用户生命周期（`auto_continuation=false && auto_recovery=0`）或非模型终态才重置。恢复回合在会话流写一条 Notice item 说明自动重试原因；它不为已在历史末尾的同一条用户请求再写 `UserMessage`（由 `arkd` 组合根去重，见 [arkd](arkd.md)），因此模型上下文与用户气泡都不会随重试次数增长。工具/策略类失败与耗尽尝试预算后的失败保持终态，仍需用户介入。
 - 工具批的分类来自工具自述的 `ToolConcurrency`（[requirements/parallel-tools.md](../requirements/parallel-tools.md)）：
   `ReadOnly`（不写共享状态）、`Isolated`（每次调用独占进程，如 `bash`、`bash_session`、`delegate_task`）
   与默认的 `Exclusive`。`ParallelPolicy` 消费组合根在建回合时从注册表快照的 `ConcurrencyTable`，
   不再维护硬编码名字白名单——插件/MCP 工具因此也能声明可并行，而未知工具仍按独占处理。
-- 同批规则：非 `Exclusive` 且资源不相同时并批；`bash` 没有资源参数，因此它只与其他工具"无冲突"，
-  这正是它必须显式声明 `Isolated` 才能并批的原因。`write`/`edit` 仍是 `Exclusive`，逐调用独占一批。
+- 同批规则：非 `Exclusive` 且资源不相同时并批；`bash_session` 固定使用 `shell_session` 资源键，共享
+  cwd 的调用因此串行，普通 `bash` 没有资源参数、仍可并批。`bash` 只与其他工具“无冲突”，这正是它
+  必须显式声明 `Isolated` 才能并批的原因。`write`/`edit` 仍是 `Exclusive`，逐调用独占一批。
 - 批内并发默认不设上限；`tuning.max_parallel_tool_calls > 0` 时批内调用被切成顺序 chunk，
   批内并发不超过该值，批间顺序不变。执行器只按计划执行，不再叠加第二层信号量限流。
 - 批内结算是流式的（[requirements/parallel-tools-v2](../requirements/parallel-tools-v2-streaming-settlement.md)）：
@@ -56,10 +57,11 @@ HTTP 侧批准一条策略表明确拒绝的调用。
   select 是逐 item 形态：每收到一条立即结算，任何已收到的结果都不存放在可被取消丢弃的 future 里。
   spawn 前先查 `is_cancelled`：取消先于批开始时不执行任何工具，但 Started/Finished 配对行仍要落盘。
   转发任务 panic 经 `join` 上浮：剩余未结算调用写 `tool batch task failed: forwarder panicked` 合成失败行并
-  `tracing::error` 记录；消费者消失时 `send` 失败静默忽略，转发任务继续驱动剩余调用至自然结束。
-  open 配对表是 `BTreeMap<call_id, &ToolCallRequest>`：结算按 call_id 移除（不依赖输出顺序），补偿按剩余键
-  定序迭代；重复 call_id 属畸形输入，消耗式槽位匹配保证两行历史都落、对应关系不作保证。
-  `converge_pending_calls_on_cancel`（AG-03）不持有 open 表，按 pending_calls 与历史行差集工作，不受本语义影响。
+  `tracing::error` 记录；stream 存活时 `send` 失败静默忽略，stream 的 `Drop` 则 abort 转发任务，确保 journal
+  追加失败不会 detach 在途工具。open 表是逐输入 slot 的 `Vec<bool>`：Started 成功后置位，对应 Finished
+  成功后清零；补偿只覆盖已有 durable Started 的 slot，不按 call_id 猜测。结算结果携带 slot，重复 call_id
+  也各自对应自己的历史行与补偿状态。`converge_pending_calls_on_cancel`（AG-03）不持有 open 表，按
+  pending_calls 与历史行差集工作，不受本语义影响。
 - 每轮模型可见历史必须已经落盘；每个工具调用必须与终态结果配对。历史修复只按配对合法性裁剪：携带 `tool_calls` 的 assistant 行即使 `content` 为空也必须保留（chat-completions 的标准形态），只有既无文本又无 `tool_calls` 的空行才删除。
 - 压缩先分离动态保护 system 消息、可折叠对话和最近尾部：最新 generated checkpoint 之前的全部
   非 generated system 行、其后的全部普通 system 行均保持原样，旧 checkpoint 与计划 seed 进入摘要来源，
@@ -69,7 +71,8 @@ HTTP 侧批准一条策略表明确拒绝的调用。
 - checkpoint 由用户请求、结构化事实、失败证据、typed 工具证据和标识符组成。工具证据保留工具名、
   `path`/`file`/`command`/`query`/`url`/`pattern`/`cwd` 标量参数及成功结果的有界首行；失败结果只进入
   失败证据，避免重复。成功工具结果一旦退出保留尾部，就不再复制完整输出，而是外化为这些有界证据，
-  原事件仍保留在权威日志中。超长单行用户请求按有界头尾保留并标记截断，不再整条丢弃。
+  原事件仍保留在权威日志中。超长单行用户请求与失败诊断均按有界头尾保留并标记截断，不再整条丢弃；
+  失败行的去重键也使用同一稳定截断形式，保证原始日志行与旧 checkpoint 吸收后仍能归并计数。
 - 折叠区内旧 checkpoint 的五个段整体吸收进新 checkpoint（`[user requests]` 保真迁移、结构化行归入
   goals、段标题与账目行不再重排）——纯文本用户请求不匹配任何结构化前缀，不链式继承则第二次压缩会
   静默丢掉最早的目标请求。checkpoint 必须摘要当前保留尾部，因为下一回合只从持久边界之后重放；
@@ -145,7 +148,7 @@ HTTP 侧批准一条策略表明确拒绝的调用。
 - 子代理完成 inbox 从父线程权威事件投影为带标记的 system source，而非用户消息；按稳定通知 ID 去重，
   跳过已确认项，并且每个父回合最多交付 8 条、每条最多 1,200 UTF-8 字节，避免完成风暴突破上下文
   预算。同一条通知最多自动投递 2 次（`MAX_AUTO_DELIVERY_ATTEMPTS`），超限后只在用户显式回合投递；
-  模型请求连续失败达到熔断阈值时暂停自动续跑，避免在 provider 故障时烧空预算。
+  重复 `child_completed` 不重置已有 attempts，自动恢复也不开启新生命周期。模型请求连续失败达到熔断阈值时暂停自动续跑，避免在 provider 故障时烧空预算。
 - 每个实际启动的回合（含自动续跑）必须在父线程事件日志中留下 `turn_started` 与一条终态记录。
   reactor 覆盖不到的退出路径（panic、任务被丢弃、`prepare()` 之前的 runner 错误）由 server supervisor
   补齐：缺起始记录则先补写（保留 `auto_continuation` 标记），已有终态则不再重复写入。
@@ -154,5 +157,6 @@ HTTP 侧批准一条策略表明确拒绝的调用。
 
 状态迁移和 policy 均应脱离 I/O 单测；取消、审批、工具失败、模型流失败和持久化失败须覆盖
 收敛到终态的路径。reactor 的内联单测宿主在 `service/reactor/tests/reactor_stream_tests.rs`
-（经 `#[path]` 挂回 `reactor.rs` 的 `tests` 模块），gate 与回归套件同目录并列；`reactor.rs`
-与测试文件分别遵守单文件行数上限。
+（经 `#[path]` 挂回 `reactor.rs` 的 `tests` 模块），gate 与回归套件同目录并列；PendingGates 及其后的
+AG-03 以上回归住在 `reactor_descendant_tests.rs`，作为回归模块的 descendant 经 `use super::*` 复用
+私有 doubles；`reactor.rs` 与测试文件分别遵守单文件行数上限。

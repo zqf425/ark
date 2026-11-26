@@ -167,9 +167,33 @@ fn replace_file(temp: &Path, path: &Path) -> std::io::Result<()> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
+fn parent_directory(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(path: &Path) -> std::io::Result<()> {
+    let parent = parent_directory(path);
+    std::fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("cannot sync parent directory {}: {error}", parent.display()),
+            )
+        })
+}
+
+#[cfg(unix)]
 fn replace_file(temp: &Path, path: &Path) -> std::io::Result<()> {
-    std::fs::rename(temp, path)
+    std::fs::rename(temp, path)?;
+    // The file itself was synced before rename. Sync the directory afterwards so
+    // the new name survives a crash; failure is reported even though rename has
+    // already committed and must not be presented as an unchanged old document.
+    sync_parent_directory(path)
 }
 
 #[cfg(test)]
@@ -273,6 +297,29 @@ mod tests {
         second.log_level = "warn".into();
         save(&path, &second).unwrap();
         assert_eq!(load_or_default(&path).unwrap(), second);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_replace_syncs_the_parent_directory() {
+        let dir = temp_dir("unix-replace");
+        let path = config_path(&dir);
+        let temp = temp_path(&path);
+        std::fs::write(&temp, b"{}").expect("write temp");
+
+        replace_file(&temp, &path).expect("rename and parent sync");
+
+        assert!(!temp.exists());
+        assert_eq!(std::fs::read(&path).expect("read replaced config"), b"{}");
+        let error = sync_parent_directory(&dir.join("missing/config.json")).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(error.to_string().contains("cannot sync parent directory"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_empty_parent_means_the_current_directory() {
+        assert_eq!(parent_directory(Path::new("config.json")), Path::new("."));
     }
 
     #[test]

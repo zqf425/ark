@@ -7,6 +7,7 @@
  * rule: a chip must occupy exactly the advance of the verbatim token, or every
  * glyph after it drifts and the draft reads as double text.
  */
+import { createRef } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { installBrowserStubs, mountWithProviders } from '../../../shared/testing/react-harness'
 import { DraftHighlight } from './DraftHighlight'
@@ -40,6 +41,13 @@ describe('DraftHighlight', () => {
   it('空草稿不渲染镜像层', async () => {
     harness = await mountWithProviders(<DraftHighlight text="" skills={SKILLS} token={null} />)
     expect(harness.host.querySelector('.ark-composer__highlight')).toBeNull()
+  })
+
+  it('通过 ref 暴露镜像并保持装饰层语义', async () => {
+    const ref = createRef<HTMLDivElement>()
+    harness = await mountWithProviders(<DraftHighlight ref={ref} text="草稿" skills={SKILLS} token={null} />)
+    expect(ref.current).toBe(harness.host.querySelector('.ark-composer__highlight'))
+    expect(ref.current?.getAttribute('aria-hidden')).toBe('true')
   })
 
   it('完整提及渲染为芯片', async () => {

@@ -19,8 +19,9 @@ use futures::stream::Stream;
 use serde::Deserialize;
 use std::convert::Infallible;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
+use ark_common::ArkError;
 use ark_contract::RuntimeEvent;
 
 use crate::api::error::ApiError;
@@ -45,6 +46,14 @@ pub async fn stream(
     Query(query): Query<EventsQuery>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let thread_id = parse_thread(&id)?;
+    let shutdown = state.shutdown_receiver();
+    if state.is_shutting_down() {
+        return Err(ArkError::new(
+            ark_common::ArkErrorCode::RuntimeUnavailable,
+            "server is shutting down",
+        )
+        .into());
+    }
     state.store.get_thread(thread_id).await?;
     let since = query.since_seq.unwrap_or(0);
     let ticket = state.store.subscribe(thread_id, since).await?;
@@ -64,6 +73,7 @@ pub async fn stream(
         idle,
         SLOW_CLIENT_TIMEOUT,
         thread_label,
+        shutdown,
     ));
 
     Ok(
@@ -79,6 +89,7 @@ async fn pump(
     idle: Option<Duration>,
     send_timeout: Duration,
     thread_label: String,
+    mut shutdown: broadcast::Receiver<&'static str>,
 ) {
     let ark_ports::SubscribeTicket {
         backlog,
@@ -88,6 +99,40 @@ async fn pump(
     // Synthetic control frames must never make a reconnecting client's
     // Last-Event-ID go backwards after replay or a live event.
     let mut last_sent_seq = watermark;
+    if !send_backlog(
+        &sender,
+        &mut shutdown,
+        backlog,
+        &thread_label,
+        watermark,
+        send_timeout,
+    )
+    .await
+    {
+        return;
+    }
+    tracing::debug!(thread = %thread_label, watermark, "sse switched to live");
+    pump_live(
+        &sender,
+        &mut shutdown,
+        &mut live,
+        idle,
+        &thread_label,
+        &mut last_sent_seq,
+        send_timeout,
+    )
+    .await;
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn send_backlog(
+    sender: &mpsc::Sender<Result<Event, Infallible>>,
+    shutdown: &mut broadcast::Receiver<&'static str>,
+    backlog: Vec<RuntimeEvent>,
+    thread_label: &str,
+    mut last_sent_seq: u64,
+    send_timeout: Duration,
+) -> bool {
     if backlog.is_empty() {
         // An empty replay leaves the body byte-less until the first live event,
         // i.e. for a whole keep-alive interval on a quiet thread, and an
@@ -95,54 +140,69 @@ async fn pump(
         // makes the body yield immediately. Only an empty replay sends it: a
         // replayed event already opens the stream, and repeating its `seq`
         // would hand the client a duplicate id.
-        let opening = initial_frame(&thread_label, watermark);
-        if !send_frame(&sender, opening, send_timeout).await {
-            return;
+        if !send_frame(
+            sender,
+            shutdown,
+            initial_frame(thread_label, last_sent_seq),
+            send_timeout,
+        )
+        .await
+        {
+            return false;
         }
     }
     for event in backlog {
         last_sent_seq = last_sent_seq.max(event.seq());
-        if !send_frame(&sender, event, send_timeout).await {
-            return;
+        if !send_frame(sender, shutdown, event, send_timeout).await {
+            return false;
         }
     }
-    tracing::debug!(thread = %thread_label, watermark, "sse switched to live");
+    true
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn pump_live(
+    sender: &mpsc::Sender<Result<Event, Infallible>>,
+    shutdown: &mut broadcast::Receiver<&'static str>,
+    live: &mut mpsc::Receiver<RuntimeEvent>,
+    idle: Option<Duration>,
+    thread_label: &str,
+    last_sent_seq: &mut u64,
+    send_timeout: Duration,
+) {
     loop {
-        // The receiver disappears the moment the client disconnects, but
-        // `live.recv()` would keep waiting for the next event — forever when
-        // `sse_idle_timeout_secs == 0` (idle timeout disabled). Watching
-        // `sender.closed()` is what makes a quiet thread release its pump and
-        // its store subscriber immediately instead of on the next fanout
-        // (design §7.9, P1-10).
+        // Every wait is shutdown-aware, including a full outbound channel. The
+        // biased ordering makes shutdown win when an event and the signal are
+        // ready together instead of delaying drain by Tokio's random polling.
         let next = match idle {
             Some(limit) => tokio::select! {
+                biased;
+                _ = shutdown.recv() => return,
                 _ = sender.closed() => return,
                 value = tokio::time::timeout(limit, live.recv()) => match value {
                     Ok(value) => value,
                     Err(_) => {
-                        // Tell the client why the stream ends; it reconnects with
-                        // its last `seq`, so nothing is lost.
                         let event = RuntimeEvent::SseIdleTimeout {
-                            seq: last_sent_seq,
-                            thread_id: parse_thread_lossy(&thread_label),
+                            seq: *last_sent_seq,
+                            thread_id: parse_thread_lossy(thread_label),
                             timestamp: chrono::Utc::now(),
                         };
-                        let _ = send_frame(&sender, event, send_timeout).await;
+                        let _ = send_frame(sender, shutdown, event, send_timeout).await;
                         return;
                     }
                 },
             },
             None => tokio::select! {
+                biased;
+                _ = shutdown.recv() => return,
                 _ = sender.closed() => return,
                 value = live.recv() => value,
             },
         };
         match next {
             Some(event) => {
-                last_sent_seq = last_sent_seq.max(event.seq());
-                if !send_frame(&sender, event, send_timeout).await {
-                    // Slow client: the store already disconnected it, so drop
-                    // this connection and let it resume from `since_seq`.
+                *last_sent_seq = (*last_sent_seq).max(event.seq());
+                if !send_frame(sender, shutdown, event, send_timeout).await {
                     return;
                 }
             }
@@ -153,10 +213,13 @@ async fn pump(
 
 async fn send_frame(
     sender: &mpsc::Sender<Result<Event, Infallible>>,
+    shutdown: &mut broadcast::Receiver<&'static str>,
     event: RuntimeEvent,
     timeout: Duration,
 ) -> bool {
     tokio::select! {
+        biased;
+        _ = shutdown.recv() => false,
         _ = sender.closed() => false,
         sent = tokio::time::timeout(timeout, sender.send(Ok(to_sse(&event)))) => {
             matches!(sent, Ok(Ok(())))
@@ -306,6 +369,7 @@ mod tests {
             })
             .await
             .unwrap();
+        let (_shutdown_tx, shutdown) = broadcast::channel(1);
         let task = tokio::spawn(pump(
             ark_ports::SubscribeTicket {
                 backlog: Vec::new(),
@@ -316,6 +380,7 @@ mod tests {
             Some(Duration::from_millis(10)),
             Duration::from_millis(100),
             thread_id.to_string(),
+            shutdown,
         ));
 
         // The empty backlog opens the stream with the watermark first.
@@ -372,7 +437,7 @@ mod tests {
             "the created thread must have one durable event"
         );
 
-        let response = crate::router(state)
+        let response = crate::router(state.clone())
             .oneshot(
                 Request::builder()
                     .uri(format!(
@@ -440,6 +505,7 @@ mod tests {
             .collect();
         let (_live_sender, live) = mpsc::channel(1);
         let (sender, mut receiver) = mpsc::channel(4);
+        let (_shutdown_tx, shutdown) = broadcast::channel(1);
         tokio::spawn(pump(
             ark_ports::SubscribeTicket {
                 backlog,
@@ -450,6 +516,7 @@ mod tests {
             None,
             Duration::from_millis(100),
             thread_id.to_string(),
+            shutdown,
         ));
 
         let first = receiver.recv().await.expect("replayed frame");
@@ -459,6 +526,90 @@ mod tests {
         );
         let second = receiver.recv().await.expect("replayed frame");
         assert!(format!("{second:?}").contains("id: 4\\n"));
+    }
+
+    #[tokio::test]
+    async fn stream_rejects_new_subscriptions_after_shutdown_begins() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let state = quiet_state(dir.path());
+        let thread = state.store.create_thread("closed").await.expect("thread");
+        state.begin_shutdown();
+
+        let response = crate::router(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/v1/threads/{}/events", thread.thread_id))
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("sse route responds");
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn shutdown_interrupts_a_blocked_backlog_send() {
+        let thread_id = ThreadId::new();
+        let backlog = [1u64, 2, 3]
+            .into_iter()
+            .map(|seq| RuntimeEvent::Heartbeat {
+                seq,
+                thread_id,
+                timestamp: chrono::Utc::now(),
+            })
+            .collect();
+        let (_live_sender, live) = mpsc::channel(1);
+        let (sender, _receiver) = mpsc::channel(1);
+        let (shutdown_tx, shutdown) = broadcast::channel(1);
+        let task = tokio::spawn(pump(
+            ark_ports::SubscribeTicket {
+                backlog,
+                watermark: 3,
+                live,
+            },
+            sender,
+            None,
+            Duration::from_secs(30),
+            thread_id.to_string(),
+            shutdown,
+        ));
+
+        shutdown_tx
+            .send(crate::state::SHUTDOWN_CANCEL_REASON)
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("shutdown must interrupt backlog backpressure")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn shutdown_interrupts_an_idle_live_wait() {
+        let thread_id = ThreadId::new();
+        let (_live_sender, live) = mpsc::channel(1);
+        let (sender, _receiver) = mpsc::channel(1);
+        let (shutdown_tx, shutdown) = broadcast::channel(1);
+        let task = tokio::spawn(pump(
+            ark_ports::SubscribeTicket {
+                backlog: Vec::new(),
+                watermark: 0,
+                live,
+            },
+            sender,
+            None,
+            Duration::from_secs(30),
+            thread_id.to_string(),
+            shutdown,
+        ));
+
+        shutdown_tx
+            .send(crate::state::SHUTDOWN_CANCEL_REASON)
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("shutdown must interrupt an idle live receiver")
+            .unwrap();
     }
 
     #[test]
@@ -481,6 +632,7 @@ mod tests {
             .collect();
         let (_live_sender, live) = mpsc::channel(1);
         let (sender, _receiver) = mpsc::channel(1);
+        let (_shutdown_tx, shutdown) = broadcast::channel(1);
         let mut task = tokio::spawn(pump(
             ark_ports::SubscribeTicket {
                 backlog,
@@ -491,6 +643,7 @@ mod tests {
             None,
             Duration::from_millis(100),
             thread_id.to_string(),
+            shutdown,
         ));
 
         let settled = tokio::time::timeout(Duration::from_secs(1), &mut task).await;

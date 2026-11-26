@@ -50,7 +50,7 @@ import { RewindControl } from './RewindControl'
 import { executeEditResend, userTextOfTurn } from './rewind-flow'
 import type { RewindAvailability } from './rewind-flow'
 import { useCodeSessionStore } from '../state/store'
-import { turnActiveMs, turnDurationMs, liveActiveMs } from './session-stats'
+import { gatePendingSince, liveActiveMs, turnActiveMs, turnDurationMs } from './session-stats'
 import { useClockTick } from './use-clock-tick'
 import { useDurationFormat } from '../hooks/use-duration-words'
 
@@ -277,22 +277,16 @@ export const TurnBlock = memo(function TurnBlock({
   // header, which is the row describing what this turn did; the answer card
   // stays about the answer.
   const allRounds = useCodeSessionStore((s) => s.rounds)
-  const gatePendingSince = useCodeSessionStore((s) => {
-    const stamps = [
-      ...Object.values(s.approvals).filter((a) => a.turn_id === group.turnId && a.status === 'pending').map((a) => Date.parse(a.requested_at)),
-      ...Object.values(s.userInputs).filter((u) => u.turn_id === group.turnId && u.status === 'pending').map((u) => Date.parse(u.requested_at))
-    ].filter((ms) => Number.isFinite(ms))
-    return stamps.length > 0 ? Math.min(...stamps) : null
-  })
+  const gateFreezeAt = useCodeSessionStore((s) => gatePendingSince(group.turnId, s))
   const turnLastEventAt = useCodeSessionStore((s) => s.turnLastEventAt[group.turnId] ?? null)
   const nowMs = useClockTick(live)
   const turnMs = useMemo(() => turnDurationMs(allRounds, group.turnId), [allRounds, group.turnId])
   const activeMs = useMemo(
     () =>
       live
-        ? liveActiveMs(allRounds, group.turnId, nowMs, turnLastEventAt, gatePendingSince)
+        ? liveActiveMs(allRounds, group.turnId, nowMs, turnLastEventAt, gateFreezeAt)
         : turnActiveMs(allRounds, group.turnId),
-    [allRounds, group.turnId, nowMs, turnLastEventAt, gatePendingSince, live]
+    [allRounds, group.turnId, nowMs, turnLastEventAt, gateFreezeAt, live]
   )
   const turnClock = useDurationFormat(activeMs ?? turnMs, live ? activeMs != null : turnMs > 0)
   // Same handler identity for every row of the turn; Markdown absorbs it.

@@ -96,6 +96,11 @@
 - Toast 是 `shared/ui/Toast` 独占的表面：组件内用 `useToast().push`；SSE 回调、轮询间隔等非 React
   调用方（回合终态通知）用 `pushToastProgrammatic`——`ToastProvider` 挂载时注册推送句柄，卸载时注销，
   provider 未挂载期间的推送静默丢弃（无表面可渲染），不排队。不得在 feature 内自建浮层通知。
+- 小型菜单与确认对话框的键盘焦点由 `shared/ui/focus.ts` 统一提供：菜单打开聚焦首个可用项，
+  ArrowUp/Down 循环移动、Home/End 跳转、Enter/Space 激活、Escape 关闭并恢复触发器，Tab 回到触发器后
+  按原生顺序离开；
+  对话框初始化焦点、在 Tab/Shift+Tab 循环中显式 trap，关闭时恢复触发器。Provider 更多菜单、Provider
+  删除确认与线程行菜单共用这些 hook；不得再叠 document Escape 关闭路径，outside click 仍负责指针关闭。
 - 消息行带身份标识（对齐主流 agent 画布）：助手元信息行前置 18px 圆形头像盘——hairline 圆环内嵌
   "ark" 字标，纯 CSS 无位图（`ark-msg__avatar`）；助手正文 `padding-left: 25px` 与头像后的作者名
   对齐，形成稳定的纵向导轨。用户气泡不渲染头像与「你」作者行：右侧独立气泡卡本身已表明说话者，
@@ -123,9 +128,14 @@
   （`duration_ms`，只含模型调用墙钟）仍保留为 `RoundTiming.durationMs` 供"模型时间"类读数使用。
   运行中回合由 `liveActiveMs` 按秒延伸：从回合最新事件锚点（`turnLastEventAt`，reducer 为每个
   带 `turn_id` 的事件维护，即使尚无 turn 状态）加挂钟增量，挂起门禁出现后以最早 `requested_at`
-  为上限（时钟冻结在提问时刻，不倒退、不空转）；中途打开时 `active_ms` 仍未知也能从有效锚点
-  建立时钟。下一次 HTTP 刷新以服务端 `active_ms` 为准整体替换，两边永不漂移。同一 active turn
-  的中途 detail 重播种沿用已折叠轮次、`turnLastEventAt` 与 `roundWindow`，不用新的 `snapshotAt`
+  为上限（时钟冻结在提问时刻，不倒退、不空转）。`SessionStatsBar` 与 `TurnBlock` 共用
+  `gatePendingSince`：`pendingGateCounts[turnId]` 缺失或为 0 时 O(1) 返回 `null`，不扫描门禁历史；
+  计数大于 0 时才筛选该 turn 当前 `status === 'pending'` 的 approval/user input，取最早有限
+  `requested_at`，已 durable resolved 的历史不参与。计数大于 0 但没有 pending 记录（例如本地已决议、
+  durable SSE 未达）或没有门禁记录时，保守冻结在 `turnLastEventAt`，不向 now 延展。这只修正 UI
+  活跃时长估算；reducer 的活跃时间保护与 durable 计数释放规则不变。中途打开时 `active_ms` 仍未知
+  也能从有效锚点建立时钟。下一次 HTTP 刷新以服务端 `active_ms` 为准整体替换，两边永不漂移。同一
+  active turn 的中途 detail 重播种沿用已折叠轮次、`turnLastEventAt` 与 `roundWindow`，不用新的 `snapshotAt`
   重置活跃时钟；只有首次播种重新建立锚点。运行中的时钟每秒
   tick 由 `components/use-clock-tick.ts` 独占（`LiveActivity` 的旧 `setInterval` 仍是独立实现，属另一
   读数）。旧运行时既无 `active_ms` 又无事件锚点时读数为 `null`：不显示，而不是伪造 `0秒`。
@@ -365,6 +375,9 @@
   即 unknown），不套用 256K 导入兜底；默认 `model` 为空时首个手填 id 回填为默认模型，与默认模型或
   清单重复的输入是 no-op 且保留输入文本供修正。
 - 设置页供应商区（当前实现）：左侧列表每行为首字母头像（右下圆点表示 enabled）+ 名称 + 默认模型，只显示一个状态标签（优先级：已禁用 > 默认 > 运行中），列表只展示脱敏后的 api_key 提示与摘要，不暴露完整密钥；列表项点击先在右侧详情展示当前供应商。右侧详情头部只放「测试连接」「编辑」两个主操作，「设为默认」「删除」收进「更多操作」菜单；删除必须经确认弹窗，删除默认供应商时弹窗写明跟随默认的会话将无法启动。详情区依次为统计卡（接口协议 / 模型数 / 上次测试）、连接（base_url + 按 endpoint_format 拼出的实际请求地址预览 + api_key 掩码）、模型表格（首行即默认模型）与最近测试。编辑/新建表单顶部为「← 返回」，按基本信息 / 连接 / 模型三段分组，endpoint_format 用分段按钮，base_url 下实时显示实际请求地址，底部操作栏「测试连接 / 取消 / 保存」；表单复用 `ProviderForm`，保留导入与手工新增模型交互。表单不提供「默认」单选列，仍保持首行即默认模型。实际请求地址的路径映射仅用于展示，真实拼接仍由运行时负责。默认供应商决定所有未显式覆盖的会话实际使用的模型，切默认必须是显式动作（右侧详情「设为默认」或「设置 → 通用」的默认模型选择器）：保存只登记条目，`make_default` 恒为 false，不提供"保存后设为默认"勾选，否则新增一个供应商就会把所有跟默认走的会话静默切到新通道。
+- Provider 编辑读取由单调 `editRequestSeq` 与当前 provider id 共同保护：关闭、切换、新建、打开或确认删除
+  都使旧读取失效，成功与失败落地前都要求票最新且返回 id 与所选 id 一致。表单只从完整 `ProviderEntry`
+  播种，保留 `api_key`、`headers`、`max_tokens`、`temperature`，不再用脱敏 `ProviderView` 固定清空高级字段。
 - 模型清单字段占满设置网格的一整行：一行需要 id、默认标记、上下文窗口与识图开关，挤在半宽列时识图会
   溢出到相邻的 api_key 提示上；整行宽度加窄窗口换行保证所有控件留在自己的卡片内。
 - 默认模型与所有导入模型用**同一套 `ModelRow` 行**展示，默认模型不再单独占一个输入框：每行都是
@@ -417,6 +430,9 @@
   等诊断信息不能占据主任务层级，必须退为状态详情或提示信息。
 - 设置页的分类导航是 `web` 内本地状态，只决定既有 section 的可见性；每个 section 仍独立持有既有 hook，
   不把 provider、MCP 或 runtime 配置逻辑回流到 Code 会话状态或 `ark-agent`。
+- `TraceSection` 的线程选择与手动重新统计共用同一 request generation 与 `AbortController`。新选择、
+  重新统计或卸载都会 abort 旧请求；成功与失败落地前同时校验 mounted、generation 及 requested/selected
+  thread id，防止 A 的迟到响应覆盖 B，即使 transport 忽略 abort 也不例外。
 - 运行调优参数按运行时语义分组呈现（回合与 token / 工具保护 / 上下文与压缩 / 流式传输 /
   权限档位），wire 键保持 `TuningSettings` 不变；子代理文案同样对齐（启用子 Agent 委派、单会话并行
   子 Agent 上限）。`SubagentSection` 直接展示运行时 `auto_continue` 与 `default_background` 值，两者默认均为
@@ -426,8 +442,10 @@
   （该路由在 Rust 侧仍是未建模 JSON，前端经 `web-only.ts` 的视图类型渲染，Rust 建模后应迁移到生成
   类型）。`/v1/runtime/tuning` 与 `/v1/runtime/model-providers` 是运行时的 501 占位路由，不是缺口。
 - 输入框在活跃回合提供两种非中断动作：「追加」（steer，立即注入下一轮）与「排队」（本地暂存为
-  chips，空闲且 SSE `open` 时按顺序自动发送）；传输失败、冲突与运行时暂不可用每 500ms 重试，
-  校验/不存在/未授权等永久拒绝保留在队列但不自动重试，直至用户编辑或逐条移除；纯本地状态不进 wire。
+  chips，空闲且 SSE `open` 时按顺序自动发送）；只有 `ApiError` 的 408/425/429/5xx 视为可重试，
+  每 500ms 重试。其他状态（含 409）及非 `ApiError` 的网络/传输异常均为永久失败，保留在队列但不自动
+  重试，直至用户编辑或逐条移除——传输异常可能发生在 arkd 已接受回合之后，无幂等契约时重发会重复
+  用户工作；纯本地状态不进 wire。
   附件在活跃回合同样可添加（+ 按钮、textarea 粘贴图片、拖拽文件均可用）：steer 与发送共用同一
   「先 `POST /v1/threads/{id}/attachments` 关联、后投递」流程，steer 携带 `TurnRequest.attachment_ids`，
   服务端授权失败走命令错误提示且不清空 chips；「排队」只排文本、附件保留待下一次投递。粘贴/拖入的
@@ -446,8 +464,9 @@
   `runtime-slice` 的 `queuedMessages: Record<ThreadId, QueuedMessage[]>` 并清掉对应 store 草稿，因此
   `key={threadId}` 重挂载后仍按线程恢复且不串会话。每条消息有独立 ID，重复文本不合并，移除与
   迟到完成都按 ID 匹配队首。队列只存内存、不进 wire 或 localStorage；自动排空以
-  `send(text, [])` 投递，同一时刻只发送一个队首，仅在服务端接受后按 ID 移除；失败保留消息并在
-  500ms 后重试，SSE 断开时暂停、恢复 `open` 后继续，不依赖再次出现 live→idle 边沿。已选附件继续留给
+  `send(text, [])` 投递，同一时刻只发送一个队首，仅在服务端接受后按 ID 移除；仅明确可重试的
+  `ApiError` 408/425/429/5xx 在 500ms 后重试，永久失败暂停该队首并保留消息。SSE 断开时暂停、恢复
+  `open` 后继续，不依赖再次出现 live→idle 边沿。已选附件继续留给
   下一次投递。新任务页的无会话 Composer 把草稿存在同一条 map 的保留键
   `NEW_TASK_DRAFT_KEY`（`'new-task'`，与线程 UUID 命名空间隔离），随同一条 localStorage 镜像
   持久化。草稿只存内存、不进 wire；`state/draft-storage.ts` 把同一映射镜像到
@@ -479,7 +498,9 @@
   `StreamRow`/`TurnBlock` 拿到所属 threadId**（芯片依赖该线程的技能缓存），脱离流的独立渲染
   传 `null` 回落纯文本。输入框草稿侧，`DraftHighlight` 镜像层在 textarea 之下按同字体度量
   （`.ark-composer__editor-font`）重绘草稿：完整提及与光标下进行中 token 均渲染为轻量标记，
-  镜像层 `pointer-events: none` 且文本透明，不影响输入/选择/IME/复制。skill 提及的视觉语言
+  镜像层 `pointer-events: none`、`aria-hidden="true"` 且文本透明，不影响输入/选择/IME/复制。
+  `DraftHighlight` 以 `forwardRef` 暴露镜像节点；Composer 在 textarea 滚动、草稿提交与 resize 后同步
+  `scrollTop`/`scrollLeft`，长草稿与自动增高不会让高亮层与输入视口错位。skill 提及的视觉语言
   对齐主流 agent 的 `@file`/`/command` 引用：紧凑圆角矩形 chip（4px 圆角、4px 左右内边距、
   1px 清晰细边、淡紫底），文字与正文同字号同字重。额外宽度来自 `padding`，由等量负 `margin`
   抵消，使 token 的 advance 严格等于逐字文本——后续字形不漂移（实测 0.03px），行首 chip

@@ -172,7 +172,11 @@ durable inbox,server 确认后才推进 `get_updates_buf`。`context_token` 保�
 `im.json`(`{ channels: [ImChannelRecord], bindings: [ImBinding], inbox: [ImInboxEntry] }`)
 经 `ark_ports::ImStore` 读写,实现 `ark-store::ImFileStore`:Mutex 串行 + copy-on-write
 快照 + tmp/fsync/rename 原子写 + 损坏恢复,同 `ScheduleFileStore` 模式;端口与
-`ScheduleStore` 同为**同步**(整份文档一次进程内锁临界区读写,锁内不做网络 IO)。
+`ScheduleStore` 同为**同步**(整份文档一次进程内锁临界区读写,锁内不做网络 IO)。异步
+`InboundSender::send_batch` 的批量持久化与 `advance` 的 cursor 提交分别经 `spawn_blocking` 调用
+同步 store，保持原有顺序与 admission ack 语义；JoinError 按取消/panic 映射为
+`RuntimeUnavailable`/`StoreFailure` 并携带操作与渠道上下文。这消除同步文件重写对 async executor
+的结构性阻塞风险，不表示已实测生产瓶颈。
 游标(telegram update offset 等)不进 wire 模型、GET 不回传,也不再有节流窗口:
 适配器的一批消息先在**一次原子 rewrite** 中全部落为 `queued=false` 的 inbox 记录;
 server 对每条记录再次原子写入 `queued=true` 与最终 cursor,记录继续保留;只有回合

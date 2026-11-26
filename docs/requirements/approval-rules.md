@@ -77,7 +77,9 @@ ApprovalSettings {
 - headless `arkd run` 的所有回合，以及 `TurnSource::Scheduled`、`TurnSource::Im`、
   `AutoContinuation`、`AutoRecovery`，使用由当前快照 `approvals.on_unattended` 构造的
   `AutoDenyGates<AllowAllGates>`；
-- child 回合保持 `AllowAllGates`，但其工具仍受每回合快照构造的 `ApprovalPolicy` 与沙箱约束。
+- child 回合使用 `DenyAllGates`，但其工具仍受每回合快照构造的 `ApprovalPolicy` 与沙箱约束。
+  Strict/WorkspaceWrite 下未知 MCP/plugin 工具不会被自动批准：审批立即拒绝并生成 synthetic 失败结果，
+  不注册交互 gate、不阻塞 child；规则明确 `Deny` 的调用仍在 sandbox 阶段直接拒绝。
 
 因此规则和无人值守处置都是下一回合 Hot 生效，不在进程启动时缓存，也不改变已经运行的回合。
 

@@ -387,13 +387,12 @@ pub(crate) struct ActiveSpan {
     pub(crate) total_ms: u64,
 }
 
-/// Timestamp of any event that can advance the clock's "now" horizon.
+/// Turn lifecycle, gate, usage and tool events advance the running horizon.
 ///
-/// Turn lifecycle and gate events drive the spans themselves; `Usage` counts
-/// too because a running turn's horizon must track the newest *anything* —
-/// for a live fold that is what makes the clock advance between terminal
-/// events. Pure rendering noise (deltas, items) stays out: the horizon only
-/// needs to be fresh to within one UI-visible event.
+/// Only lifecycle and gate events drive the spans themselves; usage and tool
+/// timestamps keep a running turn's final `finish` horizon fresh. Pure
+/// rendering noise (deltas, items) stays out because it need not extend active
+/// execution time.
 pub(crate) fn event_timestamp(event: &RuntimeEvent) -> Option<DateTime<Utc>> {
     match event {
         RuntimeEvent::TurnStarted { timestamp, .. }
@@ -404,7 +403,9 @@ pub(crate) fn event_timestamp(event: &RuntimeEvent) -> Option<DateTime<Utc>> {
         | RuntimeEvent::ApprovalResolved { timestamp, .. }
         | RuntimeEvent::UserInputRequested { timestamp, .. }
         | RuntimeEvent::UserInputResolved { timestamp, .. }
-        | RuntimeEvent::Usage { timestamp, .. } => Some(*timestamp),
+        | RuntimeEvent::Usage { timestamp, .. }
+        | RuntimeEvent::ToolCallStarted { timestamp, .. }
+        | RuntimeEvent::ToolCallFinished { timestamp, .. } => Some(*timestamp),
         _ => None,
     }
 }

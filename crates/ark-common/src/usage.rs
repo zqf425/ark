@@ -100,26 +100,31 @@ impl Usage {
 
     /// Fold a later usage sample into an accumulator (turn totals).
     ///
-    /// A single missing counter poisons the aggregate rate, permanently: once a
-    /// sample did not report `miss`, no sum of the remaining samples can restore
-    /// `hit / (hit + miss)` for the whole turn. The rate therefore becomes
-    /// `None` rather than a number that looks measured but is not.
+    /// A single missing counter poisons both aggregate counters and the rate,
+    /// permanently: no sum of the remaining samples can recover values the
+    /// provider never sent. The counters therefore become `None`, rather than
+    /// exposing a partial sum or treating an unknown miss as zero.
     pub fn merge(&mut self, other: &Usage) {
-        let self_had_sample = self.samples_merged
-            || self.prompt_tokens != 0
-            || self.completion_tokens != 0
-            || self.total_tokens != 0
-            || self.duration_ms.is_some();
+        let self_had_sample = self.has_sample();
+        let other_had_sample = other.has_sample();
+        let cache_incomplete = self.cache_counters_incomplete
+            || other.cache_counters_incomplete
+            || (self_had_sample
+                && (self.cache_hit_tokens.is_none() || self.cache_miss_tokens.is_none()))
+            || (other_had_sample
+                && (other.cache_hit_tokens.is_none() || other.cache_miss_tokens.is_none()));
         self.prompt_tokens += other.prompt_tokens;
         self.completion_tokens += other.completion_tokens;
         self.total_tokens += other.total_tokens;
-        self.cache_hit_tokens = sum_opt(self.cache_hit_tokens, other.cache_hit_tokens);
-        self.cache_miss_tokens = sum_opt(self.cache_miss_tokens, other.cache_miss_tokens);
-        self.cache_counters_incomplete = self.cache_counters_incomplete
-            || other.cache_counters_incomplete
-            || other.cache_hit_tokens.is_none()
-            || other.cache_miss_tokens.is_none();
-        self.cache_hit_rate = if self.cache_counters_incomplete {
+        self.cache_counters_incomplete = cache_incomplete;
+        if cache_incomplete {
+            self.cache_hit_tokens = None;
+            self.cache_miss_tokens = None;
+        } else {
+            self.cache_hit_tokens = sum_opt(self.cache_hit_tokens, other.cache_hit_tokens);
+            self.cache_miss_tokens = sum_opt(self.cache_miss_tokens, other.cache_miss_tokens);
+        }
+        self.cache_hit_rate = if cache_incomplete {
             None
         } else {
             Usage::rate(self.cache_hit_tokens, self.cache_miss_tokens)
@@ -140,6 +145,16 @@ impl Usage {
             sum_opt(self.duration_ms, other.duration_ms)
         };
         self.samples_merged = true;
+    }
+
+    fn has_sample(&self) -> bool {
+        self.samples_merged
+            || self.prompt_tokens != 0
+            || self.completion_tokens != 0
+            || self.total_tokens != 0
+            || self.cache_hit_tokens.is_some()
+            || self.cache_miss_tokens.is_some()
+            || self.duration_ms.is_some()
     }
 }
 
@@ -179,7 +194,18 @@ mod tests {
         let b = Usage::new(20, 5);
         a.merge(&b);
         assert_eq!(a.total_tokens, 40);
+        assert_eq!(a.cache_hit_tokens, None);
+        assert_eq!(a.cache_miss_tokens, None);
         assert_eq!(a.cache_hit_rate, None);
+    }
+
+    #[test]
+    fn empty_accumulator_does_not_poison_complete_counters() {
+        let mut total = Usage::default();
+        total.merge(&Usage::new(10, 1).with_cache(Some(90), Some(10)));
+        assert_eq!(total.cache_hit_tokens, Some(90));
+        assert_eq!(total.cache_miss_tokens, Some(10));
+        assert_eq!(total.cache_hit_rate, Some(0.9));
     }
 
     #[test]
@@ -223,15 +249,32 @@ mod tests {
     #[test]
     fn merge_never_invents_a_rate_from_a_partial_sample() {
         // Provider A reported hit but no miss; provider B reported both. The
-        // combined rate is unknown, not 100/(100+10) (P1-8).
+        // combined counters and rate are unknown, not 100/(100+10) (P1-8).
         let mut total = Usage::new(10, 1).with_cache(Some(90), None);
         total.merge(&Usage::new(5, 1).with_cache(Some(10), Some(10)));
+        assert_eq!(total.cache_hit_tokens, None);
+        assert_eq!(total.cache_miss_tokens, None);
         assert_eq!(total.cache_hit_rate, None);
 
         // Order must not matter: the taint is sticky.
         let mut reversed = Usage::new(5, 1).with_cache(Some(10), Some(10));
         reversed.merge(&Usage::new(10, 1).with_cache(Some(90), None));
+        assert_eq!(reversed.cache_hit_tokens, None);
+        assert_eq!(reversed.cache_miss_tokens, None);
         assert_eq!(reversed.cache_hit_rate, None);
+
+        let mut missing_first = Usage::new(10, 1).with_cache(None, Some(10));
+        missing_first.merge(&Usage::new(5, 1).with_cache(Some(10), Some(10)));
+        assert_eq!(missing_first.cache_hit_tokens, None);
+        assert_eq!(missing_first.cache_miss_tokens, None);
+
+        let mut zero_with_partial_cache = Usage {
+            cache_hit_tokens: Some(1),
+            ..Usage::default()
+        };
+        zero_with_partial_cache.merge(&Usage::new(5, 1).with_cache(Some(10), Some(10)));
+        assert_eq!(zero_with_partial_cache.cache_hit_tokens, None);
+        assert_eq!(zero_with_partial_cache.cache_miss_tokens, None);
     }
 
     #[test]

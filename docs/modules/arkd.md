@@ -76,6 +76,12 @@ child executor 在此复用同一个 `ark-agent` `Reactor`，并桥接 cancel/st
 `merge_child_mcp_tools`（`wiring/tools.rs`）是合并的唯一宿主，`McpServerAdapter` 的热更新同步也指向
 同一注册表；`delegate_task` 仍不进入子表，最大深度保持 1。
 
+child 仍用 `ApprovalPolicy` 保留 Strict/WorkspaceWrite 基线，但 gate 固定为 `DenyAllGates`：未知 MCP/
+插件工具在 Strict/WorkspaceWrite 下需要的审批立即得到 synthetic denial，不注册 gate、不阻塞，也不会
+被自动批准后执行。provider 请求与父 provider id 均先 trim/过滤空值，只有规范化后真正切换 provider 才
+丢弃父模型覆盖；显式指定同一 provider 而未指定 model 时继承父模型。child 报告只汇总当前 `turn_id` 的
+Usage/ToolCallStarted，resume 不重复计入前序回合。
+
 父回合开始前由组合根读取 `SessionStore` 的父事件，调用 `ark-agent` 的纯 inbox 投影并作为动态 system
 source 注入 reactor。父回合成功后再追加 completion acknowledgement；写入失败记录告警并保留下一回合
 的至少一次投递，不能把已经完成的模型回合改写为失败。
@@ -92,22 +98,22 @@ per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启
 走同一路径。
 
 自动恢复（`TurnSource::AutoRecovery`）同样复用 `AgentTurnRunner`，但它重发的是**线程里已有的请求**：
-失败回合在模型调用死掉前已经把用户消息落盘，`conversation_history` 会把它重放为末尾 `User` 行。
-因此组合根在 `prepare_parent_turn` 里先经 `without_duplicate_recovery_text` 判断：若重放历史以该请求
-文本结尾（完全相等，或以 `文本\n` 开头——附件预览拼在消息 content 但不是 item 文本），就**不再**
-`push_user_message`，恢复回合只写 Notice 与 `turn_started.auto_recovery`。否则每次尝试都会多出一条
-重复的用户气泡（实测一个线程里同一问题出现 4 次，即 1 次原始 + 3 次恢复），模型种子也会多出一条
-重复 `User` 消息。抑制条件刻意收窄：只作用于恢复；末尾行必须是该用户消息（已被回答则说明这是一次新的
-重复发言，仍要落盘）；历史里没有该文本（rewind/fork 截断）时仍落盘，保证恢复是真续跑。用户、IM、
-Scheduled 回合永不去重。恢复作业同时保留失败回合已授权的附件 id，并在回合注册前重新授权；退避期间
-出现的新回合会改变 lifecycle epoch，使旧恢复在注册门内失效。
+失败回合在模型调用死掉前已经把用户消息落盘，`conversation_history` 会把它重放。因此组合根在
+`prepare_parent_turn` 里先经 `without_duplicate_recovery_text` 从尾部找最近 `User`：文本完全相等，
+或以 `文本\n` 开头（附件预览拼在 message content 但不是 item 文本），且其后没有 `Assistant` 完成回复时，
+就**不再** `push_user_message`，恢复回合只写 Notice 与 `turn_started.auto_recovery`。其后的 `Tool` 行
+不视为完成回复，不阻止抑制；出现 Assistant 则说明请求已完成，恢复文本必须作为新请求落盘。否则每次
+尝试都会多出一条重复用户气泡（实测同一问题出现 4 次，即 1 次原始 + 3 次恢复），模型种子也会多出一条
+重复 `User` 消息。抑制只作用于恢复；历史里没有该文本（rewind/fork 截断）时仍落盘，保证恢复是真续跑。
+用户、IM、Scheduled 回合永不去重。恢复作业同时保留失败回合已授权的附件 id，并在回合注册前重新授权；
+退避期间出现的新回合会改变 lifecycle epoch，使旧恢复在注册门内失效。
 
 父回合使用 `InteractiveGates`，该实例同时注入 `AppState` 的 HTTP handler 与 `AgentTurnRunner` 的
 `ReactorConfig`。仅 `serve` 的显式 `TurnSource::User` 直接使用它；headless `run` 的所有回合，以及
 `serve` 中的 `TurnSource::Scheduled`、`TurnSource::Im`、`AutoContinuation`、`AutoRecovery`，在每回合
 开始时按当前 `approvals.on_unattended` 快照以 `AllowAllGates` 为内层构造 `AutoDenyGates`。规则与
-无人值守处置都在下一回合 Hot 生效；child 继续使用 `AllowAllGates`。交互父回合不得回退为
-`AllowAllGates`，否则审批和用户输入卡片会变成无法影响执行的装饰。
+无人值守处置都在下一回合 Hot 生效；child 始终使用 `DenyAllGates`，不等待也不注册交互 gate。
+交互父回合不得回退为 `AllowAllGates`，否则审批和用户输入卡片会变成无法影响执行的装饰。
 
 每个父/子回合在开始时读取同一份 provider 配置：自定义 headers、temperature 和 max_tokens 传入
 `ModelSeed`，不会被设置页静默忽略。在此之上，线程级运行时覆盖（`ThreadRuntimeSettings`，经

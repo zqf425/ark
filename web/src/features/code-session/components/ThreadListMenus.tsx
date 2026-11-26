@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Icon, useToast } from '../../../shared/ui'
 import type { ThreadSummary } from '../../../shared/contracts'
 import { formatRelative } from '../../../shared/format'
 import { useI18n } from '../../../shared/i18n'
 import { activityKeyOf } from '../state/threads-slice'
 import { exportThread } from '../api/threads-api'
+import { useMenuFocus } from '../../../shared/ui/focus'
 
 const MENU_GAP = 4
 const MENU_EDGE = 8
@@ -35,25 +36,22 @@ function useMenuPosition(menuRef: React.RefObject<HTMLDivElement | null>, anchor
     : { top: anchor.bottom + MENU_GAP, bottom: null, left }
 }
 
-function MenuSurface({ position, children, onDismiss }: { position: MenuPosition; children: React.ReactNode; onDismiss: () => void }): JSX.Element {
-  const ref = useRef<HTMLDivElement | null>(null)
+function MenuSurface({ position, children, onDismiss, triggerRef }: { position: MenuPosition; children: React.ReactNode; onDismiss: () => void; triggerRef: React.RefObject<HTMLButtonElement | null> }): JSX.Element {
+  const menu = useMenuFocus(true, onDismiss, triggerRef)
   useEffect(() => {
     const onPointer = (event: MouseEvent): void => {
       const target = event.target as Node
-      if (!ref.current?.contains(target) && !(target as HTMLElement).closest?.('[data-menu-trigger]')) onDismiss()
-    }
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onDismiss()
+      if (!menu.ref.current?.contains(target) && !(target as HTMLElement).closest?.('[data-menu-trigger]')) onDismiss()
     }
     document.addEventListener('mousedown', onPointer)
-    document.addEventListener('keydown', onKey)
-    return () => { document.removeEventListener('mousedown', onPointer); document.removeEventListener('keydown', onKey) }
-  }, [onDismiss])
+    return () => document.removeEventListener('mousedown', onPointer)
+  }, [menu.ref, onDismiss])
   // Re-measure after mount: layout (font/locale) decides the real height.
-  const final = useMenuPosition(ref, position.anchor ?? null)
+  const final = useMenuPosition(menu.ref, position.anchor ?? null)
   return (
     <div
-      ref={ref}
+      ref={menu.ref}
+      onKeyDown={menu.onKeyDown}
       className="ark-threadrow__menu"
       role="menu"
       style={final.top === null ? { bottom: final.bottom ?? 0, left: final.left } : { top: final.top ?? 0, left: final.left }}
@@ -74,10 +72,11 @@ export type ThreadRowMenuProps = {
   onRestore: () => Promise<void>
   onDelete: () => Promise<void>
   onClose: () => void
+  triggerRef: React.RefObject<HTMLButtonElement | null>
 }
 
 /** Fixed-position row actions; measured height keeps the last item clickable. */
-export function ThreadRowMenu({ anchor, thread, busy, sourceTitle, onRename, onFork, onArchive, onRestore, onDelete, onClose }: ThreadRowMenuProps): JSX.Element | null {
+export function ThreadRowMenu({ anchor, thread, busy, sourceTitle, onRename, onFork, onArchive, onRestore, onDelete, onClose, triggerRef }: ThreadRowMenuProps): JSX.Element | null {
   const { t } = useI18n()
   const toast = useToast()
   if (!anchor) return null
@@ -88,7 +87,7 @@ export function ThreadRowMenu({ anchor, thread, busy, sourceTitle, onRename, onF
     })
   }
   return (
-    <MenuSurface position={{ top: 0, bottom: null, left: 0, anchor }} onDismiss={onClose}>
+    <MenuSurface position={{ top: 0, bottom: null, left: 0, anchor }} onDismiss={onClose} triggerRef={triggerRef}>
       <button type="button" role="menuitem" disabled={busy} onClick={() => { onClose(); onRename() }}>{t('thread.row.rename')}</button>
       <button type="button" role="menuitem" disabled={busy} onClick={() => run(onFork)}>{t('thread.row.fork')}</button>
       {thread.archived ? (

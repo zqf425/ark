@@ -61,11 +61,31 @@ fn tool_started(
     call: &str,
     tool: &str,
 ) -> RuntimeEvent {
+    tool_started_with_item(
+        seq,
+        thread,
+        turn,
+        at_ms,
+        call,
+        tool,
+        Some(tool_item_id(call)),
+    )
+}
+
+fn tool_started_with_item(
+    seq: u64,
+    thread: ThreadId,
+    turn: TurnId,
+    at_ms: i64,
+    call: &str,
+    tool: &str,
+    item_id: Option<ItemId>,
+) -> RuntimeEvent {
     RuntimeEvent::ToolCallStarted {
         seq,
         thread_id: thread,
         turn_id: turn,
-        item_id: Some(tool_item_id(call)),
+        item_id,
         timestamp: at(at_ms),
         call_id: call.to_string(),
         tool: tool.to_string(),
@@ -85,11 +105,38 @@ fn tool_finished(
     duration_ms: u64,
     output: &str,
 ) -> RuntimeEvent {
+    tool_finished_with_item(
+        seq,
+        thread,
+        turn,
+        at_ms,
+        call,
+        tool,
+        ok,
+        duration_ms,
+        output,
+        Some(tool_item_id(call)),
+    )
+}
+
+#[allow(clippy::too_many_arguments)] // mirrors the wire event's field list
+fn tool_finished_with_item(
+    seq: u64,
+    thread: ThreadId,
+    turn: TurnId,
+    at_ms: i64,
+    call: &str,
+    tool: &str,
+    ok: bool,
+    duration_ms: u64,
+    output: &str,
+    item_id: Option<ItemId>,
+) -> RuntimeEvent {
     RuntimeEvent::ToolCallFinished {
         seq,
         thread_id: thread,
         turn_id: turn,
-        item_id: Some(tool_item_id(call)),
+        item_id,
         timestamp: at(at_ms),
         call_id: call.to_string(),
         tool: tool.to_string(),
@@ -102,8 +149,19 @@ fn tool_finished(
 
 /// The `ToolCall` item the store would project for one finished call.
 fn tool_item(turn: TurnId, at_ms: i64, call: &str, tool: &str, ok: bool) -> ThreadItem {
+    tool_item_with_id(turn, at_ms, call, tool, ok, tool_item_id(call))
+}
+
+fn tool_item_with_id(
+    turn: TurnId,
+    at_ms: i64,
+    call: &str,
+    tool: &str,
+    ok: bool,
+    item_id: ItemId,
+) -> ThreadItem {
     let mut item = ThreadItem::new(turn, ItemKind::ToolCall);
-    item.item_id = tool_item_id(call);
+    item.item_id = item_id;
     item.created_at = at(at_ms);
     item.tool = Some(ToolPayload {
         call_id: call.to_string(),
@@ -280,6 +338,120 @@ fn item_backed_tool_rows_do_not_duplicate_event_rows() {
     ];
     let timeline = build_trace_timeline(thread, &events, turn).expect("turn seen");
     assert_eq!(kinds(&timeline), vec![TraceSpanKind::ToolCall]);
+}
+
+#[test]
+fn repeated_call_ids_keep_each_occurrence_and_dedupe_by_real_item_id() {
+    let thread = ThreadId::new();
+    let turn = TurnId::new();
+    let first = ark_common::keyed_item_id("tool-occurrence-1");
+    let second = ark_common::keyed_item_id("tool-occurrence-2");
+    let events = vec![
+        started(1, thread, turn, 0),
+        tool_started_with_item(2, thread, turn, 10, "same", "bash", Some(first)),
+        tool_started_with_item(3, thread, turn, 20, "same", "bash", Some(second)),
+        tool_finished_with_item(
+            4,
+            thread,
+            turn,
+            30,
+            "same",
+            "bash",
+            true,
+            20,
+            "one",
+            Some(first),
+        ),
+        tool_finished_with_item(
+            5,
+            thread,
+            turn,
+            40,
+            "same",
+            "bash",
+            true,
+            20,
+            "two",
+            Some(second),
+        ),
+        RuntimeEvent::ItemCompleted {
+            seq: 6,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: at(30),
+            item: tool_item_with_id(turn, 10, "same", "bash", true, first),
+        },
+        RuntimeEvent::ItemCompleted {
+            seq: 7,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: at(40),
+            item: tool_item_with_id(turn, 20, "same", "bash", true, second),
+        },
+        completed(8, thread, turn, 50),
+    ];
+    let timeline = build_trace_timeline(thread, &events, turn).expect("turn seen");
+    assert_eq!(timeline.spans.len(), 2);
+    assert_eq!(timeline.spans[0].started_at, at(10));
+    assert_eq!(timeline.spans[0].item_id, Some(first));
+    assert_eq!(timeline.spans[1].started_at, at(20));
+    assert_eq!(timeline.spans[1].item_id, Some(second));
+}
+
+#[test]
+fn tool_navigation_prefers_finished_item_id_then_started_item_id() {
+    let thread = ThreadId::new();
+    let turn = TurnId::new();
+    let started_only = ark_common::keyed_item_id("tool-started-only");
+    let finished = ark_common::keyed_item_id("tool-finished");
+    let events = vec![
+        started(1, thread, turn, 0),
+        tool_started_with_item(2, thread, turn, 10, "c1", "bash", Some(started_only)),
+        tool_finished_with_item(3, thread, turn, 20, "c1", "bash", true, 10, "", None),
+        tool_started_with_item(4, thread, turn, 30, "c2", "bash", Some(finished)),
+        tool_finished_with_item(
+            5,
+            thread,
+            turn,
+            40,
+            "c2",
+            "bash",
+            true,
+            10,
+            "",
+            Some(ark_common::keyed_item_id("tool-finished-wins")),
+        ),
+        completed(6, thread, turn, 50),
+    ];
+    let timeline = build_trace_timeline(thread, &events, turn).expect("turn seen");
+    assert_eq!(timeline.spans.len(), 2);
+    assert_eq!(timeline.spans[0].item_id, Some(started_only));
+    assert_eq!(
+        timeline.spans[1].item_id,
+        Some(ark_common::keyed_item_id("tool-finished-wins"))
+    );
+}
+
+#[test]
+fn legacy_tool_events_still_dedupe_their_deterministic_item() {
+    let thread = ThreadId::new();
+    let turn = TurnId::new();
+    let events = vec![
+        started(1, thread, turn, 0),
+        tool_started_with_item(2, thread, turn, 10, "legacy", "bash", None),
+        tool_finished_with_item(3, thread, turn, 40, "legacy", "bash", true, 300, "", None),
+        RuntimeEvent::ItemCompleted {
+            seq: 4,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: at(40),
+            item: tool_item(turn, 10, "legacy", "bash", true),
+        },
+        completed(5, thread, turn, 100),
+    ];
+    let timeline = build_trace_timeline(thread, &events, turn).expect("turn seen");
+    assert_eq!(timeline.spans.len(), 1);
+    assert_eq!(timeline.spans[0].started_at, at(10));
 }
 
 #[test]
@@ -585,6 +757,88 @@ fn compaction_produces_one_spanning_row() {
     assert_eq!(span.kind, TraceSpanKind::Compaction);
     assert_eq!(span.started_at, at(20));
     assert_eq!(span.duration_ms, Some(100));
+}
+
+#[test]
+fn multiple_compactions_pair_oldest_starts_and_keep_unmatched_checkpoints() {
+    let thread = ThreadId::new();
+    let turn = TurnId::new();
+    let checkpoint = |name: &str, created_at: i64| {
+        let mut item = ThreadItem::new(turn, ItemKind::Notice);
+        item.item_id = ark_common::keyed_item_id(name);
+        item.created_at = at(created_at);
+        item.text = Some("[context checkpoint] folded".to_string());
+        item.marker = Some(ark_contract::ItemMarker::ContextCheckpoint);
+        RuntimeEvent::ItemCreated {
+            seq: 10,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: item.created_at,
+            item,
+        }
+    };
+    let events = vec![
+        started(1, thread, turn, 0),
+        RuntimeEvent::CompactionStarted {
+            seq: 2,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: at(20),
+        },
+        RuntimeEvent::CompactionStarted {
+            seq: 3,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: at(40),
+        },
+        RuntimeEvent::CompactionCompleted {
+            seq: 4,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: at(60),
+            removed_items: 1,
+            checkpoint_chars: 10,
+        },
+        checkpoint("checkpoint-first", 30),
+        RuntimeEvent::CompactionCompleted {
+            seq: 6,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: at(80),
+            removed_items: 1,
+            checkpoint_chars: 10,
+        },
+        checkpoint("checkpoint-second", 70),
+        checkpoint("checkpoint-unmatched", 90),
+        RuntimeEvent::CompactionCompleted {
+            seq: 9,
+            thread_id: thread,
+            turn_id: turn,
+            timestamp: at(100),
+            removed_items: 0,
+            checkpoint_chars: 0,
+        },
+        completed(10, thread, turn, 200),
+    ];
+    let timeline = build_trace_timeline(thread, &events, turn).expect("turn seen");
+    let compactions: Vec<_> = timeline
+        .spans
+        .iter()
+        .filter(|span| span.kind == TraceSpanKind::Compaction)
+        .collect();
+    assert_eq!(compactions.len(), 4);
+    assert_eq!(compactions[0].started_at, at(20));
+    assert_eq!(compactions[0].duration_ms, Some(40));
+    assert_eq!(compactions[1].started_at, at(40));
+    assert_eq!(compactions[1].duration_ms, Some(40));
+    assert_eq!(compactions[2].started_at, at(90));
+    assert_eq!(compactions[2].duration_ms, None);
+    assert_eq!(
+        compactions[2].item_id,
+        Some(ark_common::keyed_item_id("checkpoint-unmatched"))
+    );
+    assert_eq!(compactions[3].started_at, at(100));
+    assert_eq!(compactions[3].duration_ms, Some(0));
 }
 
 #[test]

@@ -46,6 +46,7 @@ const createMock = vi.mocked(createAnalysisThread)
 const turnMock = vi.mocked(startAnalysisTurn)
 
 const THREAD_A = '00000000-0000-0000-0000-00000000000a'
+const THREAD_B = '00000000-0000-0000-0000-00000000000b'
 const TURN_1 = '00000000-0000-0000-0000-000000000001'
 const TURN_2 = '00000000-0000-0000-0000-000000000002'
 
@@ -119,15 +120,24 @@ function timeline(turnId: string): TraceTimeline {
   }
 }
 
-async function pickFirstThread(host: HTMLElement): Promise<void> {
+async function pickThread(host: HTMLElement, threadId = THREAD_A): Promise<void> {
   const select = host.querySelector<HTMLSelectElement>('select')
   expect(select).toBeDefined()
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
-    setter?.call(select!, THREAD_A)
+    setter?.call(select!, threadId)
     select!.dispatchEvent(new Event('change', { bubbles: true }))
   })
   await settle()
+}
+
+const pickFirstThread = (host: HTMLElement): Promise<void> => pickThread(host)
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (reason: unknown) => void } {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail })
+  return { promise, resolve, reject }
 }
 
 describe('TraceSection', () => {
@@ -182,6 +192,32 @@ describe('TraceSection', () => {
     // Loading stats is still read-only.
     expect(createMock).not.toHaveBeenCalled()
     expect(turnMock).not.toHaveBeenCalled()
+    await harness.unmount()
+  })
+
+  it('drops an older reload after a newer selection completes', async () => {
+    const stale = deferred<TraceStatsResponse>()
+    const fresh = deferred<TraceStatsResponse>()
+    statsMock.mockResolvedValueOnce(stats()).mockImplementation((id) => id === THREAD_A ? stale.promise : fresh.promise)
+    listMock.mockResolvedValue([thread(), { ...thread(), thread_id: THREAD_B, title: '新会话' }])
+    const harness = await mountWithProviders(<TraceSection />)
+    await settle()
+    await pickFirstThread(harness.host)
+
+    const reload = [...harness.host.querySelectorAll('button')].find((button) => button.textContent === '重新统计')!
+    await act(async () => { reload.click() })
+    expect(statsMock).toHaveBeenCalledTimes(2)
+    const staleSignal = statsMock.mock.calls[1]![1]!
+    await pickThread(harness.host, THREAD_B)
+    expect(staleSignal.aborted).toBe(true)
+    expect(statsMock).toHaveBeenCalledTimes(3)
+    await act(async () => { fresh.resolve(stats({ thread_id: THREAD_B, turns: 77 })) })
+    await settle()
+    expect(harness.text()).toContain('77')
+    await act(async () => { stale.resolve(stats({ thread_id: THREAD_A, turns: 2 })) })
+    await settle()
+    expect(harness.text()).toContain('77')
+    expect(harness.text()).not.toContain('2 回合')
     await harness.unmount()
   })
 

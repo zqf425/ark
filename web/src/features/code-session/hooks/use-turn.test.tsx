@@ -49,14 +49,16 @@ describe('useTurn failure classification', () => {
   it.each([
     ['validation_error', 400, 'permanent'],
     ['not_found', 404, 'permanent'],
-    ['unknown', 401, 'permanent']
+    ['unknown', 401, 'permanent'],
+    ['conflict', 409, 'permanent']
   ] as const)('classifies %s HTTP %i as %s', async (code, status, expected) => {
     const result = await deliverAfter(new ApiError({ code, status, message: 'rejected' }))
     expect(result).toBe(expected)
   })
 
   it.each([
-    ['conflict', 409, 'retry'],
+    ['unknown', 408, 'retry'],
+    ['unknown', 425, 'retry'],
     ['runtime_unavailable', 503, 'retry'],
     ['unknown', 429, 'retry']
   ] as const)('classifies %s HTTP %i as %s', async (code, status, expected) => {
@@ -64,8 +66,8 @@ describe('useTurn failure classification', () => {
     expect(result).toBe(expected)
   })
 
-  it('retries transport failures without an HTTP response', async () => {
+  it('never automatically resends a transport failure without an HTTP response', async () => {
     const result = await deliverAfter(new TypeError('network unavailable'))
-    expect(result).toBe('retry')
+    expect(result).toBe('permanent')
   })
 })

@@ -7,8 +7,6 @@
 //! A cancel keeps the results that already reached the settlement channel and
 //! writes synthetic rows only for the calls it actually interrupted (§2).
 
-use std::collections::BTreeMap;
-
 use super::*;
 
 impl Reactor {
@@ -164,10 +162,10 @@ impl Reactor {
             }
             return Ok((executions, true));
         }
-        let mut open: BTreeMap<String, &ToolCallRequest> = batch
-            .iter()
-            .map(|call| (call.call_id.clone(), call))
-            .collect();
+        // One flag per submission slot: true means Started is durable but its
+        // matching Finished is not. Call ids are not identities here because a
+        // malformed provider response may repeat them.
+        let mut open = vec![false; batch.len()];
         let result = self.run_batch_events(batch, &mut open).await;
         if let Err(err) = result {
             self.close_open_tool_calls_batch(batch, &open).await;
@@ -178,16 +176,13 @@ impl Reactor {
 
     /// Place a settled call into its submission-order slot (requirements §1).
     ///
-    /// Consuming match: each slot fills at most once, so a duplicate call id
-    /// keeps both rows instead of letting the second result overwrite the
-    /// first. Returns `(slot, execution)` on success, `None` when the result's
-    /// call id matches no open slot of this batch (a stray id can only come
-    /// from a malformed runner).
+    /// Each slot fills at most once, so duplicate call ids keep both rows.
+    /// The returned slot drives durable-open bookkeeping independently of id.
     fn settle_slot(
         batch: &[ToolCallRequest],
         slots: &mut [Option<ToolExecution>],
         item: crate::service::dispatch::SettledCall,
-    ) -> Option<ToolExecution> {
+    ) -> Option<(usize, ToolExecution)> {
         let crate::service::dispatch::SettledCall {
             slot, execution, ..
         } = item;
@@ -195,15 +190,15 @@ impl Reactor {
             return None;
         }
         slots[slot] = Some(execution.clone());
-        Some(execution)
+        Some((slot, execution))
     }
 
-    async fn run_batch_events<'a>(
+    async fn persist_batch_starts(
         &mut self,
-        batch: &'a [ToolCallRequest],
-        open: &mut BTreeMap<String, &'a ToolCallRequest>,
-    ) -> Result<(Vec<ToolExecution>, bool)> {
-        for call in batch {
+        batch: &[ToolCallRequest],
+        open: &mut [bool],
+    ) -> Result<()> {
+        for (slot, call) in batch.iter().enumerate() {
             self.writer
                 .append(self.events.tool_call_started(
                     &call.call_id,
@@ -211,131 +206,122 @@ impl Reactor {
                     call.arguments.clone(),
                 ))
                 .await?;
+            open[slot] = true;
         }
-        // History rows land once per batch, in submission order, from slots.
-        // `slots[i]` holds the settled execution of `batch[i]`, or `None` while
-        // the call is still in flight (§1 history rule: the model's ordering
-        // of its own tool results is the only order the provider history may
-        // show, and duplicate call ids each keep their own slot).
-        let mut slots: Vec<Option<ToolExecution>> = vec![None; batch.len()];
-        // Two independent facts (review fix: they were conflated before). Only
-        // a cancel that left unsettled slots makes the turn interrupted; a
-        // forwarder panic settles the missing calls as failures and the turn
-        // continues, so the model still sees every sibling result (§2.4/§2.5).
-        let mut cancel_hit = false;
-        let mut panic_detail: Option<String> = None;
+        Ok(())
+    }
 
+    async fn settle_received(
+        &mut self,
+        batch: &[ToolCallRequest],
+        open: &mut [bool],
+        slots: &mut [Option<ToolExecution>],
+        item: crate::service::dispatch::SettledCall,
+    ) -> Result<()> {
+        let Some((slot, execution)) = Self::settle_slot(batch, slots, item) else {
+            return Ok(());
+        };
+        self.finish_call(&execution).await?;
+        open[slot] = false;
+        Ok(())
+    }
+
+    async fn receive_batch_events(
+        &mut self,
+        batch: &[ToolCallRequest],
+        open: &mut [bool],
+        slots: &mut [Option<ToolExecution>],
+    ) -> Result<(bool, crate::service::dispatch::SettlementStream)> {
         let calls = batch.to_vec();
         let tools = Arc::clone(&self.tools);
         let mut stream = crate::service::dispatch::run_calls_streaming(tools, calls);
-        // Per-item select (requirements §2.2): each received call is settled
-        // *before* awaiting the next one, so no settled result ever lives in a
-        // future that a cancel would drop. On cancel: abort the forwarder —
-        // dropping the join_all tree drops every in-flight tool future, and a
-        // bash's kill_on_drop guard kills the child process, the v1 semantics
-        // a detached task would silently break — then drain what already
-        // reached the channel. No wait window: the boundary is the channel,
-        // not time (§2.3).
+        // Settle each item before awaiting the next, so cancel cannot discard a
+        // result already taken from the channel. Abort drops in-flight tools;
+        // the stream then drains only results that reached the channel.
         loop {
             tokio::select! {
                 biased;
                 _ = self.cancel.cancelled() => {
                     stream.abort();
                     while let Some(item) = stream.next().await {
-                        if let Some(slot_exec) = Self::settle_slot(batch, &mut slots, item) {
-                            self.finish_call(&slot_exec).await?;
-                            open.remove(&slot_exec.call_id);
-                        }
+                        self.settle_received(batch, open, slots, item).await?;
                     }
-                    cancel_hit = true;
-                    break;
+                    return Ok((true, stream));
                 }
                 item = stream.next() => {
                     match item {
-                        Some(item) => {
-                            if let Some(slot_exec) = Self::settle_slot(batch, &mut slots, item) {
-                                self.finish_call(&slot_exec).await?;
-                                open.remove(&slot_exec.call_id);
-                            }
-                        }
-                        // Stream exhausted: every call settled.
-                        None => break,
+                        Some(item) => self.settle_received(batch, open, slots, item).await?,
+                        None => return Ok((false, stream)),
                     }
                 }
             }
         }
-        // A panic inside the forwarder is invisible to the channel (the task
-        // dies without closing through join_all), so ask the join handle. The
-        // abort of the cancel path also lands here, but a cancelled join is
-        // not an error; only a real panic surfaces (§2.5).
+    }
+
+    async fn settle_missing_slots(
+        &mut self,
+        batch: &[ToolCallRequest],
+        open: &mut [bool],
+        slots: &mut [Option<ToolExecution>],
+        detail: String,
+    ) -> Result<()> {
+        for (slot, missing) in slots.iter_mut().enumerate() {
+            if missing.is_some() {
+                continue;
+            }
+            let call = &batch[slot];
+            let execution = ToolExecution {
+                call_id: call.call_id.clone(),
+                tool: call.tool.clone(),
+                ok: false,
+                content: String::new(),
+                duration_ms: 0,
+                detail: Some(detail.clone()),
+            };
+            self.finish_call(&execution).await?;
+            open[slot] = false;
+            *missing = Some(execution);
+        }
+        Ok(())
+    }
+
+    async fn run_batch_events(
+        &mut self,
+        batch: &[ToolCallRequest],
+        open: &mut [bool],
+    ) -> Result<(Vec<ToolExecution>, bool)> {
+        self.persist_batch_starts(batch, open).await?;
+        // History rows land once per batch in submission order, independently
+        // of completion order and duplicate call ids.
+        let mut slots: Vec<Option<ToolExecution>> = vec![None; batch.len()];
+        let (cancel_hit, mut stream) = self.receive_batch_events(batch, open, &mut slots).await?;
+        // A cancelled join is expected after abort; only a real panic supplies
+        // the synthetic failure detail. Panic is not a turn cancellation.
         if let Err(join_error) = stream.join().await {
             let detail = format!("tool batch task failed: {join_error}");
             tracing::error!("{detail}");
-            panic_detail = Some(detail);
-        }
-        // Synthetic rows for the never-settled rest: cancelled detail on the
-        // cancel path, the panic summary on the panic path. Settled calls keep
-        // their real result either way (§2.3).
-        if let Some(panic_detail) = panic_detail {
-            for (slot, missing) in slots.iter_mut().enumerate() {
-                if missing.is_some() {
-                    continue;
-                }
-                let call = &batch[slot];
-                let execution = ToolExecution {
-                    call_id: call.call_id.clone(),
-                    tool: call.tool.clone(),
-                    ok: false,
-                    content: String::new(),
-                    duration_ms: 0,
-                    detail: Some(panic_detail.clone()),
-                };
-                self.finish_call(&execution).await?;
-                open.remove(&call.call_id);
-                *missing = Some(execution);
-            }
+            self.settle_missing_slots(batch, open, &mut slots, detail)
+                .await?;
         }
         let had_gaps_before_synthetic = slots.iter().any(Option::is_none);
         if had_gaps_before_synthetic {
-            let detail = "cancelled before the call completed".to_string();
-            for (slot, missing) in slots.iter_mut().enumerate() {
-                if missing.is_some() {
-                    continue;
-                }
-                let call = &batch[slot];
-                let execution = ToolExecution {
-                    call_id: call.call_id.clone(),
-                    tool: call.tool.clone(),
-                    ok: false,
-                    content: String::new(),
-                    duration_ms: 0,
-                    detail: Some(detail.clone()),
-                };
-                self.finish_call(&execution).await?;
-                open.remove(&call.call_id);
-                *missing = Some(execution);
-            }
+            self.settle_missing_slots(
+                batch,
+                open,
+                &mut slots,
+                "cancelled before the call completed".to_string(),
+            )
+            .await?;
         }
-        // All open calls must now be settled: every slot got a real or a
-        // synthetic execution, so the journal shows no dangling start. Verify
-        // via the map instead of assuming, because a duplicate call id shares
-        // its map key across slots.
-        if !open.is_empty() {
-            self.close_open_tool_calls_batch(batch, open).await;
-        }
-        // History rows in submission order (§1); the consumer-visible history
-        // stays byte-identical to v1's for a fully-completed batch.
+        debug_assert!(open.iter().all(|open| !open));
         for (call, execution) in batch.iter().zip(slots.iter()) {
             if let Some(execution) = execution {
                 self.append_tool_history(call, execution);
             }
         }
         let executions: Vec<ToolExecution> = slots.into_iter().flatten().collect();
-        // §2.4 convergence: a cancel that fired when every call had already
-        // settled (no synthetic rows were needed) resolves as a normal
-        // completion — the select! double-ready race then cannot flip a fully
-        // successful batch into an aborted turn. The drive loop still observes
-        // the cancel token afterwards and ends the turn.
+        // A cancel that found every result already settled converges normally;
+        // the drive loop still observes the token afterwards.
         let interrupted = cancel_hit && had_gaps_before_synthetic;
         Ok((executions, interrupted))
     }
@@ -359,13 +345,9 @@ impl Reactor {
     /// still marked open. A healthy writer can still close starts that were
     /// durable before the failed append; a broken writer cannot be repaired
     /// here, so preserve the original error.
-    async fn close_open_tool_calls_batch(
-        &self,
-        batch: &[ToolCallRequest],
-        open: &BTreeMap<String, &ToolCallRequest>,
-    ) {
-        for call in batch {
-            if !open.contains_key(&call.call_id) {
+    async fn close_open_tool_calls_batch(&self, batch: &[ToolCallRequest], open: &[bool]) {
+        for (slot, call) in batch.iter().enumerate() {
+            if !open[slot] {
                 continue;
             }
             let event = self.events.tool_call_finished(

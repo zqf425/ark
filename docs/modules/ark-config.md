@@ -17,6 +17,10 @@ HTTP 配置与子代理配置保存都回写该路径。`AppState::new` 默认�
 - `HotRelisten`：重建监听，客户端依靠 `since_seq` 恢复；
 - `Restart`：整批 patch 被拒绝并返回字段清单，禁止部分应用。
 
+配置文件保存先同步临时文件再原子替换。Windows 保持 `MoveFileExW` 现有路径；Unix 在 rename
+后打开 parent directory（空 parent 视为 `.`）并 `sync_all`，确保新目录项持久化。目录打开或同步
+失败会明确返回错误，但此时 rename 已提交，不能把该错误解释为旧文档仍未替换。
+
 `ConfigStore` 使用自洽快照；校验或合并失败保留旧值。已经返回 `Applied` 的修改会立即替换内存
 快照，即使持久化失败也不回滚，而是告警；此后即使 `changed` 为空的空 patch 重试，也会重新持久化
 当前已应用快照，不会因“没有新字段”而再次跳过保存。已经运行的任务必须捕获并继续使用其创建时的

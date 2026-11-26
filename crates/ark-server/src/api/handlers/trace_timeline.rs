@@ -9,7 +9,7 @@
 //! (`ItemCreated/Updated/Completed` keep the last version per item id) so the
 //! timeline can never disagree with the conversation it drills into.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use ark_common::{ItemId, ThreadId, TurnId};
 use ark_contract::item::ToolPayload;
@@ -86,6 +86,9 @@ struct ModelWindow {
     duration_ms: u64,
 }
 
+type OpenCall = (DateTime<Utc>, Option<ItemId>);
+type OpenCalls = HashMap<String, VecDeque<OpenCall>>;
+
 /// The turn-scoped state one fold pass accumulates before spans are cut.
 #[derive(Default)]
 struct TimelineFold {
@@ -93,21 +96,18 @@ struct TimelineFold {
     /// the same collapse thread detail applies to streamed items.
     items: HashMap<ItemId, ThreadItem>,
     order: Vec<ItemId>,
-    /// Tool calls started in this turn, keyed by call id. The real log has
-    /// no `ToolCall` item events -- the `ToolCall` item only exists as the
-    /// store's read-side projection (`ark-store/items.rs` applies the raw
-    /// events) -- so tool spans must come from the events themselves:
-    /// `ToolCallStarted` supplies the true start instant, `ToolCallFinished`
-    /// the payload. Item-backed tool rows are then deduped against these.
-    open_calls: HashMap<String, DateTime<Utc>>,
-    /// One row per `ToolCallFinished` of this turn, keyed by call id; the
-    /// authoritative source of tool spans on real logs.
-    tool_calls: HashMap<String, TraceSpan>,
+    /// Tool calls started in this turn, keyed by call id. Each occurrence
+    /// keeps its own start and optional item id; finishes consume the oldest
+    /// open occurrence so reused call ids never overwrite earlier calls.
+    open_calls: OpenCalls,
+    /// One row per `ToolCallFinished` occurrence, in log order.
+    tool_calls: Vec<TraceSpan>,
     /// `provider:model` label the turn's opening user item carries; labels a
     /// `model_call` row when the `usage` event itself carries no name.
     model_label: Option<String>,
-    /// Compaction observed for this turn: start timestamp plus optional end.
-    compaction: Option<(DateTime<Utc>, Option<DateTime<Utc>>)>,
+    /// Every compaction window observed for this turn. Completed events close
+    /// the earliest unfinished start; an unmatched completion is a point.
+    compaction: Vec<(DateTime<Utc>, Option<DateTime<Utc>>)>,
     /// Rows cut from raw `RuntimeEvent::Error` records attributed to this
     /// turn: the event itself carries no turn id, so the turn that was open
     /// when the error was logged owns it (llm-rounds / trace-stats rule).
@@ -189,52 +189,22 @@ impl TimelineFold {
                 turn_id,
                 call_id,
                 timestamp,
+                item_id,
                 ..
             } => {
                 if *turn_id == turn {
-                    self.open_calls.insert(call_id.clone(), *timestamp);
+                    self.open_calls
+                        .entry(call_id.clone())
+                        .or_default()
+                        .push_back((*timestamp, *item_id));
                 }
             }
-            RuntimeEvent::ToolCallFinished {
-                turn_id,
-                timestamp,
-                call_id,
-                tool,
-                ok,
-                duration_ms,
-                output,
-                detail,
-                ..
-            } if *turn_id == turn => {
-                // The start instant is the authoritative `ToolCallStarted`
-                // time; fall back to `end - duration` so a missing start
-                // event still yields a correctly sized bar, and only a log
-                // missing both degrades to a point at the end.
-                let started = self.open_calls.get(call_id).copied().unwrap_or_else(|| {
-                    *timestamp
-                        - chrono::Duration::milliseconds(
-                            i64::try_from(*duration_ms).unwrap_or(i64::MAX),
-                        )
-                });
-                let span = tool_span(
-                    started,
-                    &ToolPayload {
-                        call_id: call_id.clone(),
-                        tool: tool.clone(),
-                        arguments: None,
-                        output: (!output.is_empty()).then(|| output.clone()),
-                        ok: Some(*ok),
-                        duration_ms: Some(*duration_ms),
-                    },
-                    None,
-                );
-                self.tool_calls.insert(call_id.clone(), span);
-            }
+            RuntimeEvent::ToolCallFinished { .. } => self.observe_tool_finished(event, turn),
             RuntimeEvent::CompactionStarted {
                 turn_id, timestamp, ..
             } => {
                 if *turn_id == turn {
-                    self.compaction = Some((*timestamp, None));
+                    self.compaction.push((*timestamp, None));
                 }
             }
             RuntimeEvent::CompactionCompleted {
@@ -246,50 +216,10 @@ impl TimelineFold {
             }
             RuntimeEvent::Error {
                 timestamp, message, ..
-            } => self.observe_error(*timestamp, message, turn),
-            // One usage event = one completed model round; the agent loop
-            // measured its wall clock. The usage timestamp is the round's
-            // END: the span starts at `end - duration` so model rounds tile
-            // the timeline instead of collapsing to points at their end
-            // instants (the "gantt has holes" defect). When the duration is
-            // missing (pre-field logs), the span stays a point at the end --
-            // no invented start.
-            RuntimeEvent::Usage {
-                turn_id,
-                timestamp,
-                usage,
-                ..
-            } if *turn_id == turn => {
-                let started = match usage.duration_ms {
-                    Some(ms) => {
-                        *timestamp
-                            - chrono::Duration::milliseconds(i64::try_from(ms).unwrap_or(i64::MAX))
-                    }
-                    None => *timestamp,
-                };
-                if let Some(duration_ms) = usage.duration_ms {
-                    // Only a measured call yields a window. Older logs with
-                    // no duration cannot own text: there is no honest start
-                    // to test `created_at` against, so those fragments are
-                    // dropped from this projection (see the contract docs).
-                    let end = *timestamp;
-                    let start = end
-                        - chrono::Duration::milliseconds(
-                            i64::try_from(duration_ms).unwrap_or(i64::MAX),
-                        );
-                    self.model_windows.push(ModelWindow {
-                        start,
-                        end,
-                        duration_ms,
-                    });
-                }
-                self.model_calls.push(model_call_span(
-                    started,
-                    usage.duration_ms,
-                    self.model_label.clone(),
-                    usage,
-                ));
+            } => {
+                self.observe_error(*timestamp, message, turn);
             }
+            RuntimeEvent::Usage { .. } => self.observe_usage(event, turn),
             _ => {}
         }
         // The model label only rides the opening user item; reading it from
@@ -300,6 +230,92 @@ impl TimelineFold {
                 self.model_label = item.model.clone();
             }
         }
+    }
+
+    fn observe_tool_finished(&mut self, event: &RuntimeEvent, turn: TurnId) {
+        let RuntimeEvent::ToolCallFinished {
+            turn_id,
+            timestamp,
+            call_id,
+            tool,
+            ok,
+            duration_ms,
+            output,
+            item_id,
+            ..
+        } = event
+        else {
+            return;
+        };
+        if *turn_id != turn {
+            return;
+        }
+        // Pair each finish with the oldest open occurrence. A missing start
+        // falls back to `end - duration`; only a log missing both degrades to
+        // a point at the end.
+        let (started, started_item) = self
+            .open_calls
+            .get_mut(call_id)
+            .and_then(VecDeque::pop_front)
+            .unwrap_or_else(|| {
+                (
+                    *timestamp
+                        - chrono::Duration::milliseconds(
+                            i64::try_from(*duration_ms).unwrap_or(i64::MAX),
+                        ),
+                    None,
+                )
+            });
+        let span = tool_span(
+            started,
+            &ToolPayload {
+                call_id: call_id.clone(),
+                tool: tool.clone(),
+                arguments: None,
+                output: (!output.is_empty()).then(|| output.clone()),
+                ok: Some(*ok),
+                duration_ms: Some(*duration_ms),
+            },
+            (*item_id).or(started_item),
+        );
+        self.tool_calls.push(span);
+    }
+
+    fn observe_usage(&mut self, event: &RuntimeEvent, turn: TurnId) {
+        let RuntimeEvent::Usage {
+            turn_id,
+            timestamp,
+            usage,
+            ..
+        } = event
+        else {
+            return;
+        };
+        if *turn_id != turn {
+            return;
+        }
+        // The usage timestamp is the round's END. Measured calls start at
+        // `end - duration`; older unmeasured samples stay points and provide
+        // no window for attributing streamed text.
+        let started = match usage.duration_ms {
+            Some(ms) => {
+                *timestamp - chrono::Duration::milliseconds(i64::try_from(ms).unwrap_or(i64::MAX))
+            }
+            None => *timestamp,
+        };
+        if let Some(duration_ms) = usage.duration_ms {
+            self.model_windows.push(ModelWindow {
+                start: started,
+                end: *timestamp,
+                duration_ms,
+            });
+        }
+        self.model_calls.push(model_call_span(
+            started,
+            usage.duration_ms,
+            self.model_label.clone(),
+            usage,
+        ));
     }
 
     /// Track which turn is open so turn-less events (raw errors) can be
@@ -364,13 +380,20 @@ impl TimelineFold {
         self.items.insert(item.item_id, item.clone());
     }
 
-    /// A completed compaction without a paired start still shows the
-    /// boundary happened in this turn; with one, it closes the window.
+    /// Close the earliest unfinished compaction; an unmatched completion still
+    /// records the boundary as a point span.
     fn observe_compaction_completed(&mut self, at: DateTime<Utc>) {
-        match &mut self.compaction {
-            Some((_, end @ None)) => *end = Some(at),
-            _ => self.compaction = Some((at, Some(at))),
+        if let Some((_, end)) = self.compaction.iter_mut().find(|(_, end)| end.is_none()) {
+            *end = Some(at);
+        } else {
+            self.compaction.push((at, Some(at)));
         }
+    }
+
+    fn checkpoint_has_event_window(&self, created_at: DateTime<Utc>) -> bool {
+        self.compaction
+            .iter()
+            .any(|(start, end)| created_at >= *start && end.is_none_or(|end| created_at <= end))
     }
 
     /// Cut the timeline rows from the folded state.
@@ -380,10 +403,10 @@ impl TimelineFold {
             let Some(item) = self.items.get(id) else {
                 continue;
             };
-            // One compaction is recorded twice (checkpoint item + the
-            // start/completed event pair). The event pair carries the real
-            // window, so when it exists the item row would only duplicate it.
-            if item.is_context_checkpoint() && self.compaction.is_some() {
+            // The event pair carries the real window. Only a checkpoint whose
+            // creation falls inside one is a duplicate; unrelated checkpoint
+            // items remain visible rather than disappearing globally.
+            if item.is_context_checkpoint() && self.checkpoint_has_event_window(item.created_at) {
                 continue;
             }
             // Tool calls never take the item path: real logs carry no
@@ -396,21 +419,18 @@ impl TimelineFold {
                 spans.push(span);
             }
         }
-        if let Some((started, ended)) = self.compaction {
-            spans.push(compaction_span(started, ended));
+        for (started, ended) in &self.compaction {
+            spans.push(compaction_span(*started, *ended));
         }
         // Tool spans come from `ToolCallFinished` events -- the only source on
         // real logs (`ToolCall` items are a read-side store projection of the
         // same events, which is why the item path above skips them).
-        let mut event_tools: Vec<TraceSpan> = self.tool_calls.values().cloned().collect();
+        let mut event_tools: Vec<TraceSpan> = self.tool_calls.clone();
         // A call the log started but never finished (crash, cancel) has no
         // event row: keep its item-derived point instead of dropping the
         // activity entirely.
         for item in self.items.values() {
-            let Some(payload) = item.tool.as_ref() else {
-                continue;
-            };
-            if self.tool_calls.contains_key(&payload.call_id) {
+            if item.tool.is_none() || event_tool_owns_item(item, &event_tools) {
                 continue;
             }
             if let Some(span) = item_span(item, &self.open_calls) {
@@ -430,14 +450,21 @@ impl TimelineFold {
     }
 }
 
-/// The item id a tool-call event writes, matching the store's fallback key.
-///
-/// Test-only today: real logs carry an explicit `item_id` on tool events, but
-/// the deterministic `tool_call:{call_id}` key is what `ark-store` projects
-/// for events without one, so the tests use it to build matching items.
-#[cfg(test)]
+/// The deterministic item id `ark-store` uses for legacy tool events without
+/// an explicit `item_id`. New logs navigate by their real item id instead.
 fn tool_item_id(call_id: &str) -> ItemId {
     ark_common::keyed_item_id(&format!("tool_call:{call_id}"))
+}
+
+fn event_tool_owns_item(item: &ThreadItem, tool_calls: &[TraceSpan]) -> bool {
+    let Some(payload) = item.tool.as_ref() else {
+        return false;
+    };
+    let legacy_item_id = tool_item_id(&payload.call_id);
+    tool_calls.iter().any(|span| {
+        span.item_id == Some(item.item_id)
+            || (span.item_id.is_none() && item.item_id == legacy_item_id)
+    })
 }
 
 /// Map a collapsed item to its timeline row; items without a row fall out.
@@ -446,7 +473,7 @@ fn tool_item_id(call_id: &str) -> ItemId {
 /// item creation when the start event never landed in the log). Streamed
 /// reasoning / assistant text returns `None` -- it is child content of a model
 /// call, attached to that row instead of taking Gantt space.
-fn item_span(item: &ThreadItem, open_calls: &HashMap<String, DateTime<Utc>>) -> Option<TraceSpan> {
+fn item_span(item: &ThreadItem, open_calls: &OpenCalls) -> Option<TraceSpan> {
     // A context checkpoint is a compaction boundary, not a plain notice.
     // (When the compaction event pair exists, the caller keeps one row per
     // compaction by skipping the item copy -- the events carry the window.)
@@ -491,15 +518,17 @@ fn error_span(item: &ThreadItem) -> TraceSpan {
 }
 
 /// The tool-call row from a collapsed `ToolCall` item.
-fn tool_span_from_item(
-    item: &ThreadItem,
-    open_calls: &HashMap<String, DateTime<Utc>>,
-) -> Option<TraceSpan> {
+fn tool_span_from_item(item: &ThreadItem, open_calls: &OpenCalls) -> Option<TraceSpan> {
     let payload = item.tool.as_ref()?;
     let started_at = open_calls
         .get(&payload.call_id)
-        .copied()
-        .unwrap_or(item.created_at);
+        .and_then(|calls| {
+            calls
+                .iter()
+                .find(|(_, item_id)| *item_id == Some(item.item_id))
+                .or_else(|| calls.front())
+        })
+        .map_or(item.created_at, |(started, _)| *started);
     Some(tool_span(started_at, payload, Some(item.item_id)))
 }
 

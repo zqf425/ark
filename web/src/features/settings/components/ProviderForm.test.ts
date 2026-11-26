@@ -3,6 +3,22 @@ import { buildEntry, draftFromView, emptyDraft } from './ProviderDraft'
 import { appendManualModel, mergeImportedModels, updateInventoryItem } from './ProviderCatalog'
 
 describe('provider edit draft', () => {
+  it('preserves full-entry advanced fields through the edit round trip', () => {
+    const draft = draftFromView({
+      id: 'gateway', base_url: 'https://gateway.example/v1', endpoint_format: 'openai_chat',
+      model: 'gpt-4o', enabled: true, api_key: 'secret', headers: { 'X-Test': 'yes' },
+      max_tokens: 4096, temperature: 0.25
+    })
+    expect(draft).toMatchObject({
+      headers_text: JSON.stringify({ 'X-Test': 'yes' }, null, 2),
+      max_tokens: '4096', temperature: '0.25'
+    })
+    expect(buildEntry(draft, true)).toMatchObject({
+      ok: true,
+      entry: { headers: { 'X-Test': 'yes' }, max_tokens: 4096, temperature: 0.25 }
+    })
+  })
+
   it('prefills the stored api key and keeps an existing label on save', () => {
     const draft = draftFromView({
       id: 'gateway',

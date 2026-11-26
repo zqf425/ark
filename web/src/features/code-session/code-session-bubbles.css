@@ -583,7 +583,7 @@
   gap: 4px;
   vertical-align: bottom;
   color: var(--ark-skill);
-  font-size: 14px;
+  font-size: calc(14px * var(--ark-scale));
   font-weight: 600;
   line-height: 1.4;
 }

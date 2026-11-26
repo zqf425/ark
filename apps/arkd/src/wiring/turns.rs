@@ -510,8 +510,8 @@ fn turn_source_texts(source: &TurnSource) -> (String, Option<String>) {
     }
 }
 
-/// Drop a recovery turn's user text when it would repeat the request that is
-/// already the last row of the replayed history.
+/// Drop a recovery turn's user text when the latest user request is already in
+/// the replayed history and no assistant completion follows it.
 ///
 /// A recovery is a *resumption* of a request the thread already carries: the
 /// failed turn persisted the user message before its model call died, and
@@ -525,9 +525,9 @@ fn turn_source_texts(source: &TurnSource) -> (String, Option<String>) {
 /// The suppression is deliberately narrow:
 /// * only a *recovery* is affected — a user, IM or scheduled turn always
 ///   persists its message, because the user may legitimately repeat a text;
-/// * the trailing history row must be that user message, i.e. the request was
-///   never answered. A trailing assistant/tool row means the previous request
-///   already completed and this text is a new repetition, so it persists;
+/// * the latest `User` row must carry that text and no later `Assistant` row
+///   may complete it. Tool rows do not complete a request and therefore do not
+///   prevent suppression; an assistant row does, making the text a new request;
 /// * attachment previews ride the message content but not the item text, so a
 ///   row that equals the text or opens with `text\n` counts as present.
 ///
@@ -541,17 +541,22 @@ pub(super) fn without_duplicate_recovery_text(
     let TurnSource::AutoRecovery { text, .. } = source else {
         return user_text;
     };
-    let duplicated = history.last().is_some_and(|message| {
-        if message.role != ark_ports::ModelRole::User {
-            return false;
-        }
-        message.content == *text
-            || message
-                .content
-                .strip_prefix(text.as_str())
-                .is_some_and(|rest| rest.starts_with('\n'))
-    });
-    if duplicated {
+    let Some(index) = history
+        .iter()
+        .rposition(|message| message.role == ark_ports::ModelRole::User)
+    else {
+        return user_text;
+    };
+    let message = &history[index];
+    let duplicated = message.content == *text
+        || message
+            .content
+            .strip_prefix(text.as_str())
+            .is_some_and(|rest| rest.starts_with('\n'));
+    let completed = history[index + 1..]
+        .iter()
+        .any(|message| message.role == ark_ports::ModelRole::Assistant);
+    if duplicated && !completed {
         None
     } else {
         user_text

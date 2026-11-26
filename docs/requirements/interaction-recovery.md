@@ -12,6 +12,8 @@
 - 当前已实现：supervisor 的终态补偿先回放窄生命周期事件，再按需补 `turn_started` 并追加终态；
   回放或追加失败会保留 active registry entry，finish、完成计数和后续调度均不执行。shutdown drain
   在超时后仍有未收敛 turn/child 时返回 `runtime_unavailable`，由 serve 向上传播。
+- 当前已实现：模型失败自动恢复只对最近 `User` 文本做去重，且其后没有 `Assistant` 完成回复；末尾
+  `Tool` 结果不阻止抑制。恢复 Started/Failed 交替不清失败 streak，仅新用户生命周期或非模型终态重置。
 
 ## 目标与非目标
 
@@ -27,6 +29,12 @@
 waiter id 交集得到的待处理 gate。web 在 detail 的 `last_seq` 建立 SSE 前 seed 该快照；后续状态仍由 SSE
 terminal/resolved 事件推进。事件日志仍是唯一持久化真源，已含 `turn_*`、`approval_*`、`user_input_*`
 与 `turn_steered`。
+
+web 的 `SessionStatsBar` 与 `TurnBlock` 共用 `gatePendingSince` 计算活跃时钟冻结点：
+`pendingGateCounts[turnId]` 为 0 或缺失时 O(1) 返回空，只有计数大于 0 才筛选该 turn 仍为 pending 的
+approval/user input，并取最早有限 `requested_at`；durable resolved 历史不参与。本地决议后计数保留到
+durable SSE，若已无 pending-status 记录则冻结在 `turnLastEventAt`，不向当前时间延展。该规则只约束
+UI 活跃时长估算，不把本地 204 当作权威 resolved，也不改变 reducer 的计数释放与活跃时间保护。
 
 ## 已批准方案
 

@@ -561,17 +561,16 @@ fn push_unique(vec: &mut Vec<String>, seen: &mut HashSet<String>, value: String)
 /// entry was already bumped) must still merge, or the counter semantics break
 /// down into duplicate entries (review findings S2/S3).
 fn push_failure(vec: &mut Vec<String>, line: &str, max_chars: usize) {
-    if line.chars().count() > max_chars {
-        return;
-    }
+    let line = truncate_middle(line, max_chars);
+    let key = failure_match_key(&line);
     if let Some(existing) = vec
         .iter_mut()
-        .find(|existing| failure_match_key(existing) == failure_match_key(line))
+        .find(|existing| failure_match_key(existing) == key)
     {
         bump_failure_count(existing);
         return;
     }
-    vec.push(line.to_owned());
+    vec.push(line);
 }
 
 /// Collapse digit runs to a placeholder so numeric variants compare equal —
@@ -583,7 +582,9 @@ fn push_failure(vec: &mut Vec<String>, line: &str, max_chars: usize) {
 /// match their bare form arriving from another channel (review S2/S3).
 fn failure_match_key(line: &str) -> String {
     let (bare, _) = strip_failure_counter(line);
-    let lower = bare.to_ascii_lowercase();
+    // Raw journal rows and previously rendered rows must converge on the same
+    // bounded representation before numeric normalization.
+    let lower = truncate_middle(bare, MAX_FAILURE_LINE_CHARS).to_ascii_lowercase();
     let chars: Vec<char> = lower.chars().collect();
     let mut normalized = String::with_capacity(lower.len());
     let mut index = 0usize;

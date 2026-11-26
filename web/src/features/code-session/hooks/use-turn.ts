@@ -18,23 +18,13 @@ function describe(error: unknown): string {
 
 export type TurnSendResult = 'accepted' | 'retry' | 'permanent'
 
-const PERMANENT_ERROR_CODES: ReadonlySet<string> = new Set([
-  'validation_error',
-  'not_found',
-  'unauthorized',
-  'not_implemented',
-  'mime_mismatch',
-  'attachment_in_use',
-  'attachment_not_associated'
-])
-
 function failureResult(error: unknown): TurnSendResult {
-  if (!(error instanceof ApiError)) return 'retry'
-  if (PERMANENT_ERROR_CODES.has(error.code)) return 'permanent'
-  if (error.code === 'unknown' && error.status < 500 && ![408, 425, 429].includes(error.status)) {
-    return 'permanent'
-  }
-  return 'retry'
+  // A transport failure can happen after arkd accepted the turn. Resending
+  // would duplicate user work without an explicit idempotency contract.
+  if (!(error instanceof ApiError)) return 'permanent'
+  return error.status >= 500 || error.status === 408 || error.status === 425 || error.status === 429
+    ? 'retry'
+    : 'permanent'
 }
 
 export type TurnApi = {
