@@ -132,7 +132,7 @@ describe('TraceTimelinePanel', () => {
     const modelRow = harness.host.querySelector<HTMLElement>('.ark-gantt__row[data-span-kind="model_call"]')!
     expect(modelRow.parentElement?.querySelector('.ark-gantt__detail-section')).toBeNull()
     // Collapsed rows never show details or metrics.
-    expect(harness.text()).not.toContain('输入 token')
+    expect(harness.text()).not.toContain('输入(未命中缓存)')
     expect(harness.text()).not.toContain('缓存指标')
 
     await act(async () => {
@@ -145,13 +145,19 @@ describe('TraceTimelinePanel', () => {
     expect(detail.textContent).toContain('开始')
     expect(detail.textContent).toContain('耗时')
     expect(detail.textContent).toContain('思考与回复')
-    expect(detail.textContent).toContain('输入 token: 1,234')
-    expect(detail.textContent).toContain('输出 token: 567')
+    // smart-ark 互斥口径:cached 是 prompt 的子集,不展示"输入总量"并列,
+    // 而是 未命中输入(334)/缓存命中(900)/输出(567) 三段,合计 1801。
     expect(detail.textContent).toContain('合计 token: 1,801')
-    expect(detail.textContent).toContain('命中 token: 900')
-    expect(detail.textContent).toContain('未命中 token: 334')
+    expect(detail.textContent).toContain('输入(未命中缓存): 334')
+    expect(detail.textContent).toContain('缓存命中: 900')
+    expect(detail.textContent).toContain('输出 token: 567')
     expect(detail.textContent).toContain('命中率: 72.9%')
     expect(detail.textContent).not.toContain('供应商未上报缓存统计')
+    // 三段宽度之和应铺满条:334+900+567 = 1801 = total。
+    const widths = [...detail.querySelectorAll<HTMLElement>('.ark-gantt__token-segment')]
+      .map((segment) => Number.parseFloat(segment.style.width))
+    expect(widths).toHaveLength(3)
+    expect(widths.reduce((sum, value) => sum + value, 0)).toBeCloseTo(100, 4)
     const rows = [...detail.querySelectorAll('.ark-gantt__detail-row')]
     expect(rows).toHaveLength(3)
     expect(rows.map((row) => row.querySelector('.ark-gantt__detail-text')?.textContent)).toEqual(details.map((detailItem) => detailItem.text_snippet))
@@ -166,14 +172,14 @@ describe('TraceTimelinePanel', () => {
   it('adds usage metrics to the fixture model call when its row is expanded', async () => {
     const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
     await settle()
-    expect(harness.text()).not.toContain('输入 token')
+    expect(harness.text()).not.toContain('输入(未命中缓存)')
     const modelRow = harness.host.querySelector<HTMLElement>('.ark-gantt__row[data-span-kind="model_call"]')!
     await act(async () => {
       modelRow.click()
     })
     await settle()
     const detail = modelRow.parentElement!.querySelector('.ark-gantt__detail')!
-    expect(detail.textContent).toContain('输入 token: 1,234')
+    expect(detail.textContent).toContain('输入(未命中缓存): 334')
     expect(detail.textContent).toContain('命中率: 72.9%')
     await harness.unmount()
   })
@@ -193,7 +199,7 @@ describe('TraceTimelinePanel', () => {
     await act(async () => { modelRow.click() })
     await settle()
     const detail = modelRow.parentElement!.querySelector('.ark-gantt__detail')!
-    expect(detail.textContent).toContain('输入 token: 12')
+    expect(detail.textContent).toContain('输入(未命中缓存): 12')
     expect(detail.textContent).toContain('供应商未上报缓存统计')
     expect(detail.textContent).not.toContain('命中 token')
     expect(detail.textContent).not.toContain('未命中 token')

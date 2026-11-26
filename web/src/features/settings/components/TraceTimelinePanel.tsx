@@ -117,26 +117,71 @@ function formatCount(value: number, locale: ReturnType<typeof useI18n>['locale']
 }
 
 /**
- * Token counters of one model call. Required fields are always present on the
- * wire; only the percentage formatter is locale-aware because the provider
- * already computed the rate — the renderer never divides token counters.
+ * Mutually exclusive token segments, mirroring smart-ark's
+ * `buildTokenSegments`: `cached` is a subset of `prompt` (OpenAI counts
+ * cache hits inside prompt_tokens; Anthropic decomposes prompt into input +
+ * cache_read + cache_creation), so input-total and cache-hit must never be
+ * presented side by side as if they were disjoint. Splitting into
+ * uncached-input / cache-hit / output makes the shares sum to `total` and
+ * every percentage honest. Only arithmetic the wire does not carry; no
+ * provider value is invented when the cache counters are absent.
+ */
+function tokenSegments(usage: TraceSpanUsage): Array<{ key: 'uncached' | 'hit' | 'output'; labelKey: 'settings.trace.gantt.tokenUncached' | 'settings.trace.gantt.tokenCached' | 'settings.trace.gantt.tokenOutput'; value: number }> {
+  const prompt = Math.max(0, usage.prompt_tokens)
+  const completion = Math.max(0, usage.completion_tokens)
+  const cached = usage.cache_hit_tokens != null
+    ? Math.max(0, Math.min(usage.cache_hit_tokens, prompt))
+    : 0
+  const uncached = Math.max(0, prompt - cached)
+  const segments: Array<{ key: 'uncached' | 'hit' | 'output'; labelKey: 'settings.trace.gantt.tokenUncached' | 'settings.trace.gantt.tokenCached' | 'settings.trace.gantt.tokenOutput'; value: number }> = [
+    { key: 'uncached', labelKey: 'settings.trace.gantt.tokenUncached', value: uncached },
+    { key: 'hit', labelKey: 'settings.trace.gantt.tokenCached', value: cached },
+    { key: 'output', labelKey: 'settings.trace.gantt.tokenOutput', value: completion },
+  ]
+  return segments.filter((segment) => segment.value > 0)
+}
+
+/**
+ * Token composition bar + per-segment counts, following smart-ark's
+ * `buildTokenChartHtml`. The total row stays visible so the shares have a
+ * denominator; a provider that omits cache counters simply renders the
+ * uncached-input and output segments, without claiming a cache split.
  */
 function TokenMetrics({ usage, locale }: { usage: TraceSpanUsage; locale: ReturnType<typeof useI18n>['locale'] }): JSX.Element {
   const { t } = useI18n()
+  const segments = tokenSegments(usage)
+  const denominator = Math.max(1, usage.total_tokens)
   return (
     <DetailSection title={t('settings.trace.gantt.tokenTitle')}>
-      <div className="ark-gantt__detail-metrics">
-        <span>{t('settings.trace.gantt.tokenPrompt')}: <b>{formatCount(usage.prompt_tokens, locale)}</b></span>
-        <span>{t('settings.trace.gantt.tokenCompletion')}: <b>{formatCount(usage.completion_tokens, locale)}</b></span>
-        <span>{t('settings.trace.gantt.tokenTotal')}: <b>{formatCount(usage.total_tokens, locale)}</b></span>
+      <div className="ark-gantt__token-total">
+        {t('settings.trace.gantt.tokenTotal')}: <b>{formatCount(usage.total_tokens, locale)}</b>
+      </div>
+      <div className="ark-gantt__token-bar" role="img" aria-label={t('settings.trace.gantt.tokenTitle')}>
+        {segments.map((segment) => (
+          <span
+            key={segment.key}
+            className={`ark-gantt__token-segment is-${segment.key}`}
+            style={{ width: `${(segment.value / denominator) * 100}%` }}
+          />
+        ))}
+      </div>
+      <div className="ark-gantt__token-legend">
+        {segments.map((segment) => (
+          <span key={segment.key} className="ark-gantt__token-legend-item">
+            <i className={`is-${segment.key}`} aria-hidden="true" />
+            {t(segment.labelKey)}: <b>{formatCount(segment.value, locale)}</b>
+            <em>{new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 1 }).format(segment.value / denominator)}</em>
+          </span>
+        ))}
       </div>
     </DetailSection>
   )
 }
 
 /**
- * Cache metrics: every optional field renders only when the server sent it.
- * All three absent -> one localized "not reported" line; no synthesized zero.
+ * Cache summary: the hit rate already comes from the provider (or its
+ * documented derivation) — the renderer only formats it. All fields absent
+ * means "not reported", never a synthesized zero.
  */
 function CacheMetrics({ usage, locale }: { usage: TraceSpanUsage; locale: ReturnType<typeof useI18n>['locale'] }): JSX.Element {
   const { t } = useI18n()
