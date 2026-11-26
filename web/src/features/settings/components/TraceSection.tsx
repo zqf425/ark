@@ -29,6 +29,7 @@ import { translateNow } from '../../../shared/i18n/current'
 import { useMounted } from '../../../shared/api/use-mounted'
 import { LoadError, Notice, SettingsSection, Skeleton } from './SectionShell'
 import { TraceCharts } from './TraceCharts'
+import { SessionTokenOverview } from './SessionTokenOverview'
 import { TraceTimelinePanel } from './TraceTimelinePanel'
 import { formatDurationWordsMs } from './trace-format'
 
@@ -268,6 +269,7 @@ export function TraceSection(): JSX.Element {
       {statsLoaded && stats ? (
         <>
           <MetricRow stats={stats} locale={locale} />
+          <SessionTokenOverview usage={stats.usage} locale={locale} />
           <TraceCharts stats={stats} expandedTurnId={expandedTurnId} onToggleTurn={toggleTurn} renderTimeline={renderTimeline} />
         </>
       ) : null}

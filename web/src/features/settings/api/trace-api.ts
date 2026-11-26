@@ -22,6 +22,14 @@ import type {
   TraceTimeline,
   TurnStat
 } from '../../../generated'
+import {
+  traceTokenCacheReported,
+  traceTokenSegments,
+  type TraceTokenSegment
+} from './trace-token-segments'
+
+export type { TraceTokenSegment }
+export { traceTokenCacheReported, traceTokenSegments }
 
 export type {
   ToolStat,

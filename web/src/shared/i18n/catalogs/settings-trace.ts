@@ -98,6 +98,10 @@ export const SETTINGS_TRACE_MESSAGES = {
   'settings.trace.gantt.cacheRate': ['命中率', 'Hit rate'],
   'settings.trace.gantt.cacheRateApprox': ['约', 'approx.'],
   'settings.trace.gantt.cacheUnreported': ['供应商未上报缓存统计', 'Cache statistics not reported by provider'],
+
+  // Session-level token overview: the mutually exclusive shares reuse the
+  // gantt names, while the panel title stays specific to the whole session.
+  'settings.trace.token.title': ['会话 Token 构成', 'Session token composition'],
   'settings.trace.timeline.ganttHint': [
     '横条按真实耗时在共享时间轴上展开;无实测时长的文本行显示为刻度点。',
     'Bars scale by real duration on one shared axis; text spans without a measured duration show as ticks.'

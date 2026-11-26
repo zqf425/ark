@@ -17,9 +17,10 @@ import { installBrowserStubs, mountWithProviders, settle } from '../../../shared
 import { fetchTraceTimeline, type TraceTimeline } from '../api/trace-api'
 import { TraceTimelinePanel } from './TraceTimelinePanel'
 
-vi.mock('../api/trace-api', () => ({
-  fetchTraceTimeline: vi.fn()
-}))
+vi.mock('../api/trace-api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/trace-api')>()
+  return { ...actual, fetchTraceTimeline: vi.fn() }
+})
 
 const timelineMock = vi.mocked(fetchTraceTimeline)
 

@@ -24,21 +24,20 @@ import {
 } from '../api/trace-api'
 import { TraceSection } from './TraceSection'
 
-vi.mock('../api/trace-api', () => ({
-  fetchTraceStats: vi.fn(),
-  fetchTraceTimeline: vi.fn(),
-  listThreads: vi.fn(),
-  buildAnalysisPrompt: vi.fn(() => 'PROMPT'),
-  analysisThreadTitle: vi.fn((title: string) => `AI分析-${title}`),
-  createAnalysisThread: vi.fn(),
-  startAnalysisTurn: vi.fn(),
-  traceTokenTotals: vi.fn((usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined) => ({
-    prompt_tokens: usage?.prompt_tokens ?? 0,
-    completion_tokens: usage?.completion_tokens ?? 0,
-    total_tokens: usage?.total_tokens ?? (usage?.prompt_tokens ?? 0) + (usage?.completion_tokens ?? 0)
-  })),
-  TRACE_PROMPT_JSON_LIMIT_BYTES: 8 * 1024
-}))
+vi.mock('../api/trace-api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/trace-api')>()
+  return {
+    ...actual,
+    fetchTraceStats: vi.fn(),
+    fetchTraceTimeline: vi.fn(),
+    listThreads: vi.fn(),
+    buildAnalysisPrompt: vi.fn(() => 'PROMPT'),
+    analysisThreadTitle: vi.fn((title: string) => `AI分析-${title}`),
+    createAnalysisThread: vi.fn(),
+    startAnalysisTurn: vi.fn(),
+    TRACE_PROMPT_JSON_LIMIT_BYTES: 8 * 1024
+  }
+})
 
 const listMock = vi.mocked(listThreads)
 const statsMock = vi.mocked(fetchTraceStats)
@@ -87,7 +86,14 @@ function stats(overrides: Partial<TraceStatsResponse> = {}): TraceStatsResponse 
     turns: 2,
     active_ms: 65_000,
     model_calls: 5,
-    usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
+    usage: {
+      prompt_tokens: 1_000,
+      completion_tokens: 500,
+      total_tokens: 1_500,
+      cache_hit_tokens: 300,
+      cache_miss_tokens: 700,
+      cache_hit_rate: 0.3
+    },
     tool_calls: 4,
     failed_tool_calls: 1,
     active_days: 1,
@@ -176,6 +182,85 @@ describe('TraceSection', () => {
     // Loading stats is still read-only.
     expect(createMock).not.toHaveBeenCalled()
     expect(turnMock).not.toHaveBeenCalled()
+    await harness.unmount()
+  })
+
+  it('renders the session token overview with three exclusive shares and the reported hit rate', async () => {
+    const harness = await mountWithProviders(<TraceSection />)
+    await settle()
+    await pickFirstThread(harness.host)
+
+    const panel = harness.host.querySelector('.ark-trace__token-overview')!
+    expect(panel).not.toBeNull()
+    expect(panel.textContent).toContain('会话 Token 构成')
+    expect(panel.textContent).toContain('合计 token: 1,500')
+    expect(panel.textContent).toContain('缓存命中: 300')
+    expect(panel.textContent).toContain('输入(未命中缓存): 700')
+    expect(panel.textContent).toContain('输出 token: 500')
+    expect(panel.textContent).toContain('命中率: 30%')
+    expect(panel.textContent).not.toContain('供应商未上报缓存统计')
+    const widths = [...panel.querySelectorAll<HTMLElement>('.ark-trace__token-segment')]
+      .map((segment) => Number.parseFloat(segment.style.width))
+    expect(widths).toHaveLength(3)
+    expect(widths.reduce((sum, value) => sum + value, 0)).toBeCloseTo(100, 4)
+    expect(widths[1]).toBeCloseTo(20, 4)
+    // Legend percentages match the same denominator as the bar widths.
+    const shares = [...panel.querySelectorAll('.ark-trace__token-legend-item em')].map((em) => em.textContent)
+    expect(shares).toEqual(['46.7%', '20%', '33.3%'])
+    // The outer panel sits between the metric cards and the charts.
+    const children = [...harness.host.querySelectorAll('.ark-settings__section > *')]
+    expect(children.findIndex((node) => node.classList.contains('ark-trace__metrics')))
+      .toBeLessThan(children.findIndex((node) => node.classList.contains('ark-trace__token-overview')))
+    expect(children.findIndex((node) => node.classList.contains('ark-trace__token-overview')))
+      .toBeLessThan(children.findIndex((node) => node.classList.contains('ark-trace__charts')))
+    await harness.unmount()
+  })
+
+  it('shows only input/output shares when no cache counter was reported', async () => {
+    statsMock.mockResolvedValue(stats({
+      usage: { prompt_tokens: 12, completion_tokens: 34, total_tokens: 46 }
+    }))
+    const harness = await mountWithProviders(<TraceSection />)
+    await settle()
+    await pickFirstThread(harness.host)
+
+    const panel = harness.host.querySelector('.ark-trace__token-overview')!
+    expect(panel.textContent).toContain('输入(未命中缓存): 12')
+    expect(panel.textContent).toContain('输出 token: 34')
+    expect(panel.textContent).toContain('供应商未上报缓存统计')
+    expect(panel.textContent).not.toContain('缓存命中:')
+    expect(panel.textContent).not.toContain('命中率')
+    expect(panel.querySelectorAll('.ark-trace__token-segment')).toHaveLength(2)
+    await harness.unmount()
+  })
+
+  it('marks an approximate session cache rate with the localized tag', async () => {
+    statsMock.mockResolvedValue(stats({
+      usage: {
+        prompt_tokens: 1_000,
+        completion_tokens: 200,
+        total_tokens: 1_200,
+        cache_hit_tokens: 900,
+        cache_hit_rate: 0.42,
+        cache_hit_rate_approximate: true
+      }
+    }))
+    const harness = await mountWithProviders(<TraceSection />)
+    await settle()
+    await pickFirstThread(harness.host)
+
+    const panel = harness.host.querySelector('.ark-trace__token-overview')!
+    expect(panel.textContent).toContain('命中率: 约 42%')
+    expect(panel.textContent).not.toContain('供应商未上报缓存统计')
+    await harness.unmount()
+  })
+
+  it('does not render the token overview without a selected thread', async () => {
+    const harness = await mountWithProviders(<TraceSection />)
+    await settle()
+
+    expect(harness.host.querySelector('.ark-trace__token-overview')).toBeNull()
+    expect(harness.text()).not.toContain('会话 Token 构成')
     await harness.unmount()
   })
 

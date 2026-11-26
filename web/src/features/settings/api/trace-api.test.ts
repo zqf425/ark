@@ -11,6 +11,8 @@ import type { Usage } from '../../../shared/contracts'
 import {
   analysisThreadTitle,
   buildAnalysisPrompt,
+  traceTokenCacheReported,
+  traceTokenSegments,
   traceTokenTotals,
   TRACE_PROMPT_JSON_LIMIT_BYTES,
   type TraceStatsResponse
@@ -115,6 +117,41 @@ describe('traceTokenTotals', () => {
   it('falls back to the sum and to zeros for a missing usage', () => {
     expect(traceTokenTotals(usage({ total_tokens: undefined })).total_tokens).toBe(1_500)
     expect(traceTokenTotals(undefined)).toEqual({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
+  })
+})
+
+describe('traceTokenSegments', () => {
+  it('splits prompt into exclusive input-miss/cache-hit shares and keeps the output share', () => {
+    const segments = traceTokenSegments(usage({ cache_hit_tokens: 600, cache_miss_tokens: 400 }))
+    expect(segments).toEqual([
+      { key: 'uncached', labelKey: 'settings.trace.gantt.tokenUncached', value: 400 },
+      { key: 'hit', labelKey: 'settings.trace.gantt.tokenCached', value: 600 },
+      { key: 'output', labelKey: 'settings.trace.gantt.tokenOutput', value: 500 }
+    ])
+    expect(segments.reduce((sum, segment) => sum + segment.value, 0)).toBe(1_500)
+  })
+
+  it('caps a reported hit count at prompt so segments never overlap', () => {
+    // A provider may report cache hits beyond the prompt total; the excess
+    // must not turn the shares into a double count.
+    expect(traceTokenSegments(usage({ cache_hit_tokens: 4_000 })).map((segment) => [segment.key, segment.value]))
+      .toEqual([['hit', 1_000], ['output', 500]])
+  })
+
+  it('renders only input/output when no cache field is reported', () => {
+    expect(traceTokenCacheReported(usage())).toBe(false)
+    expect(traceTokenSegments(usage())).toEqual([
+      { key: 'uncached', labelKey: 'settings.trace.gantt.tokenUncached', value: 1_000 },
+      { key: 'output', labelKey: 'settings.trace.gantt.tokenOutput', value: 500 }
+    ])
+    expect(traceTokenCacheReported(usage({ cache_miss_tokens: 100 }))).toBe(true)
+    expect(traceTokenCacheReported(usage({ cache_hit_rate: 0.2 }))).toBe(true)
+    expect(traceTokenCacheReported(undefined)).toBe(false)
+  })
+
+  it('clamps negative wire counters and handles an absent usage', () => {
+    expect(traceTokenSegments(usage({ prompt_tokens: -10, completion_tokens: -5, cache_hit_tokens: 3 }))).toEqual([])
+    expect(traceTokenSegments(undefined)).toEqual([])
   })
 })
 

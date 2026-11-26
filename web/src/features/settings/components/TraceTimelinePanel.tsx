@@ -19,6 +19,7 @@ import { useMounted } from '../../../shared/api/use-mounted'
 import { formatClock } from '../../../shared/format'
 import {
   fetchTraceTimeline,
+  traceTokenSegments,
   type TraceSpanDetail,
   type TraceSpanDetailKind,
   type TraceSpanUsage,
@@ -117,31 +118,6 @@ function formatCount(value: number, locale: ReturnType<typeof useI18n>['locale']
 }
 
 /**
- * Mutually exclusive token segments, mirroring smart-ark's
- * `buildTokenSegments`: `cached` is a subset of `prompt` (OpenAI counts
- * cache hits inside prompt_tokens; Anthropic decomposes prompt into input +
- * cache_read + cache_creation), so input-total and cache-hit must never be
- * presented side by side as if they were disjoint. Splitting into
- * uncached-input / cache-hit / output makes the shares sum to `total` and
- * every percentage honest. Only arithmetic the wire does not carry; no
- * provider value is invented when the cache counters are absent.
- */
-function tokenSegments(usage: TraceSpanUsage): Array<{ key: 'uncached' | 'hit' | 'output'; labelKey: 'settings.trace.gantt.tokenUncached' | 'settings.trace.gantt.tokenCached' | 'settings.trace.gantt.tokenOutput'; value: number }> {
-  const prompt = Math.max(0, usage.prompt_tokens)
-  const completion = Math.max(0, usage.completion_tokens)
-  const cached = usage.cache_hit_tokens != null
-    ? Math.max(0, Math.min(usage.cache_hit_tokens, prompt))
-    : 0
-  const uncached = Math.max(0, prompt - cached)
-  const segments: Array<{ key: 'uncached' | 'hit' | 'output'; labelKey: 'settings.trace.gantt.tokenUncached' | 'settings.trace.gantt.tokenCached' | 'settings.trace.gantt.tokenOutput'; value: number }> = [
-    { key: 'uncached', labelKey: 'settings.trace.gantt.tokenUncached', value: uncached },
-    { key: 'hit', labelKey: 'settings.trace.gantt.tokenCached', value: cached },
-    { key: 'output', labelKey: 'settings.trace.gantt.tokenOutput', value: completion },
-  ]
-  return segments.filter((segment) => segment.value > 0)
-}
-
-/**
  * Token composition bar + per-segment counts, following smart-ark's
  * `buildTokenChartHtml`. The total row stays visible so the shares have a
  * denominator; a provider that omits cache counters simply renders the
@@ -149,7 +125,7 @@ function tokenSegments(usage: TraceSpanUsage): Array<{ key: 'uncached' | 'hit' |
  */
 function TokenMetrics({ usage, locale }: { usage: TraceSpanUsage; locale: ReturnType<typeof useI18n>['locale'] }): JSX.Element {
   const { t } = useI18n()
-  const segments = tokenSegments(usage)
+  const segments = traceTokenSegments(usage)
   const denominator = Math.max(1, usage.total_tokens)
   return (
     <DetailSection title={t('settings.trace.gantt.tokenTitle')}>

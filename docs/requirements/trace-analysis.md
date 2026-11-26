@@ -133,6 +133,23 @@ v1 只给了聚合数字与 Top 清单,无法回答"这个回合的 2 分钟花�
   加载态与空态;不新增依赖,不新增 npm 包。
 - 仅在用户点击时请求该端点(每回合一次,无预取)。
 
+### v2.2:会话级 token / 缓存概览(当前实现)
+
+- `TraceSection` 在指标卡与图表之间渲染 `SessionTokenOverview`:数据直接取
+  `TraceStatsResponse.usage`(后端 `Usage::merge` 的会话级结果),前端只做格式化与
+  互斥分段,不再 merge 也不推算缓存字段。
+- 互斥口径复用 smart-ark `buildTokenSegments`:`cached` 是 `prompt` 的子集,
+  三段为输入未命中(`prompt - cached`)/缓存命中(`cached`)/输出(`completion`),
+  和为 `total`;缓存字段全缺时只画输入/输出两段并显示「供应商未上报缓存统计」,
+  不把缺失值当成 `cached = 0`。命中率与「约」标记只读后端已有值。
+- 分段唯一宿主在 `features/settings/api/trace-token-segments.ts`,由
+  `trace-api.ts` re-export:`TraceSection` 概览与单回合 `TraceTimelinePanel`
+  详情都经 api 层导入同一函数,禁止组件间复制或跨 feature 导入组件内部函数。
+- 面板文案登记 `settings-trace.ts` 中英双语,样式为 `settings-trace.css` 的
+  `ark-trace__token-*`,复用甘特色板但占满面板宽度,不依赖甘特 180px 标签列。
+- 验证:`trace-api.test.ts` 钉住分段裁剪与缓存缺失行为,`TraceSection.test.tsx`
+  钉住会话概览的三段数值/占比、未上报提示与未选中线程不渲染。
+
 ### v2.1:模型调用行的 token / 缓存指标(当前实现)
 
 - `TraceSpan` 的 `model_call` 行携带可选 `usage`(`TraceSpanUsage`,镜像单次
