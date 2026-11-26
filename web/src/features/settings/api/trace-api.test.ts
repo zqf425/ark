@@ -20,7 +20,7 @@ import {
 } from './trace-api'
 
 function usage(overrides: Partial<Usage> = {}): Usage {
-  return { prompt_tokens: 1_000, completion_tokens: 500, total_tokens: 1_500, ...overrides }
+  return { prompt_tokens: 1_000, completion_tokens: 500, total_tokens: 1_600, ...overrides }
 }
 
 function stats(overrides: Partial<TraceStatsResponse> = {}): TraceStatsResponse {
@@ -112,7 +112,7 @@ describe('buildAnalysisPrompt', () => {
 
 describe('traceTokenTotals', () => {
   it('keeps the authoritative total when the usage carries one', () => {
-    expect(traceTokenTotals(usage())).toEqual({ prompt_tokens: 1_000, completion_tokens: 500, total_tokens: 1_500 })
+    expect(traceTokenTotals(usage())).toEqual({ prompt_tokens: 1_000, completion_tokens: 500, total_tokens: 1_600 })
   })
 
   it('falls back to the sum and to zeros for a missing usage', () => {
@@ -139,14 +139,20 @@ describe('traceCacheHitRate', () => {
 })
 
 describe('traceTokenSegments', () => {
-  it('splits prompt into exclusive input-miss/cache-hit shares and keeps the output share', () => {
-    const segments = traceTokenSegments(usage({ cache_hit_tokens: 600, cache_miss_tokens: 400 }))
+  it('splits prompt into four exclusive shares when hit and miss are both reported', () => {
+    const segments = traceTokenSegments(usage({ cache_hit_tokens: 600, cache_miss_tokens: 300 }))
     expect(segments).toEqual([
-      { key: 'uncached', labelKey: 'settings.trace.gantt.tokenUncached', value: 400 },
+      { key: 'noncached', labelKey: 'settings.trace.gantt.tokenNoncached', value: 100 },
+      { key: 'miss', labelKey: 'settings.trace.gantt.tokenMiss', value: 300 },
       { key: 'hit', labelKey: 'settings.trace.gantt.tokenCached', value: 600 },
       { key: 'output', labelKey: 'settings.trace.gantt.tokenOutput', value: 500 }
     ])
-    expect(segments.reduce((sum, segment) => sum + segment.value, 0)).toBe(1_500)
+    expect(segments.reduce((sum, segment) => sum + segment.value, 0)).toBe(100 + 300 + 600 + 500)
+  })
+
+  it('keeps the reported miss share when hit and miss leave no non-cached input', () => {
+    expect(traceTokenSegments(usage({ cache_hit_tokens: 600, cache_miss_tokens: 400 })).map((segment) => [segment.key, segment.value]))
+      .toEqual([['miss', 400], ['hit', 600], ['output', 500]])
   })
 
   it('caps a reported hit count at prompt so segments never overlap', () => {
@@ -154,12 +160,14 @@ describe('traceTokenSegments', () => {
     // must not turn the shares into a double count.
     expect(traceTokenSegments(usage({ cache_hit_tokens: 4_000 })).map((segment) => [segment.key, segment.value]))
       .toEqual([['hit', 1_000], ['output', 500]])
+    expect(traceTokenSegments(usage({ cache_hit_tokens: 1_300, cache_miss_tokens: 500 })).map((segment) => [segment.key, segment.value]))
+      .toEqual([['hit', 1_000], ['output', 500]])
   })
 
   it('renders only input/output when no cache field is reported', () => {
     expect(traceTokenCacheReported(usage())).toBe(false)
     expect(traceTokenSegments(usage())).toEqual([
-      { key: 'uncached', labelKey: 'settings.trace.gantt.tokenUncached', value: 1_000 },
+      { key: 'noncached', labelKey: 'settings.trace.gantt.tokenNoncached', value: 1_000 },
       { key: 'output', labelKey: 'settings.trace.gantt.tokenOutput', value: 500 }
     ])
     expect(traceTokenCacheReported(usage({ cache_miss_tokens: 100 }))).toBe(true)

@@ -590,9 +590,9 @@
   color: var(--ark-text-faint);
 }
 
-/* Token composition bar: three mutually exclusive segments (uncached
-   input / cache hit / output) mirroring smart-ark's buildTokenSegments.
-   Widths are shares of total_tokens; the legend keeps exact numbers. */
+/* Token composition bar: up to four mutually exclusive segments (non-cached
+   input / cache miss / cache hit / output). Widths are shares of total_tokens;
+   the legend keeps exact numbers. */
 .ark-gantt__token-total {
   flex-basis: 100%;
   font-size: calc(11px * var(--ark-scale));
@@ -608,7 +608,8 @@
   background: var(--ark-bg-hover);
 }
 
-.ark-gantt__token-segment.is-uncached { background: #3b82f6; }
+.ark-gantt__token-segment.is-noncached { background: #3b82f6; }
+.ark-gantt__token-segment.is-miss { background: #06b6d4; }
 .ark-gantt__token-segment.is-hit { background: #10b981; }
 .ark-gantt__token-segment.is-output { background: #f59e0b; }
 
@@ -634,7 +635,8 @@
   border-radius: 2px;
 }
 
-.ark-gantt__token-legend-item i.is-uncached { background: #3b82f6; }
+.ark-gantt__token-legend-item i.is-noncached { background: #3b82f6; }
+.ark-gantt__token-legend-item i.is-miss { background: #06b6d4; }
 .ark-gantt__token-legend-item i.is-hit { background: #10b981; }
 .ark-gantt__token-legend-item i.is-output { background: #f59e0b; }
 
@@ -647,7 +649,7 @@
 
 /*
  * Whole-session composition between the metric cards and the charts. The
- * three disjoint segments reuse the gantt palette but fill the full panel
+ * up to four disjoint segments reuse the gantt palette but fill the full panel
  * width: no 180px label column, no share of a time axis.
  */
 .ark-trace__token-overview {
@@ -685,7 +687,8 @@
   background: var(--ark-bg-inset);
 }
 
-.ark-trace__token-segment.is-uncached { background: #3b82f6; }
+.ark-trace__token-segment.is-noncached { background: #3b82f6; }
+.ark-trace__token-segment.is-miss { background: #06b6d4; }
 .ark-trace__token-segment.is-hit { background: #10b981; }
 .ark-trace__token-segment.is-output { background: #f59e0b; }
 
@@ -710,7 +713,8 @@
   border-radius: 2px;
 }
 
-.ark-trace__token-legend-item i.is-uncached { background: #3b82f6; }
+.ark-trace__token-legend-item i.is-noncached { background: #3b82f6; }
+.ark-trace__token-legend-item i.is-miss { background: #06b6d4; }
 .ark-trace__token-legend-item i.is-hit { background: #10b981; }
 .ark-trace__token-legend-item i.is-output { background: #f59e0b; }
 

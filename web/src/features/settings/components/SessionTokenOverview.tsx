@@ -3,7 +3,7 @@
  *
  * The response's `usage` is already the backend's session-wide `Usage::merge`
  * result: this component only formats it and splits it into mutually
- * exclusive shares (smart-ark `buildTokenSegments` convention). No second
+ * exclusive shares (non-cached input / cache miss / cache hit / output). No second
  * fold, no provider counter reconstructed from a missing field.
  */
 import { useI18n } from '../../../shared/i18n'
@@ -42,9 +42,9 @@ function LegendItem({ segment, total, locale }: {
 
 /**
  * Whole-session token readout between the metric cards and the charts.
- * Three disjoint shares (input miss / cache hit / output) add up to the
- * authoritative total; when no cache counter was reported, only the two
- * honest segments render and an explicit hint replaces the cache claim.
+ * Up to four disjoint shares add up to the authoritative total; when no cache
+ * counter was reported, only non-cached input and output render and an
+ * explicit hint replaces the cache claim.
  */
 export function SessionTokenOverview({ usage, locale }: { usage: Usage | undefined; locale: Locale }): JSX.Element {
   const { t } = useI18n()

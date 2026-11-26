@@ -138,25 +138,26 @@ v1 只给了聚合数字与 Top 清单,无法回答"这个回合的 2 分钟花�
 - `TraceSection` 在指标卡与图表之间渲染 `SessionTokenOverview`:数据直接取
   `TraceStatsResponse.usage`(后端 `Usage::merge` 的会话级结果),前端只做格式化与
   互斥分段,不再 merge 也不推算缓存字段。
-- 互斥口径复用 smart-ark `buildTokenSegments`:`cached` 是 `prompt` 的子集,
-  三段为输入未命中(`prompt - cached`)/缓存命中(`cached`)/输出(`completion`),
-  和为 `total`;缓存字段全缺时只画输入/输出两段并显示「供应商未上报缓存统计」,
-  不把缺失值当成 `cached = 0`。
+- 互斥口径在 smart-ark `buildTokenSegments` 基础上细分,不把「缓存查询未命中」误标为
+  全部「未命中输入」:`hit` 与 `miss` 都是 `prompt` 的子集,四段为非缓存输入
+  (`max(0, prompt - hit - miss)`)/缓存查询未命中(`miss`)/缓存命中(`hit`)/输出
+  (`completion`),和为 `total`。缓存字段全缺时只画非缓存输入/输出两段并显示
+  「供应商未上报缓存统计」;只有 `hit` 时省略 miss 段;不把缺失值当成 0 上报。
 - 命中率与会话头部（`SessionStatsBar`）统一为前端口径 `hit / (hit + miss)`:
   唯一宿主在 `features/settings/api/trace-token-segments.ts` 的纯函数
   `traceCacheHitRate`,经 `trace-api.ts` re-export;两处缓存计数齐全且分母
   >0 才显示,缺失 miss 不推算、不伪造。后端 `cache_hit_rate` 为 `None` 不
   影响显示;`cache_hit_rate_approximate` 仍只沿用后端标记。命中率文案的
   tooltip 以 i18n 说明该口径。
-- 图例三段百分比的本质是"占总 token",在概览图例区统一显示一次小字标注
+- 图例各段百分比的本质是"占总 token",在概览图例区统一显示一次小字标注
   (中英 i18n),不再让"缓存命中 42.8%"与命中率 97% 并列产生歧义。
 - 分段唯一宿主在 `features/settings/api/trace-token-segments.ts`,由
   `trace-api.ts` re-export:`TraceSection` 概览与单回合 `TraceTimelinePanel`
   详情都经 api 层导入同一函数,禁止组件间复制或跨 feature 导入组件内部函数。
 - 面板文案登记 `settings-trace.ts` 中英双语,样式为 `settings-trace.css` 的
   `ark-trace__token-*`,复用甘特色板但占满面板宽度,不依赖甘特 180px 标签列。
-- 验证:`trace-api.test.ts` 钉住分段裁剪与缓存缺失行为,`TraceSection.test.tsx`
-  钉住会话概览的三段数值/占比、未上报提示与未选中线程不渲染。
+- 验证:`trace-api.test.ts` 钉住四段拆分、裁剪与缓存缺失行为,
+  `TraceSection.test.tsx` 钉住会话概览的四段数值/占比、未上报提示与未选中线程不渲染。
 
 ### v2.1:模型调用行的 token / 缓存指标(当前实现)
 

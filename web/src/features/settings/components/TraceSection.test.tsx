@@ -87,12 +87,12 @@ function stats(overrides: Partial<TraceStatsResponse> = {}): TraceStatsResponse 
     active_ms: 65_000,
     model_calls: 5,
     usage: {
-      prompt_tokens: 1_000,
-      completion_tokens: 500,
-      total_tokens: 1_500,
-      cache_hit_tokens: 300,
-      cache_miss_tokens: 700,
-      cache_hit_rate: 0.3
+      prompt_tokens: 10_271_986,
+      completion_tokens: 110_471,
+      total_tokens: 10_382_457,
+      cache_hit_tokens: 625_792,
+      cache_miss_tokens: 6_960,
+      cache_hit_rate: 0.989
     },
     tool_calls: 4,
     failed_tool_calls: 1,
@@ -185,7 +185,7 @@ describe('TraceSection', () => {
     await harness.unmount()
   })
 
-  it('renders the session token overview with three exclusive shares and the reported hit rate', async () => {
+  it('renders the session token overview with four exclusive shares and the reported hit rate', async () => {
     const harness = await mountWithProviders(<TraceSection />)
     await settle()
     await pickFirstThread(harness.host)
@@ -193,22 +193,30 @@ describe('TraceSection', () => {
     const panel = harness.host.querySelector('.ark-trace__token-overview')!
     expect(panel).not.toBeNull()
     expect(panel.textContent).toContain('会话 Token 构成')
-    expect(panel.textContent).toContain('合计 token: 1,500')
-    expect(panel.textContent).toContain('缓存命中: 300')
-    expect(panel.textContent).toContain('输入(未命中缓存): 700')
-    expect(panel.textContent).toContain('输出 token: 500')
-    expect(panel.textContent).toContain('命中率: 30%')
+    expect(panel.textContent).toContain('合计 token: 10,382,457')
+    expect(panel.textContent).toContain('非缓存输入: 9,639,234')
+    expect(panel.textContent).toContain('缓存查询未命中: 6,960')
+    expect(panel.textContent).toContain('缓存命中: 625,792')
+    expect(panel.textContent).toContain('输出 token: 110,471')
+    expect(panel.textContent).toContain('命中率: 98.9%')
     expect(panel.textContent).toContain('百分比为占总 token')
     expect(panel.querySelector('[title*="命中 token"]')).not.toBeNull()
     expect(panel.textContent).not.toContain('供应商未上报缓存统计')
     const widths = [...panel.querySelectorAll<HTMLElement>('.ark-trace__token-segment')]
       .map((segment) => Number.parseFloat(segment.style.width))
-    expect(widths).toHaveLength(3)
-    expect(widths.reduce((sum, value) => sum + value, 0)).toBeCloseTo(100, 4)
-    expect(widths[1]).toBeCloseTo(20, 4)
+    expect(widths).toHaveLength(4)
+    expect(widths.reduce((sum, value) => sum + value, 0)).toBeCloseTo(100, 3)
     // Legend percentages match the same denominator as the bar widths.
     const shares = [...panel.querySelectorAll('.ark-trace__token-legend-item em')].map((em) => em.textContent)
-    expect(shares).toEqual(['46.7%', '20%', '33.3%'])
+    expect(shares).toEqual(['92.8%', '0.1%', '6%', '1.1%'])
+    const segments = [...panel.querySelectorAll<HTMLElement>('.ark-trace__token-segment')]
+      .map((segment) => [segment.className, Number.parseFloat(segment.style.width)])
+    expect(segments.map(([name]) => name)).toEqual([
+      'ark-trace__token-segment is-noncached',
+      'ark-trace__token-segment is-miss',
+      'ark-trace__token-segment is-hit',
+      'ark-trace__token-segment is-output'
+    ])
     // The outer panel sits between the metric cards and the charts.
     const children = [...harness.host.querySelectorAll('.ark-settings__section > *')]
     expect(children.findIndex((node) => node.classList.contains('ark-trace__metrics')))
@@ -235,6 +243,8 @@ describe('TraceSection', () => {
     const panel = harness.host.querySelector('.ark-trace__token-overview')!
     expect(panel.textContent).toContain('命中率: 97%')
     const legend = [...panel.querySelectorAll('.ark-trace__token-legend-item')].map((node) => node.textContent?.trim())
+    expect(legend).not.toContain('非缓存输入')
+    expect(legend).toContain('缓存查询未命中: 881,1491.3%')
     expect(legend).toContain('缓存命中: 28,924,86442.8%')
     expect(panel.querySelector('.ark-trace__token-share-note')?.textContent).toBe('百分比为占总 token')
     await harness.unmount()
@@ -268,6 +278,8 @@ describe('TraceSection', () => {
     await pickFirstThread(harness.host)
 
     const panel = harness.host.querySelector('.ark-trace__token-overview')!
+    expect(panel.textContent).toContain('非缓存输入: 700')
+    expect(panel.textContent).not.toContain('缓存查询未命中')
     expect(panel.textContent).toContain('缓存命中: 300')
     expect(panel.textContent).not.toContain('命中率')
     await harness.unmount()
@@ -282,7 +294,7 @@ describe('TraceSection', () => {
     await pickFirstThread(harness.host)
 
     const panel = harness.host.querySelector('.ark-trace__token-overview')!
-    expect(panel.textContent).toContain('输入(未命中缓存): 12')
+    expect(panel.textContent).toContain('非缓存输入: 12')
     expect(panel.textContent).toContain('输出 token: 34')
     expect(panel.textContent).toContain('供应商未上报缓存统计')
     expect(panel.textContent).not.toContain('缓存命中:')
