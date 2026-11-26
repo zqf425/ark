@@ -94,14 +94,22 @@ Qoder 的 STE（流式工具执行器）对同样问题的解法是：逐调用�
    结果与取消行不做标记区分，审计可由事件时间序推断）。
 4. **drain 后收敛**：open 映射为空（整批恰好都已完成）时按正常完成
    收敛，不写 interrupt（select! 双就绪竞态下取消分支被随机选中时，
-   此探测让行为可预期；drive 循环随后的 `cancelled_outcome()` 仍兜底
-   终止回合）。否则对剩余 open 调用逐个写合成取消行（文案沿用
-   `cancelled before the call completed`），然后返回 interrupted。
-5. **转发任务 panic**：`JoinHandle` 返回 `JoinError` 时，剩余调用全部
+   此探测让行为可预期；drive 循环随后仍观察 cancel token 终止回合）。
+   否则对剩余 open 调用逐个写合成取消行（文案沿用
+   `cancelled before the call completed`），仅当存在合成行时返回 interrupted——
+   interrupted 的判定是 `cancel_hit && had_gaps_before_synthetic`，取消命中与
+   实际中断两个事实分开维护，不与 panic 混用。interrupted 提前返回前必须先
+   `converge_pending_calls_on_cancel()`：后续批次从未执行，其调用不能在
+   journal 与 provider 历史里悬空（AG-03 同类约束）。
+5. **转发任务 panic**：`JoinHandle` 返回 `JoinError` 时，剩余未结算调用全部
    写合成失败行，detail 携带 JoinError 摘要（文案
    `tool batch task failed: <panic message>`），`tracing::error` 记录；
    in-flight 子进程依赖 abort drop 的 `kill_on_drop` 收尾，该依赖在此
-   显式声明。
+   显式声明。panic **不是取消**：它不置 interrupted、不终止回合——回合以
+   `ToolsSettled` 继续，模型在本回合就能看到全部兄弟调用的真实结果与失败行。
+   panic 时通道存量的归属与取消一致（§2.3 的通道边界同样适用）：已推入
+   通道的结果按真实内容保留结算，未推入的（含 panic 调用自身的 future，
+   被 join_all 树 drop）写合成失败行。
 6. **send 失败静默忽略**：消费者消失（理论路径）时 `send` 返回 Err，
    转发任务忽略之并继续驱动剩余调用至自然结束，避免 panics。
 
