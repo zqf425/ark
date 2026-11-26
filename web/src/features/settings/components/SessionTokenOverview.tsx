@@ -70,7 +70,7 @@ export function SessionTokenOverview({ usage, locale }: { usage: Usage | undefin
             {t('settings.trace.gantt.cacheRate')}:{' '}
             <b>
               {usage?.cache_hit_rate_approximate === true ? `${t('settings.trace.gantt.cacheRateApprox')} ` : ''}
-              {percent(rate)}
+              {percentFormat.format(rate)}
             </b>
           </span>
         ) : null}
