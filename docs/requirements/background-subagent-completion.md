@@ -30,7 +30,8 @@ system 策略：实质任务默认后台委派，独立工作可并行拆分；�
 
 该消息位于动态 seed 尾部，不进入父/子共享的静态 prompt-cache 前缀。headless、Scheduled 与
 AutoContinuation 不注入：headless 单回合结束即 shutdown，不能遗弃晚到的 child；completion 是待汇总结果，
-不得被当成新任务再次委派。child 工具集仍不含 `delegate_task`，最大深度保持 1。
+不得被当成新任务再次委派。child 工具集仍不含 `delegate_task`，最大深度保持 1；child 工具集并入父表
+同一 `mcp` 组（2026-11-26，见 modules/arkd.md），委派的调研任务在子代理内即可改用浏览器类兜底工具。
 
 ## 事件与持久化
 
