@@ -12,6 +12,25 @@ mod registration;
 mod startup;
 
 #[test]
+fn system_prompt_names_the_mcp_and_delegation_escape_hatches() {
+    // The audit that motivated these sentences: a research turn never learned
+    // the browser tools existed, retried guessed 404 URLs, and slept in bash
+    // waiting on child runs. The prompt is the one place every turn sees, so
+    // both escape hatches must be named there.
+    for needle in [
+        "playwright",
+        "re-derive the URL",
+        "completion notice",
+        "bash_output",
+    ] {
+        assert!(
+            SYSTEM_PROMPT.contains(needle),
+            "SYSTEM_PROMPT must mention `{needle}`"
+        );
+    }
+}
+
+#[test]
 fn serve_user_turn_keeps_the_interactive_gate() {
     assert!(!gates_for_turn(false, &TurnSource::User("hello".into())));
     assert!(gates_for_turn(

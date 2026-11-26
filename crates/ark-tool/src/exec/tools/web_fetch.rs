@@ -86,7 +86,13 @@ impl WebFetchTool {
         loop {
             if let Err(reason) = ensure_public_host_for(&url).await {
                 // Structured refusal, not a turn failure: the model can react.
-                return ToolOutput::err(format!("target refused by the SSRF guard: {reason}"));
+                // The guard refusal is not a dead-URL problem, but the same
+                // re-derive hint applies (the guessed name may be wrong), and
+                // naming the browser escape hatch keeps one consistent
+                // recovery contract for every fetch failure.
+                return ToolOutput::err(format!(
+                    "target refused by the SSRF guard: {reason}; {FAILURE_GUIDANCE}"
+                ));
             }
             let response = self
                 .http
@@ -110,7 +116,8 @@ impl WebFetchTool {
             hops += 1;
             if hops > MAX_REDIRECTS {
                 return ToolOutput::err(format!(
-                    "stopped after {MAX_REDIRECTS} redirects; the last target was `{target}`"
+                    "stopped after {MAX_REDIRECTS} redirects; the last target was `{target}`; \
+                     {FAILURE_GUIDANCE}"
                 ));
             }
             url = target;
@@ -149,10 +156,27 @@ async fn ensure_public_host_for(url: &Url) -> std::result::Result<(), String> {
     ensure_public_host(host).await
 }
 
+/// Recovery guidance appended to fetch failures.
+///
+/// A bare `request returned status 404` reads like a network outage, so the
+/// model retries the same dead URL or abandons the thread (a harness-analysis
+/// session logged 36 child + 6 parent 404s that were guessed URLs, with zero
+/// attempts to re-discover from a listing page or a browser). The text states
+/// the two escape hatches the runtime actually offers: fetch a real index
+/// page and follow links, or hand the URL to a browser tool when the page is
+/// script-rendered or bot-gated. It must stay a *recovery* hint, not an
+/// instruction to retry the identical URL.
+const FAILURE_GUIDANCE: &str = "the URL may be wrong (not a network outage): re-derive it from \
+a real page (site home, docs index, sitemap, search results) instead of retrying; if the page is \
+script-rendered or bot-gated, navigate to it with a browser tool (e.g. playwright.* MCP tools) \
+instead of web_fetch.";
+
 /// Render one completed response as model-visible output.
 fn render(status: u16, headers: &ark_ports::HeaderMap, body: &str) -> ToolOutput {
     if !(200..300).contains(&status) {
-        return ToolOutput::err(format!("request returned status {status}"));
+        return ToolOutput::err(format!(
+            "request returned status {status}; {FAILURE_GUIDANCE}"
+        ));
     }
     let content_type = headers
         .get("content-type")
@@ -641,6 +665,13 @@ mod tests {
             .unwrap();
         assert!(!out.ok, "{}", out.content);
         assert!(out.content.contains("SSRF"), "{}", out.content);
+        // Every failure branch carries the recovery guidance, not just 404s:
+        // a refusal must also point at re-deriving the target or a browser.
+        assert!(
+            out.content.contains("re-derive"),
+            "SSRF refusal must carry recovery guidance, got: {}",
+            out.content
+        );
         assert_eq!(
             scripted.urls().len(),
             1,
@@ -663,6 +694,11 @@ mod tests {
             .unwrap();
         assert!(!out.ok, "{}", out.content);
         assert!(out.content.contains("redirects"), "{}", out.content);
+        assert!(
+            out.content.contains("re-derive"),
+            "the redirect-budget error must carry recovery guidance, got: {}",
+            out.content
+        );
     }
 
     #[tokio::test]
@@ -698,7 +734,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_non_2xx_status_is_a_structured_failure() {
+    async fn a_non_2xx_status_is_a_structured_failure_with_recovery_guidance() {
         let tool = WebFetchTool::new(Arc::new(FakeHttp {
             status: 404,
             content_type: "text/html".into(),
@@ -713,6 +749,18 @@ mod tests {
             .unwrap();
         assert!(!out.ok);
         assert!(out.content.contains("404"));
+        // The failure must teach the escape hatches, not just report: a bare
+        // status reads like an outage and the model retries the same URL.
+        assert!(
+            out.content.contains("re-derive"),
+            "failure must carry re-derive guidance, got: {}",
+            out.content
+        );
+        assert!(
+            out.content.contains("browser tool"),
+            "failure must name the browser escape hatch, got: {}",
+            out.content
+        );
     }
 
     #[tokio::test]
