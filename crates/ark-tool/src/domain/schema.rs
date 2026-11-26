@@ -56,14 +56,22 @@ fn object(properties: serde_json::Value, required: &[&str]) -> serde_json::Value
 }
 
 fn read_schema() -> serde_json::Value {
-    object(
+    let mut schema = object(
         serde_json::json!({
             "path": { "type": "string", "description": "File path, absolute or relative to the workspace" },
             "offset": { "type": "integer", "minimum": 0, "description": "First line to read (0-based)" },
             "limit": { "type": "integer", "minimum": 1, "description": "Maximum number of lines" },
         }),
         &["path"],
-    )
+    );
+    // The registry forwards this to the model's function description. Naming
+    // the parallel-safe peers matters: models that were never told otherwise
+    // serialize every lookup, one round-trip of model latency per call.
+    schema["description"] = serde_json::json!(
+        "Read a slice of one file. Parallel-safe: issue it together with other \
+         independent read/ls/find/grep calls in the same turn."
+    );
+    schema
 }
 
 fn write_schema() -> serde_json::Value {
@@ -89,28 +97,39 @@ fn edit_schema() -> serde_json::Value {
 }
 
 fn ls_schema() -> serde_json::Value {
-    object(
+    let mut schema = object(
         serde_json::json!({
             "path": { "type": "string", "description": "Directory path, defaults to the workspace root" },
             "limit": { "type": "integer", "minimum": 1, "description": "Maximum entries" },
         }),
         &[],
-    )
+    );
+    schema["description"] = serde_json::json!(
+        "List one directory level. Parallel-safe: issue it together with other \
+         independent read/ls/find/grep calls in the same turn."
+    );
+    schema
 }
 
 fn find_schema() -> serde_json::Value {
-    object(
+    let mut schema = object(
         serde_json::json!({
             "pattern": { "type": "string", "description": "Glob such as *.rs or src/**/*.ts" },
             "path": { "type": "string", "description": "Directory to search below" },
             "limit": { "type": "integer", "minimum": 1, "description": "Maximum results" },
         }),
         &["pattern"],
-    )
+    );
+    schema["description"] = serde_json::json!(
+        "Find files whose name matches a glob below a directory. Parallel-safe: \
+         issue it together with other independent read/ls/find/grep calls in the \
+         same turn."
+    );
+    schema
 }
 
 fn grep_schema() -> serde_json::Value {
-    object(
+    let mut schema = object(
         serde_json::json!({
             "pattern": { "type": "string", "description": "Text or regular expression to search" },
             "path": { "type": "string", "description": "Directory or file to search" },
@@ -121,7 +140,12 @@ fn grep_schema() -> serde_json::Value {
             "limit": { "type": "integer", "minimum": 1, "description": "Maximum matching lines" },
         }),
         &["pattern"],
-    )
+    );
+    schema["description"] = serde_json::json!(
+        "Search file contents for a pattern. Parallel-safe: issue it together \
+         with other independent read/ls/find/grep calls in the same turn."
+    );
+    schema
 }
 
 fn bash_schema() -> serde_json::Value {
