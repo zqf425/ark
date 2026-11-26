@@ -560,6 +560,15 @@
   gap: 2px;
 }
 
+/* Metric rows inside an expanded model call: each block stays on its own line
+   so long localized labels never wrap into the adjacent metric. */
+.ark-gantt__detail-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .ark-gantt__detail-meta {
   display: flex;
   align-items: baseline;

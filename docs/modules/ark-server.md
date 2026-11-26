@@ -178,7 +178,8 @@
   挂到含其 `created_at` 的最窄模型调用窗口 `[usage.timestamp-duration, usage.timestamp]`
   的 `model_call.details`(升序,同类多段保留);窗口外或无 `duration_ms` 的旧日志
   片段在投影中丢弃。投影逻辑在 `api/handlers/trace_timeline.rs`,单测在同目录
-  `trace_timeline/tests.rs`。
+  `trace_timeline/tests.rs`。`model_call` 行还把该条 `usage` 事件快照成
+  `TraceSpanUsage`,逐字段拷贝 token/缓存/费用,不在读侧聚合,也不伪造 provider 未上报的字段。
 - `GET /v1/threads/{id}/usage` 与 `GET /v1/debug/llm-rounds` 都只从权威 `usage` 事件投影（每轮模型
   调用恰好一条），不维护第二套用量真源。`usage.duration_ms` 优先采用 agent 循环实测的模型调用耗时
   （不含工具执行），并作为轮次耗时的唯一 wire 载体。线程 usage 聚合直接对这些样本做严格折叠，不为

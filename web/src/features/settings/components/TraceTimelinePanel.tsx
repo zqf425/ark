@@ -21,6 +21,7 @@ import {
   fetchTraceTimeline,
   type TraceSpanDetail,
   type TraceSpanDetailKind,
+  type TraceSpanUsage,
   type TraceTimeline,
   type TraceTimelineSpan
 } from '../api/trace-api'
@@ -101,6 +102,73 @@ function DetailRow({ detail, locale }: { detail: TraceSpanDetail; locale: Return
   )
 }
 
+/** Shared detail section shell: all metric blocks and text fragments use it. */
+function DetailSection({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
+  return (
+    <div className="ark-gantt__detail-section">
+      <span className="ark-gantt__detail-title">{title}</span>
+      {children}
+    </div>
+  )
+}
+
+function formatCount(value: number, locale: ReturnType<typeof useI18n>['locale']): string {
+  return new Intl.NumberFormat(locale).format(value)
+}
+
+/**
+ * Token counters of one model call. Required fields are always present on the
+ * wire; only the percentage formatter is locale-aware because the provider
+ * already computed the rate — the renderer never divides token counters.
+ */
+function TokenMetrics({ usage, locale }: { usage: TraceSpanUsage; locale: ReturnType<typeof useI18n>['locale'] }): JSX.Element {
+  const { t } = useI18n()
+  return (
+    <DetailSection title={t('settings.trace.gantt.tokenTitle')}>
+      <div className="ark-gantt__detail-metrics">
+        <span>{t('settings.trace.gantt.tokenPrompt')}: <b>{formatCount(usage.prompt_tokens, locale)}</b></span>
+        <span>{t('settings.trace.gantt.tokenCompletion')}: <b>{formatCount(usage.completion_tokens, locale)}</b></span>
+        <span>{t('settings.trace.gantt.tokenTotal')}: <b>{formatCount(usage.total_tokens, locale)}</b></span>
+      </div>
+    </DetailSection>
+  )
+}
+
+/**
+ * Cache metrics: every optional field renders only when the server sent it.
+ * All three absent -> one localized "not reported" line; no synthesized zero.
+ */
+function CacheMetrics({ usage, locale }: { usage: TraceSpanUsage; locale: ReturnType<typeof useI18n>['locale'] }): JSX.Element {
+  const { t } = useI18n()
+  const hasHit = usage.cache_hit_tokens != null
+  const hasMiss = usage.cache_miss_tokens != null
+  const hasRate = usage.cache_hit_rate != null
+  if (!hasHit && !hasMiss && !hasRate) {
+    return (
+      <DetailSection title={t('settings.trace.gantt.cacheTitle')}>
+        <span className="ark-gantt__detail-empty">{t('settings.trace.gantt.cacheUnreported')}</span>
+      </DetailSection>
+    )
+  }
+  return (
+    <DetailSection title={t('settings.trace.gantt.cacheTitle')}>
+      <div className="ark-gantt__detail-metrics">
+        {hasHit ? <span>{t('settings.trace.gantt.cacheHit')}: <b>{formatCount(usage.cache_hit_tokens!, locale)}</b></span> : null}
+        {hasMiss ? <span>{t('settings.trace.gantt.cacheMiss')}: <b>{formatCount(usage.cache_miss_tokens!, locale)}</b></span> : null}
+        {hasRate ? (
+          <span>
+            {t('settings.trace.gantt.cacheRate')}:{' '}
+            <b>
+              {usage.cache_hit_rate_approximate === true ? `${t('settings.trace.gantt.cacheRateApprox')} ` : ''}
+              {new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 1 }).format(usage.cache_hit_rate!)}
+            </b>
+          </span>
+        ) : null}
+      </div>
+    </DetailSection>
+  )
+}
+
 /**
  * The expanded body of one span. On a model call the streamed text fragments
  * follow the meta line, separated by a hairline; other spans keep the plain
@@ -131,9 +199,14 @@ function SpanDetails({ span, locale, failed }: {
         </span>
       ) : null}
       {failed ? <span className="ark-gantt__detail-failed">{t('settings.trace.span.failed')}</span> : null}
+      {span.kind === 'model_call' && span.usage != null ? (
+        <>
+          <TokenMetrics usage={span.usage} locale={locale} />
+          <CacheMetrics usage={span.usage} locale={locale} />
+        </>
+      ) : null}
       {details ? (
-        <div className="ark-gantt__detail-section">
-          <span className="ark-gantt__detail-title">{t('settings.trace.gantt.detailsTitle')}</span>
+        <DetailSection title={t('settings.trace.gantt.detailsTitle')}>
           {details.length > 0 ? (
             <ul className="ark-gantt__detail-rows">
               {details.map((detail, index) => (
@@ -143,7 +216,7 @@ function SpanDetails({ span, locale, failed }: {
           ) : (
             <span className="ark-gantt__detail-empty">{t('settings.trace.gantt.detailsEmpty')}</span>
           )}
-        </div>
+        </DetailSection>
       ) : null}
     </div>
   )

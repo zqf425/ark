@@ -116,15 +116,22 @@ fn tool_item(turn: TurnId, at_ms: i64, call: &str, tool: &str, ok: bool) -> Thre
     item
 }
 
+/// One snapshot usage sample; `cache` adds the provider-optional fields so
+/// tests can distinguish "reported" from "not reported" on the wire.
 fn usage_at(
     seq: u64,
     thread: ThreadId,
     turn: TurnId,
     at_ms: i64,
     duration_ms: Option<u64>,
+    cache: bool,
 ) -> RuntimeEvent {
     let mut usage = Usage::new(100, 40);
     usage.duration_ms = duration_ms;
+    if cache {
+        usage = usage.with_cache(Some(90), Some(10));
+        usage.cost_usd = Some(0.25);
+    }
     RuntimeEvent::Usage {
         seq,
         thread_id: thread,
@@ -189,7 +196,7 @@ fn a_normal_turn_sorts_all_kinds_by_start_time() {
             timestamp: at(10),
             item: user,
         },
-        usage_at(3, thread, turn, 20, Some(5)),
+        usage_at(3, thread, turn, 20, Some(5), false),
         // Model call: ends at 20ms, lasts 5ms → starts at 15ms, after
         // the user message at 10ms and before the tool at 30ms.
         tool_started(4, thread, turn, 30, "c1", "read"),
@@ -226,6 +233,8 @@ fn a_normal_turn_sorts_all_kinds_by_start_time() {
     let user_span = &timeline.spans[0];
     assert_eq!(user_span.duration_ms, None);
     assert_eq!(user_span.text_snippet.as_deref(), Some("帮我看看"));
+    assert!(user_span.usage.is_none());
+    assert!(tool.usage.is_none());
 }
 
 #[test]
@@ -361,7 +370,7 @@ fn text_items_are_not_rows_and_streamed_versions_collapse() {
         updated,
         finished,
         // A measured window owns the text at 10ms: [0, 20].
-        usage_at(5, thread, turn, 20, Some(20)),
+        usage_at(5, thread, turn, 20, Some(20), false),
     ];
     let timeline = build_trace_timeline(thread, &events, turn).expect("turn seen");
     // No independent assistant/reasoning row: the Gantt axis only shows
@@ -382,7 +391,7 @@ fn text_fragments_go_to_the_narrowest_containing_model_call() {
     let events = vec![
         started(1, thread, turn, 0),
         // Outer window [0, 100]; nested window [40, 60].
-        usage_at(2, thread, turn, 100, Some(100)),
+        usage_at(2, thread, turn, 100, Some(100), false),
         item_event(
             3,
             thread,
@@ -391,11 +400,11 @@ fn text_fragments_go_to_the_narrowest_containing_model_call() {
             ItemKind::AssistantMessage,
             "outer reply",
         ),
-        usage_at(4, thread, turn, 60, Some(20)),
+        usage_at(4, thread, turn, 60, Some(20), false),
         item_event(5, thread, turn, 55, ItemKind::Reasoning, "later thought"),
         item_event(9, thread, turn, 50, ItemKind::Reasoning, "inner thought"),
         // Another window, with text at its right boundary.
-        usage_at(6, thread, turn, 200, Some(20)),
+        usage_at(6, thread, turn, 200, Some(20), false),
         item_event(7, thread, turn, 200, ItemKind::Reasoning, "edge thought"),
         completed(8, thread, turn, 300),
     ];
@@ -435,11 +444,11 @@ fn text_outside_every_window_or_without_any_window_is_dropped() {
     let events = vec![
         started(1, thread, turn, 0),
         // Measured window [40, 50]: text at 10ms and 60ms is outside.
-        usage_at(2, thread, turn, 50, Some(10)),
+        usage_at(2, thread, turn, 50, Some(10), false),
         item_event(3, thread, turn, 10, ItemKind::AssistantMessage, "too early"),
         item_event(4, thread, turn, 60, ItemKind::Reasoning, "too late"),
         // Old log: no duration means no window, so its text has no owner.
-        usage_at(5, thread, turn, 100, None),
+        usage_at(5, thread, turn, 100, None, false),
         item_event(
             6,
             thread,
@@ -464,7 +473,7 @@ fn model_call_without_text_has_no_details() {
     let turn = TurnId::new();
     let events = vec![
         started(1, thread, turn, 0),
-        usage_at(2, thread, turn, 90, Some(80)),
+        usage_at(2, thread, turn, 90, Some(80), false),
         completed(3, thread, turn, 100),
     ];
     let timeline = build_trace_timeline(thread, &events, turn).expect("turn seen");
@@ -496,10 +505,10 @@ fn usage_events_become_model_call_spans() {
     let events = vec![
         started(1, thread, turn, 0),
         // Measured round: ends at 90ms, lasts 80ms → starts at 10ms.
-        usage_at(2, thread, turn, 90, Some(80)),
+        usage_at(2, thread, turn, 90, Some(80), true),
         // Unmeasured round: starts (and stays) at its end instant --
         // never a invented start or a fake zero duration.
-        usage_at(3, thread, turn, 200, None),
+        usage_at(3, thread, turn, 200, None, false),
         completed(4, thread, turn, 300),
     ];
     let timeline = build_trace_timeline(thread, &events, turn).expect("turn seen");
@@ -512,6 +521,28 @@ fn usage_events_become_model_call_spans() {
     // instead of collapsing to points (the "gantt has holes" defect).
     assert_eq!(timeline.spans[0].started_at, at(10));
     assert_eq!(timeline.spans[1].started_at, at(200));
+    // The row carries the event snapshot, not a lifetime aggregate: every
+    // field is copied verbatim, including optional cache metadata.
+    let usage = timeline.spans[0].usage.as_ref().expect("snapshot");
+    assert_eq!(usage.prompt_tokens, 100);
+    assert_eq!(usage.completion_tokens, 40);
+    assert_eq!(usage.total_tokens, 140);
+    assert_eq!(usage.cache_hit_tokens, Some(90));
+    assert_eq!(usage.cache_miss_tokens, Some(10));
+    assert_eq!(usage.cache_hit_rate, Some(0.9));
+    assert_eq!(usage.cost_usd, Some(0.25));
+    assert_eq!(usage.duration_ms, Some(80));
+    assert!(!usage.cache_hit_rate_approximate);
+    // A provider that reported no cache fields leaves them absent; the
+    // projection must not fill them in from prompt tokens.
+    let usage = timeline.spans[1].usage.as_ref().expect("snapshot");
+    assert_eq!(usage.prompt_tokens, 100);
+    assert_eq!(usage.cache_hit_tokens, None);
+    assert_eq!(usage.cache_miss_tokens, None);
+    assert_eq!(usage.cache_hit_rate, None);
+    assert_eq!(usage.cost_usd, None);
+    assert_eq!(usage.duration_ms, None);
+    assert!(!usage.cache_hit_rate_approximate);
 }
 
 #[test]
@@ -588,7 +619,7 @@ fn the_other_turns_rows_do_not_leak_into_this_timeline() {
     let events = vec![
         started(1, thread, other, 0),
         item_event(2, thread, other, 10, ItemKind::Notice, "other turn"),
-        usage_at(3, thread, other, 20, Some(5)),
+        usage_at(3, thread, other, 20, Some(5), false),
         started(4, thread, turn, 30),
         item_event(5, thread, turn, 40, ItemKind::Notice, "this turn"),
         completed(6, thread, turn, 50),

@@ -24,6 +24,7 @@ export type { TraceErrorEntry } from "./TraceErrorEntry";
 export type { TraceRuntimeError } from "./TraceRuntimeError";
 export type { TraceTimeline } from "./TraceTimeline";
 export type { TraceSpan } from "./TraceSpan";
+export type { TraceSpanUsage } from "./TraceSpanUsage";
 export type { TraceSpanDetail } from "./TraceSpanDetail";
 export type { TraceSpanDetailKind } from "./TraceSpanDetailKind";
 export type { TraceSpanKind } from "./TraceSpanKind";

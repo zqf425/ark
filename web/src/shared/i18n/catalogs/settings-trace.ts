@@ -85,6 +85,16 @@ export const SETTINGS_TRACE_MESSAGES = {
   'settings.trace.gantt.duration': ['耗时', 'Duration'],
   'settings.trace.gantt.detailsTitle': ['思考与回复', 'Reasoning & replies'],
   'settings.trace.gantt.detailsEmpty': ['本次模型调用没有留下思考或回复。', 'No reasoning or reply was recorded for this model call.'],
+  'settings.trace.gantt.tokenTitle': ['Token 用量', 'Token usage'],
+  'settings.trace.gantt.tokenPrompt': ['输入 token', 'Input tokens'],
+  'settings.trace.gantt.tokenCompletion': ['输出 token', 'Output tokens'],
+  'settings.trace.gantt.tokenTotal': ['合计 token', 'Total tokens'],
+  'settings.trace.gantt.cacheTitle': ['缓存指标', 'Cache metrics'],
+  'settings.trace.gantt.cacheHit': ['命中 token', 'Hit tokens'],
+  'settings.trace.gantt.cacheMiss': ['未命中 token', 'Miss tokens'],
+  'settings.trace.gantt.cacheRate': ['命中率', 'Hit rate'],
+  'settings.trace.gantt.cacheRateApprox': ['约', 'approx.'],
+  'settings.trace.gantt.cacheUnreported': ['供应商未上报缓存统计', 'Cache statistics not reported by provider'],
   'settings.trace.timeline.ganttHint': [
     '横条按真实耗时在共享时间轴上展开;无实测时长的文本行显示为刻度点。',
     'Bars scale by real duration on one shared axis; text spans without a measured duration show as ticks.'

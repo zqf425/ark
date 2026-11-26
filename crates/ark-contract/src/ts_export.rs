@@ -49,10 +49,10 @@ use crate::{
     ThreadListQuery, ThreadRuntimeSettings, ThreadRuntimeSnapshot, ThreadSkillsResponse,
     ThreadSummary, ThreadUsageResponse, TodoEntry, TodoStatus, TodosRequest, ToolStat,
     TraceErrorEntry, TraceRuntimeError, TraceSlowCall, TraceSpan, TraceSpanDetail,
-    TraceSpanDetailKind, TraceSpanKind, TraceStatsResponse, TraceTimeline, TuningSettings,
-    TurnRequest, TurnStat, TurnSummary, TurnUsage, UiCatalog, UpdateImChannelRequest,
-    UpdateMemoryRequest, UpdateScheduleRequest, UpdateThreadRequest, UsageResponse,
-    WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
+    TraceSpanDetailKind, TraceSpanKind, TraceSpanUsage, TraceStatsResponse, TraceTimeline,
+    TuningSettings, TurnRequest, TurnStat, TurnSummary, TurnUsage, UiCatalog,
+    UpdateImChannelRequest, UpdateMemoryRequest, UpdateScheduleRequest, UpdateThreadRequest,
+    UsageResponse, WorkspaceChange, WorkspaceChangesResponse, WorkspaceDescriptor, WorkspaceDiff,
     WorkspaceDiffFile, WorkspaceFilePreview, WorkspaceStatus, WorkspaceValidateResponse,
     WorkspaceView,
 };
@@ -131,6 +131,7 @@ fn export_roots(dir: &std::path::Path) -> Result<(), ts_rs::ExportError> {
     TraceRuntimeError::export_all_to(dir)?;
     TraceTimeline::export_all_to(dir)?;
     TraceSpan::export_all_to(dir)?;
+    TraceSpanUsage::export_all_to(dir)?;
     TraceSpanDetail::export_all_to(dir)?;
     TraceSpanDetailKind::export_all_to(dir)?;
     TraceSpanKind::export_all_to(dir)?;
@@ -304,6 +305,7 @@ const ROOT_NAMES: &[&str] = &[
     "TraceRuntimeError",
     "TraceTimeline",
     "TraceSpan",
+    "TraceSpanUsage",
     "TraceSpanDetail",
     "TraceSpanDetailKind",
     "TraceSpanKind",

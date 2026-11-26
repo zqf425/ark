@@ -15,7 +15,7 @@ use ark_common::{ItemId, ThreadId, TurnId};
 use ark_contract::item::ToolPayload;
 use ark_contract::{
     ItemKind, RuntimeEvent, ThreadItem, TraceSpan, TraceSpanDetail, TraceSpanDetailKind,
-    TraceSpanKind, TraceTimeline, TRACE_TIMELINE_SNIPPET_MAX_CHARS,
+    TraceSpanKind, TraceSpanUsage, TraceTimeline, TRACE_TIMELINE_SNIPPET_MAX_CHARS,
 };
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -287,6 +287,7 @@ impl TimelineFold {
                     started,
                     usage.duration_ms,
                     self.model_label.clone(),
+                    usage,
                 ));
             }
             _ => {}
@@ -330,6 +331,7 @@ impl TimelineFold {
             is_error: true,
             item_id: None,
             details: None,
+            usage: None,
         });
     }
 
@@ -477,6 +479,7 @@ fn plain_span(kind: TraceSpanKind, item: &ThreadItem) -> TraceSpan {
         is_error: false,
         item_id: Some(item.item_id),
         details: None,
+        usage: None,
     }
 }
 
@@ -535,6 +538,7 @@ fn tool_span(
         is_error: payload.ok == Some(false),
         item_id,
         details: None,
+        usage: None,
     }
 }
 
@@ -549,19 +553,21 @@ fn compaction_span(started_at: DateTime<Utc>, ended_at: Option<DateTime<Utc>>) -
         is_error: false,
         item_id: None,
         details: None,
+        usage: None,
     }
 }
 
 /// One `model_call` row per `usage` event.
 ///
-/// Honest approximation: `LlmSpanStart`/`LlmSpanEnd` have no producer yet, so
-/// the duration is the wall clock the agent loop recorded when it closed the
+/// The duration is the wall clock the agent loop recorded when it closed the
 /// round, and the label falls back to the `provider:model` stamp the turn's
-/// opening user item carries (absent on older logs).
+/// opening user item carries (absent on older logs). `usage` is copied
+/// field-by-field: aggregation belongs to `Usage::merge`, not to a row.
 fn model_call_span(
     started_at: DateTime<Utc>,
     duration_ms: Option<u64>,
     label: Option<String>,
+    usage: &ark_common::Usage,
 ) -> TraceSpan {
     TraceSpan {
         kind: TraceSpanKind::ModelCall,
@@ -572,6 +578,17 @@ fn model_call_span(
         is_error: false,
         item_id: None,
         details: None,
+        usage: Some(TraceSpanUsage {
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
+            cache_hit_tokens: usage.cache_hit_tokens,
+            cache_miss_tokens: usage.cache_miss_tokens,
+            cache_hit_rate: usage.cache_hit_rate,
+            cost_usd: usage.cost_usd,
+            duration_ms: usage.duration_ms,
+            cache_hit_rate_approximate: usage.cache_hit_rate_approximate,
+        }),
     }
 }
 

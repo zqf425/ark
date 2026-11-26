@@ -2,6 +2,7 @@
 import type { ItemId } from "./ItemId";
 import type { TraceSpanDetail } from "./TraceSpanDetail";
 import type { TraceSpanKind } from "./TraceSpanKind";
+import type { TraceSpanUsage } from "./TraceSpanUsage";
 
 /**
  * One span of a turn's timeline.
@@ -30,7 +31,7 @@ label?: string,
 /**
  * Bounded text summary of at most `TRACE_TIMELINE_SNIPPET_MAX_CHARS`
  * characters, cut on character boundaries so multi-byte text stays
- * intact. Event bodies never ride the timeline — the full text stays on
+ * intact. Event bodies never ride the timeline -- the full text stays on
  * thread detail.
  */
 text_snippet?: string, 
@@ -50,7 +51,13 @@ item_id?: ItemId,
  * `model_call` rows only. Each fragment falls in this row's measured
  * window and is ordered by `started_at` ascending; `None` means no
  * text could be attributed (or this is not a model call). Text outside
- * every model window — including logs without `duration_ms` — is dropped
+ * every model window -- including logs without `duration_ms` -- is dropped
  * from this projection, not shown as its own row.
  */
-details?: Array<TraceSpanDetail>, };
+details?: Array<TraceSpanDetail>, 
+/**
+ * Token/cache snapshot from the `usage` event, `model_call` rows only.
+ * Cache fields are provider-optional: absent means unreported, never a
+ * value inferred by this projection.
+ */
+usage?: TraceSpanUsage, };

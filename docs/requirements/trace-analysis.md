@@ -107,6 +107,9 @@ v1 只给了聚合数字与 Top 清单,无法回答"这个回合的 2 分钟花�
     created_at,`duration_ms` 为 None(契约注释注明)。
   - `label`(工具名/模型名)、`text_snippet`(截断 200 字)、
     `is_error`、`item_id`(可跳回会话画布)。
+  - `model_call` 行另带可选 `usage`:单次 `usage` 事件的 token/缓存快照
+    (`TraceSpanUsage`,逐字段搬运,不聚合);缓存字段是 provider 可选上报,
+    缺失为 `None`,不得推算或伪造。
 - 折叠规则:thread detail 同源——`ItemCreated/Updated/Completed` 按
   item_id 取最后版本(与 store 投影一致,避免流式多版本重复);
   `Usage` 事件生成 `model_call` span;`RuntimeEvent::Error` 生成
@@ -129,3 +132,20 @@ v1 只给了聚合数字与 Top 清单,无法回答"这个回合的 2 分钟花�
 - 时间线面板:垂直 span 列表(色块 = kind,右侧耗时,failed 红标),
   加载态与空态;不新增依赖,不新增 npm 包。
 - 仅在用户点击时请求该端点(每回合一次,无预取)。
+
+### v2.1:模型调用行的 token / 缓存指标(当前实现)
+
+- `TraceSpan` 的 `model_call` 行携带可选 `usage`(`TraceSpanUsage`,镜像单次
+  `ark_common::Usage` wire 字段):`prompt_tokens`/`completion_tokens`/`total_tokens`
+  必有;`cache_hit_tokens`/`cache_miss_tokens`/`cache_hit_rate` 等可选,
+  `cache_hit_rate_approximate` 由后端标记命中率是否为推断值。前端不做除法,
+  也不把缺失的缓存字段补成 0。
+- 展开详情时,仅 `model_call` 行渲染「Token 用量」与「缓存指标」两个区块:
+  输入/输出/合计 token 用 `Intl.NumberFormat(locale)` 千分位;缓存字段只显示
+  provider 实际给出的项,命中率用百分比格式(一位小数),近似值按标记加
+  「约」。三项缓存字段全缺时显示「供应商未上报缓存统计」;未展开与非模型
+  行均不渲染这两个区块。
+- **当前实现**:Rust 侧 `TraceSpanUsage` 已登记 ts_export 根并生成
+  `web/src/generated/TraceSpanUsage.ts`,`TraceSpan.usage` 已出现在生成类型;
+  `features/settings/api/trace-api.ts` 统一 re-export,组件与测试只经 api 层消费。
+- 文案全部登记 `settings-trace.ts` 中英双语,随 catalog-completeness 校验。

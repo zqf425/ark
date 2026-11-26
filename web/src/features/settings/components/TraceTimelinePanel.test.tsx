@@ -6,8 +6,10 @@
  * mount fetch *is* the click-time fetch — TraceSection's test pins that no
  * panel exists before the click), spans render top-down with kind labels,
  * a 404 renders the empty state instead of an error, failed spans carry the
- * failure mark, and reasoning/assistant text only appears inside an expanded
- * `model_call` row as ordered detail fragments (never as its own Gantt row).
+ * failure mark, reasoning/assistant text only appears inside an expanded
+ * `model_call` row as ordered detail fragments (never as its own Gantt row),
+ * and token/cache metrics only appear on expanded `model_call` rows with the
+ * exact fields the server reported.
  */
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -38,7 +40,16 @@ function timeline(overrides: Partial<TraceTimeline> = {}): TraceTimeline {
         kind: 'model_call',
         started_at: '2026-11-02T00:00:05Z',
         duration_ms: 3_200,
-        label: 'deepseek-v4.1'
+        label: 'deepseek-v4.1',
+        usage: {
+          prompt_tokens: 1_234,
+          completion_tokens: 567,
+          total_tokens: 1_801,
+          cache_hit_tokens: 900,
+          cache_miss_tokens: 334,
+          cache_hit_rate: 0.7294,
+          cost_usd: 0.0123
+        }
       },
       {
         kind: 'tool_call',
@@ -90,7 +101,7 @@ describe('TraceTimelinePanel', () => {
     await harness.unmount()
   })
 
-  it('renders model-call details in server order after the meta line when expanded', async () => {
+  it('renders model-call details and token/cache metrics in server order when expanded', async () => {
     const details = [
       { kind: 'reasoning' as const, started_at: '2026-11-02T00:00:06Z', text_snippet: '先检查登录链路' },
       { kind: 'assistant_text' as const, started_at: '2026-11-02T00:00:07Z', text_snippet: '我已经定位到问题' },
@@ -101,7 +112,16 @@ describe('TraceTimelinePanel', () => {
         kind: 'model_call',
         started_at: '2026-11-02T00:00:05Z',
         duration_ms: 3_200,
-        details
+        details,
+        usage: {
+          prompt_tokens: 1_234,
+          completion_tokens: 567,
+          total_tokens: 1_801,
+          cache_hit_tokens: 900,
+          cache_miss_tokens: 334,
+          cache_hit_rate: 0.7294,
+          cost_usd: 0.0123
+        }
       }]
     }))
     const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
@@ -111,6 +131,9 @@ describe('TraceTimelinePanel', () => {
     expect([...harness.host.querySelectorAll('.ark-gantt__row')].map((row) => row.getAttribute('data-span-kind'))).toEqual(['model_call'])
     const modelRow = harness.host.querySelector<HTMLElement>('.ark-gantt__row[data-span-kind="model_call"]')!
     expect(modelRow.parentElement?.querySelector('.ark-gantt__detail-section')).toBeNull()
+    // Collapsed rows never show details or metrics.
+    expect(harness.text()).not.toContain('输入 token')
+    expect(harness.text()).not.toContain('缓存指标')
 
     await act(async () => {
       modelRow.click()
@@ -122,6 +145,13 @@ describe('TraceTimelinePanel', () => {
     expect(detail.textContent).toContain('开始')
     expect(detail.textContent).toContain('耗时')
     expect(detail.textContent).toContain('思考与回复')
+    expect(detail.textContent).toContain('输入 token: 1,234')
+    expect(detail.textContent).toContain('输出 token: 567')
+    expect(detail.textContent).toContain('合计 token: 1,801')
+    expect(detail.textContent).toContain('命中 token: 900')
+    expect(detail.textContent).toContain('未命中 token: 334')
+    expect(detail.textContent).toContain('命中率: 72.9%')
+    expect(detail.textContent).not.toContain('供应商未上报缓存统计')
     const rows = [...detail.querySelectorAll('.ark-gantt__detail-row')]
     expect(rows).toHaveLength(3)
     expect(rows.map((row) => row.querySelector('.ark-gantt__detail-text')?.textContent)).toEqual(details.map((detailItem) => detailItem.text_snippet))
@@ -130,6 +160,107 @@ describe('TraceTimelinePanel', () => {
       expect.stringContaining('助手回复'),
       expect.stringContaining('思考')
     ])
+    await harness.unmount()
+  })
+
+  it('adds usage metrics to the fixture model call when its row is expanded', async () => {
+    const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
+    await settle()
+    expect(harness.text()).not.toContain('输入 token')
+    const modelRow = harness.host.querySelector<HTMLElement>('.ark-gantt__row[data-span-kind="model_call"]')!
+    await act(async () => {
+      modelRow.click()
+    })
+    await settle()
+    const detail = modelRow.parentElement!.querySelector('.ark-gantt__detail')!
+    expect(detail.textContent).toContain('输入 token: 1,234')
+    expect(detail.textContent).toContain('命中率: 72.9%')
+    await harness.unmount()
+  })
+
+  it('shows the localized unreported hint when the provider sent no cache fields', async () => {
+    timelineMock.mockResolvedValue(timeline({
+      spans: [{
+        kind: 'model_call',
+        started_at: '2026-11-02T00:00:05Z',
+        duration_ms: 3_200,
+        usage: { prompt_tokens: 12, completion_tokens: 34, total_tokens: 46 }
+      }]
+    }))
+    const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
+    await settle()
+    const modelRow = harness.host.querySelector<HTMLElement>('.ark-gantt__row[data-span-kind="model_call"]')!
+    await act(async () => { modelRow.click() })
+    await settle()
+    const detail = modelRow.parentElement!.querySelector('.ark-gantt__detail')!
+    expect(detail.textContent).toContain('输入 token: 12')
+    expect(detail.textContent).toContain('供应商未上报缓存统计')
+    expect(detail.textContent).not.toContain('命中 token')
+    expect(detail.textContent).not.toContain('未命中 token')
+    expect(detail.textContent).not.toContain('命中率')
+    await harness.unmount()
+  })
+
+  it('renders only partial cache fields without computing a missing rate', async () => {
+    timelineMock.mockResolvedValue(timeline({
+      spans: [{
+        kind: 'model_call',
+        started_at: '2026-11-02T00:00:05Z',
+        duration_ms: 3_200,
+        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, cache_hit_tokens: 30 }
+      }]
+    }))
+    const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
+    await settle()
+    const modelRow = harness.host.querySelector<HTMLElement>('.ark-gantt__row[data-span-kind="model_call"]')!
+    await act(async () => { modelRow.click() })
+    await settle()
+    const detail = modelRow.parentElement!.querySelector('.ark-gantt__detail')!
+    expect(detail.textContent).toContain('命中 token: 30')
+    expect(detail.textContent).not.toContain('未命中 token')
+    expect(detail.textContent).not.toContain('命中率')
+    expect(detail.textContent).not.toContain('供应商未上报缓存统计')
+    await harness.unmount()
+  })
+
+  it('marks an approximate cache rate without recalculating it', async () => {
+    timelineMock.mockResolvedValue(timeline({
+      spans: [{
+        kind: 'model_call',
+        started_at: '2026-11-02T00:00:05Z',
+        duration_ms: 3_200,
+        usage: {
+          prompt_tokens: 1_000,
+          completion_tokens: 200,
+          total_tokens: 1_200,
+          cache_hit_tokens: 900,
+          cache_hit_rate: 0.42,
+          cache_hit_rate_approximate: true
+        }
+      }]
+    }))
+    const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
+    await settle()
+    const modelRow = harness.host.querySelector<HTMLElement>('.ark-gantt__row[data-span-kind="model_call"]')!
+    await act(async () => { modelRow.click() })
+    await settle()
+    const detail = modelRow.parentElement!.querySelector('.ark-gantt__detail')!
+    expect(detail.textContent).toContain('命中率: 约 42%')
+    expect(detail.textContent).toContain('命中 token: 900')
+    expect(detail.textContent).not.toContain('未命中 token')
+    await harness.unmount()
+  })
+
+  it('never renders token/cache sections on non-model rows', async () => {
+    const harness = await mountWithProviders(<TraceTimelinePanel threadId={THREAD} turnId={TURN} />)
+    await settle()
+    for (const kind of ['user_message', 'tool_call']) {
+      const row = harness.host.querySelector<HTMLElement>(`.ark-gantt__row[data-span-kind="${kind}"]`)!
+      await act(async () => { row.click() })
+      await settle()
+      expect(row.parentElement?.querySelector('.ark-gantt__detail')?.textContent).not.toContain('Token 用量')
+      expect(row.parentElement?.querySelector('.ark-gantt__detail')?.textContent).not.toContain('缓存指标')
+    }
     await harness.unmount()
   })
 

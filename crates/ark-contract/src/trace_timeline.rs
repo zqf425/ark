@@ -68,6 +68,43 @@ pub enum TraceSpanDetailKind {
     AssistantText,
 }
 
+/// Snapshot of the single `usage` event that produced a `model_call` row.
+///
+/// This mirrors `ark_common::Usage`'s wire fields only: no `merge` here, so a
+/// row reports exactly what one provider round reported. Cache counters and
+/// rate stay `None` when the provider omitted them -- never reconstructed
+/// from prompt tokens in this read-side projection.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(optional_fields)]
+pub struct TraceSpanUsage {
+    #[ts(as = "f64")]
+    pub prompt_tokens: u64,
+    #[ts(as = "f64")]
+    pub completion_tokens: u64,
+    #[ts(as = "f64")]
+    pub total_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub cache_hit_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub cache_miss_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_hit_rate: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    /// Wall clock of this one call, copied from the event. `None` when the
+    /// log was written before the runtime measured it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<f64>")]
+    pub duration_ms: Option<u64>,
+    /// Copied from the event: `true` means the rate was derived from an
+    /// inferred miss, not measured natively.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(as = "Option<bool>")]
+    pub cache_hit_rate_approximate: bool,
+}
+
 /// One streamed text fragment nested in its owning `model_call` span.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(optional_fields)]
@@ -129,6 +166,11 @@ pub struct TraceSpan {
     /// from this projection, not shown as its own row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<Vec<TraceSpanDetail>>,
+    /// Token/cache snapshot from the `usage` event, `model_call` rows only.
+    /// Cache fields are provider-optional: absent means unreported, never a
+    /// value inferred by this projection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<TraceSpanUsage>,
 }
 
 /// `GET /v1/threads/{id}/trace-timeline?turn_id=…`.

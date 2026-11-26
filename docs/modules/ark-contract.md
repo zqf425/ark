@@ -48,7 +48,9 @@ gated 在 `Notice` kind 上）。取消原因词表与自治权词表不在本 c
 呈现。归属由服务端按包含 `created_at` 的最窄模型调用窗口 `[end-duration, end]`
 决定;窗口外或旧日志无 `duration_ms` 的片段在本投影中丢弃(契约注释已声明),
 全文仍以 thread detail 为真源。新类型 `TraceSpanDetail` / `TraceSpanDetailKind`
-已登记 ts 生成根与 barrel。
+已登记 ts 生成根与 barrel。`TraceSpan.usage: Option<TraceSpanUsage>` 只在 `model_call`
+行有值,是单次 `usage` 事件的逐字段快照(`TraceSpanUsage` 镜像 `Usage` 的 wire 字段,
+不实现 `merge`);缓存计数/命中率/费用未上报时为 `None`,展示层不得推算补齐。
 
 `ToolCallStarted/Finished`、`UserInputRequested/Resolved` 与 `TurnFailed` 携带可选
 `item_id`，由 Rust 生产者通过 `ark_common::keyed_item_id` 生成；live 渲染层直接消费该 ID，

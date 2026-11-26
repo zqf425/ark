@@ -16,6 +16,7 @@ import type {
   TraceSpan as TraceTimelineSpan,
   TraceSpanDetail,
   TraceSpanDetailKind,
+  TraceSpanUsage,
   TraceSpanKind as TraceTimelineSpanKind,
   TraceStatsResponse,
   TraceTimeline,
@@ -31,6 +32,7 @@ export type {
   TraceTimeline,
   TraceSpanDetail,
   TraceSpanDetailKind,
+  TraceSpanUsage,
   TraceTimelineSpan,
   TraceTimelineSpanKind,
   TurnStat
