@@ -210,9 +210,15 @@ impl ChildTurnExecutorImpl {
 
     /// Build the transport client for a resolved provider, or retain the local
     /// parent fallback when no usable provider is configured.
+    ///
+    /// The phase timeout comes from the live tuning snapshot, so a settings
+    /// edit applies to the next child run without a restart.
     fn model_for(&self, provider: Option<ark_llm::ProviderConfig>) -> Arc<dyn ModelClient> {
         match provider {
-            Some(provider) => model::select_from_config(provider, Arc::clone(&self.usage)).0,
+            Some(provider) => {
+                let tuning = self.config.snapshot().tuning.clone();
+                model::select_with_tuning(provider, &tuning, Arc::clone(&self.usage)).0
+            }
             None => Arc::clone(&self.parent_model),
         }
     }
@@ -851,7 +857,12 @@ mod tests {
         // The parent fallback never runs in this scenario, so a minimal
         // config pointing at an unroutable address is fine.
         let parent_config = ark_llm::ProviderConfig::new("test-parent", "test-model");
-        let parent_model = model::select_from_config(parent_config, Arc::clone(&usage)).0;
+        let parent_model = model::select_with_tuning(
+            parent_config,
+            &ark_config::TuningConfig::default(),
+            Arc::clone(&usage),
+        )
+        .0;
         let skills = Arc::new(ark_skills::SkillRuntime::new(
             Arc::new(ark_skills::SkillsConfig::default),
             dir.clone(),
@@ -909,7 +920,12 @@ mod tests {
 
         let usage = Arc::new(UsageRecorder::new());
         let parent_config = ark_llm::ProviderConfig::new("test-parent", "test-model");
-        let parent_model = model::select_from_config(parent_config, Arc::clone(&usage)).0;
+        let parent_model = model::select_with_tuning(
+            parent_config,
+            &ark_config::TuningConfig::default(),
+            Arc::clone(&usage),
+        )
+        .0;
         let snapshot_store = Arc::new(ark_config::ConfigStore::new(RuntimeConfig::default()));
         let skills = Arc::new(ark_skills::SkillRuntime::new(
             Arc::new(ark_skills::SkillsConfig::default),

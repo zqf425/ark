@@ -60,6 +60,11 @@ hook 包装的工具执行与 `ReactorSpec` 构造都住在这里。理由是结
 不会漂移；除该文件外，`wiring` 仍不得包含业务规则。静态前缀里的 `SYSTEM_PROMPT` 是版本化资产：
 指引模型对长任务先 `todo_write` 建计划、完成或改向时更新（只提工具名，不把 checkpoint 的结构化
 行前缀当模型契约）；修改它意味着一次性的 prompt-cache 全量 miss，提交信息必须显式声明该代价。
+
+模型客户端每回合重建：provider 表解析后经 `model::select_with_tuning` 读取 live 快照的
+`tuning.model_phase_timeout_secs`（0 即 ark-llm 内置默认）传给 `with_timeout`，该调优字段因此 Hot
+生效、无需重启。父子两条路径（`wiring/turns.rs` 与 `child.rs`）以及组合根初始装配（`wiring/mod.rs`
+的 `select_model`）都必须走这一入口，不得绕过 tuning 直接构造 `HttpModelClient`。
 2026-11-26 追加两句（同一次 miss）：其一告知模型存在 `<server>.<tool>` 形态的 MCP 工具（如
 playwright 浏览器类），并规定 web_fetch 404/SSRF/反爬失败时重新推导 URL 或改用浏览器工具、不得
 原样重试——实测模型按读到的源码目录枚举工具集，从不读注入的 schema，浏览器工具因此从未被想起；

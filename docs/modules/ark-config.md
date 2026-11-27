@@ -26,6 +26,9 @@ HTTP 配置与子代理配置保存都回写该路径。`AppState::new` 默认�
 当前已应用快照，不会因“没有新字段”而再次跳过保存。已经运行的任务必须捕获并继续使用其创建时的
 策略；新任务读取最新快照。首次启动或 `tuning` 缺失字段使用的默认调优值为：`max_rounds=1000`、
 `max_tokens=0`（不限）、`max_tool_calls=1000`；其余调优字段沿用类型定义的默认值。
+`tuning.model_phase_timeout_secs`（Hot，默认 0）是模型请求的阶段静默上限（等响应头、等一个完整
+SSE frame 各自适用，见 [ark-llm](ark-llm.md)）：0 表示沿用 ark-llm 内置 120 秒默认，正数在
+每回合重建模型客户端时传入 `with_timeout`，因此保存后下一回合即生效，无需重启。
 
 `default_autonomy` 是未设置会话覆盖时使用的 `Hot` 全局默认值。它只接受 `strict`、`workspace_write` 或向后兼容的 `unattended`；非法 patch 会被事务性拒绝，不得静默回退。
 

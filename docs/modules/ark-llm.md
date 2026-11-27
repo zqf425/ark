@@ -11,7 +11,10 @@
 - endpoint format 在入口只路由一次到 provider family；禁止在巨型函数中堆叠格式分支。
 - SSE 帧解析、增量拼接、重试、usage 与消息/工具参数修复各有唯一实现。
 - 流必须逐块消费，不能为长响应无界缓冲。
-- 阶段超时只约束「等响应头」与「等下一帧」的静默，不约束整个回合。provider 发出终止帧
+- 阶段超时只约束「等响应头」与「等下一帧」的静默，不约束整个回合。默认上限为内置
+  `DEFAULT_PHASE_TIMEOUT`（120 秒）；组合根可按 live tuning 的 `model_phase_timeout_secs`
+  （0 即使用内置默认）通过 `HttpModelClient::with_timeout` 收窄或放宽，每个回合重建客户端，
+  因此该值 Hot 生效。provider 发出终止帧
   （`[DONE]` / `message_stop` / `response.completed`）即视为回合结束：pump 立即收尾，不再等
   EOF，否则保持连接的服务端会把已完成的流误判为超时并触发重复请求。终止帧之后到达的字节不得
   发布。收尾时 `StreamAccumulator::finish()` 补发的 tool-call chunk 必须同样转发到 sink，使

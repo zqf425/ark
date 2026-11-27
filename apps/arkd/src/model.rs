@@ -7,6 +7,7 @@
 //! never inside a route.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use ark_common::{Result, ThreadId, TurnId, Usage};
 use ark_config::RuntimeConfig;
@@ -48,20 +49,26 @@ pub fn select(config: &RuntimeConfig, usage: Arc<UsageRecorder>) -> (Arc<dyn Mod
     }
 }
 
-/// Build a client from a provider-table entry.
+/// Build a client from a provider-table entry with the live tuning timeout.
 ///
-/// This is the path the GUI uses: a provider added or edited through
-/// `/v1/runtime/providers` is resolved from `providers.json`, so the next turn
-/// picks it up without a restart (design §7.15: the provider table is `Hot`).
-pub fn select_from_config(
+/// `model_phase_timeout_secs` is `Hot`: read from the current snapshot on
+/// every client construction (one per turn), so a saved value applies to the
+/// very next model request without a restart. `0` keeps `ark-llm`'s built-in
+/// default instead of mapping to "no timeout" — a silent model stream with no
+/// bound would hang a turn forever.
+pub fn select_with_tuning(
     provider: ProviderConfig,
+    tuning: &ark_config::TuningConfig,
     usage: Arc<UsageRecorder>,
 ) -> (Arc<dyn ModelClient>, String) {
     let label = format!(
         "http provider `{}` model `{}`",
         provider.provider_id, provider.model
     );
-    let client = HttpModelClient::new(provider, governed_transport());
+    let mut client = HttpModelClient::new(provider, governed_transport());
+    if tuning.model_phase_timeout_secs > 0 {
+        client = client.with_timeout(Duration::from_secs(tuning.model_phase_timeout_secs));
+    }
     (Arc::new(MeteredModel::new(Arc::new(client), usage)), label)
 }
 
@@ -387,6 +394,23 @@ mod tests {
     fn no_provider_falls_back_to_the_local_client() {
         let (_client, label) = select(&RuntimeConfig::default(), Arc::new(UsageRecorder::new()));
         assert!(label.contains("local deterministic"));
+    }
+
+    /// The tuning timeout rides the client built for one turn: a positive
+    /// `model_phase_timeout_secs` narrows the phase bound, `0` keeps the
+    /// built-in default. Both paths wrap the result in the meter, so identity
+    /// forwarding stays intact.
+    #[test]
+    fn tuning_timeout_narrows_the_model_phase_bound() {
+        let provider = ark_llm::ProviderConfig::new("p", "m");
+        let mut tuning = ark_config::TuningConfig::default();
+        let (client, _) =
+            select_with_tuning(provider.clone(), &tuning, Arc::new(UsageRecorder::new()));
+        assert_eq!(client.provider_id(), "p");
+
+        tuning.model_phase_timeout_secs = 300;
+        let (client, _) = select_with_tuning(provider, &tuning, Arc::new(UsageRecorder::new()));
+        assert_eq!(client.provider_id(), "p");
     }
 
     #[test]

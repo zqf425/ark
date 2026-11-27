@@ -63,6 +63,7 @@ pub const TUNING_KEYS: &[&str] = &[
     "chunk_buffer",
     "sse_heartbeat_secs",
     "sse_idle_timeout_secs",
+    "model_phase_timeout_secs",
     "tool_storm_window_size",
     "max_parallel_tool_calls",
 ];

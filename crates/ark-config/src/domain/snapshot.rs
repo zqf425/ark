@@ -37,6 +37,10 @@ pub struct TuningConfig {
     pub sse_heartbeat_secs: u64,
     /// SSE idle timeout before `sse_idle_timeout`, in seconds (0 disables).
     pub sse_idle_timeout_secs: u64,
+    /// Maximum model-phase silence, in seconds: waiting for response headers
+    /// and waiting for one complete SSE frame each get this bound. `0` keeps
+    /// `ark-llm`'s built-in default.
+    pub model_phase_timeout_secs: u64,
     /// Storm-breaker window in model rounds; 0 counts the whole turn.
     pub tool_storm_window_size: u32,
     /// Cap on concurrent calls inside one read-only batch; 0 means no cap.
@@ -54,6 +58,7 @@ impl Default for TuningConfig {
             chunk_buffer: 64,
             sse_heartbeat_secs: 15,
             sse_idle_timeout_secs: 300,
+            model_phase_timeout_secs: 0,
             tool_storm_window_size: 0,
             max_parallel_tool_calls: 0,
         }
@@ -77,6 +82,7 @@ impl TuningConfig {
         self.chunk_buffer = self.chunk_buffer.clamp(1, 4_096);
         self.sse_heartbeat_secs = self.sse_heartbeat_secs.clamp(0, 3_600);
         self.sse_idle_timeout_secs = self.sse_idle_timeout_secs.clamp(0, 86_400);
+        self.model_phase_timeout_secs = self.model_phase_timeout_secs.clamp(0, 86_400);
         self.tool_storm_window_size = self.tool_storm_window_size.clamp(0, 128);
         self.max_parallel_tool_calls = self.max_parallel_tool_calls.clamp(0, 32);
         self
@@ -94,6 +100,7 @@ impl From<&TuningConfig> for TuningSettings {
             chunk_buffer: value.chunk_buffer,
             sse_heartbeat_secs: value.sse_heartbeat_secs,
             sse_idle_timeout_secs: value.sse_idle_timeout_secs,
+            model_phase_timeout_secs: value.model_phase_timeout_secs,
             tool_storm_window_size: value.tool_storm_window_size,
             max_parallel_tool_calls: value.max_parallel_tool_calls,
         }
@@ -111,6 +118,7 @@ impl From<TuningSettings> for TuningConfig {
             chunk_buffer: value.chunk_buffer,
             sse_heartbeat_secs: value.sse_heartbeat_secs,
             sse_idle_timeout_secs: value.sse_idle_timeout_secs,
+            model_phase_timeout_secs: value.model_phase_timeout_secs,
             tool_storm_window_size: value.tool_storm_window_size,
             max_parallel_tool_calls: value.max_parallel_tool_calls,
         }

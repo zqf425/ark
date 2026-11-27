@@ -455,13 +455,20 @@ fn assemble_plugin_host(
 
 /// Resolve the effective model client: provider table first, legacy config
 /// fallback second.
+///
+/// The timeout tuning is read from the live snapshot; the per-turn paths
+/// re-resolve clients anyway, so this initial client only needs to be right
+/// for the first turn.
 fn select_model(
     providers: &Arc<ark_provider::ProviderStore>,
     config: &Arc<ConfigStore>,
     usage: Arc<UsageRecorder>,
 ) -> (Arc<dyn ModelClient>, String) {
     match providers.resolve(None) {
-        Some(endpoint) => model::select_from_config(endpoint, Arc::clone(&usage)),
+        Some(endpoint) => {
+            let tuning = config.snapshot().tuning.clone();
+            model::select_with_tuning(endpoint, &tuning, usage)
+        }
         None => model::select(&config.snapshot(), usage),
     }
 }

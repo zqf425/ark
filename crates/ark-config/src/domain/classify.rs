@@ -39,6 +39,7 @@ pub const TUNING_FIELDS: &[&str] = &[
     "tuning.chunk_buffer",
     "tuning.sse_heartbeat_secs",
     "tuning.sse_idle_timeout_secs",
+    "tuning.model_phase_timeout_secs",
     "tuning.tool_storm_window_size",
     "tuning.max_parallel_tool_calls",
 ];
@@ -101,6 +102,9 @@ pub fn tuning_diff(old: &TuningConfig, new: &TuningConfig) -> Vec<FieldPath> {
     }
     if old.sse_idle_timeout_secs != new.sse_idle_timeout_secs {
         out.push(FieldPath::new("tuning.sse_idle_timeout_secs"));
+    }
+    if old.model_phase_timeout_secs != new.model_phase_timeout_secs {
+        out.push(FieldPath::new("tuning.model_phase_timeout_secs"));
     }
     if old.tool_storm_window_size != new.tool_storm_window_size {
         out.push(FieldPath::new("tuning.tool_storm_window_size"));

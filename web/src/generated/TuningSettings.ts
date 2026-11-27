@@ -19,6 +19,12 @@ max_rounds: number,
  */
 max_tokens: number, max_tool_calls: number, max_identical_calls: number, keep_recent_messages: number, chunk_buffer: number, sse_heartbeat_secs: number, sse_idle_timeout_secs: number, 
 /**
+ * Maximum silence, in seconds, between complete model SSE frames (and for
+ * waiting on response headers). `0` falls back to the runtime default;
+ * valid values are `0..=86_400`.
+ */
+model_phase_timeout_secs: number, 
+/**
  * Sliding window, in model rounds, the identical-call counter looks at.
  * `0` counts the whole turn — the historical behaviour.
  */

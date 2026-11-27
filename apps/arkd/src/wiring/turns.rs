@@ -43,11 +43,12 @@ struct PreparedParentTurn {
 }
 
 impl AgentTurnRunner {
-    /// Model client for this turn, from the live provider table.
+    /// Model client for this turn, from the live provider table and tuning.
     ///
     /// The provider table wins; `model_providers` in `config.json` remains the
-    /// legacy fallback. Rebuilt per turn so an added/edited provider applies to
-    /// the next turn without a restart.
+    /// legacy fallback. Rebuilt per turn so an added/edited provider or a
+    /// changed `tuning.model_phase_timeout_secs` applies to the next turn
+    /// without a restart (design §7.15, P1-7).
     fn model_for_turn(
         &self,
         snapshot: &RuntimeConfig,
@@ -56,7 +57,9 @@ impl AgentTurnRunner {
         turn_id: TurnId,
     ) -> Arc<dyn ModelClient> {
         let inner = match provider {
-            Some(endpoint) => model::select_from_config(endpoint, Arc::clone(&self.usage)).0,
+            Some(endpoint) => {
+                model::select_with_tuning(endpoint, &snapshot.tuning, Arc::clone(&self.usage)).0
+            }
             None => model::select(snapshot, Arc::clone(&self.usage)).0,
         };
         model::hooked(Arc::clone(&self.hooks), thread_id, turn_id, inner)

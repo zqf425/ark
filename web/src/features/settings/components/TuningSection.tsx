@@ -58,7 +58,8 @@ const GROUPS: readonly TuningGroup[] = [
     fields: [
       { key: 'chunk_buffer', labelKey: 'settings.tuning.field.chunkBuffer.label', hintKey: 'settings.tuning.field.chunkBuffer.hint', min: 1, max: 4_096 },
       { key: 'sse_heartbeat_secs', labelKey: 'settings.tuning.field.sseHeartbeatSecs.label', hintKey: 'settings.tuning.field.sseHeartbeatSecs.hint', min: 0, max: 3_600 },
-      { key: 'sse_idle_timeout_secs', labelKey: 'settings.tuning.field.sseIdleTimeoutSecs.label', hintKey: 'settings.tuning.field.sseIdleTimeoutSecs.hint', min: 0, max: 86_400 }
+      { key: 'sse_idle_timeout_secs', labelKey: 'settings.tuning.field.sseIdleTimeoutSecs.label', hintKey: 'settings.tuning.field.sseIdleTimeoutSecs.hint', min: 0, max: 86_400 },
+      { key: 'model_phase_timeout_secs', labelKey: 'settings.tuning.field.modelPhaseTimeoutSecs.label', hintKey: 'settings.tuning.field.modelPhaseTimeoutSecs.hint', min: 0, max: 86_400 }
     ]
   }
 ]

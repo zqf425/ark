@@ -145,6 +145,11 @@ pub struct TuningSettings {
     pub sse_heartbeat_secs: u64,
     #[ts(as = "f64")]
     pub sse_idle_timeout_secs: u64,
+    /// Maximum silence, in seconds, between complete model SSE frames (and for
+    /// waiting on response headers). `0` falls back to the runtime default;
+    /// valid values are `0..=86_400`.
+    #[ts(as = "f64")]
+    pub model_phase_timeout_secs: u64,
     /// Sliding window, in model rounds, the identical-call counter looks at.
     /// `0` counts the whole turn — the historical behaviour.
     #[ts(as = "f64")]
@@ -166,6 +171,7 @@ impl Default for TuningSettings {
             chunk_buffer: 64,
             sse_heartbeat_secs: 15,
             sse_idle_timeout_secs: 300,
+            model_phase_timeout_secs: 0,
             tool_storm_window_size: 0,
             max_parallel_tool_calls: 0,
         }

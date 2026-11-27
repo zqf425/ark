@@ -45,6 +45,7 @@ function config(): RuntimeConfigView {
       chunk_buffer: 64,
       sse_heartbeat_secs: 15,
       sse_idle_timeout_secs: 300,
+      model_phase_timeout_secs: 0,
       tool_storm_window_size: 0,
       max_parallel_tool_calls: 0
     }

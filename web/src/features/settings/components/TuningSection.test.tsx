@@ -32,6 +32,7 @@ function config(): RuntimeConfigView {
       chunk_buffer: 64,
       sse_heartbeat_secs: 15,
       sse_idle_timeout_secs: 300,
+      model_phase_timeout_secs: 0,
       tool_storm_window_size: 0,
       max_parallel_tool_calls: 0
     }
@@ -108,6 +109,18 @@ describe('TuningSection turn budgets', () => {
       { tuning: expect.objectContaining({ max_rounds: 0 }) },
       'tuning'
     )
+  })
+
+  it('renders the model phase timeout with 0-86400 bounds', async () => {
+    harness = await mountWithProviders(<TuningSection settings={settingsApi()} />)
+    await settle()
+
+    const field = harness.host.querySelector('#tuning-model_phase_timeout_secs') as HTMLInputElement
+    expect(field).not.toBeNull()
+    expect(field.min).toBe('0')
+    expect(field.max).toBe('86400')
+    expect(field.value).toBe('0')
+    expect(harness.text()).toContain('模型阶段超时')
   })
 
   it('rejects values above the new upper bounds', async () => {
