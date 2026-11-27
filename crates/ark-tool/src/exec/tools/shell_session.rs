@@ -706,8 +706,8 @@ fn unknown_task_message(tool: &str, task_id: &ShellTaskId) -> String {
          id returned by bash_session(run_in_background=true) in this process; the task never \
          started, was evicted, or the runtime restarted. A delegate_task child run id is a \
          different namespace and cannot be polled with bash_output or bash_kill: the child's \
-         final answer arrives in a completion notice, so wait for it instead of re-running the \
-         work"
+         final answer arrives in a completion notice that wakes the next turn on this thread, \
+         so end your turn and wait for it instead of re-running the work"
     )
 }
 

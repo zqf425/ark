@@ -147,18 +147,26 @@ impl DelegateTaskTool {
         }
 
         let child = self.runner.delegate_background(request).await?;
-        // The acknowledgement must name the id's namespace: a model that reads
-        // "queued" as a background shell task polls it with `bash_output`, gets
-        // an unknown-task error and concludes the delegation failed. The child
-        // id and a `bash_session` task id are two namespaces with two delivery
-        // paths, so the message states both.
+        // The acknowledgement must name the id's namespace *and* the delivery
+        // mechanics: a model that reads "queued" as a background shell task
+        // polls it with `bash_output`, gets an unknown-task error and concludes
+        // the delegation failed (observed twice in real sessions: three
+        // `bash_output` calls against evicted child ids in one audit, then a
+        // repeat in a later session that slept 90/240/300s in `bash` waiting).
+        // The completion notice only reaches a turn that *starts after* the
+        // child finishes — an in-flight turn is never woken — so the text must
+        // say "end the turn to receive it", and name `background: false` for
+        // the caller that needs the result within the same turn.
         Ok(ToolOutput {
             ok: true,
             content: format!(
                 "child run {child} queued in the background\n\
                  this id is a sub-agent child run id, not a shell task id: do not pass it to \
                  bash_output or bash_kill. The child's final answer arrives in a completion \
-                 notice when it finishes; only a task id returned by \
+                 notice that wakes the *next* turn on this thread — end your turn after \
+                 dispatching and it will be delivered then; polling or sleeping in `bash` \
+                 cannot fetch it. If you need the result within this same turn, dispatch \
+                 with `background: false` instead. Only a task id returned by \
                  bash_session(run_in_background=true) can be polled with bash_output."
             ),
             detail: Some(format!("child={child} status=queued")),

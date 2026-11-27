@@ -41,10 +41,11 @@
   对应 `subagents.default_background`，默认开启=后台派发）；未注入策略源时保持前台默认。
   恢复（`resumeChildId`，优先级高于 `background`）始终走前台结果契约；两者均复用同一端口边界。
   后台派发立即返回 child id，最终答案经完成通知回传；前台与工具恢复直接返回最终答案，不发布父 completion
-  通知，避免同一结果再次触发自动汇总。派发回执与未知 id 错误都写明"等完成通知，不要轮询"；
-  系统提示词（arkd 装配）同样规定后台派发后停止等待，不用 bash_output 轮询 child id、不用 bash
-  sleep 空转——实测一次回合主线程 sleep 90/240/300 轮询等子代理，被 storm breaker 抑制一次后仍
-  继续轮询已被运行时逐出的 child id（3 次 `unknown task id`），然后整块重做子代理的工作。
+  通知，避免同一结果再次触发自动汇总。派发回执与未知 id 错误都写明"等完成通知，不要轮询"；回执还必须写明
+  **接收机制**（2026-11-26）：完成通知只唤醒**之后启动**的回合，飞行中的回合收不到——所以收到 child id 后
+  必须结束回合，回合内就要结果则改用 `background: false` 前台派发。只写"答案会经通知到达"而不写这两条接收
+  机制时，模型会在回合内用 `bash` sleep 90/240/300s 空转等待（实测两次，跨会话复发：一次被 storm breaker
+  抑制后继续轮询已被逐出的 child id 三次，另一次等满 9 分钟），系统提示词（arkd 装配）与之呼应。
 - **child run id 与 shell task id 是两个命名空间，不能混用**（当前实现）：`delegate_task` 后台派发
   返回的是子运行 id（UUID），只能等完成通知回传最终答案；`bash_output`/`bash_kill` 只接受
   `bash_session(run_in_background=true)` 在**本进程**内返回的 `task_N` 任务 id。两套 id 都会在工具

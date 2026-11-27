@@ -305,6 +305,20 @@ async fn the_background_acknowledgement_warns_that_the_child_id_is_not_a_shell_t
         content.contains("completion notice"),
         "the acknowledgement must name how the answer actually arrives: {content}"
     );
+    // The delivery mechanics, not just the channel name: the notice wakes a
+    // turn that starts *after* the child finishes, so an in-flight turn must
+    // end to receive it, and a caller needing the result now must go
+    // foreground. Observed failure: the model stayed in its turn and slept in
+    // `bash` (90/240/300s) waiting for a notice that structurally cannot
+    // arrive mid-turn.
+    assert!(
+        content.contains("end your turn after dispatching"),
+        "the acknowledgement must say the turn must end to receive the notice: {content}"
+    );
+    assert!(
+        content.contains("background: false"),
+        "the acknowledgement must name the foreground dispatch for in-turn results: {content}"
+    );
     assert!(
         content.contains("bash_session(run_in_background=true)"),
         "the acknowledgement must name the id namespace bash_output does accept: {content}"

@@ -462,7 +462,20 @@ mod tool_tests {
             .await
             .unwrap();
         assert!(out.ok, "{}", out.content);
-        assert!(out.content.contains(target.to_string_lossy().as_ref()));
+        // `pwd` prints a POSIX path (`/c/...`, or `/tmp/...` where MSYS mounts
+        // the temp dir), which can never contain the verbatim Windows form
+        // `\\?\C:\...` that `canonicalize` returns — a verbatim-substring
+        // assertion is always false here. Assert the unique fixture leaf
+        // instead; the exact canonical identity is already pinned below via
+        // `session.cwd`.
+        assert!(
+            out.content.contains(&format!(
+                "ark-shelltool-fg-multiline-{}",
+                std::process::id()
+            )),
+            "pwd output must name the fixture leaf: {}",
+            out.content
+        );
         assert!(!out.content.contains("[stderr]"), "{}", out.content);
         assert_eq!(session.cwd(&dir), target);
     }
@@ -566,7 +579,14 @@ mod tool_tests {
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        assert!(seen.contains(target.to_string_lossy().as_ref()), "{seen}");
+        // Same POSIX-vs-verbatim rule as the foreground multiline test: `pwd`
+        // prints a POSIX path, so assert the unique fixture leaf instead of the
+        // verbatim Windows form; the canonical identity is pinned above via
+        // `session.cwd`.
+        assert!(
+            seen.contains(&format!("ark-shelltool-bg-cd-{}", std::process::id())),
+            "pwd output must name the fixture leaf: {seen}"
+        );
         assert!(!seen.contains("can't cd"), "{seen}");
     }
 
@@ -647,6 +667,9 @@ mod tool_tests {
         assert!(out.content.contains("delegate_task"), "{}", out.content);
         assert!(out.content.contains("completion notice"), "{}", out.content);
         assert!(out.content.contains("bash_output"), "{}", out.content);
+        // The notice only wakes a turn started after the child finishes; the
+        // rejection must say to end the turn, not to keep waiting in place.
+        assert!(out.content.contains("end your turn"), "{}", out.content);
     }
 
     #[tokio::test]
