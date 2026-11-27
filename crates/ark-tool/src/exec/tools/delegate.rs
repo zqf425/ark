@@ -150,13 +150,15 @@ impl DelegateTaskTool {
         // The acknowledgement must name the id's namespace *and* the delivery
         // mechanics: a model that reads "queued" as a background shell task
         // polls it with `bash_output`, gets an unknown-task error and concludes
-        // the delegation failed (observed twice in real sessions: three
-        // `bash_output` calls against evicted child ids in one audit, then a
-        // repeat in a later session that slept 90/240/300s in `bash` waiting).
-        // The completion notice only reaches a turn that *starts after* the
-        // child finishes — an in-flight turn is never woken — so the text must
-        // say "end the turn to receive it", and name `background: false` for
-        // the caller that needs the result within the same turn.
+        // the delegation failed. The failure mode recurred across two sessions:
+        // one slept 90/240/300s in `bash`, got storm-suppressed, then polled
+        // evicted child ids with `bash_output` three times; a later session
+        // slept 120/180/240s (~9 minutes) in `bash` waiting for a notice that
+        // structurally cannot reach an in-flight turn. The completion notice
+        // only reaches a turn that *starts after* the child finishes, so the
+        // text must say "end the turn to receive it", and name
+        // `background: false` for the caller that needs the result within the
+        // same turn.
         Ok(ToolOutput {
             ok: true,
             content: format!(
