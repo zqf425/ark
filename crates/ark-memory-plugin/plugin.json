@@ -1,0 +1,13 @@
+{
+  "id": "ark.memory.core",
+  "version": "1.0.0",
+  "kind": "tool",
+  "capabilities": ["tool"],
+  "http": {
+    "allow": []
+  },
+  "mcp": {
+    "expose": ["memory_store", "memory_search", "memory_list", "memory_delete"],
+    "consume": []
+  }
+}

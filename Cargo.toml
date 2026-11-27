@@ -22,6 +22,7 @@ members = [
   "crates/ark-studio",
   "crates/ark-obs",
   "crates/ark-server",
+  "crates/ark-memory-plugin",
   "apps/arkd",
   "apps/ark-desktop/src-tauri",
 ]

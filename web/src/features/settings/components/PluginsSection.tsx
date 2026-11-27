@@ -170,6 +170,14 @@ export function PluginsSection(): JSX.Element {
         ) : null}
       </SettingsSection>
 
+      <SettingsSection title={t('settings.plugins.install.title')} desc={t('settings.plugins.install.desc')}>
+        <div className="ark-settings__stack">
+          <p className="ark-settings__hint">{t('settings.plugins.install.required')}</p>
+          <p className="ark-settings__hint">{t('settings.plugins.install.path')}</p>
+          <p className="ark-settings__hint">{t('settings.plugins.install.restart')}</p>
+        </div>
+      </SettingsSection>
+
       <SettingsSection title={t('settings.plugins.title')} desc={t('settings.plugins.desc')}>
         <CardBody state={plugins} rows={3} />
         {plugins.data ? (

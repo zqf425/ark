@@ -28,5 +28,23 @@ export const SETTINGS_PLUGINS_MESSAGES = {
   'settings.plugins.provision.enable': ['启用', 'Enable'],
   'settings.plugins.provision.installAndEnable': ['未检测到本机安装，点击安装并启用', 'Not found locally — click to install and enable'],
   'settings.plugins.provision.retry': ['重试', 'Retry'],
-  'settings.plugins.provision.busy': ['处理中…', 'Working…']
+  'settings.plugins.provision.busy': ['处理中…', 'Working…'],
+
+  'settings.plugins.install.title': ['安装插件', 'Install a plugin'],
+  'settings.plugins.install.desc': [
+    'arkd 在启动时读取插件目录，本版本没有热装载：把插件文件夹放入下列目录后重启 arkd 即生效，卸载同理。',
+    'arkd reads the plugin directory at startup and has no hot-reload in this build: drop a plugin folder into the directory below and restart arkd to load it; removing one works the same way.'
+  ],
+  'settings.plugins.install.path': [
+    '插件目录是 arkd 启动日志中 “loaded local plugins” 一行记录的 root；本版本没有通过 API 暴露它。',
+    'The plugin directory is the root printed on the “loaded local plugins” startup log line; this build does not expose it through the API.'
+  ],
+  'settings.plugins.install.required': [
+    '每个插件是一个目录，至少包含 plugin.json（id、version、kind；工具在 mcp.expose 声明）。',
+    'Each plugin is a directory containing at least plugin.json (id, version, kind; tools are declared in mcp.expose).'
+  ],
+  'settings.plugins.install.restart': [
+    '放入后重启 arkd，本页刷新即可看到新插件的页面、面板与工具贡献。',
+    'Restart arkd after dropping it in, then refresh this page to see the new plugin’s pages, panels and tools.'
+  ]
 } as const

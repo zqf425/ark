@@ -1,0 +1,20 @@
+[package]
+name = "ark-memory-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ark-common = { workspace = true }
+ark-ports = { workspace = true }
+ark-plugin = { workspace = true }
+ark-mcp = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true }
+ark-ui = { workspace = true }
+ark-http = { workspace = true }
