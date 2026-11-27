@@ -203,6 +203,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-memory-plugin"
+version = "0.1.0"
+dependencies = [
+ "ark-common",
+ "ark-http",
+ "ark-mcp",
+ "ark-plugin",
+ "ark-ports",
+ "ark-ui",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "ark-obs"
 version = "0.1.0"
 dependencies = [
