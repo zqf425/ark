@@ -22,6 +22,9 @@ fn system_prompt_names_the_mcp_and_delegation_escape_hatches() {
         "re-derive the URL",
         "completion notice",
         "bash_output",
+        // The wait exit has two halves: end the turn to receive the notice,
+        // and go foreground when the result is needed in-turn.
+        "background: false",
     ] {
         assert!(
             SYSTEM_PROMPT.contains(needle),

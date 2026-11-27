@@ -77,10 +77,23 @@ impl StormBreaker {
 
 /// The result text written for a refused call. Kept here so the wording is
 /// stable and testable rather than assembled at a call site.
+///
+/// A repeating `bash` call is usually a wait loop: real sessions slept
+/// `90/240/300`s in `bash` waiting for background children that can only be
+/// received by *ending the turn* (the completion notice wakes a later turn,
+/// never an in-flight one). The generic advice ("change approach") does not
+/// name that exit, so the bash-specific line does — the exact recovery the
+/// model needs at the moment the breaker cuts it off.
 pub fn suppression_message(tool: &str, count: u32) -> String {
+    let wait_hint = if tool == "bash" {
+        "; if you are waiting for a background child run, end your turn now — its \
+         completion notice wakes the next turn and cannot reach an in-flight one"
+    } else {
+        ""
+    };
     format!(
         "tool call suppressed by storm breaker: `{tool}` has already run {count} times in this turn; \
-         stop repeating it and change approach or finish the turn"
+         stop repeating it and change approach or finish the turn{wait_hint}"
     )
 }
 
@@ -192,5 +205,29 @@ mod tests {
         let message = suppression_message("bash", 4);
         assert!(message.contains("bash"));
         assert!(message.contains('4'));
+    }
+
+    #[test]
+    fn the_bash_suppression_message_names_the_child_wait_exit() {
+        // A repeating bash call is the observed wait-for-child failure mode:
+        // the model slept in bash for minutes because it never learned that the
+        // completion notice only reaches a turn started after the child
+        // finishes. The refusal must carry that exit, not generic advice.
+        let message = suppression_message("bash", 4);
+        assert!(
+            message.contains("end your turn now"),
+            "bash suppression must name the end-turn exit: {message}"
+        );
+        assert!(
+            message.contains("completion notice"),
+            "bash suppression must name the delivery mechanism: {message}"
+        );
+        // Other tools keep the generic line; the hint is bash-only because the
+        // wait loop is bash-only.
+        let other = suppression_message("read", 4);
+        assert!(
+            !other.contains("completion notice"),
+            "non-bash suppression must not carry the child hint: {other}"
+        );
     }
 }
