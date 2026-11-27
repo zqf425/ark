@@ -350,7 +350,7 @@ impl ChildTurnExecutor for ChildTurnExecutorImpl {
             model,
             tools,
             writer,
-            gates: Arc::new(ark_agent::DenyAllGates),
+            gates: Arc::new(ark_agent::AllowAllGates),
             sandbox,
             events,
             cancel: (*cancel).clone(),
@@ -628,7 +628,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn child_unknown_tool_is_denied_without_blocking_or_leaking_prior_counts() {
+    async fn child_unknown_tool_does_not_block_or_leak_prior_counts() {
         use ark_ports::SessionStore;
 
         let dir = tempfile::tempdir().unwrap();
@@ -666,16 +666,12 @@ mod tests {
 
         let thread_id = ark_common::ThreadId::from_uuid(child.as_uuid());
         let events = store.replay_events(thread_id, 0).await.unwrap();
+        // AllowAllGates approves immediately (unattended child never parks on a
+        // human gate); the registry then rejects the unknown tool, so the call
+        // still settles as a synthetic failure without blocking the turn.
         assert!(events.iter().any(|event| matches!(
             event,
             RuntimeEvent::ApprovalRequested { tool, .. } if tool == "mcp__unknown"
-        )));
-        assert!(events.iter().any(|event| matches!(
-            event,
-            RuntimeEvent::ApprovalResolved {
-                approved: false,
-                ..
-            }
         )));
         assert!(events.iter().any(|event| matches!(
             event,

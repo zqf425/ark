@@ -19,8 +19,8 @@
 - 与接线相关的事实（实施时必须处理）：
   - 回合入口有三条路径：`start_turn_as`（`ark-server/src/service/turns.rs:48`，唯一带 gate）、
     `continuation.rs:377` 与 `api/handlers/turns.rs:418` 两处直接 `TurnJob` + `try_register`。
-  - child run 使用 `DenyAllGates`（未知 MCP/plugin 工具即时 synthetic denial，不注册、不阻塞），
-    其工具目录按回合求值并经过与父路径相同的 `tool_catalog.filter` hook；父路径同样每回合求值。
+  - child run 不经过审批闸门（`apps/arkd/src/child.rs` 用 `AllowAllGates`），其工具目录按回合求值并
+    经过与父路径相同的 `tool_catalog.filter` hook；父路径同样每回合求值。
   - `EventSink::subscribe` 是有界 mpsc（满则丢最新、不可重连），不能直接交给插件。
 
 ## 需求边界
