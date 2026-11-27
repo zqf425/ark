@@ -96,6 +96,12 @@
 - Toast 是 `shared/ui/Toast` 独占的表面：组件内用 `useToast().push`；SSE 回调、轮询间隔等非 React
   调用方（回合终态通知）用 `pushToastProgrammatic`——`ToastProvider` 挂载时注册推送句柄，卸载时注销，
   provider 未挂载期间的推送静默丢弃（无表面可渲染），不排队。不得在 feature 内自建浮层通知。
+- 破坏性操作的确认必须使用 `shared/ui/ConfirmDialog`（应用内弹窗），禁止 `window.confirm`：
+  桌面 WebView（Tauri/WKWebView）会静默吞掉原生 confirm——不渲染且返回真，破坏性操作会未经确认
+  直接执行。ConfirmDialog 复用 `useDialogFocus` 的焦点契约，初始焦点落在取消按钮、Escape/遮罩点击
+  均按取消解析（确认门闩必须 fail closed）；当前接入 Code 会话列表的项目批量删除与单条会话删除，
+  设置页供应商删除使用等价的专属 `DeleteDialog`。断言位于 ConfirmDialog 与 ThreadListPanel 的
+  project-actions 测试。
 - 小型菜单与确认对话框的键盘焦点由 `shared/ui/focus.ts` 统一提供：菜单打开聚焦首个可用项，
   ArrowUp/Down 循环移动、Home/End 跳转、Enter/Space 激活、Escape 关闭并恢复触发器，Tab 回到触发器后
   按原生顺序离开；
@@ -346,7 +352,9 @@
   `WorkspaceService::validate` 校验后作为该线程的 workspace 覆盖种子，新会话即落在该组；🗑 批量清理
   该项目下已结束的会话——`DELETE /v1/threads?workspace=…` 一次调用，"已结束"由服务端权威判定
   （turn 注册表 + 持久日志折叠，重启后仍准确），运行中线程按行跳过并在响应 `skipped` 中回报
-  `conflict`，前端以确认框 + toast 呈现结果，被删行经 `removeThread` 折叠出列表，下次刷新仍是权威。
+  `conflict`，前端以确认框 + toast 呈现结果（确认框是 `shared/ui/ConfirmDialog` 应用内弹窗，
+  见"共享原语"一节——原生 `window.confirm` 在桌面 WebView 中被静默吞掉，不可作为确认门闩），
+  被删行经 `removeThread` 折叠出列表，下次刷新仍是权威。
   默认项目组（无 override 且无 active root）不提供这两个动作。
 - 视觉样式只消费设计令牌：浅色"纸白"为默认主题（`preferences.ts` 默认 `theme: 'light'`），色板在
   `styles/tokens.css`，暗色"石墨"覆盖在 `styles/theme.css`，共享原语样式在 `styles/primitives.css`，

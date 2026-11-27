@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, EmptyState, ErrorBoundary, Icon, useToast } from '../../../shared/ui'
+import { Button, ConfirmDialog, EmptyState, ErrorBoundary, Icon, useToast } from '../../../shared/ui'
 import type { ThreadSummary } from '../../../shared/contracts'
 import { useI18n } from '../../../shared/i18n'
 import { useCodeSessionStore } from '../state/store'
@@ -155,6 +155,10 @@ export function ThreadListPanel(): JSX.Element {
   }, [])
 
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  // One confirm surface for every destructive rail verb. `window.confirm` is
+  // swallowed by the desktop WebView (Tauri/WKWebView never renders it and
+  // resolves truthy), so the gate must be an in-app dialog, not a native one.
+  const [confirmGate, setConfirmGate] = useState<{ title: string; confirm: () => Promise<void> } | null>(null)
   const visibleThreads = useMemo(() => filterThreadsWithWorkspace(threads, query, scope), [threads, query, scope])
   const groups = useMemo(() => {
     const { default: fallback, projects } = groupThreadsByProject(visibleThreads, activeWorkspace)
@@ -185,14 +189,18 @@ export function ThreadListPanel(): JSX.Element {
     const path = group.path.trim()
     if (!path || group.threads.length === 0) return
     const title = group.label || t('thread.list.defaultProject')
-    if (!window.confirm(t('thread.list.groupDeleteConfirm', { title, count: group.threads.length }))) return
-    const response = await deleteProject(path)
-    if (!response) return
-    if (response.skipped.length > 0) {
-      toast.push('info', t('thread.list.groupDeleteSkipped', { deleted: response.deleted.length, skipped: response.skipped.length }))
-    } else if (response.deleted.length > 0) {
-      toast.push('success', t('thread.list.groupDeleteDone', { count: response.deleted.length }))
-    }
+    setConfirmGate({
+      title: t('thread.list.groupDeleteConfirm', { title, count: group.threads.length }),
+      confirm: async () => {
+        const response = await deleteProject(path)
+        if (!response) return
+        if (response.skipped.length > 0) {
+          toast.push('info', t('thread.list.groupDeleteSkipped', { deleted: response.deleted.length, skipped: response.skipped.length }))
+        } else if (response.deleted.length > 0) {
+          toast.push('success', t('thread.list.groupDeleteDone', { count: response.deleted.length }))
+        }
+      }
+    })
   }
 
   return (
@@ -311,7 +319,10 @@ export function ThreadListPanel(): JSX.Element {
                           onRestore={async () => { if (await restore(thread.thread_id)) setScope('recent') }}
                           onDelete={async () => {
                             const name = thread.title || t('thread.row.untitled')
-                            if (window.confirm(t('thread.row.deleteConfirm', { title: name }))) await remove(thread.thread_id)
+                            setConfirmGate({
+                              title: t('thread.row.deleteConfirm', { title: name }),
+                              confirm: async () => { await remove(thread.thread_id) }
+                            })
                           }}
                         />
                       ))}
@@ -325,6 +336,20 @@ export function ThreadListPanel(): JSX.Element {
       </div>
 
       {scheduleOpen ? <ScheduleCreateDialog onClose={() => setScheduleOpen(false)} /> : null}
+      {confirmGate ? (
+        <ConfirmDialog
+          title={confirmGate.title}
+          confirmLabel={t('common.delete')}
+          cancelLabel={t('common.cancel')}
+          onResolve={(confirmed) => {
+            const gate = confirmGate
+            setConfirmGate(null)
+            if (confirmed) void gate.confirm().catch((error: unknown) => {
+              toast.push('error', t('thread.row.actionFailed', { message: error instanceof Error ? error.message : String(error) }))
+            })
+          }}
+        />
+      ) : null}
     </aside>
   )
 }
