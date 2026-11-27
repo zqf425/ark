@@ -1,0 +1,58 @@
+/*
+ * Confirm dialog, shared by every destructive gate (delete project, delete
+ * thread, settings pages). Reuses the schedule dialog's language: full-screen
+ * fixed overlay, raised panel, hairline borders, centered narrow panel.
+ * Colors come from styles/tokens.css (theme.css for dark) only — a literal
+ * hex here would break light/dark parity (design §7.10.2).
+ */
+
+.ark-confirmdialog {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.ark-confirmdialog__scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: var(--ark-overlay);
+  cursor: pointer;
+}
+
+.ark-confirmdialog__panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(360px, 100%);
+  border: 1px solid var(--ark-border-muted);
+  border-radius: var(--ark-radius-xl);
+  background: var(--ark-bg-raised);
+  box-shadow: var(--ark-shadow-2);
+  padding: 16px 18px 14px;
+}
+
+.ark-confirmdialog__title {
+  color: var(--ark-text);
+  font-size: calc(14.5px * var(--ark-scale));
+  line-height: 1.45;
+}
+
+.ark-confirmdialog__detail {
+  margin: 0;
+  color: var(--ark-text-faint);
+  font-size: calc(12.5px * var(--ark-scale));
+  line-height: 1.5;
+}
+
+.ark-confirmdialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}

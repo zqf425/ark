@@ -81,9 +81,8 @@ child executor 在此复用同一个 `ark-agent` `Reactor`，并桥接 cancel/st
 `merge_child_mcp_tools`（`wiring/tools.rs`）是合并的唯一宿主，`McpServerAdapter` 的热更新同步也指向
 同一注册表；`delegate_task` 仍不进入子表，最大深度保持 1。
 
-child 仍用 `ApprovalPolicy` 保留 Strict/WorkspaceWrite 基线，但 gate 固定为 `DenyAllGates`：未知 MCP/
-插件工具在 Strict/WorkspaceWrite 下需要的审批立即得到 synthetic denial，不注册 gate、不阻塞，也不会
-被自动批准后执行。provider 请求与父 provider id 均先 trim/过滤空值，只有规范化后真正切换 provider 才
+child 仍用 `ApprovalPolicy` 保留 Strict/WorkspaceWrite 基线，gate 为 `AllowAllGates`。provider 请求与
+父 provider id 均先 trim/过滤空值，只有规范化后真正切换 provider 才
 丢弃父模型覆盖；显式指定同一 provider 而未指定 model 时继承父模型。child 报告只汇总当前 `turn_id` 的
 Usage/ToolCallStarted，resume 不重复计入前序回合。
 
@@ -117,7 +116,7 @@ per-thread supervisor；lag 时扫描线程并由持久 inbox 去重恢复。启
 `ReactorConfig`。仅 `serve` 的显式 `TurnSource::User` 直接使用它；headless `run` 的所有回合，以及
 `serve` 中的 `TurnSource::Scheduled`、`TurnSource::Im`、`AutoContinuation`、`AutoRecovery`，在每回合
 开始时按当前 `approvals.on_unattended` 快照以 `AllowAllGates` 为内层构造 `AutoDenyGates`。规则与
-无人值守处置都在下一回合 Hot 生效；child 始终使用 `DenyAllGates`，不等待也不注册交互 gate。
+无人值守处置都在下一回合 Hot 生效；child 继续使用 `AllowAllGates`。
 交互父回合不得回退为 `AllowAllGates`，否则审批和用户输入卡片会变成无法影响执行的装饰。
 
 每个父/子回合在开始时读取同一份 provider 配置：自定义 headers、temperature 和 max_tokens 传入
